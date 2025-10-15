@@ -236,8 +236,6 @@ class ChartDisplay(PluginBase):
         self._update_scatter_controls(selected_id=scatter_id)
         self._render_scatter_area()
         self._sync_panel_location()
-        # if hasattr(self.main_viewer, "refresh_bottom_panel"):
-            # self.main_viewer.refresh_bottom_panel()
 
     def _render_histogram(self, x_col: str) -> None:
         data = self._prepare_dataframe([x_col])
@@ -478,8 +476,6 @@ class ChartDisplay(PluginBase):
         self._update_scatter_controls()
         self._render_scatter_area()
         self._sync_panel_location()
-        if hasattr(self.main_viewer, "refresh_bottom_panel"):
-            self.main_viewer.refresh_bottom_panel()
 
     def _clear_all_scatter_views(self, _button) -> None:
         for scatter in self._scatter_views.values():
@@ -488,8 +484,6 @@ class ChartDisplay(PluginBase):
         self._update_scatter_controls()
         self._render_scatter_area()
         self._sync_panel_location()
-        if hasattr(self.main_viewer, "refresh_bottom_panel"):
-            self.main_viewer.refresh_bottom_panel()
         self.selected_indices.value = set()
 
     def _on_scatter_selector_change(self, change) -> None:
@@ -514,11 +508,19 @@ class ChartDisplay(PluginBase):
         self.ui.children = [self._wide_notice]
         self._section_location = "horizontal"
 
-    def _sync_panel_location(self) -> None:
+    def _sync_panel_location(self) -> bool:
+        previous_location = self._section_location
         if self._has_multiple_scatter():
             self._place_sections_horizontal()
         else:
             self._place_sections_vertical()
+        layout_changed = previous_location != self._section_location
+        if (
+            layout_changed
+            and hasattr(self.main_viewer, "refresh_bottom_panel")
+        ):
+            self.main_viewer.refresh_bottom_panel()
+        return layout_changed
 
     def wide_panel_layout(self):
         if self._has_multiple_scatter():
@@ -533,8 +535,11 @@ class ChartDisplay(PluginBase):
 
     def after_all_plugins_loaded(self):
         super().after_all_plugins_loaded()
-        self._sync_panel_location()
-        if hasattr(self.main_viewer, "refresh_bottom_panel"):
+        layout_changed = self._sync_panel_location()
+        if (
+            not layout_changed
+            and hasattr(self.main_viewer, "refresh_bottom_panel")
+        ):
             self.main_viewer.refresh_bottom_panel()
 
     # ------------------------------------------------------------------
