@@ -76,6 +76,9 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 - Updated `ChartDisplay` so the plugin automatically refreshes the footer when multiple scatter plots are active, keeping controls in the bottom tab while leaving a clear notice in the sidebar ([issue #5](https://github.com/HartmannLab/UELer/issues/5)).
 - Added `tests/test_chart_footer_behavior.py` with lightweight widget and data stubs to guard the layout toggle and footer refresh workflow ([issue #5](https://github.com/HartmannLab/UELer/issues/5)).
 
+**Heatmap footer stability**
+- Heatmap plugin now reattaches its canvas during footer rebuilds so horizontal heatmaps persist after chart scatter plots are added or removed, with expanded regression coverage in `tests/test_chart_footer_behavior.py` ([issue #6](https://github.com/HartmannLab/UELer/issues/6)).
+
 ## Earlier Updates  
 
 You can find previous update logs [here](/doc/log.md).
