@@ -100,9 +100,12 @@ def update_wide_plugin_panel(viewer, ordering=None):
     sideplots = getattr(viewer, 'SidePlots', None)
     heatmap_plugin = getattr(sideplots, 'heatmap_output', None) if sideplots else None
     if isinstance(heatmap_plugin, PluginBase):
-        restore = getattr(heatmap_plugin, 'restore_vertical_canvas', None)
-        if callable(restore):
-            restore()
+        restore_footer = getattr(heatmap_plugin, 'restore_footer_canvas', None)
+        if callable(restore_footer):
+            restore_footer()
+        restore_vertical = getattr(heatmap_plugin, 'restore_vertical_canvas', None)
+        if callable(restore_vertical):
+            restore_vertical()
 
 def create_widgets(viewer):
     viewer.ui_component = uicomponents(viewer)

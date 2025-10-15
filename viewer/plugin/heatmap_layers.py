@@ -966,6 +966,7 @@ class DisplayLayer:
         self.ui.children = [self._wide_notice]
         self.ui.layout.display = ''
         self._section_location = 'horizontal'
+        self._ensure_plot_canvas_attached()
 
     def _sync_panel_location(self):
         if self.adapter.is_wide():
@@ -976,6 +977,7 @@ class DisplayLayer:
     def wide_panel_layout(self):
         if self.adapter.is_wide():
             self._place_sections_horizontal()
+            self._ensure_plot_canvas_attached()
             return {
                 "title": self.displayed_name,
                 "control": self.controls_section,
@@ -1050,6 +1052,19 @@ class DisplayLayer:
         if self.adapter.is_wide():
             return
         self._ensure_plot_canvas_attached()
+
+    def restore_footer_canvas(self):
+        if not self.adapter.is_wide():
+            return
+        self._ensure_plot_canvas_attached()
+        g = getattr(self.data, 'g', None)
+        fig = getattr(g, 'fig', None) if g is not None else None
+        canvas = getattr(fig, 'canvas', None) if fig is not None else None
+        if canvas is not None and hasattr(canvas, 'draw_idle'):
+            try:
+                canvas.draw_idle()
+            except Exception:
+                pass
 
     @update_status_bar
     def generate_heatmap(self):
