@@ -97,8 +97,8 @@ def _resolve_wide_pane(entry, pane_cache):
     if cached_pane is None or cached_token != token:
         pane = build_wide_plugin_pane(entry.get('control'), entry.get('content'))
         pane_cache[attr] = (pane, token)
-        return pane
-    return cached_pane
+        return pane, False
+    return cached_pane, True
 
 
 def _apply_wide_panel(viewer, entries, tab_children):
@@ -128,11 +128,29 @@ def _restore_heatmap(viewer):
             restore_vertical()
 
 
+def _trigger_cached_plugin_refresh(plugin):
+    refresh = getattr(plugin, 'request_cached_wide_panel_refresh', None)
+    if not callable(refresh):
+        return
+    try:
+        refresh()
+    except Exception:  # pragma: no cover - best effort logging only
+        logger = getattr(plugin, 'logger', None)
+        log_exception = getattr(logger, 'exception', None) if logger else None
+        if callable(log_exception):
+            log_exception('Failed to refresh cached wide panel for %s', getattr(plugin, 'displayed_name', plugin))
+
+
 def update_wide_plugin_panel(viewer, ordering=None):
+    debug_enabled = getattr(viewer, '_debug', False)
     if not hasattr(viewer, 'wide_plugin_tab') or not hasattr(viewer, 'wide_plugin_panel'):
+        if debug_enabled:
+            print("[wide-plugin] viewer missing wide_plugin_tab or wide_plugin_panel; skipping update")
         return
 
     entries = collect_wide_plugin_entries(viewer)
+    if debug_enabled:
+        print(f"[wide-plugin] update requested with {len(entries)} entries")
     bottom_ns = _ensure_bottom_namespace(viewer)
     pane_cache = _ensure_pane_cache(viewer)
 
@@ -140,6 +158,8 @@ def update_wide_plugin_panel(viewer, ordering=None):
     _cleanup_bottom_state(bottom_ns, pane_cache, active_attrs)
 
     if not entries:
+        if debug_enabled:
+            print('[wide-plugin] no entries found; hiding footer panel')
         _clear_wide_panel(viewer)
         return
 
@@ -147,12 +167,25 @@ def update_wide_plugin_panel(viewer, ordering=None):
     entries = sorted(entries, key=key)
 
     tab_children = []
+    refresh_queue = []
     for entry in entries:
-        tab_children.append(_resolve_wide_pane(entry, pane_cache))
+        pane, reused = _resolve_wide_pane(entry, pane_cache)
+        tab_children.append(pane)
         setattr(bottom_ns, entry['attr'], entry['plugin'])
+        if reused:
+            refresh_queue.append(entry['plugin'])
+            if debug_enabled:
+                print(f"[wide-plugin] reused pane for {entry['attr']}")
+        elif debug_enabled:
+            print(f"[wide-plugin] rebuilt pane for {entry['attr']}")
 
     _apply_wide_panel(viewer, entries, tab_children)
     _restore_heatmap(viewer)
+    for plugin in refresh_queue:
+        _trigger_cached_plugin_refresh(plugin)
+    if debug_enabled and refresh_queue:
+        refreshed = ', '.join(getattr(plugin, 'displayed_name', repr(plugin)) for plugin in refresh_queue)
+        print(f'[wide-plugin] triggered cached refresh for: {refreshed}')
 
 
 def create_widgets(viewer):

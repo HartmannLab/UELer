@@ -224,6 +224,13 @@ class CachingHeatmapPlugin(ToggleFooterPlugin):
     def wide_panel_cache_token(self):
         return ("heatmap", self.horizontal)
 
+    def __init__(self, viewer):
+        super().__init__(viewer)
+        self.refresh_calls = 0
+
+    def request_cached_wide_panel_refresh(self):
+        self.refresh_calls += 1
+
 
 class CachingChartPlugin(ToggleFooterPlugin):
     def __init__(self, viewer):
@@ -236,9 +243,9 @@ class CachingChartPlugin(ToggleFooterPlugin):
 
 class ViewerHarness:
     def __init__(self):
-        self.SidePlots = SimpleNamespace()
-        self.BottomPlots = SimpleNamespace()
-        self.wide_plugin_tab = widgets.Tab(children=tuple(), layout=widgets.Layout())
+        self.SidePlots = SimpleNamespace()  # noqa: N815 - mirrors production attribute casing
+        self.BottomPlots = SimpleNamespace()  # noqa: N815 - mirrors production attribute casing
+        self.wide_plugin_tab = widgets.Tab(children=(), layout=widgets.Layout())
         self.wide_plugin_tab.selected_index = None
         self.wide_plugin_panel = widgets.VBox(
             [self.wide_plugin_tab],
@@ -324,6 +331,21 @@ class WidePanelHelperTests(unittest.TestCase):
             self.assertEqual(build_mock.call_count, 2)
             self.assertEqual(viewer.wide_plugin_tab.children, (initial_pane,))
             self.assertIs(viewer._wide_plugin_panes['heatmap_output'][0], initial_pane)
+
+    def test_cached_heatmap_requests_refresh_when_pane_reused(self):
+        viewer = ViewerHarness()
+        heatmap = CachingHeatmapPlugin(viewer)
+        viewer.SidePlots.heatmap_output = heatmap
+        heatmap.horizontal = True
+
+        update_wide_plugin_panel(viewer)
+        self.assertEqual(heatmap.refresh_calls, 0)
+
+        update_wide_plugin_panel(viewer)
+        self.assertEqual(heatmap.refresh_calls, 1)
+
+        update_wide_plugin_panel(viewer)
+        self.assertEqual(heatmap.refresh_calls, 2)
 
 
 if __name__ == "__main__":  # pragma: no cover

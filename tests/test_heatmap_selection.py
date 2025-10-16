@@ -4,7 +4,7 @@ import sys
 import types
 import unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
@@ -323,6 +323,32 @@ class AxisStub:
         return []
 
 
+class OutputStub:
+    def __init__(self):
+        self.outputs = ()
+        self.clear_output_calls = []
+
+    def clear_output(self, wait=False):
+        self.clear_output_calls.append(wait)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+class CanvasStub:
+    def __init__(self, raise_on_draw=False):
+        self.raise_on_draw = raise_on_draw
+        self.draw_idle_called = False
+
+    def draw_idle(self):
+        if self.raise_on_draw:
+            raise RuntimeError("draw failure")
+        self.draw_idle_called = True
+
+
 class HeatmapPatchRenderingTests(unittest.TestCase):
     def _build_display(self, horizontal):
         heatmap = HeatmapDisplay.__new__(HeatmapDisplay)
@@ -394,6 +420,80 @@ class HeatmapPatchRenderingTests(unittest.TestCase):
 
         self.assertEqual(len(axis.hspans), 2)
         self.assertEqual(len(axis.vspans), 0)
+
+
+class HeatmapCanvasRestoreTests(unittest.TestCase):
+    def _make_heatmap(self):
+        heatmap = HeatmapDisplay.__new__(HeatmapDisplay)
+        heatmap.adapter = SimpleNamespace(is_wide=lambda: True)
+        heatmap.plot_output = OutputStub()
+        heatmap.plot_section = SimpleNamespace(children=(heatmap.plot_output,))
+        heatmap._restoring_plot_section = False
+        heatmap.data = SimpleNamespace(g=None)
+        return heatmap
+
+    def test_redraw_returns_false_without_artifacts(self):
+        heatmap = self._make_heatmap()
+        heatmap._cached_footer_artifacts = None
+
+        with patch("viewer.plugin.heatmap_layers.display") as display_mock:
+            result = heatmap.redraw_cached_footer_canvas()
+
+        self.assertFalse(result)
+        display_mock.assert_not_called()
+
+    def test_redraw_replays_display_when_output_empty(self):
+        heatmap = self._make_heatmap()
+        canvas = CanvasStub()
+        fig = SimpleNamespace(canvas=canvas)
+        heatmap._cached_footer_artifacts = {
+            "fig": fig,
+            "canvas": canvas,
+            "axes": {},
+        }
+
+        with patch("viewer.plugin.heatmap_layers.display") as display_mock:
+            result = heatmap.redraw_cached_footer_canvas()
+
+        self.assertTrue(result)
+        self.assertEqual(heatmap.plot_output.clear_output_calls, [True])
+        display_mock.assert_called_once_with(fig)
+        self.assertTrue(canvas.draw_idle_called)
+
+    def test_redraw_skips_display_when_widget_view_present(self):
+        heatmap = self._make_heatmap()
+        canvas = CanvasStub()
+        fig = SimpleNamespace(canvas=canvas)
+        heatmap._cached_footer_artifacts = {
+            "fig": fig,
+            "canvas": canvas,
+            "axes": {},
+        }
+        heatmap.plot_output.outputs = (
+            {
+                "output_type": "display_data",
+                "data": {"application/vnd.jupyter.widget-view+json": {"model_id": "abc"}},
+            },
+        )
+
+        with patch("viewer.plugin.heatmap_layers.display") as display_mock:
+            result = heatmap.redraw_cached_footer_canvas()
+
+        self.assertTrue(result)
+        self.assertEqual(heatmap.plot_output.clear_output_calls, [])
+        display_mock.assert_not_called()
+        self.assertTrue(canvas.draw_idle_called)
+
+    def test_restore_footer_canvas_prefers_cached_redraw(self):
+        heatmap = self._make_heatmap()
+        canvas = CanvasStub()
+        heatmap.data = SimpleNamespace(g=SimpleNamespace(fig=SimpleNamespace(canvas=canvas)))
+        heatmap.redraw_cached_footer_canvas = MagicMock(return_value=True)
+
+        heatmap.restore_footer_canvas()
+
+        heatmap.redraw_cached_footer_canvas.assert_called_once()
+        self.assertFalse(canvas.draw_idle_called)
 
 
 if __name__ == "__main__":

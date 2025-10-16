@@ -77,11 +77,16 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 - Added `tests/test_chart_footer_behavior.py` with lightweight widget and data stubs to guard the layout toggle and footer refresh workflow ([issue #5](https://github.com/HartmannLab/UELer/issues/5)).
 
 **Heatmap footer stability**
-- Heatmap plugin now reattaches its canvas during footer rebuilds so horizontal heatmaps persist after chart scatter plots are added or removed, with expanded regression coverage in `tests/test_chart_footer_behavior.py` ([issue #6](https://github.com/HartmannLab/UELer/issues/6)).
+- Ensured the heatmap plugin reattaches its canvas during footer rebuilds so horizontal heatmaps persist after scatter plots are added or removed in the chart plugin ([issue #6](https://github.com/HartmannLab/UELer/issues/6)).
+- Expanded `tests/test_chart_footer_behavior.py` to simulate combined chart and heatmap footer refreshes, guaranteeing the heatmap remains registered in `BottomPlots` following scatter changes ([issue #6](https://github.com/HartmannLab/UELer/issues/6)).
 
 **Footer pane caching**
-- `viewer/ui_components.update_wide_plugin_panel` now caches wide plugin panes so chart relocations reuse existing widgets, preserving live heatmap canvases while moving between sidebar and footer layouts ([issue #6](https://github.com/HartmannLab/UELer/issues/6)).
-- Added cache-aware regression coverage in `tests/test_wide_plugin_panel.py` to ensure the heatmap pane instance survives chart toggles without forcing a new widget tree ([issue #6](https://github.com/HartmannLab/UELer/issues/6)).
+- Reworked `viewer/ui_components.update_wide_plugin_panel` to cache wide plugin panes, preserving live matplotlib canvases when the chart toggles between sidebar and footer layouts ([issue #6](https://github.com/HartmannLab/UELer/issues/6)).
+- Extended `tests/test_wide_plugin_panel.py` with cache-aware stubs so chart relocations reuse the existing heatmap pane instead of instantiating a fresh widget tree ([issue #6](https://github.com/HartmannLab/UELer/issues/6)).
+
+**Heatmap redraw automation**
+- Triggered the heatmap footer pane to replay its Plot routine whenever a cached wide layout is reused so horizontal canvases repopulate immediately after chart-driven footer rebuilds ([issue #6](https://github.com/HartmannLab/UELer/issues/6)).
+- Added a regression to `tests/test_wide_plugin_panel.py` asserting cached panes invoke the redraw helper every time the footer recomposes, preventing future regressions ([issue #6](https://github.com/HartmannLab/UELer/issues/6)).
 
 ## Earlier Updates  
 

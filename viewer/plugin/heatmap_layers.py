@@ -866,6 +866,7 @@ class InteractionLayer:
 class DisplayLayer:
     def __init__(self, *args, **kwargs):
         self._restoring_plot_section = False
+        self._plot_refresh_inflight = False
         super().__init__(*args, **kwargs)
 
     def _get_cluster_axes(self):
@@ -986,7 +987,35 @@ class DisplayLayer:
         self._place_sections_vertical()
         return None
 
+    def request_cached_wide_panel_refresh(self):
+        viewer = getattr(self, 'main_viewer', None)
+        debug_enabled = getattr(viewer, '_debug', False)
+        if not getattr(self, 'initialized', False):
+            if debug_enabled:
+                print('[heatmap] skip cached refresh: plugin not initialised')
+            return
+        if not self.adapter.is_wide():
+            if debug_enabled:
+                print('[heatmap] skip cached refresh: not in wide layout')
+            return
+        if getattr(self, '_plot_refresh_inflight', False):
+            if debug_enabled:
+                print('[heatmap] skip cached refresh: refresh already running')
+            return
+        if debug_enabled:
+            print('[heatmap] refreshing cached wide pane')
+        self._plot_refresh_inflight = True
+        try:
+            self._ensure_plot_canvas_attached()
+            self.plot_heatmap()
+            if debug_enabled:
+                print('[heatmap] wide pane refresh complete')
+        finally:
+            self._plot_refresh_inflight = False
+
     def plot_heatmap(self, *args):
+        viewer = getattr(self, 'main_viewer', None)
+        debug_enabled = getattr(viewer, '_debug', False)
         self._reset_selection_cache()
         self.prepare_heatmap_data()
         self.dendrogram = self.generate_dendrogram()
@@ -995,6 +1024,9 @@ class DisplayLayer:
         with self.plot_output:
             self.plot_output.clear_output(wait=True)
             self.generate_heatmap()
+        if debug_enabled:
+            mode = 'wide' if self.adapter.is_wide() else 'vertical'
+            print(f'[heatmap] plot refreshed in {mode} mode')
 
     def load_heatmap(self, heatmap_df, cutoff, *args):
         self._reset_selection_cache()
