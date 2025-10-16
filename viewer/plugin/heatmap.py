@@ -22,6 +22,8 @@ class HeatmapDisplay(DataLayer, InteractionLayer, DisplayLayer, PluginBase):
 
         self.ui_component = UiComponent(self)
         self.data = Data()
+        # Keep Assign tab controls in sync with current cluster selection state.
+        self.data.current_clusters["index"].add_observer(self.update_ui_components)
         self.plot_output = Output()
 
         self.orientation_state = {
@@ -39,6 +41,8 @@ class HeatmapDisplay(DataLayer, InteractionLayer, DisplayLayer, PluginBase):
 
         self.initiate_ui()
         self.setup_widget_observers()
+        # Prime the Assign tab controls to reflect any restored selection state.
+        self.update_ui_components(self.data.current_clusters["index"].value)
         self._reset_selection_cache()
         self.initialized = True
         # Ensure layout reflects the starting orientation before observers fire.
