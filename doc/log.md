@@ -1,3 +1,5 @@
+### v0.2.0-alpha
+
 ### v0.1.10-rc3
 **Assign tab activation**
 - Wired `HeatmapDisplay` to observe `current_clusters["index"]` so the Assign tab's `Meta-cluster ID` field and Apply button enable as soon as a cluster selection exists and disable when it clears ([issue #9](https://github.com/HartmannLab/UELer/issues/9)).
