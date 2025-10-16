@@ -509,6 +509,9 @@ class ChartDisplay(PluginBase):
         self._section_location = "horizontal"
 
     def _sync_panel_location(self) -> bool:
+        debug_enabled = getattr(self.main_viewer, '_debug', False)
+        if debug_enabled:
+            print(f"[chart] sync panel location: {self._section_location}")
         previous_location = self._section_location
         if self._has_multiple_scatter():
             self._place_sections_horizontal()
@@ -519,6 +522,8 @@ class ChartDisplay(PluginBase):
             layout_changed
             and hasattr(self.main_viewer, "refresh_bottom_panel")
         ):
+            if debug_enabled:
+                print(f"[chart] refreshing bottom panel due to layout change")
             self.main_viewer.refresh_bottom_panel()
         return layout_changed
 

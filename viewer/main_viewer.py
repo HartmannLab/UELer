@@ -1508,6 +1508,9 @@ class ImageMaskViewer:
         self.after_all_plugins_loaded()
 
     def refresh_bottom_panel(self, ordering=None):
+        debug_enabled = getattr(self, '_debug', False)
+        if debug_enabled:
+            print("Refreshing bottom panel...")
         update_wide_plugin_panel(self, ordering)
 
     def save_widget_states(self, file_path):
