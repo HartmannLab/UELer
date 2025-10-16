@@ -207,6 +207,18 @@ _heatmap_spec.loader.exec_module(_heatmap_module)
 Data = _heatmap_module.Data
 HeatmapDisplay = _heatmap_module.HeatmapDisplay
 
+heatmap_layers_module = sys.modules.get("viewer.plugin.heatmap_layers")
+if heatmap_layers_module is None:
+    _HEATMAP_LAYERS_PATH = pathlib.Path(__file__).resolve().parents[1] / "viewer" / "plugin" / "heatmap_layers.py"
+    _heatmap_layers_spec = importlib.util.spec_from_file_location(
+        "heatmap_layers_under_test", _HEATMAP_LAYERS_PATH
+    )
+    heatmap_layers_module = importlib.util.module_from_spec(_heatmap_layers_spec)
+    assert _heatmap_layers_spec.loader is not None
+    _heatmap_layers_spec.loader.exec_module(heatmap_layers_module)
+
+_apply_heatmap_tick_labels = heatmap_layers_module._apply_heatmap_tick_labels
+
 
 class HeatmapScatterSelectionTests(unittest.TestCase):
     def _make_heatmap(self):
@@ -321,6 +333,111 @@ class AxisStub:
 
     def get_children(self):
         return []
+
+
+class TickAxisStub:
+    def __init__(self):
+        self.xticks = []
+        self.yticks = []
+        self.xticklabels = []
+        self.yticklabels = []
+        self.xlabel = None
+        self.ylabel = None
+        self.xticklabel_kwargs = {}
+        self.yticklabel_kwargs = {}
+
+    def set_xticks(self, ticks):
+        self.xticks = list(ticks)
+
+    def set_xticklabels(self, labels, **kwargs):
+        self.xticklabels = list(labels)
+        self.xticklabel_kwargs = dict(kwargs)
+
+    def set_yticks(self, ticks):
+        self.yticks = list(ticks)
+
+    def set_yticklabels(self, labels, **kwargs):
+        self.yticklabels = list(labels)
+        self.yticklabel_kwargs = dict(kwargs)
+
+    def set_xlabel(self, label):
+        self.xlabel = label
+
+    def set_ylabel(self, label):
+        self.ylabel = label
+
+    def get_xticklabels(self):
+        return []
+
+
+class HeatmapTickAlignmentTests(unittest.TestCase):
+    def test_wide_ticks_centered_on_cells(self):
+        axis = TickAxisStub()
+        adapter = SimpleNamespace(is_wide=lambda: True)
+        cluster_leaves = ["B", "A", "C"]
+        marker_leaves = ["CD3", "CD8"]
+
+        _apply_heatmap_tick_labels(adapter, axis, cluster_leaves, marker_leaves, "Cluster")
+
+        self.assertEqual(axis.xticks, [0.5, 1.5, 2.5])
+        self.assertEqual(axis.yticks, [0.5, 1.5])
+        self.assertEqual(axis.xticklabels, cluster_leaves)
+        self.assertEqual(axis.yticklabels, marker_leaves)
+        self.assertEqual(axis.xlabel, "Cluster")
+        self.assertEqual(axis.xticklabel_kwargs.get("rotation"), 45)
+        self.assertEqual(axis.xticklabel_kwargs.get("ha"), "right")
+
+    def test_vertical_ticks_keep_existing_ordering(self):
+        axis = TickAxisStub()
+        adapter = SimpleNamespace(is_wide=lambda: False)
+        cluster_leaves = ["B", "A"]
+
+        _apply_heatmap_tick_labels(adapter, axis, cluster_leaves, [], "Cluster")
+
+        self.assertEqual(axis.yticks, [0, 1])
+        self.assertEqual(axis.yticklabels, ["A", "B"])
+
+    class HeatmapClusterAssignmentPersistenceTests(unittest.TestCase):
+        def test_cache_and_restore_reapply_revised_ids(self):
+            heatmap = HeatmapDisplay.__new__(HeatmapDisplay)
+            heatmap._cluster_assignment_cache = {}
+            heatmap.heatmap_data = pd.DataFrame(
+                {
+                    "meta_cluster": [1, 2, 3],
+                    "meta_cluster_revised": [1, 99, 3],
+                },
+                index=["A", "B", "C"],
+            )
+
+            heatmap._cache_cluster_assignments()
+
+            heatmap.heatmap_data = pd.DataFrame(
+                {
+                    "meta_cluster": [3, 2, 1],
+                },
+                index=["C", "B", "A"],
+            )
+
+            heatmap._restore_cluster_assignments()
+
+            self.assertIn("meta_cluster_revised", heatmap.heatmap_data.columns)
+            self.assertEqual(heatmap.heatmap_data.loc["B", "meta_cluster_revised"], 99)
+            self.assertEqual(heatmap.heatmap_data.loc["A", "meta_cluster_revised"], 1)
+            self.assertEqual(heatmap.heatmap_data.loc["C", "meta_cluster_revised"], 3)
+
+        def test_cache_clears_when_no_revised_column_present(self):
+            heatmap = HeatmapDisplay.__new__(HeatmapDisplay)
+            heatmap._cluster_assignment_cache = {"B": 4}
+            heatmap.heatmap_data = pd.DataFrame(
+                {
+                    "meta_cluster": [7, 8],
+                },
+                index=["A", "B"],
+            )
+
+            heatmap._cache_cluster_assignments()
+
+            self.assertEqual(heatmap._cluster_assignment_cache, {})
 
 
 class OutputStub:

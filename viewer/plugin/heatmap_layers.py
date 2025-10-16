@@ -60,13 +60,19 @@ def _append_hist_axis(adapter, divider, ax_heatmap):
     return divider.append_axes("right", size="15%", pad=0.4, sharey=ax_heatmap)
 
 
+def _tick_centers(count):
+    if count <= 0:
+        return np.array([])
+    return np.arange(count, dtype=float) + 0.5
+
+
 def _apply_heatmap_tick_labels(adapter, ax_heatmap, cluster_leaves, marker_leaves, cluster_label):
     if adapter.is_wide():
-        positions = np.arange(len(cluster_leaves))
+        positions = _tick_centers(len(cluster_leaves))
         ax_heatmap.set_xticks(positions)
         ax_heatmap.set_xticklabels(cluster_leaves, rotation=45, ha="right", fontsize="small")
         if marker_leaves:
-            ax_heatmap.set_yticks(np.arange(len(marker_leaves)))
+            ax_heatmap.set_yticks(_tick_centers(len(marker_leaves)))
             ax_heatmap.set_yticklabels(marker_leaves, fontsize="small")
         ax_heatmap.set_xlabel(cluster_label)
         return
@@ -82,7 +88,7 @@ def _render_histogram(adapter, ax_hist, ax_heatmap, hist_series, cluster_leaves,
     horizontal = adapter.is_wide()
     heatmap_ticks = ax_heatmap.get_xticks() if horizontal else ax_heatmap.get_yticks()
     if len(heatmap_ticks) != len(hist_series):
-        heatmap_ticks = np.arange(len(hist_series))
+        heatmap_ticks = _tick_centers(len(hist_series)) if horizontal else np.arange(len(hist_series))
 
     if horizontal:
         display_values = hist_series.values
@@ -105,6 +111,41 @@ def _render_histogram(adapter, ax_hist, ax_heatmap, hist_series, cluster_leaves,
 class DataLayer:
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._cluster_assignment_cache = {}
+
+    def _cache_cluster_assignments(self):
+        data = getattr(self, "heatmap_data", None)
+        cache = {}
+        if data is not None and hasattr(data, "columns") and 'meta_cluster_revised' in data.columns:
+            revised = data['meta_cluster_revised'].dropna()
+            if not revised.empty:
+                cache = revised.to_dict()
+        self._cluster_assignment_cache = cache
+
+    def _restore_cluster_assignments(self):
+        cache = getattr(self, "_cluster_assignment_cache", None)
+        if not cache:
+            return
+        data = getattr(self, "heatmap_data", None)
+        if data is None or not hasattr(data, "index"):
+            return
+        if 'meta_cluster_revised' not in data.columns:
+            if 'meta_cluster' in data.columns:
+                data['meta_cluster_revised'] = data['meta_cluster']
+            else:
+                data['meta_cluster_revised'] = np.nan
+        for label, value in cache.items():
+            if label in data.index:
+                data.at[label, 'meta_cluster_revised'] = value
+
+    def _engage_cutoff_lock(self, reason):
+        self._cutoff_lock_reason = reason
+        self._lock_override_requested = False
+        self.ui_component.lock_override_button.disabled = False
+        if not self.ui_component.lock_cutoff_button.value:
+            self.ui_component.lock_cutoff_button.value = True
+        else:
+            print(f"{reason}. Use 'Unlock once' before editing the dendrogram.")
 
     def _reset_selection_cache(self):
         self._last_scatter_selection = None
@@ -485,6 +526,7 @@ class InteractionLayer:
                     print(f"New dendrogram cutoff: {value}")
                     self._draw_cutoff_line(dend_axis)
                     self.apply_new_cutoff()
+                    self._engage_cutoff_lock("Cutoff locked after dendrogram update")
 
             elif color_axis is not None and event.inaxes == color_axis:
                 coord = self._color_axis_coord_from_event(event)
@@ -860,6 +902,7 @@ class InteractionLayer:
         if not self.adapter.is_wide():
             self.update_text_labels()
 
+        self._engage_cutoff_lock("Cutoff locked after meta-cluster reassignment")
         print(f"New cluster ID {new_cluster_id} applied to selected rows.")
 
 
@@ -911,7 +954,10 @@ class DisplayLayer:
         ])
 
         edit = VBox([
-            HBox([self.ui_component.lock_cutoff_button]),
+            HBox([
+                self.ui_component.lock_cutoff_button,
+                self.ui_component.lock_override_button
+            ], layout=Layout(gap='8px')),
             HBox([self.ui_component.cluster_id_text,
                 self.ui_component.cluster_id_apply_button])
         ])
@@ -1016,6 +1062,7 @@ class DisplayLayer:
     def plot_heatmap(self, *args):
         viewer = getattr(self, 'main_viewer', None)
         debug_enabled = getattr(viewer, '_debug', False)
+        self._cache_cluster_assignments()
         self._reset_selection_cache()
         self.prepare_heatmap_data()
         self.dendrogram = self.generate_dendrogram()
@@ -1126,6 +1173,7 @@ class DisplayLayer:
             return
         self.heatmap_data = self.heatmap_data.reindex(base_index)
         self.heatmap_data['meta_cluster'] = meta_cluster_labels
+        self._restore_cluster_assignments()
 
         num_clusters = len(np.unique(meta_cluster_labels))
         cluster_palette = sns.color_palette('husl', num_clusters)
