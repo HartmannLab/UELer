@@ -15,7 +15,7 @@ from viewer.plugin.plugin_base import PluginBase
 def build_wide_plugin_pane(control=None, content=None):
     """Compose the standard left/right layout used in the footer tabs."""
     if control is None and content is None:
-        return VBox(children=tuple(), layout=Layout(width='100%'))
+        return VBox(children=(), layout=Layout(width='100%'))
 
     if control is None:
         return VBox(children=(content,), layout=Layout(width='100%', overflow_y='auto'))
@@ -59,44 +59,64 @@ def collect_wide_plugin_entries(viewer):
     return entries
 
 
-def update_wide_plugin_panel(viewer, ordering=None):
-    if not hasattr(viewer, 'wide_plugin_tab') or not hasattr(viewer, 'wide_plugin_panel'):
-        return
-
-    entries = collect_wide_plugin_entries(viewer)
-
+def _ensure_bottom_namespace(viewer):
     bottom_ns = getattr(viewer, 'BottomPlots', None)
     if bottom_ns is None:
         bottom_ns = SimpleNamespace()
         viewer.BottomPlots = bottom_ns
+    return bottom_ns
 
-    for attr in list(vars(bottom_ns).keys()):
+
+def _ensure_pane_cache(viewer):
+    pane_cache = getattr(viewer, '_wide_plugin_panes', None)
+    if not isinstance(pane_cache, dict):
+        pane_cache = {}
+        viewer._wide_plugin_panes = pane_cache
+    return pane_cache
+
+
+def _cleanup_bottom_state(bottom_ns, pane_cache, active_attrs):
+    for attr in {name for name in vars(bottom_ns) if name not in active_attrs}:
         delattr(bottom_ns, attr)
+    for attr in [name for name in pane_cache if name not in active_attrs]:
+        pane_cache.pop(attr, None)
 
-    if not entries:
-        viewer.wide_plugin_tab.children = []
-        viewer.wide_plugin_panel.layout.display = 'none'
-        return
 
-    key = ordering or (lambda entry: entry['title'].lower())
-    entries = sorted(entries, key=key)
+def _clear_wide_panel(viewer):
+    viewer.wide_plugin_tab.children = ()
+    viewer.wide_plugin_tab.selected_index = None
+    viewer.wide_plugin_panel.layout.display = 'none'
 
-    tab_children = []
-    for entry in entries:
+
+def _resolve_wide_pane(entry, pane_cache):
+    plugin = entry['plugin']
+    attr = entry['attr']
+    token_getter = getattr(plugin, 'wide_panel_cache_token', None)
+    token = token_getter() if callable(token_getter) else None
+    cached_pane, cached_token = pane_cache.get(attr, (None, None))
+    if cached_pane is None or cached_token != token:
         pane = build_wide_plugin_pane(entry.get('control'), entry.get('content'))
-        tab_children.append(pane)
-        setattr(bottom_ns, entry['attr'], entry['plugin'])
+        pane_cache[attr] = (pane, token)
+        return pane
+    return cached_pane
 
-    viewer.wide_plugin_tab.children = tab_children
+
+def _apply_wide_panel(viewer, entries, tab_children):
+    previous_selection = getattr(viewer.wide_plugin_tab, 'selected_index', None)
+    viewer.wide_plugin_tab.children = tuple(tab_children)
     for idx, entry in enumerate(entries):
         viewer.wide_plugin_tab.set_title(idx, entry['title'])
-
-    selected = getattr(viewer.wide_plugin_tab, 'selected_index', None)
-    if viewer.wide_plugin_tab.children and selected is None:
-        viewer.wide_plugin_tab.selected_index = 0
-
+    if viewer.wide_plugin_tab.children:
+        if previous_selection is not None and previous_selection < len(viewer.wide_plugin_tab.children):
+            viewer.wide_plugin_tab.selected_index = previous_selection
+        elif getattr(viewer.wide_plugin_tab, 'selected_index', None) is None:
+            viewer.wide_plugin_tab.selected_index = 0
+    else:
+        viewer.wide_plugin_tab.selected_index = None
     viewer.wide_plugin_panel.layout.display = ''
 
+
+def _restore_heatmap(viewer):
     sideplots = getattr(viewer, 'SidePlots', None)
     heatmap_plugin = getattr(sideplots, 'heatmap_output', None) if sideplots else None
     if isinstance(heatmap_plugin, PluginBase):
@@ -106,6 +126,34 @@ def update_wide_plugin_panel(viewer, ordering=None):
         restore_vertical = getattr(heatmap_plugin, 'restore_vertical_canvas', None)
         if callable(restore_vertical):
             restore_vertical()
+
+
+def update_wide_plugin_panel(viewer, ordering=None):
+    if not hasattr(viewer, 'wide_plugin_tab') or not hasattr(viewer, 'wide_plugin_panel'):
+        return
+
+    entries = collect_wide_plugin_entries(viewer)
+    bottom_ns = _ensure_bottom_namespace(viewer)
+    pane_cache = _ensure_pane_cache(viewer)
+
+    active_attrs = {entry['attr'] for entry in entries}
+    _cleanup_bottom_state(bottom_ns, pane_cache, active_attrs)
+
+    if not entries:
+        _clear_wide_panel(viewer)
+        return
+
+    key = ordering or (lambda entry: entry['title'].lower())
+    entries = sorted(entries, key=key)
+
+    tab_children = []
+    for entry in entries:
+        tab_children.append(_resolve_wide_pane(entry, pane_cache))
+        setattr(bottom_ns, entry['attr'], entry['plugin'])
+
+    _apply_wide_panel(viewer, entries, tab_children)
+    _restore_heatmap(viewer)
+
 
 def create_widgets(viewer):
     viewer.ui_component = uicomponents(viewer)

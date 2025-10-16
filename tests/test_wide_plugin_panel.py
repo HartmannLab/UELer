@@ -2,6 +2,7 @@ import math
 import sys
 import types
 import unittest
+from unittest import mock
 from types import SimpleNamespace
 
 
@@ -219,6 +220,20 @@ class ToggleFooterPlugin(PluginBase):
         return None
 
 
+class CachingHeatmapPlugin(ToggleFooterPlugin):
+    def wide_panel_cache_token(self):
+        return ("heatmap", self.horizontal)
+
+
+class CachingChartPlugin(ToggleFooterPlugin):
+    def __init__(self, viewer):
+        super().__init__(viewer)
+        self.displayed_name = "Chart"
+
+    def wide_panel_cache_token(self):
+        return ("chart", self.horizontal)
+
+
 class ViewerHarness:
     def __init__(self):
         self.SidePlots = SimpleNamespace()
@@ -274,6 +289,41 @@ class WidePanelHelperTests(unittest.TestCase):
         entries = collect_wide_plugin_entries(viewer)
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0]["plugin"], plugin)
+
+    def test_heatmap_pane_reused_when_chart_relocations_trigger_refresh(self):
+        viewer = ViewerHarness()
+        heatmap = CachingHeatmapPlugin(viewer)
+        chart = CachingChartPlugin(viewer)
+        viewer.SidePlots.heatmap_output = heatmap
+        viewer.SidePlots.chart_output = chart
+
+        heatmap.horizontal = True
+        chart.horizontal = False
+
+        with mock.patch("viewer.ui_components.build_wide_plugin_pane") as build_mock:
+            build_mock.side_effect = lambda control, content: widgets.VBox(children=(control, content))
+
+            update_wide_plugin_panel(viewer)
+            self.assertEqual(build_mock.call_count, 1)
+            first_call_control, first_call_content = build_mock.call_args_list[0].args
+            self.assertIs(first_call_control, heatmap.controls)
+            self.assertIs(first_call_content, heatmap.content)
+            initial_pane = viewer.wide_plugin_tab.children[0]
+
+            chart.horizontal = True
+            update_wide_plugin_panel(viewer)
+            self.assertEqual(build_mock.call_count, 2)
+            self.assertIn(initial_pane, viewer.wide_plugin_tab.children)
+            self.assertIs(viewer._wide_plugin_panes['heatmap_output'][0], initial_pane)
+            last_call_control, last_call_content = build_mock.call_args_list[-1].args
+            self.assertIs(last_call_control, chart.controls)
+            self.assertIs(last_call_content, chart.content)
+
+            chart.horizontal = False
+            update_wide_plugin_panel(viewer)
+            self.assertEqual(build_mock.call_count, 2)
+            self.assertEqual(viewer.wide_plugin_tab.children, (initial_pane,))
+            self.assertIs(viewer._wide_plugin_panes['heatmap_output'][0], initial_pane)
 
 
 if __name__ == "__main__":  # pragma: no cover

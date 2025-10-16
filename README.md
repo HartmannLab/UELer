@@ -79,6 +79,10 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 **Heatmap footer stability**
 - Heatmap plugin now reattaches its canvas during footer rebuilds so horizontal heatmaps persist after chart scatter plots are added or removed, with expanded regression coverage in `tests/test_chart_footer_behavior.py` ([issue #6](https://github.com/HartmannLab/UELer/issues/6)).
 
+**Footer pane caching**
+- `viewer/ui_components.update_wide_plugin_panel` now caches wide plugin panes so chart relocations reuse existing widgets, preserving live heatmap canvases while moving between sidebar and footer layouts ([issue #6](https://github.com/HartmannLab/UELer/issues/6)).
+- Added cache-aware regression coverage in `tests/test_wide_plugin_panel.py` to ensure the heatmap pane instance survives chart toggles without forcing a new widget tree ([issue #6](https://github.com/HartmannLab/UELer/issues/6)).
+
 ## Earlier Updates  
 
 You can find previous update logs [here](/doc/log.md).

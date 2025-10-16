@@ -28,6 +28,10 @@ class PluginBase:
         """
         return None
 
+    def wide_panel_cache_token(self):
+        """Provide an identifier used to decide when a cached footer pane must be rebuilt."""
+        return None
+
     def after_all_plugins_loaded(self):
         widget_states_path = os.path.join(self.main_viewer.base_folder, ".UELer", f'{self.displayed_name}_widget_states.json')
         self.load_widget_states(widget_states_path)
