@@ -106,6 +106,15 @@ class DataLayer:
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+    def _engage_cutoff_lock(self, reason):
+        self._cutoff_lock_reason = reason
+        self._lock_override_requested = False
+        self.ui_component.lock_override_button.disabled = False
+        if not self.ui_component.lock_cutoff_button.value:
+            self.ui_component.lock_cutoff_button.value = True
+        else:
+            print(f"{reason}. Use 'Unlock once' before editing the dendrogram.")
+
     def _reset_selection_cache(self):
         self._last_scatter_selection = None
         self._last_highlighted_clusters = None
@@ -485,6 +494,7 @@ class InteractionLayer:
                     print(f"New dendrogram cutoff: {value}")
                     self._draw_cutoff_line(dend_axis)
                     self.apply_new_cutoff()
+                    self._engage_cutoff_lock("Cutoff locked after dendrogram update")
 
             elif color_axis is not None and event.inaxes == color_axis:
                 coord = self._color_axis_coord_from_event(event)
@@ -860,6 +870,7 @@ class InteractionLayer:
         if not self.adapter.is_wide():
             self.update_text_labels()
 
+        self._engage_cutoff_lock("Cutoff locked after meta-cluster reassignment")
         print(f"New cluster ID {new_cluster_id} applied to selected rows.")
 
 
@@ -911,7 +922,10 @@ class DisplayLayer:
         ])
 
         edit = VBox([
-            HBox([self.ui_component.lock_cutoff_button]),
+            HBox([
+                self.ui_component.lock_cutoff_button,
+                self.ui_component.lock_override_button
+            ], layout=Layout(gap='8px')),
             HBox([self.ui_component.cluster_id_text,
                 self.ui_component.cluster_id_apply_button])
         ])

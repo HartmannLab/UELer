@@ -22,8 +22,13 @@ class HeatmapDisplay(DataLayer, InteractionLayer, DisplayLayer, PluginBase):
 
         self.ui_component = UiComponent(self)
         self.data = Data()
+        self._cutoff_lock_reason = None
+        self._lock_override_requested = False
+        self._suppress_lock_observer = False
         # Keep Assign tab controls in sync with current cluster selection state.
         self.data.current_clusters["index"].add_observer(self.update_ui_components)
+        self.ui_component.lock_cutoff_button.observe(self._on_lock_cutoff_change, names='value')
+        self.ui_component.lock_override_button.on_click(self._request_lock_override)
         self.plot_output = Output()
 
         self.orientation_state = {
@@ -47,6 +52,42 @@ class HeatmapDisplay(DataLayer, InteractionLayer, DisplayLayer, PluginBase):
         self.initialized = True
         # Ensure layout reflects the starting orientation before observers fire.
         self._sync_panel_location()
+
+    def _on_lock_cutoff_change(self, change):
+        if self._suppress_lock_observer:
+            return
+
+        owner = change['owner']
+        new_value = change['new']
+
+        if new_value:
+            reason = self._cutoff_lock_reason or "Cutoff lock engaged"
+            print(f"{reason}. Use 'Unlock once' before editing the dendrogram.")
+            self._lock_override_requested = False
+            self.ui_component.lock_override_button.disabled = False
+            return
+
+        if self._lock_override_requested:
+            print("Cutoff unlock granted. Adjust the dendrogram, then reapply the lock when done.")
+            self._lock_override_requested = False
+            self._cutoff_lock_reason = None
+            return
+
+        print("Cutoff edits require the lock. Use 'Unlock once' to temporarily disable it.")
+        self._suppress_lock_observer = True
+        owner.value = True
+        self._suppress_lock_observer = False
+
+    def _request_lock_override(self, *_):
+        if not self.ui_component.lock_cutoff_button.value:
+            print("Cutoff is already unlocked.")
+            return
+
+        self._lock_override_requested = True
+        self._cutoff_lock_reason = None
+        self.ui_component.lock_override_button.disabled = True
+        print("Unlock request accepted. You may adjust the dendrogram until it relocks.")
+        self.ui_component.lock_cutoff_button.value = False
 
 class UiComponent:
     def __init__(self, parent):
@@ -115,6 +156,14 @@ class UiComponent:
             description='Lock Cutoff',
             disabled=False,
             indent=False
+        )
+
+        self.lock_override_button = Button(
+            description='Unlock once',
+            disabled=False,
+            button_style='',
+            tooltip='Temporarily allow cutoff edits until the next automatic lock.',
+            icon='unlock'
         )
 
         self.cluster_id_text = IntText(
