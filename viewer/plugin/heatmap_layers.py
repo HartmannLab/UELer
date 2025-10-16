@@ -60,13 +60,19 @@ def _append_hist_axis(adapter, divider, ax_heatmap):
     return divider.append_axes("right", size="15%", pad=0.4, sharey=ax_heatmap)
 
 
+def _tick_centers(count):
+    if count <= 0:
+        return np.array([])
+    return np.arange(count, dtype=float) + 0.5
+
+
 def _apply_heatmap_tick_labels(adapter, ax_heatmap, cluster_leaves, marker_leaves, cluster_label):
     if adapter.is_wide():
-        positions = np.arange(len(cluster_leaves))
+        positions = _tick_centers(len(cluster_leaves))
         ax_heatmap.set_xticks(positions)
         ax_heatmap.set_xticklabels(cluster_leaves, rotation=45, ha="right", fontsize="small")
         if marker_leaves:
-            ax_heatmap.set_yticks(np.arange(len(marker_leaves)))
+            ax_heatmap.set_yticks(_tick_centers(len(marker_leaves)))
             ax_heatmap.set_yticklabels(marker_leaves, fontsize="small")
         ax_heatmap.set_xlabel(cluster_label)
         return
@@ -82,7 +88,7 @@ def _render_histogram(adapter, ax_hist, ax_heatmap, hist_series, cluster_leaves,
     horizontal = adapter.is_wide()
     heatmap_ticks = ax_heatmap.get_xticks() if horizontal else ax_heatmap.get_yticks()
     if len(heatmap_ticks) != len(hist_series):
-        heatmap_ticks = np.arange(len(hist_series))
+        heatmap_ticks = _tick_centers(len(hist_series)) if horizontal else np.arange(len(hist_series))
 
     if horizontal:
         display_values = hist_series.values
