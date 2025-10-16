@@ -111,6 +111,32 @@ def _render_histogram(adapter, ax_hist, ax_heatmap, hist_series, cluster_leaves,
 class DataLayer:
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._cluster_assignment_cache = {}
+
+    def _cache_cluster_assignments(self):
+        data = getattr(self, "heatmap_data", None)
+        cache = {}
+        if data is not None and hasattr(data, "columns") and 'meta_cluster_revised' in data.columns:
+            revised = data['meta_cluster_revised'].dropna()
+            if not revised.empty:
+                cache = revised.to_dict()
+        self._cluster_assignment_cache = cache
+
+    def _restore_cluster_assignments(self):
+        cache = getattr(self, "_cluster_assignment_cache", None)
+        if not cache:
+            return
+        data = getattr(self, "heatmap_data", None)
+        if data is None or not hasattr(data, "index"):
+            return
+        if 'meta_cluster_revised' not in data.columns:
+            if 'meta_cluster' in data.columns:
+                data['meta_cluster_revised'] = data['meta_cluster']
+            else:
+                data['meta_cluster_revised'] = np.nan
+        for label, value in cache.items():
+            if label in data.index:
+                data.at[label, 'meta_cluster_revised'] = value
 
     def _engage_cutoff_lock(self, reason):
         self._cutoff_lock_reason = reason
@@ -1036,6 +1062,7 @@ class DisplayLayer:
     def plot_heatmap(self, *args):
         viewer = getattr(self, 'main_viewer', None)
         debug_enabled = getattr(viewer, '_debug', False)
+        self._cache_cluster_assignments()
         self._reset_selection_cache()
         self.prepare_heatmap_data()
         self.dendrogram = self.generate_dendrogram()
@@ -1146,6 +1173,7 @@ class DisplayLayer:
             return
         self.heatmap_data = self.heatmap_data.reindex(base_index)
         self.heatmap_data['meta_cluster'] = meta_cluster_labels
+        self._restore_cluster_assignments()
 
         num_clusters = len(np.unique(meta_cluster_labels))
         cluster_palette = sns.color_palette('husl', num_clusters)

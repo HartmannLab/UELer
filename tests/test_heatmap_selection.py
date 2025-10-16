@@ -397,6 +397,48 @@ class HeatmapTickAlignmentTests(unittest.TestCase):
         self.assertEqual(axis.yticks, [0, 1])
         self.assertEqual(axis.yticklabels, ["A", "B"])
 
+    class HeatmapClusterAssignmentPersistenceTests(unittest.TestCase):
+        def test_cache_and_restore_reapply_revised_ids(self):
+            heatmap = HeatmapDisplay.__new__(HeatmapDisplay)
+            heatmap._cluster_assignment_cache = {}
+            heatmap.heatmap_data = pd.DataFrame(
+                {
+                    "meta_cluster": [1, 2, 3],
+                    "meta_cluster_revised": [1, 99, 3],
+                },
+                index=["A", "B", "C"],
+            )
+
+            heatmap._cache_cluster_assignments()
+
+            heatmap.heatmap_data = pd.DataFrame(
+                {
+                    "meta_cluster": [3, 2, 1],
+                },
+                index=["C", "B", "A"],
+            )
+
+            heatmap._restore_cluster_assignments()
+
+            self.assertIn("meta_cluster_revised", heatmap.heatmap_data.columns)
+            self.assertEqual(heatmap.heatmap_data.loc["B", "meta_cluster_revised"], 99)
+            self.assertEqual(heatmap.heatmap_data.loc["A", "meta_cluster_revised"], 1)
+            self.assertEqual(heatmap.heatmap_data.loc["C", "meta_cluster_revised"], 3)
+
+        def test_cache_clears_when_no_revised_column_present(self):
+            heatmap = HeatmapDisplay.__new__(HeatmapDisplay)
+            heatmap._cluster_assignment_cache = {"B": 4}
+            heatmap.heatmap_data = pd.DataFrame(
+                {
+                    "meta_cluster": [7, 8],
+                },
+                index=["A", "B"],
+            )
+
+            heatmap._cache_cluster_assignments()
+
+            self.assertEqual(heatmap._cluster_assignment_cache, {})
+
 
 class OutputStub:
     def __init__(self):
