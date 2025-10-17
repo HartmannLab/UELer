@@ -6,6 +6,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import tests.bootstrap  # noqa: F401  # Ensure shared test bootstrap runs
+
 import pandas as pd
 
 

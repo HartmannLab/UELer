@@ -3,6 +3,8 @@ import types
 import unittest
 from types import SimpleNamespace
 
+import tests.bootstrap  # noqa: F401  # Ensure shared test bootstrap runs
+
 # ---------------------------------------------------------------------------
 # Optional dependency stubs
 # ---------------------------------------------------------------------------
