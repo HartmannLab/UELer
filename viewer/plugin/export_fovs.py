@@ -1,38 +1,15 @@
-"""Placeholder Batch Export plugin."""
+"""Compatibility wrapper for the relocated ``export_fovs`` plugin."""
 
-from ipywidgets import HTML, Layout, VBox
+from __future__ import annotations
 
-from viewer.plugin.plugin_base import PluginBase
-
-
-PLACEHOLDER_MESSAGE = "Batch export will be available soon."
+import importlib
+import sys
 
 
-class RunFlowsom(PluginBase):
-    """Minimal stub so the Batch export tab communicates its pending status."""
+_target = importlib.import_module("ueler.viewer.plugin.export_fovs")
+sys.modules[__name__] = _target
 
-    def __init__(self, main_viewer, width, height):
-        super().__init__(main_viewer, width, height)
-        self.SidePlots_id = "batch_export_output"
-        self.displayed_name = "Batch export"
-        self.main_viewer = main_viewer
-        self.width = width
-        self.height = height
+PLACEHOLDER_MESSAGE = _target.PLACEHOLDER_MESSAGE
+RunFlowsom = _target.RunFlowsom
 
-        self._message = HTML(
-            value=f"<b>{PLACEHOLDER_MESSAGE}</b>",
-            layout=Layout(width="100%", padding="12px")
-        )
-        self.ui = VBox([
-            self._message
-        ], layout=Layout(width="100%"))
-
-        self.initialized = True
-
-    def initiate_ui(self):
-        """Kept for PluginBase compatibility; no controls to assemble yet."""
-        return None
-
-    def setup_widget_observers(self):
-        """No observers required until the feature ships."""
-        return None
+__all__ = getattr(_target, "__all__", None) or ["RunFlowsom", "PLACEHOLDER_MESSAGE"]

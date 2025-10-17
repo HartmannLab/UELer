@@ -28,7 +28,6 @@ VIEWER_CORE_ALIASES: Dict[str, str] = {
 }
 
 VIEWER_PLUGIN_ALIASES: Dict[str, str] = {
-	"ueler.viewer.plugin": "viewer.plugin",
 	"ueler.viewer.plugin.plugin_base": "viewer.plugin.plugin_base",
 	"ueler.viewer.plugin.chart": "viewer.plugin.chart",
 	"ueler.viewer.plugin.chart_heatmap": "viewer.plugin.chart_heatmap",
@@ -37,12 +36,10 @@ VIEWER_PLUGIN_ALIASES: Dict[str, str] = {
 	"ueler.viewer.plugin.heatmap_adapter": "viewer.plugin.heatmap_adapter",
 	"ueler.viewer.plugin.scatter_widget": "viewer.plugin.scatter_widget",
 	"ueler.viewer.plugin.cell_gallery": "viewer.plugin.cell_gallery",
-	"ueler.viewer.plugin.export_fovs": "viewer.plugin.export_fovs",
 	"ueler.viewer.plugin.mask_painter": "viewer.plugin.mask_painter",
 	"ueler.viewer.plugin.region_annotation": "viewer.plugin.region_annotation",
 	"ueler.viewer.plugin.roi_manager_plugin": "viewer.plugin.roi_manager_plugin",
 	"ueler.viewer.plugin.run_flowsom": "viewer.plugin.run_flowsom",
-	"ueler.viewer.plugin.go_to": "viewer.plugin.go_to",
 }
 
 LEGACY_VIEWER_ALIASES: Dict[str, str] = {
@@ -52,6 +49,14 @@ LEGACY_VIEWER_ALIASES: Dict[str, str] = {
 	"viewer.observable": "ueler.viewer.observable",
 	"viewer.annotation_palette_editor": "ueler.viewer.annotation_palette_editor",
 	"viewer.annotation_display": "ueler.viewer.annotation_display",
+	"viewer.roi_manager": "ueler.viewer.roi_manager",
+}
+
+LEGACY_PLUGIN_ALIASES: Dict[str, str] = {
+	"viewer.plugin.plugin_base": "ueler.viewer.plugin.plugin_base",
+	"viewer.plugin.export_fovs": "ueler.viewer.plugin.export_fovs",
+	"viewer.plugin.go_to": "ueler.viewer.plugin.go_to",
+	"viewer.plugin.cell_gallery": "ueler.viewer.plugin.cell_gallery",
 }
 
 COMPAT_ALIAS_GROUPS: Iterable[Mapping[str, str]] = (
@@ -59,6 +64,7 @@ COMPAT_ALIAS_GROUPS: Iterable[Mapping[str, str]] = (
 	VIEWER_CORE_ALIASES,
 	VIEWER_PLUGIN_ALIASES,
 	LEGACY_VIEWER_ALIASES,
+	LEGACY_PLUGIN_ALIASES,
 )
 
 # Flattened view that tests can import for validation.

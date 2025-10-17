@@ -85,6 +85,11 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 - Transitioned `viewer/observable.py` to `ueler.viewer.observable`, tightened typing for the observable helper, and replaced the legacy module with a thin forwarding shim.
 - Relocated `viewer/annotation_palette_editor.py` into `ueler.viewer.annotation_palette_editor`, updated its color helper imports, and retained a legacy shim for backward compatibility.
 - Shifted `viewer/annotation_display.py` into `ueler.viewer.annotation_display`, refreshed imports to use the packaged namespace, added a lazy widget loader so test stubs initialize before instantiation, and provided a compatibility wrapper plus alias updates so existing code keeps working.
+- Repositioned `viewer/roi_manager.py` into `ueler.viewer.roi_manager`, switched timestamps to `datetime.now(timezone.utc)` for lint compliance, and left a compatibility wrapper plus reverse alias so legacy imports remain operational.
+- Ported `viewer/plugin/plugin_base.py` into `ueler.viewer.plugin.plugin_base`, introduced a packaged plugin scaffold, and replaced the legacy module with a forwarding shim plus reverse alias coverage.
+- Moved `viewer/plugin/export_fovs.py` into `ueler.viewer.plugin.export_fovs`, preserved the placeholder UI, and wrapped the legacy module with a forwarding shim plus alias updates.
+- Shifted `viewer/plugin/go_to.py` into `ueler.viewer.plugin.go_to`, refreshed imports to use the packaged helpers, and added a legacy wrapper plus alias updates for continuity.
+- Migrated `viewer/plugin/cell_gallery.py` into `ueler.viewer.plugin.cell_gallery`, tightened deterministic sampling when downscaling selections, and replaced the legacy module with a forwarding shim plus alias updates to preserve backwards compatibility.
 
 **Fast-stub pandas parity**
 - Extended the shared pandas shim with `Series.loc`/`.iloc` indexers, `map`, `astype`, boolean helpers, and dictionary-aware constructors so chart and scatter tests align categories correctly without the real library installed.
