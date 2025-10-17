@@ -44,17 +44,35 @@
     - Commit after each move for traceability.
 
 - [ ] **7a. Further incremental module moves**
-  - **Description:** Move modules one by one according to the order and the plan in `dev_note/github_issues.md`. **Don't stop until _six_ planned modules are relocated compared to the last Git commit.**
+  - **Description:** Move modules one by one according to the order and the plan in `dev_note/github_issues.md`. Don't stop until item 13 in the **progress** list below is checked.
   - **Details & rationale:** See the full action plan in `dev_note/github_issues.md` under the "Task 7a — Risk-sorted module migration order (2025-10-17)" section for the ordered list, checklist, and edge cases.
   - **Acceptance:** 
     - All fast tests remain green after each move.
     - All moves are completed according to the plan.
   - **Progress:**
-    - [x] `viewer.color_palettes` → `ueler.viewer.color_palettes` (2025-10-17)
-    - [x] `viewer.decorators` → `ueler.viewer.decorators` (2025-10-17)
-    - [x] `viewer.observable` → `ueler.viewer.observable` (2025-10-18)
-    - [x] `viewer.annotation_palette_editor` → `ueler.viewer.annotation_palette_editor` (2025-10-18)
-    - [x] `viewer.annotation_display` → `ueler.viewer.annotation_display` (2025-10-18)
+  Don't stop until item 13 is checked.
+    1. [x] `viewer.color_palettes` → `ueler.viewer.color_palettes` (2025-10-17)
+    2. [x] `viewer.decorators` → `ueler.viewer.decorators` (2025-10-17)
+    3. [x] `viewer.observable` → `ueler.viewer.observable` (2025-10-18)
+    4. [x] `viewer.annotation_palette_editor` → `ueler.viewer.annotation_palette_editor` (2025-10-18)
+    5. [x] `viewer.annotation_display` → `ueler.viewer.annotation_display` (2025-10-18)
+    6. [ ] `viewer.roi_manager` → `ueler.viewer.roi_manager` (pending)
+    7. [ ] `viewer.plugin.plugin_base` → `ueler.viewer.plugin.plugin_base` (pending)
+    8. [ ] `viewer.plugin.export_fovs` → `ueler.viewer.plugin.export_fovs` (pending)
+    9. [ ] `viewer.plugin.go_to` → `ueler.viewer.plugin.go_to` (pending)
+    10. [ ] `viewer.plugin.cell_gallery` → `ueler.viewer.plugin.cell_gallery` (pending)
+    11. [ ] `viewer.plugin.chart` → `ueler.viewer.plugin.chart` (pending)
+    12. [ ] `viewer.plugin.scatter_widget` → `ueler.viewer.plugin.scatter_widget` (pending)
+    13. [ ] `viewer.image_display` → `ueler.viewer.image_display` (pending)
+    14. [ ] `viewer.images` → `ueler.viewer.images` (pending)
+    15. [ ] `viewer.plugin.heatmap_adapter` → `ueler.viewer.plugin.heatmap_adapter` (pending)
+    16. [ ] `viewer.plugin.heatmap_layers` → `ueler.viewer.plugin.heatmap_layers` (pending)
+    17. [ ] `viewer.plugin.chart_heatmap` → `ueler.viewer.plugin.chart_heatmap` (pending)
+    18. [ ] `viewer.plugin.heatmap` → `ueler.viewer.plugin.heatmap` (pending)
+    19. [ ] `viewer.plugin.mask_painter` → `ueler.viewer.plugin.mask_painter` (pending)
+    20. [ ] `viewer.plugin.roi_manager_plugin` → `ueler.viewer.plugin.roi_manager_plugin` (pending)
+    21. [ ] `viewer.plugin.run_flowsom` → `ueler.viewer.plugin.run_flowsom` (pending)
+    22. [ ] `viewer.main_viewer` → `ueler.viewer.main_viewer` (pending)
 
 ---
 
