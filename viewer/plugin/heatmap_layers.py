@@ -1136,6 +1136,15 @@ class DisplayLayer:
         if not self.adapter.is_wide():
             return
         self._ensure_plot_canvas_attached()
+
+        redraw_method = getattr(self, "redraw_cached_footer_canvas", None)
+        if callable(redraw_method):
+            try:
+                if redraw_method():
+                    return
+            except Exception:
+                pass
+
         g = getattr(self.data, 'g', None)
         fig = getattr(g, 'fig', None) if g is not None else None
         canvas = getattr(fig, 'canvas', None) if fig is not None else None

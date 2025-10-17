@@ -8,6 +8,7 @@ project modules are imported by the tests.
 
 from __future__ import annotations
 
+import importlib
 import inspect
 import sys
 import types
@@ -28,6 +29,8 @@ _ANYWIDGET = "anywidget"
 _JSCATTER = "jscatter"
 _IPYTHON = "IPython"
 _IPYTHON_DISPLAY = "IPython.display"
+_MATPLOTLIB = "matplotlib"
+_MATPLOTLIB_PYPLOT = "matplotlib.pyplot"
 
 _DEFAULT_POINT_COLOR = (0.2, 0.4, 0.8, 0.85)
 
@@ -86,27 +89,57 @@ def _supplement_pandas_stub(module: types.ModuleType) -> None:
 
     stub = _create_pandas_stub()
 
-    def _needs_replacement(attr_name: str, value) -> bool:
-        if value is None:
-            return True
-        if attr_name in {"DataFrame", "Series", "Index"} and value is object:
-            return True
-        return False
-
-    replaced = False
-    for name in ("DataFrame", "Series", "Index", "merge", "concat", "isna"):
-        current = getattr(module, name, None)
-        if _needs_replacement(name, current):
-            setattr(module, name, getattr(stub, name))
-            replaced = True
-
-    if not hasattr(module, "api"):
-        module.api = getattr(stub, "api")  # type: ignore[attr-defined]
+    replaced = _replace_missing_pandas_symbols(module, stub)
+    if _ensure_pandas_api_support(module, stub):
         replaced = True
 
     if replaced:
         module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
         module.__bootstrap_patched__ = True  # type: ignore[attr-defined]
+
+
+def _pandas_attr_needs_replacement(attr_name: str, value) -> bool:
+    if value is None:
+        return True
+    if attr_name in {"DataFrame", "Series", "Index"} and value is object:
+        return True
+    return False
+
+
+def _replace_missing_pandas_symbols(target: types.ModuleType, stub: types.ModuleType) -> bool:
+    replaced = False
+    for name in ("DataFrame", "Series", "Index", "merge", "concat", "isna"):
+        current = getattr(target, name, None)
+        if _pandas_attr_needs_replacement(name, current):
+            setattr(target, name, getattr(stub, name))
+            replaced = True
+    return replaced
+
+
+def _ensure_pandas_api_support(target: types.ModuleType, stub: types.ModuleType) -> bool:
+    if not hasattr(target, "api"):
+        target.api = getattr(stub, "api")  # type: ignore[attr-defined]
+        return True
+
+    stub_api = getattr(stub, "api", None)
+    target_api = getattr(target, "api", None)
+    if stub_api is None or target_api is None:
+        return False
+
+    stub_types = getattr(stub_api, "types", None)
+    target_types = getattr(target_api, "types", None)
+    replaced = False
+    if target_types is None and stub_types is not None:
+        target_api.types = stub_types  # type: ignore[attr-defined]
+        return True
+    if stub_types is None or target_types is None:
+        return replaced
+
+    for attr in ("is_numeric_dtype", "is_object_dtype"):
+        if not hasattr(target_types, attr):
+            setattr(target_types, attr, getattr(stub_types, attr))
+            replaced = True
+    return replaced
 
 
 def _clear_numpy_stub() -> None:
@@ -127,104 +160,244 @@ def _import_real_pandas() -> types.ModuleType | None:
     return sys.modules[_PANDAS]
 
 
-class _BootstrapSeries:
-    def __init__(self, values=None, index=None, name=None):
-        self._data = list(values or [])
-        self.index = list(index or range(len(self._data)))
-        self.name = name
+class _BootstrapSeries(list):
+    def __init__(self, data=(), index=None):
+        if isinstance(data, dict):
+            items = list(data.items())
+            values = [value for _, value in items]
+            default_index = [key for key, _ in items]
+            super().__init__(values)
+        else:
+            super().__init__(data)
+            default_index = list(range(len(self)))
 
-    def __iter__(self):  # pragma: no cover - simple proxy
-        return iter(self._data)
-
-    def __len__(self):  # pragma: no cover - simple proxy
-        return len(self._data)
-
-    def __getitem__(self, item):
-        return self._data[item]
-
-    def __setitem__(self, index, value):  # pragma: no cover - rarely used
-        self._data[index] = value
+        if index is None:
+            self.index = _BootstrapIndex(default_index)
+        else:
+            self.index = _BootstrapIndex(index)
+        self._loc = _BootstrapSeriesLocIndexer(self)
+        self._iloc = _BootstrapSeriesILocIndexer(self)
 
     def dropna(self):
-        filtered = [value for value in self._data if value is not None]
-        filtered_index = [idx for value, idx in zip(self._data, self.index) if value is not None]
-        return _BootstrapSeries(filtered, filtered_index)
+        result = _BootstrapSeries(value for value in self if value is not None)
+        result.index = [idx for value, idx in zip(self, self.index) if value is not None]
+        return result
 
     def unique(self):
         seen = []
-        for item in self._data:
+        seen_index = []
+        for item in self:
             if item not in seen:
                 seen.append(item)
-        return _BootstrapSeries(seen)
+                seen_index.append(len(seen_index))
+        result = _BootstrapSeries(seen)
+        result.index = seen_index
+        return result
 
     def isin(self, values):  # pragma: no cover - simple stub
-        lookup = set(values)
-        return _BootstrapSeries([item in lookup for item in self._data])
+        values = set(values)
+        result = _BootstrapSeries(item in values for item in self)
+        result.index = list(self.index)
+        return result
 
-    def tolist(self):
-        return list(self._data)
+    def isna(self):  # pragma: no cover - simple stub
+        result = _BootstrapSeries(value is None for value in self)
+        result.index = list(self.index)
+        return result
 
-    def _resolve_positions(self, key):
-        if isinstance(key, slice):  # pragma: no cover - seldom triggered
-            start = key.start or 0
-            stop = key.stop if key.stop is not None else len(self.index)
-            step = key.step or 1
-            return list(range(start, stop, step))
-        if isinstance(key, (list, tuple, set)):
-            keys = list(key)
+    def all(self):  # pragma: no cover - simple stub
+        return all(bool(item) for item in self)
+
+    def any(self):  # pragma: no cover - simple stub
+        return any(bool(item) for item in self)
+
+    def astype(self, dtype):  # pragma: no cover - simple stub
+        if dtype in (int, float, str):
+            converted = [dtype(value) if value is not None else None for value in self]
         else:
-            keys = [key]
+            converted = list(self)
+        return _BootstrapSeries(converted, index=list(self.index))
+
+    def map(self, mapper):  # pragma: no cover - simple stub
+        if callable(mapper):
+            mapped = [mapper(value) for value in self]
+        else:
+            getter = getattr(mapper, "get", None)
+            mapped = []
+            for value in self:
+                if getter is not None:
+                    mapped.append(getter(value))
+                else:
+                    try:
+                        mapped.append(mapper[value])  # type: ignore[index]
+                    except Exception:
+                        mapped.append(None)
+        return _BootstrapSeries(mapped, index=list(self.index))
+
+    def _resolve_index_labels(self, key):
+        if isinstance(key, slice):
+            positions = list(range(*key.indices(len(self))))
+            labels = [self.index[pos] for pos in positions]
+            return positions, labels
+        if isinstance(key, _BootstrapIndex):
+            labels = list(key)
+        elif isinstance(key, _BootstrapSeries):
+            if all(isinstance(item, bool) for item in key):
+                positions = [pos for pos, flag in enumerate(key) if flag]
+                labels = [self.index[pos] for pos in positions]
+                return positions, labels
+            labels = list(key)
+        elif isinstance(key, (list, tuple)):
+            labels = list(key)
+        elif isinstance(key, set):  # pragma: no cover - defensive
+            labels = list(key)
+        else:
+            labels = [key]
+
         positions = []
-        for label in keys:
-            if label in self.index:
-                positions.append(self.index.index(label))
-            elif isinstance(label, int) and 0 <= label < len(self._data):
-                positions.append(label)
-            else:  # pragma: no cover - defensive guard
+        for label in labels:
+            if label not in self.index:
                 raise KeyError(label)
-        return positions
+            positions.append(self.index.index(label))
+        return positions, labels
 
     @property
-    def loc(self):
-        class _SeriesLoc:
-            def __init__(self, series):
-                self._series = series
+    def loc(self):  # pragma: no cover - simple stub
+        return self._loc
 
-            def __getitem__(self, key):
-                positions = self._series._resolve_positions(key)
-                values = [self._series[pos] for pos in positions]
-                if len(values) == 1 and not isinstance(key, (list, tuple, set, slice)):
-                    return values[0]
-                indices = [self._series.index[pos] for pos in positions]
-                return _BootstrapSeries(values, indices)
+    @property
+    def iloc(self):  # pragma: no cover - simple stub
+        return self._iloc
 
-        return _SeriesLoc(self)
+    def tolist(self):
+        return list(self)
+
+    @property
+    def empty(self):  # pragma: no cover - simple stub
+        return len(self) == 0
+
+    def reindex(self, new_index):  # pragma: no cover - simple stub
+        labels = list(new_index)
+        position_lookup = {label: pos for pos, label in enumerate(self.index)}
+        values = []
+        for label in labels:
+            pos = position_lookup.get(label)
+            values.append(self[pos] if pos is not None else None)
+        result = _BootstrapSeries(values, index=labels)
+        return result
 
 
 class _BootstrapIndex(list):
+    def __init__(self, iterable=()):
+        super().__init__(iterable)
+        self._positions = {}
+        for pos, value in enumerate(self):
+            self._positions[value] = pos
+
     def take(self, positions):  # pragma: no cover - simple stub
         return _BootstrapIndex(self[pos] for pos in positions)
+
+    def get_loc(self, label):
+        if label in self._positions:
+            return self._positions[label]
+        raise KeyError(label)
+
+    def append(self, value):  # pragma: no cover - helper
+        self._positions[value] = len(self)
+        super().append(value)
+
+
+class _BootstrapLocIndexer:
+    def __init__(self, dataframe):
+        self._df = dataframe
+
+    def __getitem__(self, key):
+        return self._df._get_loc(key)
+
+    def __setitem__(self, key, value):
+        self._df._set_loc(key, value)
+
+
+class _BootstrapSeriesLocIndexer:
+    def __init__(self, series):
+        self._series = series
+
+    def __getitem__(self, key):
+        positions, labels = self._series._resolve_index_labels(key)
+        values = [self._series[pos] for pos in positions]
+        if len(values) == 1 and not isinstance(key, (list, tuple, _BootstrapSeries, _BootstrapIndex, set)):
+            return values[0]
+        result = _BootstrapSeries(values, index=labels)
+        return result
+
+    def __setitem__(self, key, value):  # pragma: no cover - assignment support
+        positions, _labels = self._series._resolve_index_labels(key)
+        if isinstance(value, _BootstrapSeries):
+            values_iter = list(value)
+        elif isinstance(value, (list, tuple)):
+            values_iter = list(value)
+        else:
+            values_iter = [value] * len(positions)
+        for pos, item in zip(positions, values_iter):
+            self._series[pos] = item
+
+
+class _BootstrapSeriesILocIndexer:
+    def __init__(self, series):
+        self._series = series
+
+    def __getitem__(self, key):
+        if isinstance(key, slice):
+            indices = range(*key.indices(len(self._series)))
+        elif isinstance(key, (list, tuple)):
+            indices = key
+        else:
+            indices = [key]
+
+        values = [self._series[pos] for pos in indices]
+        labels = [self._series.index[pos] for pos in indices]
+        if len(values) == 1 and not isinstance(key, (list, tuple)):
+            return values[0]
+        return _BootstrapSeries(values, index=labels)
 
 
 class _BootstrapDataFrame:
     def __init__(self, data=None, index=None):
         data = data or {}
         self._data = {key: list(value) for key, value in data.items()}
-        first_column = next(iter(self._data.values()), [])
-        inferred_index = list(range(len(first_column)))
-        self.index = _BootstrapIndex(index or inferred_index)
         self.columns = _BootstrapSeries(self._data.keys())
-        self.loc = _BootstrapDataFrameLoc(self)  # type: ignore[attr-defined]
+        rows = len(next(iter(self._data.values()), []))
+        self.index = _BootstrapIndex(index or range(rows))
+        if rows:
+            for column in self.columns:
+                self._data.setdefault(column, [None] * rows)
+        self._loc = _BootstrapLocIndexer(self)
 
     def copy(self):
         return _BootstrapDataFrame(self._data.copy(), list(self.index))
 
     def __getitem__(self, key):
         values = self._data[key]
-        return _BootstrapSeries(values, list(self.index))
+        if isinstance(values, list):
+            return _BootstrapSeries(values, index=list(self.index))
+        return values
 
     def __setitem__(self, key, values):  # pragma: no cover - simple stub
-        self._data[key] = list(values)
+        values_list = list(values)
+        if not self.index and values_list:
+            self.index = _BootstrapIndex(range(len(values_list)))
+        target_len = len(self.index)
+        if target_len:
+            if len(values_list) < target_len:
+                values_list.extend([None] * (target_len - len(values_list)))
+            values_list = values_list[:target_len]
+        else:
+            target_len = len(values_list)
+        if target_len and not values_list:
+            values_list = [None] * target_len
+        self._data[key] = list(values_list)
+        if key not in self.columns:
+            self.columns.append(key)
 
     def __contains__(self, key):
         return key in self._data
@@ -240,102 +413,110 @@ class _BootstrapDataFrame:
 
     def isin(self, values):  # pragma: no cover - simple stub
         lookup = set(values)
-        first_key = next(iter(self._data), None)
-        if first_key is None:
-            return _BootstrapSeries([])
-        result = [row in lookup for row in self._data[first_key]]
-        return _BootstrapSeries(result, list(self.index))
+        key = next(iter(self._data), None)
+        if key is None:
+            return _BootstrapSeries()
+        result = [row in lookup for row in self._data[key]]
+        series = _BootstrapSeries(result, index=list(self.index))
+        return series
+
+    def _normalize_key(self, key):
+        if isinstance(key, tuple):
+            return key
+        return key, slice(None)
+
+    def _ensure_row(self, row_label):
+        for label in self._normalize_row_labels(row_label):
+            if label in self.index:
+                continue
+            self.index.append(label)
+            for column in self.columns:
+                self._data.setdefault(column, []).append(None)
+
+    def _set_loc(self, key, value):
+        row_label, column_label = self._normalize_key(key)
+        self._ensure_row(row_label)
+        if isinstance(column_label, slice):
+            raise NotImplementedError("slice assignment not supported in stub")
+        if column_label not in self.columns:
+            self.columns.append(column_label)
+            self._data[column_label] = [None] * len(self.index)
+        row_positions = self._resolve_row_positions(row_label)
+        if len(row_positions) == 1:
+            self._data[column_label][row_positions[0]] = value
+        else:
+            if isinstance(value, _BootstrapSeries):
+                values_iter = list(value)
+            elif isinstance(value, (list, tuple)):
+                values_iter = list(value)
+            else:
+                values_iter = [value] * len(row_positions)
+            for pos, val in zip(row_positions, values_iter):
+                self._data[column_label][pos] = val
+
+    def _get_loc(self, key):  # pragma: no cover - helper for completeness
+        row_label, column_label = self._normalize_key(key)
+        if isinstance(column_label, slice):
+            raise NotImplementedError("slice access not supported in stub")
+        row_positions = self._resolve_row_positions(row_label)
+        values = [self._data[column_label][pos] for pos in row_positions]
+        if len(row_positions) == 1:
+            return values[0]
+        labels = self._normalize_row_labels(row_label)
+        series = _BootstrapSeries(values, index=labels)
+        return series
+
+    def _resolve_row_positions(self, row_label):
+        labels = self._normalize_row_labels(row_label)
+        return [self.index.get_loc(label) for label in labels]
+
+    def _normalize_row_labels(self, row_label):
+        if isinstance(row_label, _BootstrapSeries):
+            return list(row_label)
+        if isinstance(row_label, (list, tuple)):
+            return list(row_label)
+        if isinstance(row_label, set):  # pragma: no cover - uncommon branch
+            return list(row_label)
+        return [row_label]
+
+    @property
+    def loc(self):  # pragma: no cover - simple stub
+        return self._loc
 
     @property
     def empty(self):  # pragma: no cover - simple stub
         return not any(self._data.values())
 
-    def _resolve_row_positions(self, selector):
-        if isinstance(selector, slice):  # pragma: no cover - defensive guard
-            start = selector.start or 0
-            stop = selector.stop if selector.stop is not None else len(self.index)
-            step = selector.step or 1
-            return list(range(start, stop, step))
-        if isinstance(selector, (list, tuple, set)):
-            labels = list(selector)
-        else:
-            labels = [selector]
-        positions = []
-        for label in labels:
-            if label in self.index:
-                positions.append(self.index.index(label))
-            elif isinstance(label, int) and 0 <= label < len(self.index):
-                positions.append(label)
-            else:  # pragma: no cover - defensive guard
-                raise KeyError(label)
-        return positions
+
+def _pandas_merge(left, right, **_kwargs):  # pragma: no cover - simple stub
+    combined = left.copy()
+    combined._data.update(right._data)
+    return combined
 
 
-class _BootstrapDataFrameLoc:
-    def __init__(self, frame):
-        self._frame = frame
+def _pandas_concat(frames, ignore_index=False, **_kwargs):  # pragma: no cover - simple stub
+    base = _BootstrapDataFrame()
+    base._data = {}
+    for frame in frames:
+        for key, values in frame._data.items():
+            base._data.setdefault(key, []).extend(values)
+    if ignore_index:
+        base.index = _BootstrapIndex(range(len(next(iter(base._data.values()), []))))
+    return base
 
-    def __getitem__(self, key):
-        if isinstance(key, tuple):
-            row_selector, col_selector = key
-        else:
-            row_selector, col_selector = key, slice(None)
 
-        row_positions = self._frame._resolve_row_positions(row_selector)
-        if isinstance(col_selector, slice):  # pragma: no cover - defensive guard
-            column_names = list(self._frame._data.keys())[col_selector]
-        elif isinstance(col_selector, (list, tuple)):
-            column_names = list(col_selector)
-        elif isinstance(col_selector, set):
-            column_names = sorted(col_selector)
-        elif col_selector is slice(None):
-            column_names = list(self._frame._data.keys())
-        else:
-            column_names = [col_selector]
-
-        if len(column_names) == 1:
-            column = column_names[0]
-            values = [self._frame._data[column][pos] for pos in row_positions]
-            if len(values) == 1 and not isinstance(row_selector, (list, tuple, set, slice)):
-                return values[0]
-            indices = [self._frame.index[pos] for pos in row_positions]
-            return _BootstrapSeries(values, indices)
-
-        data = {
-            column: [self._frame._data[column][pos] for pos in row_positions]
-            for column in column_names
-        }
-        indices = [self._frame.index[pos] for pos in row_positions]
-        return _BootstrapDataFrame(data, indices)
+def _pandas_isna(value):  # pragma: no cover - simple stub
+    return value is None
 
 
 def _create_pandas_stub() -> types.ModuleType:
     pandas_stub = types.ModuleType(_PANDAS)
-
-    def _merge(left, right, **_kwargs):  # pragma: no cover - simple stub
-        combined = left.copy()
-        combined._data.update(right._data)
-        return combined
-
-    def _concat(frames, ignore_index=False, **_kwargs):  # pragma: no cover - simple stub
-        base = _BootstrapDataFrame()
-        base._data = {}
-        for frame in frames:
-            for key, values in frame._data.items():
-                base._data.setdefault(key, []).extend(values)
-        if ignore_index:
-            base.index = _BootstrapIndex(range(len(next(iter(base._data.values()), []))))
-        return base
-
-    def _isna(value):  # pragma: no cover - simple stub
-        return value is None
-
     pandas_stub.DataFrame = _BootstrapDataFrame  # type: ignore[attr-defined]
     pandas_stub.Series = _BootstrapSeries  # type: ignore[attr-defined]
     pandas_stub.Index = _BootstrapIndex  # type: ignore[attr-defined]
-    pandas_stub.merge = _merge  # type: ignore[attr-defined]
-    pandas_stub.concat = _concat  # type: ignore[attr-defined]
-    pandas_stub.isna = _isna  # type: ignore[attr-defined]
+    pandas_stub.merge = _pandas_merge  # type: ignore[attr-defined]
+    pandas_stub.concat = _pandas_concat  # type: ignore[attr-defined]
+    pandas_stub.isna = _pandas_isna  # type: ignore[attr-defined]
     pandas_stub.api = SimpleNamespace(  # type: ignore[attr-defined]
         types=SimpleNamespace(
             is_numeric_dtype=lambda values: all(isinstance(v, (int, float)) for v in values),
@@ -345,8 +526,6 @@ def _create_pandas_stub() -> types.ModuleType:
 
     pandas_stub.__bootstrap_stub__ = True  # type: ignore[attr-defined]
     return pandas_stub
-
-
 
 
 def _ensure_ipywidgets_stub() -> None:
@@ -529,6 +708,65 @@ def _ensure_ipython_display() -> None:
     sys.modules[_IPYTHON] = ipython
     sys.modules[_IPYTHON_DISPLAY] = display_module
 
+
+def _ensure_matplotlib_stub() -> None:
+    if _MATPLOTLIB_PYPLOT in sys.modules:
+        return
+
+    matplotlib_stub = types.ModuleType(_MATPLOTLIB)
+    pyplot_stub = types.ModuleType(_MATPLOTLIB_PYPLOT)
+
+    class _Canvas:
+        def mpl_connect(self, *_args, **_kwargs):  # pragma: no cover - simple stub
+            return None
+
+        def draw_idle(self, *_args, **_kwargs):  # pragma: no cover - simple stub
+            return None
+
+        @property
+        def toolbar(self):  # pragma: no cover - simple stub
+            return SimpleNamespace(
+                _nav_stack=lambda: SimpleNamespace(push=lambda *_a, **_k: None)
+            )
+
+    class _Figure:
+        def __init__(self):
+            self.canvas = _Canvas()
+
+        def tight_layout(self):  # pragma: no cover - simple stub
+            return None
+
+    class _Axes:
+        def __init__(self, figure):
+            self.figure = figure
+            self.collections = []
+
+        def hist(self, *_args, **_kwargs):  # pragma: no cover - simple stub
+            return None
+
+        def set_xlabel(self, *_args, **_kwargs):  # pragma: no cover - simple stub
+            return None
+
+        def set_ylabel(self, *_args, **_kwargs):  # pragma: no cover - simple stub
+            return None
+
+        def axvline(self, *_args, **_kwargs):  # pragma: no cover - simple stub
+            return SimpleNamespace(remove=lambda: None)
+
+    def _subplots(*_args, **_kwargs):  # pragma: no cover - simple stub
+        figure = _Figure()
+        axes = _Axes(figure)
+        return figure, axes
+
+    def _show(*_args, **_kwargs):  # pragma: no cover - simple stub
+        return None
+
+    pyplot_stub.subplots = _subplots  # type: ignore[attr-defined]
+    pyplot_stub.show = _show  # type: ignore[attr-defined]
+    matplotlib_stub.pyplot = pyplot_stub  # type: ignore[attr-defined]
+    sys.modules[_MATPLOTLIB] = matplotlib_stub
+    sys.modules[_MATPLOTLIB_PYPLOT] = pyplot_stub
+
 def _ensure_heatmap_dependency_stubs() -> None:
     """Provide ultra-light stubs for third-party libraries used by the
     heatmap plugin when they are not installed in the test environment."""
@@ -705,13 +943,7 @@ def _initial_color_series(pd_series, data):
     else:
         length = len(data) if hasattr(data, "__len__") else 0
         index = range(length)
-    try:
-        return pd_series([0] * length, index=index)
-    except TypeError:
-        series = pd_series([0] * length)
-        if hasattr(series, "index"):
-            series.index = list(index)
-        return series
+    return pd_series([0] * length, index=index)
 
 
 def _patch_heatmap_utilities() -> None:
@@ -953,10 +1185,18 @@ def _preload_viewer_plugins() -> None:
     presence avoid installing ultra-minimal fallbacks."""
 
     for module_name in ("viewer.plugin.chart", "viewer.plugin.roi_manager_plugin"):
+        module = sys.modules.get(module_name)
+        if module is not None and getattr(module, "__file__", None):
+            _protect_module(module_name, module)
+            continue
+
+        sys.modules.pop(module_name, None)
         try:  # pragma: no cover - best-effort helper
-            __import__(module_name)
+            module = importlib.import_module(module_name)
         except Exception:
             continue
+        if getattr(module, "__file__", None):
+            _protect_module(module_name, module)
 
 
 def initialize():
@@ -967,6 +1207,7 @@ def initialize():
     _ensure_anywidget_stub()
     _ensure_jscatter_stub()
     _ensure_ipython_display()
+    _ensure_matplotlib_stub()
     _patch_heatmap_utilities()
     _preload_viewer_plugins()
 
