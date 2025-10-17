@@ -76,7 +76,7 @@ class ChartDisplay(PluginBase):
             layout=Layout(width="100%"),
         )
         self._plot_host = VBox(
-            [self._plot_placeholder], layout=Layout(width="100%", gap="8px")
+            children=[self._plot_placeholder], layout=Layout(width="100%", gap="8px")
         )
 
         self._wide_notice = HTML(
@@ -118,22 +118,22 @@ class ChartDisplay(PluginBase):
 
     def _build_layout(self) -> None:
         histogram_controls = HBox(
-            [self.ui_component.bin_slider, self.ui_component.above_below_buttons],
+            children=[self.ui_component.bin_slider, self.ui_component.above_below_buttons],
             layout=Layout(gap="12px"),
         )
 
         scatter_controls = VBox(
-            [
+            children=[
                 self.ui_component.point_size_slider,
                 HBox(
-                    [
+                    children=[
                         self.ui_component.scatter_set_selector,
                         self.ui_component.remove_scatter_button,
                     ],
                     layout=Layout(gap="8px", align_items="center"),
                 ),
                 HBox(
-                    [
+                    children=[
                         self.ui_component.clear_scatter_button,
                         self.ui_component.clear_selection_button,
                     ],
@@ -144,7 +144,7 @@ class ChartDisplay(PluginBase):
         )
 
         subset_controls = VBox(
-            [
+            children=[
                 self.ui_component.subset_on_dropdown,
                 self.ui_component.subset_selector,
                 self.ui_component.impose_fov_checkbox,
@@ -153,11 +153,12 @@ class ChartDisplay(PluginBase):
         )
 
         trace_controls = VBox(
-            [self.ui_component.trace_button], layout=Layout(width="100%", gap="8px")
+            children=[self.ui_component.trace_button],
+            layout=Layout(width="100%", gap="8px"),
         )
 
         link_controls = VBox(
-            [
+            children=[
                 self.ui_component.mv_linked_checkbox,
                 self.ui_component.cell_gallery_linked_checkbox,
             ],
@@ -180,9 +181,9 @@ class ChartDisplay(PluginBase):
         self._plot_tabs.set_title(4, "Linked plugins")
 
         chart_widgets = VBox(
-            [
+            children=[
                 HBox(
-                    [
+                    children=[
                         self.ui_component.x_axis_selector,
                         self.ui_component.y_axis_selector,
                         self.ui_component.color_selector,
@@ -196,16 +197,16 @@ class ChartDisplay(PluginBase):
         )
 
         self.controls_section = VBox(
-            [chart_widgets],
+            children=[chart_widgets],
             layout=Layout(width="100%", gap="12px"),
         )
         self.plot_section = VBox(
-            [self._plot_host],
+            children=[self._plot_host],
             layout=Layout(width="100%", flex="1 1 auto"),
         )
 
         self.ui = VBox(
-            [self.controls_section, self.plot_section],
+            children=[self.controls_section, self.plot_section],
             layout=Layout(width="100%", max_height="600px", gap="12px"),
         )
 
@@ -539,7 +540,7 @@ class ChartDisplay(PluginBase):
             and hasattr(self.main_viewer, "refresh_bottom_panel")
         ):
             if debug_enabled:
-                print(f"[chart] refreshing bottom panel due to layout change")
+                print("[chart] refreshing bottom panel due to layout change")
             self.main_viewer.refresh_bottom_panel()
         return layout_changed
 
@@ -599,6 +600,7 @@ class ChartDisplay(PluginBase):
         self.selected_indices.add_observer(forward_to_cell_gallery)
 
     def color_points(self, selected_indices, selected_colors=None):
+        _ = selected_colors  # legacy parameter retained for compatibility
         self._apply_external_selection(selected_indices)
 
 

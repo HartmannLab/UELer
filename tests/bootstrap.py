@@ -35,6 +35,14 @@ _MATPLOTLIB_PYPLOT = "matplotlib.pyplot"
 _DEFAULT_POINT_COLOR = (0.2, 0.4, 0.8, 0.85)
 
 
+def _is_stub_module(module: types.ModuleType | None) -> bool:
+    if module is None:
+        return True
+    if getattr(module, "__bootstrap_stub__", False):
+        return True
+    return not bool(getattr(module, "__file__", None))
+
+
 def _install_module_guard() -> None:
     """Historically wrapped ``sys.modules`` to keep real modules alive.
 
@@ -767,64 +775,86 @@ def _ensure_matplotlib_stub() -> None:
     sys.modules[_MATPLOTLIB] = matplotlib_stub
     sys.modules[_MATPLOTLIB_PYPLOT] = pyplot_stub
 
+def _install_seaborn_stub() -> None:
+    sys.modules.pop(_SEABORN, None)
+    seaborn_stub = types.ModuleType(_SEABORN)
+
+    def _clustermap(*_args, **_kwargs):  # pragma: no cover - simple stub
+        figure = SimpleNamespace(
+            axes=SimpleNamespace(
+                ax_col_dendrogram=None,
+                ax_col_colors=None,
+                ax_row_dendrogram=None,
+                ax_row_colors=None,
+            ),
+            figsize=(6, 4),
+        )
+        return SimpleNamespace(fig=figure)
+
+    seaborn_stub.clustermap = _clustermap  # type: ignore[attr-defined]
+    seaborn_stub.color_palette = lambda *_, **__: []  # type: ignore[attr-defined]
+    seaborn_stub.set_context = lambda *_, **__: None  # type: ignore[attr-defined]
+    seaborn_stub.__bootstrap_stub__ = True  # type: ignore[attr-defined]
+    sys.modules[_SEABORN] = seaborn_stub
+
+
+def _install_scipy_stub() -> None:
+    for name in (_SCIPY_HIERARCHY, _SCIPY_CLUSTER, _SCIPY):
+        sys.modules.pop(name, None)
+
+    scipy_module = types.ModuleType(_SCIPY)
+    cluster_module = types.ModuleType(_SCIPY_CLUSTER)
+    hierarchy_module = types.ModuleType(_SCIPY_HIERARCHY)
+
+    def _dendrogram(*_args, **_kwargs):  # pragma: no cover - simple stub
+        return {"leaves": []}
+
+    hierarchy_module.dendrogram = _dendrogram  # type: ignore[attr-defined]
+    hierarchy_module.linkage = lambda *_, **__: []  # type: ignore[attr-defined]
+    hierarchy_module.cut_tree = lambda *_, **__: []  # type: ignore[attr-defined]
+    hierarchy_module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
+
+    cluster_module.hierarchy = hierarchy_module  # type: ignore[attr-defined]
+    cluster_module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
+    scipy_module.cluster = cluster_module  # type: ignore[attr-defined]
+    scipy_module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
+
+    sys.modules[_SCIPY_HIERARCHY] = hierarchy_module
+    sys.modules[_SCIPY_CLUSTER] = cluster_module
+    sys.modules[_SCIPY] = scipy_module
+
+
 def _ensure_heatmap_dependency_stubs() -> None:
     """Provide ultra-light stubs for third-party libraries used by the
-    heatmap plugin when they are not installed in the test environment."""
+    heatmap plugin when heavyweight dependencies are unavailable."""
 
-    try:  # pragma: no cover - prefer actual seaborn
-        import seaborn  # type: ignore  # noqa: F401
-        _protect_module(_SEABORN, sys.modules[_SEABORN])
-    except Exception:  # pragma: no cover - fallback for minimal environments
-        sys.modules.pop(_SEABORN, None)
-        if _SEABORN not in sys.modules:
-            seaborn_stub = types.ModuleType(_SEABORN)
+    pandas_module = sys.modules.get(_PANDAS)
+    force_stub = _is_stub_module(pandas_module)
 
-            def _clustermap(*_args, **_kwargs):  # pragma: no cover - simple stub
-                figure = SimpleNamespace(
-                    axes=SimpleNamespace(
-                        ax_col_dendrogram=None,
-                        ax_col_colors=None,
-                        ax_row_dendrogram=None,
-                        ax_row_colors=None,
-                    ),
-                    figsize=(6, 4),
-                )
-                return SimpleNamespace(fig=figure)
+    if force_stub:
+        _install_seaborn_stub()
+    else:  # pragma: no cover - prefer actual seaborn when pandas is real
+        try:
+            import seaborn  # type: ignore  # noqa: F401
+        except Exception:
+            _install_seaborn_stub()
+        else:
+            _protect_module(_SEABORN, sys.modules[_SEABORN])
 
-            seaborn_stub.clustermap = _clustermap  # type: ignore[attr-defined]
-            seaborn_stub.color_palette = lambda *_, **__: []  # type: ignore[attr-defined]
-            seaborn_stub.set_context = lambda *_, **__: None  # type: ignore[attr-defined]
-            sys.modules[_SEABORN] = seaborn_stub
-
-    try:  # pragma: no cover - prefer actual scipy
-        import scipy.cluster.hierarchy  # type: ignore  # noqa: F401
-        _protect_module(_SCIPY, sys.modules[_SCIPY])
-        _protect_module(_SCIPY_CLUSTER, sys.modules.get(_SCIPY_CLUSTER, sys.modules[_SCIPY]))
-        _protect_module(_SCIPY_HIERARCHY, sys.modules[_SCIPY_HIERARCHY])
-    except Exception:  # pragma: no cover - fallback when compiled extensions missing
-        for name in (_SCIPY, _SCIPY_CLUSTER, _SCIPY_HIERARCHY):
-            sys.modules.pop(name, None)
-        if _SCIPY not in sys.modules:
-            scipy_module = types.ModuleType(_SCIPY)
-            cluster_module = types.ModuleType(_SCIPY_CLUSTER)
-            hierarchy_module = types.ModuleType(_SCIPY_HIERARCHY)
-
-            def _dendrogram(*_args, **_kwargs):  # pragma: no cover - simple stub
-                return {"leaves": []}
-
-            hierarchy_module.dendrogram = _dendrogram  # type: ignore[attr-defined]
-            hierarchy_module.linkage = lambda *_, **__: []  # type: ignore[attr-defined]
-            hierarchy_module.cut_tree = lambda *_, **__: []  # type: ignore[attr-defined]
-            hierarchy_module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
-
-            cluster_module.hierarchy = hierarchy_module  # type: ignore[attr-defined]
-            cluster_module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
-            scipy_module.cluster = cluster_module  # type: ignore[attr-defined]
-            scipy_module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
-
-            sys.modules[_SCIPY] = scipy_module
-            sys.modules[_SCIPY_CLUSTER] = cluster_module
-            sys.modules[_SCIPY_HIERARCHY] = hierarchy_module
+    if force_stub:
+        _install_scipy_stub()
+    else:  # pragma: no cover - prefer actual scipy when available
+        try:
+            import scipy.cluster.hierarchy  # type: ignore  # noqa: F401
+        except Exception:
+            _install_scipy_stub()
+        else:
+            _protect_module(_SCIPY, sys.modules[_SCIPY])
+            _protect_module(
+                _SCIPY_CLUSTER,
+                sys.modules.get(_SCIPY_CLUSTER, sys.modules[_SCIPY]),
+            )
+            _protect_module(_SCIPY_HIERARCHY, sys.modules[_SCIPY_HIERARCHY])
 
 
 def _ensure_anywidget_stub() -> None:

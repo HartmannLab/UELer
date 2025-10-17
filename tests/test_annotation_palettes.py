@@ -7,6 +7,8 @@ from unittest.mock import patch
 
 import numpy as np
 
+import tests.bootstrap  # noqa: F401  # Ensure shared test bootstrap runs
+
 # Provide a lightweight dask.array stub when the real dependency is unavailable.
 if "dask.array" not in sys.modules:
     class FakeDaskArray:
@@ -154,7 +156,7 @@ if "ipywidgets" not in sys.modules:
 
     class _Widget:
         def __init__(self, *_, **kwargs):
-            self.children = kwargs.get("children", tuple())
+            self.children = kwargs.get("children", ())
             self.value = kwargs.get("value")
             self.allowed_tags = kwargs.get("allowed_tags", [])
             self.options = kwargs.get("options", [])
@@ -475,7 +477,7 @@ class AnnotationLayoutTests(unittest.TestCase):
         viewer.ui_component.annotation_edit_button = widgets.Button(disabled=True)
 
         accordion = widgets.Accordion()
-        accordion.children = tuple()
+        accordion.children = ()
         accordion.selected_index = 0
         accordion.observe = lambda *args, **kwargs: None
         accordion.set_title = lambda idx, title: None
