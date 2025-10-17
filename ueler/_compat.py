@@ -26,7 +26,6 @@ VIEWER_CORE_ALIASES: Dict[str, str] = {
 	"ueler.viewer.image_display": "viewer.image_display",
 	"ueler.viewer.roi_manager": "viewer.roi_manager",
 	"ueler.viewer.color_palettes": "viewer.color_palettes",
-	"ueler.viewer.observable": "viewer.observable",
 }
 
 VIEWER_PLUGIN_ALIASES: Dict[str, str] = {
@@ -51,6 +50,7 @@ LEGACY_VIEWER_ALIASES: Dict[str, str] = {
 	"viewer.ui_components": "ueler.viewer.ui_components",
 	"viewer.color_palettes": "ueler.viewer.color_palettes",
 	"viewer.decorators": "ueler.viewer.decorators",
+	"viewer.observable": "ueler.viewer.observable",
 }
 
 COMPAT_ALIAS_GROUPS: Iterable[Mapping[str, str]] = (

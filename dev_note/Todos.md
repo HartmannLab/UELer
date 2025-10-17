@@ -52,6 +52,7 @@
   - **Progress:**
     - [x] `viewer.color_palettes` → `ueler.viewer.color_palettes` (2025-10-17)
     - [x] `viewer.decorators` → `ueler.viewer.decorators` (2025-10-17)
+    - [x] `viewer.observable` → `ueler.viewer.observable` (2025-10-18)
 
 ---
 
