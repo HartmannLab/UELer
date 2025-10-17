@@ -1,61 +1,46 @@
+# viewer/image_display.py
+
 from __future__ import annotations
 
 import itertools
 from collections import OrderedDict
-from typing import Iterable, Mapping, Optional, Sequence, Set, Tuple, Union
+from typing import Iterable, Optional, Sequence, Set, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-
-import ipywidgets as _ipywidgets
-
-Button = getattr(_ipywidgets, "Button")
-Checkbox = getattr(_ipywidgets, "Checkbox")
-Dropdown = getattr(_ipywidgets, "Dropdown")
-FloatSlider = getattr(_ipywidgets, "FloatSlider", getattr(_ipywidgets, "Widget"))
-HBox = getattr(_ipywidgets, "HBox")
-HTML = getattr(_ipywidgets, "HTML")
-IntSlider = getattr(_ipywidgets, "IntSlider", None)
-Layout = getattr(_ipywidgets, "Layout")
-Output = getattr(_ipywidgets, "Output")
-SelectMultiple = getattr(_ipywidgets, "SelectMultiple")
-Tab = getattr(_ipywidgets, "Tab")
-ToggleButtons = getattr(_ipywidgets, "ToggleButtons")
-VBox = getattr(_ipywidgets, "VBox")
-
-if IntSlider is None:  # pragma: no cover - fallback for stub environments
-    base_slider = FloatSlider if isinstance(FloatSlider, type) else getattr(_ipywidgets, "Widget")
-
-    class IntSlider(base_slider):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            self.min = kwargs.get("min", 0)
-            self.max = kwargs.get("max", 10)
-            self.step = kwargs.get("step", 1)
-
-    _ipywidgets.IntSlider = IntSlider  # type: ignore[attr-defined]
-    del base_slider
-
+from ipywidgets import (
+    Button,
+    Checkbox,
+    Dropdown,
+    FloatSlider,
+    HBox,
+    HTML,
+    IntSlider,
+    Layout,
+    Output,
+    Tab,
+    ToggleButtons,
+    VBox,
+)
 from jscatter import compose
 
 from ueler.viewer.decorators import update_status_bar
 from ueler.viewer.observable import Observable
-
-from .plugin_base import PluginBase
-from .scatter_widget import ScatterPlotWidget
+from ueler.viewer.plugin.plugin_base import PluginBase
+from ueler.viewer.plugin.scatter_widget import ScatterPlotWidget
 
 
 _SELECTION_NOTICE = (
-    "<i>No scatter plots generated yet. Choose axes, then click <b>Plot</b>.</i>"
+    "<i>No heatmap scatter plots yet. Choose axes, then click <b>Plot</b>.</i>"
 )
 
 
 class ChartDisplay(PluginBase):
     def __init__(self, main_viewer, width: float, height: float):
         super().__init__(main_viewer, width, height)
-        self.SidePlots_id = "chart_output"
-        self.displayed_name = "Chart"
+        self.SidePlots_id = "chart_heatmap_output"
+        self.displayed_name = "Chart (heatmap)"
         self.main_viewer = main_viewer
         self.width = width
         self.height = height
@@ -81,7 +66,7 @@ class ChartDisplay(PluginBase):
 
         self._wide_notice = HTML(
             value=(
-                "<b>Multiple scatter plots are active.</b> Controls and plots appear in the footer."
+                "<b>Multiple heatmap scatter plots are active.</b> Controls and plots appear in the footer."
             ),
             layout=Layout(width="100%", padding="8px"),
         )
@@ -96,12 +81,8 @@ class ChartDisplay(PluginBase):
     # ------------------------------------------------------------------
     def _wire_events(self) -> None:
         self.ui_component.plot_button.on_click(self.plot_chart)
-        self.ui_component.trace_button.on_click(self.trace_cells)
         self.ui_component.point_size_slider.observe(
             self._on_point_size_change, names="value"
-        )
-        self.ui_component.subset_on_dropdown.observe(
-            self.on_subset_on_dropdown_change, names="value"
         )
         self.ui_component.remove_scatter_button.on_click(
             self._remove_selected_scatter
@@ -143,19 +124,6 @@ class ChartDisplay(PluginBase):
             layout=Layout(width="100%", gap="8px"),
         )
 
-        subset_controls = VBox(
-            [
-                self.ui_component.subset_on_dropdown,
-                self.ui_component.subset_selector,
-                self.ui_component.impose_fov_checkbox,
-            ],
-            layout=Layout(width="100%", gap="8px"),
-        )
-
-        trace_controls = VBox(
-            [self.ui_component.trace_button], layout=Layout(width="100%", gap="8px")
-        )
-
         link_controls = VBox(
             [
                 self.ui_component.mv_linked_checkbox,
@@ -165,19 +133,11 @@ class ChartDisplay(PluginBase):
         )
 
         self._plot_tabs = Tab(
-            children=[
-                histogram_controls,
-                scatter_controls,
-                subset_controls,
-                trace_controls,
-                link_controls,
-            ]
+            children=[histogram_controls, scatter_controls, link_controls]
         )
         self._plot_tabs.set_title(0, "Histogram")
         self._plot_tabs.set_title(1, "Scatter plot")
-        self._plot_tabs.set_title(2, "Subset")
-        self._plot_tabs.set_title(3, "Trace")
-        self._plot_tabs.set_title(4, "Linked plugins")
+        self._plot_tabs.set_title(2, "Linked plugins")
 
         chart_widgets = VBox(
             [
@@ -214,6 +174,16 @@ class ChartDisplay(PluginBase):
     # ------------------------------------------------------------------
     @update_status_bar
     def plot_chart(self, _button):
+        heatmap_plugin = getattr(self.main_viewer.SidePlots, "heatmap_output", None)
+        if heatmap_plugin is None or not hasattr(heatmap_plugin, "heatmap_data"):
+            print("Heatmap data not available. Plot the heatmap first.")
+            return
+
+        heatmap_df = getattr(heatmap_plugin, "heatmap_data", None)
+        if heatmap_df is None or not isinstance(heatmap_df, pd.DataFrame):
+            print("Heatmap data is not a pandas DataFrame.")
+            return
+
         x_col = self.ui_component.x_axis_selector.value
         y_col = self.ui_component.y_axis_selector.value
         c_col = self.ui_component.color_selector.value
@@ -223,18 +193,23 @@ class ChartDisplay(PluginBase):
             return
 
         if y_col == "None":
-            self._render_histogram(x_col)
+            self._render_histogram(heatmap_df, x_col)
             return
 
         required_columns = [
             col for col in [x_col, y_col, c_col] if col and col != "None"
         ]
-        data = self._prepare_dataframe(required_columns)
-        if data.empty:
-            self._plot_host.children = [HTML("<i>No rows match the current filters.</i>")]
+        missing = [col for col in required_columns if col not in heatmap_df.columns]
+        if missing:
+            print(f"Missing columns in heatmap data: {missing}")
             return
 
-        scatter_id = f"scatter-{next(self._id_counter)}"
+        data = heatmap_df.dropna(subset=required_columns)
+        if data.empty:
+            self._plot_host.children = [HTML("<i>No rows available for the selected axes.</i>")]
+            return
+
+        scatter_id = f"heatmap-scatter-{next(self._id_counter)}"
         scatter = ScatterPlotWidget(
             identifier=scatter_id,
             data=data,
@@ -252,10 +227,15 @@ class ChartDisplay(PluginBase):
         self._update_scatter_controls(selected_id=scatter_id)
         self._render_scatter_area()
         self._sync_panel_location()
+        if hasattr(self.main_viewer, "refresh_bottom_panel"):
+            self.main_viewer.refresh_bottom_panel()
 
-    def _render_histogram(self, x_col: str) -> None:
-        data = self._prepare_dataframe([x_col])
-        if data.empty:
+    def _render_histogram(self, data: pd.DataFrame, x_col: str) -> None:
+        if x_col not in data.columns:
+            print(f"Column '{x_col}' not found in heatmap data.")
+            return
+        filtered = data.dropna(subset=[x_col])
+        if filtered.empty:
             self._plot_host.children = [HTML("<i>No rows available for histogram.</i>")]
             return
 
@@ -263,13 +243,13 @@ class ChartDisplay(PluginBase):
         fig, ax = plt.subplots(figsize=(self.width * 0.9, self.height))
         with self._hist_output:
             ax.hist(
-                data[x_col],
+                filtered[x_col],
                 bins=self.ui_component.bin_slider.value,
                 color="tab:blue",
                 alpha=0.75,
             )
             ax.set_xlabel(x_col)
-            ax.set_ylabel("Cell count")
+            ax.set_ylabel("Count")
             self.histogram_line = None
 
             def onclick(event):
@@ -295,7 +275,7 @@ class ChartDisplay(PluginBase):
         self._plot_host.children = [self._hist_output]
 
     # ------------------------------------------------------------------
-    # Selection + linking helpers
+    # Selection helpers
     # ------------------------------------------------------------------
     def _on_scatter_selection(
         self, indices: Set[Union[int, str]], origin: str
@@ -308,7 +288,6 @@ class ChartDisplay(PluginBase):
             self._focus_main_viewer(next(iter(normalized)))
 
     def _on_scatter_hover(self, index: Optional[Union[int, str]]) -> None:
-        # Reserved for future hover-linked integrations.
         return None
 
     def _apply_external_selection(
@@ -320,20 +299,6 @@ class ChartDisplay(PluginBase):
         for scatter in self._scatter_views.values():
             scatter.apply_selection(normalized, announce=False)
         self.selected_indices.value = normalized
-
-    def apply_color_mapping(
-        self,
-        categories: pd.Series,
-        color_map: Mapping[Union[int, str], Union[str, Tuple[float, float, float], Tuple[float, float, float, float]]],
-        *,
-        default_color: Union[str, Tuple[float, float, float], Tuple[float, float, float, float]] = "grey",
-    ) -> None:
-        if categories is None or not self._scatter_views:
-            return
-        if not isinstance(categories, pd.Series):
-            categories = pd.Series(categories)
-        for scatter in self._scatter_views.values():
-            scatter.set_categorical_colors(categories, color_map, default_color=default_color)
 
     def _focus_main_viewer(self, index: Union[int, str]) -> None:
         if index not in self.main_viewer.cell_table.index:
@@ -352,36 +317,6 @@ class ChartDisplay(PluginBase):
         ax.set_ylim(y - 100, y + 100)
         nav_stack.push(current_view)
         ax.figure.canvas.draw_idle()
-
-    # ------------------------------------------------------------------
-    # Trace + highlight
-    # ------------------------------------------------------------------
-    def trace_cells(self, _button) -> None:
-        if not self.main_viewer.image_display.selected_masks_label:
-            print("No cells selected.")
-            return
-        x_col = self.ui_component.x_axis_selector.value
-        y_col = self.ui_component.y_axis_selector.value
-        if x_col == "None" or y_col == "None":
-            print("Please select both x and y axes to trace cells.")
-            return
-        current_fov = self.main_viewer.ui_component.image_selector.value
-        mask_ids = [
-            mask_id
-            for _mask_name, mask_id in self.main_viewer.image_display.selected_masks_label
-        ]
-        if not mask_ids:
-            print("No cells selected for tracing.")
-            return
-        cell_table = self.main_viewer.cell_table
-        in_fov = cell_table[self.main_viewer.fov_key] == current_fov
-        traced = cell_table.loc[
-            in_fov & cell_table[self.main_viewer.label_key].isin(mask_ids)
-        ]
-        if traced.empty:
-            print("No matching cells found in the current FOV.")
-            return
-        self._apply_external_selection(traced.index)
 
     def highlight_cells(self) -> None:
         x_col = self.ui_component.x_axis_selector.value
@@ -405,43 +340,19 @@ class ChartDisplay(PluginBase):
         )
 
     # ------------------------------------------------------------------
-    # Data helpers
-    # ------------------------------------------------------------------
-    def _prepare_dataframe(self, columns: Sequence[str]) -> pd.DataFrame:
-        cell_table = self.main_viewer.cell_table.copy()
-        subset_on = self.ui_component.subset_on_dropdown.value
-        subset_values = list(self.ui_component.subset_selector.value)
-        if subset_on and subset_values:
-            if subset_on not in cell_table.columns:
-                raise KeyError(
-                    f"Subset column '{subset_on}' not found in cell table."
-                )
-            cell_table = cell_table[cell_table[subset_on].isin(subset_values)]
-        if self.ui_component.impose_fov_checkbox.value:
-            current_fov = self.main_viewer.ui_component.image_selector.value
-            cell_table = cell_table[
-                cell_table[self.main_viewer.fov_key] == current_fov
-            ]
-        columns = [col for col in columns if col in cell_table.columns]
-        if columns:
-            cell_table = cell_table.dropna(subset=columns)
-        return cell_table
-
-    def _tooltip_fields(self, x: str, y: str, color: Optional[str]) -> Sequence[str]:
-        fields = [x, y, self.main_viewer.fov_key, self.main_viewer.label_key]
-        if color and color != "None":
-            fields.append(color)
-        # Preserve ordering but remove duplicates
-        return list(dict.fromkeys(fields))
-
-    # ------------------------------------------------------------------
-    # Scatter management helpers
+    # Scatter management
     # ------------------------------------------------------------------
     def _scatter_title(self, x: str, y: str, color: Optional[str]) -> str:
         base = f"{y} vs {x}"
         if color and color != "None":
             return f"{base} • color: {color}"
         return base
+
+    def _tooltip_fields(self, x: str, y: str, color: Optional[str]) -> Sequence[str]:
+        fields = [x, y]
+        if color and color != "None":
+            fields.append(color)
+        return list(dict.fromkeys(fields))
 
     def _render_scatter_area(self) -> None:
         if not self._scatter_views:
@@ -492,6 +403,8 @@ class ChartDisplay(PluginBase):
         self._update_scatter_controls()
         self._render_scatter_area()
         self._sync_panel_location()
+        if hasattr(self.main_viewer, "refresh_bottom_panel"):
+            self.main_viewer.refresh_bottom_panel()
 
     def _clear_all_scatter_views(self, _button) -> None:
         for scatter in self._scatter_views.values():
@@ -500,6 +413,8 @@ class ChartDisplay(PluginBase):
         self._update_scatter_controls()
         self._render_scatter_area()
         self._sync_panel_location()
+        if hasattr(self.main_viewer, "refresh_bottom_panel"):
+            self.main_viewer.refresh_bottom_panel()
         self.selected_indices.value = set()
 
     def _on_scatter_selector_change(self, change) -> None:
@@ -524,24 +439,11 @@ class ChartDisplay(PluginBase):
         self.ui.children = [self._wide_notice]
         self._section_location = "horizontal"
 
-    def _sync_panel_location(self) -> bool:
-        debug_enabled = getattr(self.main_viewer, '_debug', False)
-        if debug_enabled:
-            print(f"[chart] sync panel location: {self._section_location}")
-        previous_location = self._section_location
+    def _sync_panel_location(self) -> None:
         if self._has_multiple_scatter():
             self._place_sections_horizontal()
         else:
             self._place_sections_vertical()
-        layout_changed = previous_location != self._section_location
-        if (
-            layout_changed
-            and hasattr(self.main_viewer, "refresh_bottom_panel")
-        ):
-            if debug_enabled:
-                print(f"[chart] refreshing bottom panel due to layout change")
-            self.main_viewer.refresh_bottom_panel()
-        return layout_changed
 
     def wide_panel_layout(self):
         if self._has_multiple_scatter():
@@ -556,29 +458,13 @@ class ChartDisplay(PluginBase):
 
     def after_all_plugins_loaded(self):
         super().after_all_plugins_loaded()
-        layout_changed = self._sync_panel_location()
-        if (
-            not layout_changed
-            and hasattr(self.main_viewer, "refresh_bottom_panel")
-        ):
+        self._sync_panel_location()
+        if hasattr(self.main_viewer, "refresh_bottom_panel"):
             self.main_viewer.refresh_bottom_panel()
 
     # ------------------------------------------------------------------
     # Widget linkage
     # ------------------------------------------------------------------
-    def on_subset_on_dropdown_change(self, change):
-        selected_column = change.get("new")
-        if (
-            not selected_column
-            or selected_column not in self.main_viewer.cell_table.columns
-        ):
-            self.ui_component.subset_selector.options = []
-            return
-        unique_values = (
-            self.main_viewer.cell_table[selected_column].dropna().unique().tolist()
-        )
-        self.ui_component.subset_selector.options = sorted(unique_values)
-
     def _on_point_size_change(self, change) -> None:
         if change.get("name") != "value":
             return
@@ -628,12 +514,6 @@ class UiComponent:
             style=widget_style,
             layout=Layout(width="150px"),
         )
-        self.impose_fov_checkbox = Checkbox(
-            value=False,
-            description="Current FOV",
-            style=widget_style,
-            layout=Layout(width="140px"),
-        )
         self.plot_button = Button(
             description="Plot",
             button_style="",
@@ -667,32 +547,6 @@ class UiComponent:
             continuous_update=False,
             style={'description_width': 'auto'},
             layout=Layout(width="250px"),
-        )
-
-        subset_columns = [
-            col
-            for col in viewer.cell_table.columns
-            if pd.api.types.is_numeric_dtype(viewer.cell_table[col])
-            or pd.api.types.is_object_dtype(viewer.cell_table[col])
-        ]
-        self.subset_on_dropdown = Dropdown(
-            options=subset_columns,
-            description="Subset on:",
-            style={'description_width': 'auto'},
-            layout=Layout(width="100%"),
-        )
-        self.subset_selector = SelectMultiple(
-            options=[],
-            description="Subset:",
-            style={'description_width': 'auto'},
-            layout=Layout(width="100%"),
-        )
-        self.trace_button = Button(
-            description="Trace",
-            button_style="",
-            tooltip="Select the traced cells in every scatter plot",
-            icon="search",
-            layout=Layout(width="120px"),
         )
         self.mv_linked_checkbox = Checkbox(
             value=False,

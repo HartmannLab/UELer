@@ -22,22 +22,14 @@ VIEWER_CORE_ALIASES: Dict[str, str] = {
 	"ueler.viewer.main_viewer": "viewer.main_viewer",
 	"ueler.viewer.ui_components": "viewer.ui_components",
 	"ueler.viewer.annotation_display": "viewer.annotation_display",
-	"ueler.viewer.image_display": "viewer.image_display",
 	"ueler.viewer.roi_manager": "viewer.roi_manager",
 	"ueler.viewer.color_palettes": "viewer.color_palettes",
 }
 
 VIEWER_PLUGIN_ALIASES: Dict[str, str] = {
 	"ueler.viewer.plugin.plugin_base": "viewer.plugin.plugin_base",
-	"ueler.viewer.plugin.chart_heatmap": "viewer.plugin.chart_heatmap",
-	"ueler.viewer.plugin.heatmap": "viewer.plugin.heatmap",
-	"ueler.viewer.plugin.heatmap_layers": "viewer.plugin.heatmap_layers",
-	"ueler.viewer.plugin.heatmap_adapter": "viewer.plugin.heatmap_adapter",
-	"ueler.viewer.plugin.scatter_widget": "viewer.plugin.scatter_widget",
 	"ueler.viewer.plugin.cell_gallery": "viewer.plugin.cell_gallery",
-	"ueler.viewer.plugin.mask_painter": "viewer.plugin.mask_painter",
 	"ueler.viewer.plugin.region_annotation": "viewer.plugin.region_annotation",
-	"ueler.viewer.plugin.roi_manager_plugin": "viewer.plugin.roi_manager_plugin",
 	"ueler.viewer.plugin.run_flowsom": "viewer.plugin.run_flowsom",
 }
 

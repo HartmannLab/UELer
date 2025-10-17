@@ -62,23 +62,23 @@
     9. [x] `viewer.plugin.go_to` → `ueler.viewer.plugin.go_to` (2025-10-18)
     10. [x] `viewer.plugin.cell_gallery` → `ueler.viewer.plugin.cell_gallery` (2025-10-18)
     11. [x] `viewer.plugin.chart` → `ueler.viewer.plugin.chart` (2025-10-18)
-    12. [ ] `viewer.plugin.scatter_widget` → `ueler.viewer.plugin.scatter_widget` (pending)
+  12. [x] `viewer.plugin.scatter_widget` → `ueler.viewer.plugin.scatter_widget` (2025-10-18)
     Don't stop until item 20 is checked.
-    13. [ ] `viewer.image_display` → `ueler.viewer.image_display` (pending)
+  13. [x] `viewer.image_display` → `ueler.viewer.image_display` (2025-10-18)
     Don't stop until item 20 is checked.
-    14. [ ] `viewer.images` → `ueler.viewer.images` (pending)
+  14. [x] `viewer.images` → `ueler.viewer.images` (2025-10-18)
     Don't stop until item 20 is checked.
-    15. [ ] `viewer.plugin.heatmap_adapter` → `ueler.viewer.plugin.heatmap_adapter` (pending)
+  15. [x] `viewer.plugin.heatmap_adapter` → `ueler.viewer.plugin.heatmap_adapter` (2025-10-18)
     Don't stop until item 20 is checked.
-    16. [ ] `viewer.plugin.heatmap_layers` → `ueler.viewer.plugin.heatmap_layers` (pending)
+  16. [x] `viewer.plugin.heatmap_layers` → `ueler.viewer.plugin.heatmap_layers` (2025-10-18)
     Don't stop until item 20 is checked.
-    17. [ ] `viewer.plugin.chart_heatmap` → `ueler.viewer.plugin.chart_heatmap` (pending)
+  17. [x] `viewer.plugin.chart_heatmap` → `ueler.viewer.plugin.chart_heatmap` (2025-10-18)
     Don't stop until item 20 is checked.
-    18. [ ] `viewer.plugin.heatmap` → `ueler.viewer.plugin.heatmap` (pending)
+  18. [x] `viewer.plugin.heatmap` → `ueler.viewer.plugin.heatmap` (2025-10-18)
     Don't stop until item 20 is checked.
-    19. [ ] `viewer.plugin.mask_painter` → `ueler.viewer.plugin.mask_painter` (pending)
+  19. [x] `viewer.plugin.mask_painter` → `ueler.viewer.plugin.mask_painter` (2025-10-18)
     Don't stop until item 20 is checked.
-    20. [ ] `viewer.plugin.roi_manager_plugin` → `ueler.viewer.plugin.roi_manager_plugin` (pending)
+  20. [x] `viewer.plugin.roi_manager_plugin` → `ueler.viewer.plugin.roi_manager_plugin` (2025-10-18)
     21. [ ] `viewer.plugin.run_flowsom` → `ueler.viewer.plugin.run_flowsom` (pending)
     22. [ ] `viewer.main_viewer` → `ueler.viewer.main_viewer` (pending)
 

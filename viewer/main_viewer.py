@@ -25,7 +25,12 @@ from data_loader import (
     load_one_channel_fov,
     merge_channel_max,
 )
-from image_utils import generate_edges, calculate_downsample_factor, get_axis_limits_with_padding
+from ueler.image_utils import (
+    calculate_downsample_factor,
+    generate_edges,
+    get_axis_limits_with_padding,
+)
+from ueler.viewer.images import load_asset_bytes
 from .ui_components import create_widgets, display_ui, update_wide_plugin_panel
 from .roi_manager import ROIManager
 from viewer.plugin.roi_manager_plugin import ROIManagerPlugin
@@ -1638,18 +1643,8 @@ class ImageMaskViewer:
         self.inform_plugins('refresh_roi_table')
     
     def load_status_images(self):
-        current_dir = os.path.dirname(__file__)
-        gif_path = os.path.join(current_dir, "images", "loading.gif")
-        png_path = os.path.join(current_dir, "images", "ready.png")
-
-        with open(gif_path, "rb") as file:
-            # read file as string into `image` 
-            image = file.read()
-        self._status_image["processing"] = image
-        with open(png_path, "rb") as file:
-            # read file as string into `image` 
-            image = file.read()
-        self._status_image["ready"] = image
+        self._status_image["processing"] = load_asset_bytes("loading.gif")
+        self._status_image["ready"] = load_asset_bytes("ready.png")
 
     def load_cell_table_from_path(self, file_path):
         """Load the cell table from a CSV file and convert columns with integer values (allowing NA) to integer."""
