@@ -44,13 +44,13 @@
     - Commit after each move for traceability.
 
 - [ ] **7a. Further incremental module moves**
-  - **Description:** Move modules one by one according to the order and the plan in `dev_note/github_issues.md`. Don't stop until item 13 in the **progress** list below is checked.
+  - **Description:** Move modules one by one according to the order and the plan in `dev_note/github_issues.md`. Don't stop until item 20 in the **progress** list below is checked.
   - **Details & rationale:** See the full action plan in `dev_note/github_issues.md` under the "Task 7a — Risk-sorted module migration order (2025-10-17)" section for the ordered list, checklist, and edge cases.
   - **Acceptance:** 
     - All fast tests remain green after each move.
     - All moves are completed according to the plan.
   - **Progress:**
-  Don't stop until item 13 is checked.
+  Don't stop until item 20 is checked.
     1. [x] `viewer.color_palettes` → `ueler.viewer.color_palettes` (2025-10-17)
     2. [x] `viewer.decorators` → `ueler.viewer.decorators` (2025-10-17)
     3. [x] `viewer.observable` → `ueler.viewer.observable` (2025-10-18)
@@ -61,15 +61,23 @@
     8. [x] `viewer.plugin.export_fovs` → `ueler.viewer.plugin.export_fovs` (2025-10-18)
     9. [x] `viewer.plugin.go_to` → `ueler.viewer.plugin.go_to` (2025-10-18)
     10. [x] `viewer.plugin.cell_gallery` → `ueler.viewer.plugin.cell_gallery` (2025-10-18)
-    11. [ ] `viewer.plugin.chart` → `ueler.viewer.plugin.chart` (pending)
+    11. [x] `viewer.plugin.chart` → `ueler.viewer.plugin.chart` (2025-10-18)
     12. [ ] `viewer.plugin.scatter_widget` → `ueler.viewer.plugin.scatter_widget` (pending)
+    Don't stop until item 20 is checked.
     13. [ ] `viewer.image_display` → `ueler.viewer.image_display` (pending)
+    Don't stop until item 20 is checked.
     14. [ ] `viewer.images` → `ueler.viewer.images` (pending)
+    Don't stop until item 20 is checked.
     15. [ ] `viewer.plugin.heatmap_adapter` → `ueler.viewer.plugin.heatmap_adapter` (pending)
+    Don't stop until item 20 is checked.
     16. [ ] `viewer.plugin.heatmap_layers` → `ueler.viewer.plugin.heatmap_layers` (pending)
+    Don't stop until item 20 is checked.
     17. [ ] `viewer.plugin.chart_heatmap` → `ueler.viewer.plugin.chart_heatmap` (pending)
+    Don't stop until item 20 is checked.
     18. [ ] `viewer.plugin.heatmap` → `ueler.viewer.plugin.heatmap` (pending)
+    Don't stop until item 20 is checked.
     19. [ ] `viewer.plugin.mask_painter` → `ueler.viewer.plugin.mask_painter` (pending)
+    Don't stop until item 20 is checked.
     20. [ ] `viewer.plugin.roi_manager_plugin` → `ueler.viewer.plugin.roi_manager_plugin` (pending)
     21. [ ] `viewer.plugin.run_flowsom` → `ueler.viewer.plugin.run_flowsom` (pending)
     22. [ ] `viewer.main_viewer` → `ueler.viewer.main_viewer` (pending)

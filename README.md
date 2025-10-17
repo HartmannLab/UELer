@@ -90,6 +90,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 - Moved `viewer/plugin/export_fovs.py` into `ueler.viewer.plugin.export_fovs`, preserved the placeholder UI, and wrapped the legacy module with a forwarding shim plus alias updates.
 - Shifted `viewer/plugin/go_to.py` into `ueler.viewer.plugin.go_to`, refreshed imports to use the packaged helpers, and added a legacy wrapper plus alias updates for continuity.
 - Migrated `viewer/plugin/cell_gallery.py` into `ueler.viewer.plugin.cell_gallery`, tightened deterministic sampling when downscaling selections, and replaced the legacy module with a forwarding shim plus alias updates to preserve backwards compatibility.
+- Relocated `viewer/plugin/chart.py` into `ueler.viewer.plugin.chart`, re-pointed intra-project imports to the packaged namespace, and slimmed the legacy module to a forwarding shim while pruning redundant alias table entries.
 
 **Fast-stub pandas parity**
 - Extended the shared pandas shim with `Series.loc`/`.iloc` indexers, `map`, `astype`, boolean helpers, and dictionary-aware constructors so chart and scatter tests align categories correctly without the real library installed.

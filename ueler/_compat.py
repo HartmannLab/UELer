@@ -29,7 +29,6 @@ VIEWER_CORE_ALIASES: Dict[str, str] = {
 
 VIEWER_PLUGIN_ALIASES: Dict[str, str] = {
 	"ueler.viewer.plugin.plugin_base": "viewer.plugin.plugin_base",
-	"ueler.viewer.plugin.chart": "viewer.plugin.chart",
 	"ueler.viewer.plugin.chart_heatmap": "viewer.plugin.chart_heatmap",
 	"ueler.viewer.plugin.heatmap": "viewer.plugin.heatmap",
 	"ueler.viewer.plugin.heatmap_layers": "viewer.plugin.heatmap_layers",
