@@ -48,10 +48,15 @@ VIEWER_PLUGIN_ALIASES: Dict[str, str] = {
 	"ueler.viewer.plugin.go_to": "viewer.plugin.go_to",
 }
 
+LEGACY_VIEWER_ALIASES: Dict[str, str] = {
+	"viewer.ui_components": "ueler.viewer.ui_components",
+}
+
 COMPAT_ALIAS_GROUPS: Iterable[Mapping[str, str]] = (
 	UTILITY_ALIASES,
 	VIEWER_CORE_ALIASES,
 	VIEWER_PLUGIN_ALIASES,
+	LEGACY_VIEWER_ALIASES,
 )
 
 # Flattened view that tests can import for validation.
