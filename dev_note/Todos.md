@@ -44,12 +44,14 @@
     - Commit after each move for traceability.
 
 - [ ] **7a. Further incremental module moves**
-  - **Description:** Move modules one by one according to the order and the plan in `dev_note/github_issues.md`.
+  - **Description:** Move modules one by one according to the order and the plan in `dev_note/github_issues.md`. **Don't stop until _six_ planned modules are relocated compared to the last Git commit.**
   - **Details & rationale:** See the full action plan in `dev_note/github_issues.md` under the "Task 7a — Risk-sorted module migration order (2025-10-17)" section for the ordered list, checklist, and edge cases.
   - **Acceptance:** 
     - All fast tests remain green after each move.
-    - After moving six modules, stop and wait for my commit.
     - All moves are completed according to the plan.
+  - **Progress:**
+    - [x] `viewer.color_palettes` → `ueler.viewer.color_palettes` (2025-10-17)
+    - [x] `viewer.decorators` → `ueler.viewer.decorators` (2025-10-17)
 
 ---
 
