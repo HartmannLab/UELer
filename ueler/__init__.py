@@ -1,22 +1,37 @@
-"""UELer package skeleton.
+"""UELer package skeleton with compatibility shims.
 
-This module provides a forward-looking package namespace while continuing to
-expose the legacy `viewer` entry points. Runtime behavior remains identical to
-the existing top-level imports; symbols are lazily delegated to the current
-`viewer` package until the migration is complete.
+This module keeps the current runtime behavior by delegating imports to the
+legacy modules while providing a stable place to register compatibility alias
+modules. The helper re-exports allow notebooks to begin using the ``ueler``
+namespace without breaking existing code.
 """
 
 from importlib import import_module as _import_module
 from typing import TYPE_CHECKING, Any
+
+from ._compat import (
+	UTILITY_ALIASES as _UTILITY_ALIASES,
+	ensure_aliases_loaded as _ensure_aliases_loaded,
+	register_module_aliases as _register_module_aliases,
+)
+
+_register_module_aliases(_UTILITY_ALIASES)
 
 __all__ = [
 	"viewer",
 	"ImageMaskViewer",
 	"create_widgets",
 	"display_ui",
+	"ensure_compat_aliases",
 ]
 
 __version__ = "0.2.0a0"
+
+
+def ensure_compat_aliases() -> None:
+	"""Ensure all planned alias modules are registered."""
+
+	_ensure_aliases_loaded()
 
 
 def __getattr__(name: str) -> Any:

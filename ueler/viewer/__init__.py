@@ -8,6 +8,15 @@ legacy ``viewer`` package until modules are relocated.
 from importlib import import_module as _import_module
 from typing import TYPE_CHECKING, Any
 
+from .._compat import (
+	VIEWER_CORE_ALIASES as _VIEWER_CORE_ALIASES,
+	VIEWER_PLUGIN_ALIASES as _VIEWER_PLUGIN_ALIASES,
+	register_module_aliases as _register_module_aliases,
+)
+
+_register_module_aliases(_VIEWER_CORE_ALIASES)
+_register_module_aliases(_VIEWER_PLUGIN_ALIASES)
+
 __all__ = [
 	"ImageMaskViewer",
 	"create_widgets",
