@@ -19,7 +19,6 @@ UTILITY_ALIASES: Dict[str, str] = {
 }
 
 VIEWER_CORE_ALIASES: Dict[str, str] = {
-	"ueler.viewer.main_viewer": "viewer.main_viewer",
 	"ueler.viewer.ui_components": "viewer.ui_components",
 	"ueler.viewer.annotation_display": "viewer.annotation_display",
 	"ueler.viewer.roi_manager": "viewer.roi_manager",
@@ -30,7 +29,6 @@ VIEWER_PLUGIN_ALIASES: Dict[str, str] = {
 	"ueler.viewer.plugin.plugin_base": "viewer.plugin.plugin_base",
 	"ueler.viewer.plugin.cell_gallery": "viewer.plugin.cell_gallery",
 	"ueler.viewer.plugin.region_annotation": "viewer.plugin.region_annotation",
-	"ueler.viewer.plugin.run_flowsom": "viewer.plugin.run_flowsom",
 }
 
 LEGACY_VIEWER_ALIASES: Dict[str, str] = {
@@ -41,6 +39,7 @@ LEGACY_VIEWER_ALIASES: Dict[str, str] = {
 	"viewer.annotation_palette_editor": "ueler.viewer.annotation_palette_editor",
 	"viewer.annotation_display": "ueler.viewer.annotation_display",
 	"viewer.roi_manager": "ueler.viewer.roi_manager",
+	"viewer.main_viewer": "ueler.viewer.main_viewer",
 }
 
 LEGACY_PLUGIN_ALIASES: Dict[str, str] = {
@@ -48,6 +47,7 @@ LEGACY_PLUGIN_ALIASES: Dict[str, str] = {
 	"viewer.plugin.export_fovs": "ueler.viewer.plugin.export_fovs",
 	"viewer.plugin.go_to": "ueler.viewer.plugin.go_to",
 	"viewer.plugin.cell_gallery": "ueler.viewer.plugin.cell_gallery",
+	"viewer.plugin.run_flowsom": "ueler.viewer.plugin.run_flowsom",
 }
 
 COMPAT_ALIAS_GROUPS: Iterable[Mapping[str, str]] = (
