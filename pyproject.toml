@@ -32,6 +32,7 @@ documentation = "https://github.com/HartmannLab/UELer"
 
 [tool.setuptools]
 include-package-data = true
+py-modules = ["constants", "data_loader", "image_utils"]
 
 [tool.setuptools.packages.find]
 include = ["ueler", "ueler.*", "viewer", "viewer.*"]

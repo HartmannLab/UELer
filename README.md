@@ -119,6 +119,10 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 - Created a lightweight `Makefile` offering virtualenv creation, editable installs, and fast/integration test targets to align local workflows with the mitigation strategy.
 - Introduced `ueler.__init__` and `ueler.viewer.__init__` compatibility shims that lazily forward to the legacy `viewer` module so consumers can begin migrating import paths without runtime changes.
 
+**Root helper packaging**
+- Listed `constants.py`, `data_loader.py`, and `image_utils.py` under `tool.setuptools.py-modules` so wheel builds include the legacy helpers relied upon by the compatibility shims.
+- Flagged follow-up release validation to build wheels/sdists and confirm the helpers remain available after installation.
+
 **Heatmap selection safeguards**
 - Wrapped `InteractionLayer._apply_cluster_highlights` so scatter highlights respect the chart link toggle, eliminating false redraws during Task 2 heatmap tests.
 - Preloaded the chart plugin before test modules import so downstream suites reuse the real `ChartDisplay` implementation instead of minimal stubs.

@@ -43,7 +43,7 @@
     - All fast tests remain green after each move.  
     - Commit after each move for traceability.
 
-- [ ] **7a. Further incremental module moves**
+- [x] **7a. Further incremental module moves**
   - **Description:** Move modules one by one according to the order and the plan in `dev_note/github_issues.md`. Don't stop until item 22 in the **progress** list below is checked.
   - **Details & rationale:** See the full action plan in `dev_note/github_issues.md` under the "Task 7a — Risk-sorted module migration order (2025-10-17)" section for the ordered list, checklist, and edge cases.
   - **Acceptance:** 
@@ -71,9 +71,8 @@
     18. [x] `viewer.plugin.heatmap` → `ueler.viewer.plugin.heatmap` (2025-10-18)
     19. [x] `viewer.plugin.mask_painter` → `ueler.viewer.plugin.mask_painter` (2025-10-18)
     20. [x] `viewer.plugin.roi_manager_plugin` → `ueler.viewer.plugin.roi_manager_plugin` (2025-10-18)
-  21. [x] `viewer.plugin.run_flowsom` → `ueler.viewer.plugin.run_flowsom` (2025-10-18)
-  Don't stop until item 22 is checked.
-  22. [x] `viewer.main_viewer` → `ueler.viewer.main_viewer` (2025-10-18)
+    21. [x] `viewer.plugin.run_flowsom` → `ueler.viewer.plugin.run_flowsom` (2025-10-18)
+    22. [x] `viewer.main_viewer` → `ueler.viewer.main_viewer` (2025-10-18)
 
 ---
 
