@@ -2,6 +2,7 @@
 **Notebook runner interface**
 - Added `ueler/runner.py` with a `run_viewer(...)` helper that normalizes dataset paths, registers import shims, displays the UI by default, and triggers plugin post-load hooks so notebooks can launch the viewer without boilerplate.
 - Added `tests/test_runner.py` to smoke-test the runner using stubbed factories, covering alias registration, optional flags, and package-level re-exports for both `ueler.runner` and `import ueler` entry points.
+- Hardened the viewer navigation stack update so environments without a Matplotlib toolbar (e.g., inline backends) skip the nav-stack sync instead of raising `AttributeError` when launched via the new runner.
 
 **Fast-test dependency isolation**
 - Forced the shared bootstrap to install in-process seaborn/scipy stubs whenever pandas is stubbed so heatmap imports no longer reach for the real libraries, and wired the annotation palette suite to load the bootstrap before importing viewer modules to guarantee the lightweight shims take effect.

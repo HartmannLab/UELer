@@ -507,18 +507,22 @@ class ImageMaskViewer:
 
         ax = self.image_display.ax
 
-        # if the navigation stack is not empty, update the first element
-        if self.image_display.fig.canvas.toolbar._nav_stack._elements:
-            nav_stack_element = self.image_display.fig.canvas.toolbar._nav_stack._elements[0]
-            existing_view, existing_bboxes = nav_stack_element[ax]
-            # Update only the xlim and ylim
+        toolbar = getattr(self.image_display.fig.canvas, "toolbar", None)
+        nav_stack = getattr(toolbar, "_nav_stack", None) if toolbar is not None else None
+        elements = getattr(nav_stack, "_elements", None) if nav_stack is not None else None
+
+        if elements:
+            nav_stack_element = elements[0]
+            try:
+                existing_view, existing_bboxes = nav_stack_element[ax]
+            except KeyError:
+                existing_view, existing_bboxes = ({}, ())
+            existing_view = dict(existing_view)
             existing_view['xlim'] = ax.get_xlim()
             existing_view['ylim'] = ax.get_ylim()
-            nav_stack_element[self.image_display.ax] = (existing_view, existing_bboxes)
-            print("Updated navigation stack.")
-
-        else:
-            self.image_display.fig.canvas.toolbar.push_current()
+            nav_stack_element[ax] = (existing_view, existing_bboxes)
+        elif toolbar is not None and hasattr(toolbar, "push_current"):
+            toolbar.push_current()
 
         self.inform_plugins('on_fov_change')
 
