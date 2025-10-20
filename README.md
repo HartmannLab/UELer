@@ -72,73 +72,24 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### v0.2.0-alpha
-**Notebook runner interface**
-- Added `ueler/runner.py` with a `run_viewer(...)` helper that normalizes dataset paths, registers import shims, displays the UI by default, and triggers plugin post-load hooks so notebooks can launch the viewer without boilerplate.
-- Added `tests/test_runner.py` to smoke-test the runner using stubbed factories, covering alias registration, optional flags, and package-level re-exports for both `ueler.runner` and `import ueler` entry points.
-- Hardened the viewer navigation stack update so inline Matplotlib backends without a toolbar skip nav-stack synchronization instead of raising an `AttributeError` when launched in notebooks.
-- Added `load_cell_table(...)` so notebook workflows can attach a CSV or in-memory table to an existing viewer, refresh controls, and optionally redisplay the UI after staged data loading.
+Now UELer can be run either the old way by importing from `viewer` or the new way by importing from `ueler.viewer`.
 
-**Fast-test dependency isolation**
-- Forced the shared bootstrap to install in-process seaborn/scipy stubs whenever pandas is stubbed so heatmap imports no longer reach for the real libraries, and wired the annotation palette suite to load the bootstrap before importing viewer modules to guarantee the lightweight shims take effect.
-- Added explicit stub markers for the installed modules so subsequent imports keep reusing the lightweight implementations during `unittest` discovery.
+**Notebook workflow helpers**
+- Added `run_viewer(...)` and `load_cell_table(...)` in `ueler.runner` plus a toolbar guard so notebooks can launch, refresh, and redisplay the viewer without boilerplate; smoke tests cover the new entry points.
 
-**Chart widget layout compatibility**
-- Updated the chart plugin to build every `VBox`/`HBox` with the `children=` keyword, ensuring older ipywidgets stubs capture the controls and plot panes so footer layout assertions reflect production behavior.
-- Retained the legacy `color_points` signature while documenting the unused `selected_colors` parameter to satisfy lint without altering callers.
+**Namespace migration & shims**
+- Introduced a lazy alias registry and forwarding wrappers so legacy `viewer.*` imports resolve to relocated `ueler.viewer.*` modules; migrated viewer UI, plugins, and the main viewer while keeping notebooks compatible.
 
-**Compatibility import shims**
-- Registered lazy module aliases bridging the new `ueler.*` namespace to the legacy `viewer` modules via `_compat.register_module_aliases`, letting notebooks adopt the packaged layout without eager imports.
-- Hardened the alias finder to fall back to stubbed modules lacking `ModuleSpec` metadata so fast-stub tests keep loading lightweight plugin placeholders without errors.
-- Expanded `tests/test_shims_imports.py` to assert the alias matrix resolves to the legacy modules and to skip gracefully when optional dependencies such as `cv2` are unavailable.
+**Fast-test environment hardening**
+- Expanded bootstrap stubs (pandas, seaborn/scipy, ipywidgets, matplotlib, jscatter) and tuned chart/heatmap paths so the fast `unittest` suite runs without heavy dependencies or flaky redraws.
 
-**Incremental module moves**
-- Migrated `viewer/ui_components.py` into `ueler.viewer.ui_components` while retaining the legacy import path through a lightweight compatibility wrapper and alias bridge.
-- Updated shim tests to tolerate downstream stubs and confirmed the fast suite stays green after the relocation.
-- Relocated `viewer/color_palettes.py` into `ueler.viewer.color_palettes`, added a legacy wrapper plus reverse alias in `_compat.py`, and reran the fast test suite to verify shim coverage remains intact.
-- Moved `viewer/decorators.py` into `ueler.viewer.decorators`, introduced helpers to simplify the status-bar decorator, and left a compatibility wrapper for legacy imports.
-- Transitioned `viewer/observable.py` to `ueler.viewer.observable`, tightened typing for the observable helper, and replaced the legacy module with a thin forwarding shim.
-- Relocated `viewer/annotation_palette_editor.py` into `ueler.viewer.annotation_palette_editor`, updated its color helper imports, and retained a legacy shim for backward compatibility.
-- Shifted `viewer/annotation_display.py` into `ueler.viewer.annotation_display`, refreshed imports to use the packaged namespace, added a lazy widget loader so test stubs initialize before instantiation, and provided a compatibility wrapper plus alias updates so existing code keeps working.
-- Repositioned `viewer/roi_manager.py` into `ueler.viewer.roi_manager`, switched timestamps to `datetime.now(timezone.utc)` for lint compliance, and left a compatibility wrapper plus reverse alias so legacy imports remain operational.
-- Ported `viewer/plugin/plugin_base.py` into `ueler.viewer.plugin.plugin_base`, introduced a packaged plugin scaffold, and replaced the legacy module with a forwarding shim plus reverse alias coverage.
-- Moved `viewer/plugin/export_fovs.py` into `ueler.viewer.plugin.export_fovs`, preserved the placeholder UI, and wrapped the legacy module with a forwarding shim plus alias updates.
-- Shifted `viewer/plugin/go_to.py` into `ueler.viewer.plugin.go_to`, refreshed imports to use the packaged helpers, and added a legacy wrapper plus alias updates for continuity.
-- Migrated `viewer/plugin/cell_gallery.py` into `ueler.viewer.plugin.cell_gallery`, tightened deterministic sampling when downscaling selections, and replaced the legacy module with a forwarding shim plus alias updates to preserve backwards compatibility.
-- Relocated `viewer/plugin/chart.py` into `ueler.viewer.plugin.chart`, re-pointed intra-project imports to the packaged namespace, and slimmed the legacy module to a forwarding shim while pruning redundant alias table entries.
-- Migrated `viewer/plugin/run_flowsom.py` into `ueler.viewer.plugin.run_flowsom`, added a graceful fallback when `pyFlowSOM` is missing, deduplicated repeated layout strings, and left the legacy module as a thin wrapper.
-- Ported `viewer/main_viewer.py` into `ueler.viewer.main_viewer`, updated its internal imports to favor the packaged namespace, pointed dynamic plugin loading at `ueler.viewer.plugin.*`, and replaced the legacy file with a compatibility wrapper.
+**Packaging & tooling**
+- Updated `pyproject.toml`, Makefile targets, and root helper inclusion to package the project cleanly and align developer workflows; documentation reflects the new entry points and migration status.
 
-**Fast-stub pandas parity**
-- Extended the shared pandas shim with `Series.loc`/`.iloc` indexers, `map`, `astype`, boolean helpers, and dictionary-aware constructors so chart and scatter tests align categories correctly without the real library installed.
-- Patched fallback pandas modules discovered during test imports to graft the shared `api.types` helpers, keeping `is_numeric_dtype` and `is_object_dtype` available even when ad-hoc stubs surface.
-- Hardened reindex and assignment support (`Series.reindex`, `Series.loc[...] = value`) to preserve ROI, heatmap, and scatter workflows in the fast-test environment.
-
-**Matplotlib stub coverage**
-- Registered a lightweight `matplotlib.pyplot` stub with canvas and axis helpers so histogram code paths execute during fast tests without pulling in the full plotting stack.
-- Updated the plugin preloader to replace minimalist viewer stubs with the real chart/ROI modules before tests run, ensuring footer layout assertions exercise production logic.
-
-**Heatmap footer redraw preference**
-- Taught `HeatmapDisplay.restore_footer_canvas` to attempt cached redraws before scheduling a canvas repaint, satisfying the footer regression tests and avoiding redundant `draw_idle` calls when the cache already holds a canvas snapshot.
-
-**Packaging skeleton groundwork**
-- Added `pyproject.toml` with minimal project metadata, setuptools configuration, and developer extras to unblock incremental packaging work.
-- Created a lightweight `Makefile` offering virtualenv creation, editable installs, and fast/integration test targets to align local workflows with the mitigation strategy.
-- Introduced `ueler.__init__` and `ueler.viewer.__init__` compatibility shims that lazily forward to the legacy `viewer` module so consumers can begin migrating import paths without runtime changes.
-
-**Root helper packaging**
-- Listed `constants.py`, `data_loader.py`, and `image_utils.py` under `tool.setuptools.py-modules` so wheel builds include the legacy helpers relied upon by the compatibility shims.
-- Flagged follow-up release validation to build wheels/sdists and confirm the helpers remain available after installation.
-
-**Heatmap selection safeguards**
-- Wrapped `InteractionLayer._apply_cluster_highlights` so scatter highlights respect the chart link toggle, eliminating false redraws during Task 2 heatmap tests.
-- Preloaded the chart plugin before test modules import so downstream suites reuse the real `ChartDisplay` implementation instead of minimal stubs.
-
-**Bootstrap dependency coverage**
-- Normalized ad-hoc pandas stubs by grafting the shared test DataFrame/Series helpers whenever modules downgrade `pandas` to `object`, restoring ROI and heatmap helpers.
-- Expanded the ipywidgets shim to surface `allowed_tags`, `allow_new`, and other TagsInput traits that the ROI manager exercises during tag merge scenarios.
-
-**Test suite reliability**
-- Pre-imported key plugins and reran `python -m unittest discover tests`, confirming all 44 tests pass under the shared bootstrap.
+**Verification**
+- `python -m unittest discover tests`
+- `python -m unittest tests.test_runner`
+- `python -m unittest tests.test_shims_imports`
 
 ## Earlier Updates  
 
