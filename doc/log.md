@@ -1,5 +1,5 @@
 ### v0.2.0-alpha
-See [issue #4](https://github.com/HartmannLab/UELer/issues/6) for an overview.
+See [issue #4](https://github.com/HartmannLab/UELer/issues/4) for an overview.
 **Notebook runner interface**
 - Added `ueler/runner.py` with a `run_viewer(...)` helper that normalizes dataset paths, registers import shims, displays the UI by default, and triggers plugin post-load hooks so notebooks can launch the viewer without boilerplate.
 - Added `tests/test_runner.py` to smoke-test the runner using stubbed factories, covering alias registration, optional flags, and package-level re-exports for both `ueler.runner` and `import ueler` entry points.
