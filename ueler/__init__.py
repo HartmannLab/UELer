@@ -14,7 +14,7 @@ from ._compat import (
 	ensure_aliases_loaded as _ensure_aliases_loaded,
 	register_module_aliases as _register_module_aliases,
 )
-from .runner import run_viewer
+from .runner import load_cell_table, run_viewer
 
 _register_module_aliases(_UTILITY_ALIASES)
 
@@ -24,6 +24,7 @@ __all__ = [
 	"create_widgets",
 	"display_ui",
 	"run_viewer",
+	"load_cell_table",
 	"ensure_compat_aliases",
 ]
 

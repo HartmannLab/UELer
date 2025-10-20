@@ -4,7 +4,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
 
 import ueler
-from ueler.runner import run_viewer
+from ueler.runner import load_cell_table, run_viewer
 
 
 class RunnerSmokeTest(unittest.TestCase):
@@ -86,6 +86,88 @@ class RunnerSmokeTest(unittest.TestCase):
 
 	def test_module_reexports_runner(self) -> None:
 		self.assertTrue(hasattr(ueler, "run_viewer"))
+		self.assertTrue(hasattr(ueler, "load_cell_table"))
+
+	def _make_viewer_mock(self) -> MagicMock:
+		viewer = MagicMock()
+		viewer.current_downsample_factor = 8
+		viewer.update_marker_set_dropdown = MagicMock()
+		viewer.update_controls = MagicMock()
+		viewer.on_image_change = MagicMock()
+		viewer.update_display = MagicMock()
+		viewer.update_keys = MagicMock()
+		viewer.refresh_bottom_panel = MagicMock()
+		viewer.inform_plugins = MagicMock()
+		viewer.after_all_plugins_loaded = MagicMock()
+		return viewer
+
+	def test_load_cell_table_from_path_refreshes_ui(self) -> None:
+		csv_path = self.tmp_root / "cell_table.csv"
+		csv_path.write_text("a,b\n1,2\n")
+
+		viewer = self._make_viewer_mock()
+		viewer.load_cell_table_from_path = MagicMock()
+
+		with patch("ueler.runner._load_display_helpers") as load_display:
+			load_display.return_value = (MagicMock(), MagicMock())
+			load_cell_table(
+				viewer,
+				cell_table_path=csv_path,
+				auto_display=False,
+				after_plugins=False,
+			)
+
+		load_display.assert_not_called()
+		viewer.load_cell_table_from_path.assert_called_once_with(str(csv_path))
+		viewer.update_marker_set_dropdown.assert_called_once()
+		viewer.update_controls.assert_called_once_with(None)
+		viewer.on_image_change.assert_called_once_with(None)
+		viewer.update_display.assert_called_once_with(viewer.current_downsample_factor)
+		viewer.update_keys.assert_called_once_with(None)
+		viewer.refresh_bottom_panel.assert_called_once()
+		viewer.inform_plugins.assert_called_once_with('refresh_roi_table')
+		viewer.after_all_plugins_loaded.assert_not_called()
+
+	def test_load_cell_table_with_dataframe_and_display(self) -> None:
+		viewer = self._make_viewer_mock()
+		viewer.set_cell_table = MagicMock()
+
+		fake_df = object()
+
+		with patch("ueler.runner._load_display_helpers") as load_display:
+			display_mock = MagicMock()
+			panel_mock = MagicMock()
+			load_display.return_value = (display_mock, panel_mock)
+			load_cell_table(
+				viewer,
+				cell_table=fake_df,
+				auto_display=True,
+				after_plugins=True,
+			)
+
+		viewer.set_cell_table.assert_called_once_with(fake_df)
+		load_display.assert_called_once()
+		display_mock.assert_called_once_with(viewer)
+		panel_mock.assert_called_once_with(viewer)
+		viewer.update_marker_set_dropdown.assert_called_once()
+		viewer.update_controls.assert_called_once_with(None)
+		viewer.on_image_change.assert_called_once_with(None)
+		viewer.update_display.assert_called_once_with(viewer.current_downsample_factor)
+		viewer.update_keys.assert_called_once_with(None)
+		viewer.refresh_bottom_panel.assert_called_once()
+		viewer.inform_plugins.assert_called_once_with('refresh_roi_table')
+		viewer.after_all_plugins_loaded.assert_called_once()
+
+	def test_load_cell_table_validation(self) -> None:
+		viewer = self._make_viewer_mock()
+		viewer.load_cell_table_from_path = MagicMock()
+		viewer.set_cell_table = MagicMock()
+
+		with self.assertRaises(ValueError):
+			load_cell_table(viewer)
+
+		with self.assertRaises(ValueError):
+			load_cell_table(viewer, cell_table_path=self.tmp_root / "foo.csv", cell_table=object())
 
 
 if __name__ == "__main__":
