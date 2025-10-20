@@ -89,16 +89,12 @@
 ---
 
 ## **Checkpoint 5 — Final Integration & CI**
-**Goal:** Complete documentation updates, finalize shims, and add CI coverage.
+**Goal:** Prepare CI and integration-test strategy, finalize shims, and finish documentation.
 
-- [ ] **8. Update docs and release notes**  
-  - **Description:** Update `doc/log.md`, `README.md`, and append entries to `dev_note/github_issues.md`.  
-  - **Acceptance:** Docs reflect latest changes and version notes.
+- Planned: add a CI `fast-stub` job
+  - Description: create a `fast-stub` workflow (GitHub Actions or equivalent) that will run the fast-stub test suite on incoming PRs and report results.
+  - Acceptance criteria: PRs will show the fast-stub job status and failures will be visible in the PR checks.
 
-- [ ] **9. CI `fast-stub` job**  
-  - **Description:** Add CI job `fast-stub` to run the fast test suite on PRs.  
-  - **Acceptance:** PRs show fast-stub test results.
-
-- [ ] **10. Integration test triage**  
-  - **Description:** Define and add `integration` CI job for GUI and heavy dependencies; document cadence.  
-  - **Acceptance:** Integration job runs nightly or on demand.
+- Planned: define integration test triage and job
+  - Description: define and add an `integration` workflow for GUI and heavy-dependency tests (scheduled and/or manual runs). Document the cadence and resource requirements.
+  - Acceptance criteria: an integration job will be available to run nightly or on demand and will produce logs/artifacts for troubleshooting.
