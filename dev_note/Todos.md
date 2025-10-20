@@ -79,7 +79,7 @@
 ## **Checkpoint 4 — Runner & Notebooks**
 **Goal:** Extract the notebook entrypoint logic into a clean interface.
 
-- [ ] **6. Create `ueler.runner`**  
+- [x] **6. Create `ueler.runner`**  
   - **Description:** Add `ueler/runner.py` exposing `run_viewer(...)`.  
   - **Demo:** Smoke-test notebook cell showing import and invocation.  
   - **Acceptance:**  

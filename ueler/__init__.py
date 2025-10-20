@@ -14,6 +14,7 @@ from ._compat import (
 	ensure_aliases_loaded as _ensure_aliases_loaded,
 	register_module_aliases as _register_module_aliases,
 )
+from .runner import run_viewer
 
 _register_module_aliases(_UTILITY_ALIASES)
 
@@ -22,6 +23,7 @@ __all__ = [
 	"ImageMaskViewer",
 	"create_widgets",
 	"display_ui",
+	"run_viewer",
 	"ensure_compat_aliases",
 ]
 
