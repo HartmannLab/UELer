@@ -46,9 +46,14 @@ from ueler.viewer.color_palettes import (
     build_discrete_colormap,
     merge_palette_updates,
 )
+from ueler.viewer.rendering import (
+    AnnotationRenderSettings,
+    ChannelRenderSettings,
+    MaskRenderSettings,
+    render_fov_to_array,
+)
 # viewer/main_viewer.py
 
-import dask.array as da
 from weakref import WeakKeyDictionary
 
 from skimage.io import imsave
@@ -1122,135 +1127,122 @@ class ImageMaskViewer:
         self.update_display(self.current_downsample_factor)
 
     def render_image(self, selected_channels, downsample_factor, xym, xym_ds):
-        """
-        Render an image based on selected channels and masks within specified view coordinates.
-        
-        Parameters:
-        -----------
-        selected_channels : list
-            List of selected channel names to display
-        downsample_factor : int
-            Factor by which to downsample the image
-        xmin, xmax, ymin, ymax : int
-            Coordinates of the visible region in original resolution
-        xmin_ds, xmax_ds, ymin_ds, ymax_ds : int
-            Coordinates of the visible region in downsampled resolution
-            
-        Returns:
-        --------
-        combined : ndarray
-            The rendered image as a NumPy array
-        """
-        # Ensure the image is loaded in the cache
-        self.load_fov(self.ui_component.image_selector.value, selected_channels)
-        fov_images = self.image_cache[self.ui_component.image_selector.value]
+        """Render a composite image for the active viewer selection."""
+
+        current_fov = self.ui_component.image_selector.value
+        self.load_fov(current_fov, selected_channels)
+        fov_images = self.image_cache[current_fov]
 
         if xym is not None:
-            # unpack the xym tuples
-            xmin, xmax, ymin, ymax = xym
-            xmin_ds, xmax_ds, ymin_ds, ymax_ds = xym_ds
+            xmin, xmax, ymin, ymax = (int(v) for v in xym)
         else:
-            # take the full image using the shape of the first channel
-            xmin, xmax, ymin, ymax = fov_images[next(iter(fov_images))].shape
+            first_channel = next(iter(fov_images.values()), None)
+            if first_channel is None:
+                raise ValueError(f"FOV '{current_fov}' has no loaded channels")
+            shape = getattr(first_channel, "shape", None)
+            if not shape or len(shape) < 2:
+                raise ValueError("Unable to determine image bounds for rendering")
+            ymax, xmax = int(shape[0]), int(shape[1])
+            xmin, ymin = 0, 0
 
-            # todo: this may cause errors when downsample_factor is not 1
-            xmin_ds, xmax_ds, ymin_ds, ymax_ds = xmin//downsample_factor, xmax//downsample_factor, ymin//downsample_factor, ymax//downsample_factor
+        region_xy = (xmin, xmax, ymin, ymax)
 
-        # Initialize combined image
+        if xym_ds is not None:
+            xmin_ds, xmax_ds, ymin_ds, ymax_ds = (int(v) for v in xym_ds)
+        else:
+            xmin_ds = xmin // downsample_factor
+            xmax_ds = max(xmin_ds + 1, xmax // downsample_factor)
+            ymin_ds = ymin // downsample_factor
+            ymax_ds = max(ymin_ds + 1, ymax // downsample_factor)
+
+        region_ds = (xmin_ds, xmax_ds, ymin_ds, ymax_ds)
+
         if not selected_channels:
-            # If no channels selected, return black image
-            return np.zeros((ymax_ds - ymin_ds, xmin_ds - xmin_ds, 3), dtype=np.float32)
-        
-        combined = da.zeros((ymax_ds - ymin_ds, xmax_ds - xmin_ds, 3), dtype=np.float32)
+            height = max(1, ymax_ds - ymin_ds)
+            width = max(1, xmax_ds - xmin_ds)
+            return np.zeros((height, width, 3), dtype=np.float32)
 
+        controls = self.ui_component
+        channel_settings = {}
         for ch in selected_channels:
-            # Retrieve color mapping and contrast settings
-            color_rgb = np.array(to_rgb(self.predefined_colors[self.ui_component.color_controls[ch].value]), dtype=np.float32)
-            contrast_min = self.ui_component.contrast_min_controls[ch].value
-            contrast_max = self.ui_component.contrast_max_controls[ch].value
+            color_key = controls.color_controls[ch].value
+            color_value = self.predefined_colors.get(color_key, color_key)
+            color_rgb = to_rgb(color_value)
+            channel_settings[ch] = ChannelRenderSettings(
+                color=color_rgb,
+                contrast_min=controls.contrast_min_controls[ch].value,
+                contrast_max=controls.contrast_max_controls[ch].value,
+            )
 
-            # Get channel image
-            ch_image = fov_images[ch]
-
-            # Extract and downsample the visible portion of the channel
-            channel_ds = ch_image[ymin:ymax:downsample_factor, xmin:xmax:downsample_factor]
-
-            # Convert channel to float32 before resizing
-            channel_ds = channel_ds.astype(np.float32)
-
-            # Normalize channel
-            channel_ds = np.clip((channel_ds - contrast_min) / (contrast_max - contrast_min), 0, 1)
-
-            # Apply color mapping
-            combined += (channel_ds[:, :, np.newaxis] * da.from_array(color_rgb))
-
-        # Clip to [0,1] to avoid overflow and materialize as NumPy array for blending
-        combined = da.clip(combined, 0, 1)
-        combined_np = combined.compute()
-
-        # Determine overlay preferences
-        selected_masks = [mask_name for mask_name, cb in self.ui_component.mask_display_controls.items() if cb.value]
-        overlay_mode = self.annotation_overlay_mode if self.annotation_display_enabled else "mask"
-        include_annotation_fill = (
+        annotation_settings = None
+        if (
             self.annotations_available
             and self.annotation_display_enabled
-            and overlay_mode in {"annotation", "combined"}
             and self.active_annotation_name is not None
-        )
-        include_mask_edges = bool(selected_masks) and overlay_mode in {"mask", "combined"}
-
-        # Overlay annotations as translucent fills
-        if include_annotation_fill:
-            annotation_layers = self.annotation_label_cache.get(self.ui_component.image_selector.value, {})
-            annotation_entry = annotation_layers.get(self.active_annotation_name, {}) if annotation_layers else {}
+        ):
+            annotation_layers = self.annotation_label_cache.get(current_fov, {})
+            annotation_entry = annotation_layers.get(self.active_annotation_name, {})
             annotation_ds = annotation_entry.get(downsample_factor)
             if annotation_ds is None and annotation_entry:
-                # Fallback to factor 1 if requested factor missing
                 base_array = annotation_entry.get(1)
                 if base_array is not None:
                     annotation_ds = base_array[::downsample_factor, ::downsample_factor]
-
             if annotation_ds is not None:
-                annotation_region = annotation_ds[ymin_ds:ymax_ds, xmin_ds:xmax_ds]
-                try:
-                    annotation_region_np = annotation_region.compute().astype(np.int32)
-                except AttributeError:
-                    annotation_region_np = np.asarray(annotation_region, dtype=np.int32)
-
-                class_ids = self.annotation_class_ids.get(self.active_annotation_name) or np.unique(annotation_region_np)
-                palette = self.annotation_palettes.get(self.active_annotation_name, {})
-                colormap = build_discrete_colormap(class_ids, palette)
-                if colormap.size:
-                    max_index = colormap.shape[0] - 1
-                    annotation_region_np = np.clip(annotation_region_np, 0, max_index)
-                    annotation_rgb = colormap[annotation_region_np]
-                    alpha = float(np.clip(self.annotation_overlay_alpha, 0.0, 1.0))
-                    combined_np = (1.0 - alpha) * combined_np + alpha * annotation_rgb
-
-        # Overlay mask edges if requested
-        if include_mask_edges:
-            self.load_fov(self.ui_component.image_selector.value)
-            if self.ui_component.image_selector.value in self.mask_cache:
-                for mask_name in selected_masks:
-                    mask_color_rgb = np.array(
-                        to_rgb(self.predefined_colors[self.ui_component.mask_color_controls[mask_name].value]),
-                        dtype=np.float32,
+                class_ids = self.annotation_class_ids.get(self.active_annotation_name)
+                if not class_ids:
+                    cache_source = self.annotation_cache.get(current_fov, {}).get(
+                        self.active_annotation_name
                     )
+                    if cache_source is not None:
+                        class_ids = list(_unique_annotation_values(cache_source))
+                palette = self.annotation_palettes.get(self.active_annotation_name, {})
+                colormap = build_discrete_colormap(class_ids or [0], palette)
+                annotation_settings = AnnotationRenderSettings(
+                    array=annotation_ds,
+                    colormap=colormap,
+                    alpha=self.annotation_overlay_alpha,
+                    mode=self.annotation_overlay_mode,
+                )
 
-                    label_mask_dict = self.label_masks_cache.get(self.ui_component.image_selector.value, {}).get(mask_name)
-                    if not label_mask_dict:
-                        continue
-                    label_mask_ds = label_mask_dict.get(downsample_factor)
-                    if label_mask_ds is None:
-                        continue
-                    edge_mask_full = find_boundaries(label_mask_ds.compute(), mode="inner")
-                    edge_mask = edge_mask_full[ymin_ds:ymax_ds, xmin_ds:xmax_ds]
-                    combined_np[edge_mask] = mask_color_rgb
-            else:
-                print(f"Masks not loaded for FOV '{self.ui_component.image_selector.value}'.")
+        mask_settings = []
+        if self.masks_available:
+            selected_masks = [
+                mask_name for mask_name, cb in controls.mask_display_controls.items() if cb.value
+            ]
+            for mask_name in selected_masks:
+                label_dict = self.label_masks_cache.get(current_fov, {}).get(mask_name)
+                if not label_dict:
+                    continue
+                label_mask_ds = label_dict.get(downsample_factor)
+                if label_mask_ds is None:
+                    continue
+                try:
+                    mask_array = label_mask_ds.compute()
+                except AttributeError:
+                    mask_array = np.asarray(label_mask_ds)
+                if mask_array.size == 0:
+                    continue
+                edge_mask = find_boundaries(mask_array, mode="inner")
+                color_key = controls.mask_color_controls[mask_name].value
+                color_value = self.predefined_colors.get(color_key, color_key)
+                mask_settings.append(
+                    MaskRenderSettings(
+                        array=edge_mask.astype(bool, copy=False),
+                        color=to_rgb(color_value),
+                    )
+                )
 
-        combined_np = np.clip(combined_np, 0, 1)
-        return combined_np.astype(np.float32)
+        return render_fov_to_array(
+            current_fov,
+            fov_images,
+            selected_channels,
+            channel_settings,
+            downsample_factor=downsample_factor,
+            region_xy=region_xy,
+            region_ds=region_ds,
+            annotation=annotation_settings,
+            masks=mask_settings,
+        )
 
     def update_display(self, downsample_factor=8):
         """Update the display with the current downsample factor and visible area."""
@@ -1926,9 +1918,10 @@ class ImageMaskViewer:
                         print(f"Rendering image: size {xmax-xmin}x{ymax-ymin} → {xmax_ds-xmin_ds}x{ymax_ds-ymin_ds}")
                     
                     combined = self.render_image(selected_channels, downsample_factor_adjusted, xym, xym_ds)
-                    
+
                     # Convert to uint8 for reliable saving
-                    img_array = combined.compute()
+                    img_array = np.asarray(combined, dtype=np.float32)
+                    img_array = np.clip(img_array, 0.0, 1.0)
                     img_array = (img_array * 255).astype(np.uint8)
                     
                     # Check image dimensions

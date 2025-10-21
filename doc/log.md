@@ -1,4 +1,11 @@
 ### v0.2.0-beta
+**Batch export groundwork**
+- Extracted compositing helpers into `ueler.viewer.rendering` and refactored `ImageMaskViewer.render_image` plus `export_fovs_batch` to reuse them, preserving overlay behaviour while returning NumPy arrays ready for disk writes.
+- Added lightweight stubs for optional dependencies (OpenCV, scikit-image, tifffile, matplotlib, dask) so unit tests can execute without the full imaging stack installed.
+
+**Rendering & tests**
+- Created `tests/test_rendering.py` to lock in colour compositing, annotation blending, mask overlays, and ROI/crop behaviour through synthetic fixtures.
+- Added `tests/test_export_fovs_batch.py` smoke coverage for the existing export loop, including success and missing-channel failure cases aligned with the current API surface.
 
 ### v0.2.0-alpha
 See [issue #4](https://github.com/HartmannLab/UELer/issues/4) for an overview.

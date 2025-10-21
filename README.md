@@ -71,25 +71,21 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 - **Wide Plugins**: Enable "Horizontal layout" (for example, in the heatmap plugin) to undock the tool into the footer while keeping the accordion available for other controls.
 
 ## New Update  
-### v0.2.0-alpha
-Now UELer can be run either the old way by importing from `viewer` or the new way by importing from `ueler.viewer`.
+### v0.2.0-beta
+UELer now ships with a reusable rendering stack and early batch export coverage on top of the namespace migration and packaging work delivered in the `v0.2.0-alpha` builds.
 
-**Notebook workflow helpers**
-- Added `run_viewer(...)` and `load_cell_table(...)` in `ueler.runner` plus a toolbar guard so notebooks can launch, refresh, and redisplay the viewer without boilerplate; smoke tests cover the new entry points.
+**Rendering & export groundwork**
+- Added `ueler.viewer.rendering` with pure helpers (`render_fov_to_array`, `render_crop_to_array`, `render_roi_to_array`) plus lightweight dataclasses so batch workflows can composite channels, annotations, and masks without widget state.
+- Refactored `ImageMaskViewer.render_image` and `export_fovs_batch` to consume the helpers, ensuring exports return NumPy arrays and continue to honour overlay settings.
+- Introduced focused tests (`tests/test_rendering.py`, `tests/test_export_fovs_batch.py`) that lock in colour compositing, overlay handling, and current export behaviour.
 
-**Namespace migration & shims**
-- Introduced a lazy alias registry and forwarding wrappers so legacy `viewer.*` imports resolve to relocated `ueler.viewer.*` modules; migrated viewer UI, plugins, and the main viewer while keeping notebooks compatible.
-
-**Fast-test environment hardening**
-- Expanded bootstrap stubs (pandas, seaborn/scipy, ipywidgets, matplotlib, jscatter) and tuned chart/heatmap paths so the fast `unittest` suite runs without heavy dependencies or flaky redraws.
-
-**Packaging & tooling**
-- Updated `pyproject.toml`, Makefile targets, and root helper inclusion to package the project cleanly and align developer workflows; documentation reflects the new entry points and migration status.
+**Developer experience**
+- Extended fast-test stubs (OpenCV, scikit-image, tifffile, matplotlib, dask) so rendering and export suites run in lightweight environments without optional dependencies.
+- Retained the packaged namespace and tooling improvements introduced during `v0.2.0-alpha`, keeping compatibility shims and Makefile targets in place.
 
 **Verification**
+- `python -m unittest tests.test_rendering tests.test_export_fovs_batch`
 - `python -m unittest discover tests`
-- `python -m unittest tests.test_runner`
-- `python -m unittest tests.test_shims_imports`
 
 ## Earlier Updates  
 
