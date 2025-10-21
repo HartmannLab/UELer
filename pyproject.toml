@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ueler"
-version = "0.2.0a0"
+version = "0.2.0b0"
 description = "Usability Enhanced Linked Viewer packaged skeleton"
 readme = "README.md"
 requires-python = ">=3.9"
