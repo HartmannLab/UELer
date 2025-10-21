@@ -78,15 +78,17 @@ UELer now ships with a reusable rendering stack and early batch export coverage 
 - Added `ueler.viewer.rendering` with pure helpers (`render_fov_to_array`, `render_crop_to_array`, `render_roi_to_array`) plus lightweight dataclasses so batch workflows can composite channels, annotations, and masks without widget state.
 - Refactored `ImageMaskViewer.render_image` and `export_fovs_batch` to consume the helpers, ensuring exports return NumPy arrays and continue to honour overlay settings.
 - Introduced focused tests (`tests/test_rendering.py`, `tests/test_export_fovs_batch.py`) that lock in colour compositing, overlay handling, and current export behaviour.
-- Built a sequential `ExportJob` runner (`ueler/export/job.py`) and updated `export_fovs_batch` to report structured per-FOV status while supporting cancellation hooks.
+
+**Batch export job runner**
+- Added `ueler.export.job.Job` for serial batch execution with structured result payloads, cancellation hooks, and pluggable progress callbacks.
+- Updated `ImageMaskViewer.export_fovs_batch` to orchestrate exports through the job runner, logging progress via the standard logger while preserving the legacy return contract for existing notebooks.
 
 **Developer experience**
 - Extended fast-test stubs (OpenCV, scikit-image, tifffile, matplotlib, dask) so rendering and export suites run in lightweight environments without optional dependencies.
 - Retained the packaged namespace and tooling improvements introduced during `v0.2.0-alpha`, keeping compatibility shims and Makefile targets in place.
-- Hardened the shared bootstrap to drop placeholder `ipywidgets` modules that miss `IntText` before installing the fast-test stub, avoiding notebook import failures when plugin fallbacks pre-load the namespace.
 
 **Verification**
-- `python -m unittest tests.test_export_job tests.test_rendering tests.test_export_fovs_batch`
+- `python -m unittest tests.test_rendering tests.test_export_fovs_batch`
 - `python -m unittest discover tests`
 
 ## Earlier Updates  

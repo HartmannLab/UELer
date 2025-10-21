@@ -2,15 +2,12 @@
 **Batch export groundwork**
 - Extracted compositing helpers into `ueler.viewer.rendering` and refactored `ImageMaskViewer.render_image` plus `export_fovs_batch` to reuse them, preserving overlay behaviour while returning NumPy arrays ready for disk writes.
 - Added lightweight stubs for optional dependencies (OpenCV, scikit-image, tifffile, matplotlib, dask) so unit tests can execute without the full imaging stack installed.
+- Introduced a synchronous job runner (`ueler.export.job.Job`) with cancellation and structured result reporting, and migrated `ImageMaskViewer.export_fovs_batch` to delegate work to the runner while logging progress through the shared logger.
 
 **Rendering & tests**
 - Created `tests/test_rendering.py` to lock in colour compositing, annotation blending, mask overlays, and ROI/crop behaviour through synthetic fixtures.
 - Added `tests/test_export_fovs_batch.py` smoke coverage for the existing export loop, including success and missing-channel failure cases aligned with the current API surface.
-
-**Export orchestration**
-- Introduced `ueler/export/job.py` with a sequential `ExportJob` runner that tracks per-item status, structured errors, and cancellation flags.
-- Reworked `ImageMaskViewer.export_fovs_batch` to delegate work to the job runner, keeping UI state snapshots intact while emitting structured progress logs.
-- Backed the orchestration layer with `tests/test_export_job.py`, covering success, error, and cancellation scenarios.
+- Authored `tests/test_export_job.py` to exercise success, error, cancellation, and snapshot behaviour for the new job runner API.
 
 ### v0.2.0-alpha
 See [issue #4](https://github.com/HartmannLab/UELer/issues/4) for an overview.
@@ -79,7 +76,6 @@ See [issue #4](https://github.com/HartmannLab/UELer/issues/4) for an overview.
 **Bootstrap dependency coverage**
 - Normalized ad-hoc pandas stubs by grafting the shared test DataFrame/Series helpers whenever modules downgrade `pandas` to `object`, restoring ROI and heatmap helpers.
 - Expanded the ipywidgets shim to surface `allowed_tags`, `allow_new`, and other TagsInput traits that the ROI manager exercises during tag merge scenarios.
-- Taught the bootstrap to discard placeholder `ipywidgets` modules that omit `IntText` (for example, plugin fallbacks) before rebuilding the shared stub, keeping notebook imports aligned with the real widget API when the fast stubs are active.
 
 **Test suite reliability**
 - Pre-imported key plugins and reran `python -m unittest discover tests`, confirming all 44 tests pass under the shared bootstrap.

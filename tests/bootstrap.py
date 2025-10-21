@@ -546,14 +546,6 @@ def _ensure_ipywidgets_stub() -> None:
     if existing is not None and getattr(existing, "__bootstrap_force_stub__", False):
         return
 
-    if existing is not None:
-        essential = ("Widget", "Layout", "IntSlider", "IntText")
-        if not getattr(existing, "__file__", None) and any(
-            not hasattr(existing, name) for name in essential
-        ):
-            sys.modules.pop("ipywidgets", None)
-            existing = None
-
     try:
         import ipywidgets as real_widgets  # type: ignore
     except Exception:

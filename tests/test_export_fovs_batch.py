@@ -49,22 +49,6 @@ if "skimage.measure" not in sys.modules:
 else:
     setattr(skimage_module, "measure", sys.modules["skimage.measure"])
 
-if "skimage.morphology" not in sys.modules:
-    morphology_module = types.ModuleType("skimage.morphology")
-
-    def _binary_dilation_stub(array, footprint=None):
-        return array
-
-    def _disk_stub(radius):
-        return np.ones((max(1, int(radius) * 2 + 1), max(1, int(radius) * 2 + 1)), dtype=bool)
-
-    morphology_module.binary_dilation = _binary_dilation_stub  # type: ignore[attr-defined]
-    morphology_module.disk = _disk_stub  # type: ignore[attr-defined]
-    sys.modules["skimage.morphology"] = morphology_module
-    setattr(skimage_module, "morphology", morphology_module)
-else:
-    setattr(skimage_module, "morphology", sys.modules["skimage.morphology"])
-
 if "skimage.segmentation" not in sys.modules:
     segmentation_module = types.ModuleType("skimage.segmentation")
 

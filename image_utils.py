@@ -31,12 +31,7 @@ from skimage.io import imread, imsave
 from skimage import exposure
 from skimage.transform import resize
 from skimage.segmentation import find_boundaries
-import warnings
-
-try:  # Optional dependency
-    import cv2  # type: ignore
-except ModuleNotFoundError:  # pragma: no cover - environment without OpenCV
-    cv2 = None  # type: ignore[assignment]
+import cv2
 
 import tifffile
 
@@ -538,21 +533,10 @@ def process_images(FOVs, text, marker2display, lbs, gains, gammas, pt, base_dir,
     img_tiled_colored = (img_tiled_colored * 255).astype(np.uint8)
 
     # adding corresponding text to each component image
-    if cv2 is None:
-        warnings.warn("OpenCV (cv2) not installed; skipping channel labels on tiled image", RuntimeWarning)
-    else:
-        for idx in range(len(text)):
-            current_row = idx // m
-            current_col = idx % m
-            cv2.putText(
-                img_tiled_colored,
-                text[idx],
-                (10 + 2048 * current_col, 250 + 2048 * current_row),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                10,
-                (255, 255, 255),
-                20,
-            )
+    for idx in range(len(text)):
+        current_row = idx // m
+        current_col = idx % m
+        cv2.putText(img_tiled_colored, text[idx], (10 + 2048 * current_col, 250 + 2048 * current_row), cv2.FONT_HERSHEY_SIMPLEX, 10, (255, 255, 255), 20)  # Add this line
 
     visualization_dir = os.path.join(base_dir, project_name, "visualization")
     if not os.path.exists(visualization_dir):
@@ -612,12 +596,31 @@ def color_annotations_single_FOV(FOV, file_source, color_map):
 
 
 import numpy as np
-from skimage import color, io
+from skimage import color, io, measure
 from skimage.io import imread
-from skimage.morphology import binary_dilation, disk
+import cv2  # Ensure OpenCV is installed
 import os
 
-def overlay_masks_single_FOV(FOV, image_source, mask_source, output_dir, source_surfix, mask_surfix, thickness = 1, edge_color = [255, 255, 255]):
+def draw_contour(image, contour, thickness, color):
+    """
+    Draw a single contour on the image with the specified thickness and color.
+
+    Args:
+        image (ndarray): The original image.
+        contour (ndarray): Contour points.
+        thickness (int): Thickness of the contour.
+        color (list): Color of the contour in [R, G, B].
+
+    Returns:
+        ndarray: The image with the contour drawn on it.
+    """
+    for point in contour:
+        rr, cc = draw.circle_perimeter(int(point[0]), int(point[1]), radius=thickness, shape=image.shape)
+        valid = (rr >= 0) & (rr < image.shape[0]) & (cc >= 0) & (cc < image.shape[1])
+        image[rr[valid], cc[valid]] = color
+    return image
+
+def overlay_masks_single_FOV(FOV, image_source, mask_source, output_dir, source_surfix, mask_surfix, thickness = 1, color = [255, 255, 255]):
     """
     Overlay masks on the original image for a single FOV.
 
@@ -647,22 +650,23 @@ def overlay_masks_single_FOV(FOV, image_source, mask_source, output_dir, source_
         img = color.gray2rgb(img)
     
     unique_ids = np.unique(mask)
-    img_rgb = img.copy()
-
+    # Convert image to BGR for OpenCV
+    img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    
     for cell_id in unique_ids:
-        if cell_id == 0:
-            continue
-        binary_mask = mask == cell_id
-        edge_mask = find_boundaries(binary_mask, mode="inner")
-        if thickness > 1:
-            edge_mask = binary_dilation(edge_mask, disk(thickness))
-    img_rgb[edge_mask] = edge_color
-
+        binary_mask = np.uint8(mask == cell_id)
+        contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(img_bgr, contours, -1, color, thickness)
+    
+    # Convert back to RGB if saving with skimage.io
+    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+    
+    # Save the modified image
     image_name = f"{FOV}_{mask_surfix}_overlay.png"
     io.imsave(os.path.join(output_dir, image_name), img_rgb)
 
 
-def overlay_masks(image_source, mask_source, output_dir, source_surfix = None, mask_surfix=None, thickness = 1, edge_color = [255, 255, 255]):
+def overlay_masks(image_source, mask_source, output_dir, source_surfix = None, mask_surfix=None, thickness = 1, color = [255, 255, 255]):
     """
     Overlay masks on the original image for all FOVs by calling overlay_masks_single_FOV().
     Args:
@@ -677,7 +681,7 @@ def overlay_masks(image_source, mask_source, output_dir, source_surfix = None, m
     for filename in os.listdir(image_source):
         if filename.endswith('.tiff'):
             FOV = filename.split('.')[0]
-        overlay_masks_single_FOV(FOV, image_source, mask_source, output_dir, source_surfix, mask_surfix, thickness, edge_color)
+            overlay_masks_single_FOV(FOV, image_source, mask_source, output_dir, source_surfix, mask_surfix, thickness, color)
 
 def plot_color_palette(color_palette, title):
     fig, ax = plt.subplots(1, 1, figsize=(0.6, 0.6*len(color_palette)+0.3),
