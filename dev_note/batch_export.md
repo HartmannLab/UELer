@@ -97,13 +97,20 @@ Goals: separate rendering logic from UI state so exports can be invoked from mul
 
 ### Phase 3 — UI plugin & UX
 Goals: provide a user-facing tab to select mode, configure options and start/cancel jobs with progress UI.
-- [ ] Expand `ueler/viewer/plugin/export_fovs.py` to a full plugin class (rename stub `RunFlowsom` to `BatchExportPlugin` or similar):
-  - [ ] Controls: mode selector (Full FOV / Single Cells / ROIs), marker set dropdown, output folder chooser (text + browse), file format selector, per-mode options (cell table filter input, ROI selection widget, image size controls, scale bar options), Start and Cancel buttons
-  - [ ] Status/Output area: job progress bar, per-item log, link to output folder
-  - [ ] When Start is clicked, create a `Job` and call `start()` in a background thread (or `concurrent.futures.ThreadPoolExecutor`) and subscribe to status updates to refresh UI
-  - [ ] Implement a small UX for Single Cells: allow applying a cell table filter string or selecting a subset; provide a preview button that renders one sample crop using the renderer API
-  - [ ] Add explicit controls for scale bar inclusion per-export and a global default. The UI should allow users to choose whether to include a scale bar; when included, the export pipeline will compute a recommended scale bar length that does not exceed 10% of the exported image width (see Phase 4 for details on the scale bar calculation).
-- [ ] Ensure the plugin runs without blocking the main UI; use IPython's event loop-friendly approaches when updating widgets (use `threading` and send status updates back to the main thread via `ipywidgets.Output`/traitlets safely).
+- [x] Expand `ueler/viewer/plugin/export_fovs.py` to a full plugin class (rename stub `RunFlowsom` to `BatchExportPlugin` or similar):
+  - [x] Controls: mode selector (Full FOV / Single Cells / ROIs), marker set dropdown, output folder chooser (text + browse), file format selector, per-mode options (cell table filter input, ROI selection widget, image size controls, scale bar options), Start and Cancel buttons
+  - [x] Status/Output area: job progress bar, per-item log, link to output folder
+  - [x] When Start is clicked, create a `Job` and call `start()` in a background thread (or `concurrent.futures.ThreadPoolExecutor`) and subscribe to status updates to refresh UI
+  - [x] Implement a small UX for Single Cells: allow applying a cell table filter string or selecting a subset; provide a preview button that renders one sample crop using the renderer API
+  - [x] Add explicit controls for scale bar inclusion per-export and a global default. (Computation of recommended scale bar length remains planned for Phase 4.)
+- [x] Ensure the plugin runs without blocking the main UI; use IPython's event loop-friendly approaches when updating widgets (use `threading` and send status updates back to the main thread via `ipywidgets.Output`/traitlets safely).
+
+#### Phase 3 Action Plan (2025-10-21)
+- [x] Replace `RunFlowsom` stub with `BatchExportPlugin` implementing `PluginBase` contract while preserving tab identity.
+- [x] Build UI layout with shared controls (mode, marker set, output path, format, scale bar defaults) and per-mode option containers using traitlets to toggle visibility.
+- [x] Integrate job runner by wiring Start/Cancel buttons to create background `Job` instances using `ThreadPoolExecutor` and forward progress via traitlets observers.
+- [x] Implement per-mode data binding: Full FOV uses selected FOVs, Single Cells consumes filter text and preview, ROIs binds to ROI manager selection widget.
+- [x] Surface progress/log output via `ipywidgets.Output` and status bar, ensuring thread-safe updates on the main event loop.
 
 ### Phase 4 — Per-ROI and Per-Cell features
 Goals: support ROI-level overrides and per-cell crops with scale bars and marker overlays.

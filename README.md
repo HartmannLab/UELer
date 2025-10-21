@@ -71,25 +71,25 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 - **Wide Plugins**: Enable "Horizontal layout" (for example, in the heatmap plugin) to undock the tool into the footer while keeping the accordion available for other controls.
 
 ## New Update  
-### v0.2.0-beta
-UELer now ships with a reusable rendering stack and early batch export coverage on top of the namespace migration and packaging work delivered in the `v0.2.0-alpha` builds.
+### v0.2.0-rc1
+The release candidate combines the new Batch Export UI with the rendering and job runner refactors introduced across the `v0.2.0-alpha` and `v0.2.0-beta` milestones.
 
-**Rendering & export groundwork**
-- Added `ueler.viewer.rendering` with pure helpers (`render_fov_to_array`, `render_crop_to_array`, `render_roi_to_array`) plus lightweight dataclasses so batch workflows can composite channels, annotations, and masks without widget state.
-- Refactored `ImageMaskViewer.render_image` and `export_fovs_batch` to consume the helpers, ensuring exports return NumPy arrays and continue to honour overlay settings.
-- Introduced focused tests (`tests/test_rendering.py`, `tests/test_export_fovs_batch.py`) that lock in colour compositing, overlay handling, and current export behaviour.
+**Batch export UI & UX**
+- Replaced the placeholder plugin with `BatchExportPlugin`, offering mode selection (Full FOV, Single Cells, ROIs), marker profiles, output configuration, and asynchronous Start/Cancel controls with progress feedback.
+- Added per-mode panels with cell filtering, ROI selectors, crop sizing, and a single-cell preview workflow that uses the shared rendering helpers before launching full jobs.
+- Surfaced scale-bar toggles and PDF/bitmap format handling; scale-bar sizing hooks are in place ahead of the Phase 4 implementation.
 
-**Batch export job runner**
-- Added `ueler.export.job.Job` for serial batch execution with structured result payloads, cancellation hooks, and pluggable progress callbacks.
-- Updated `ImageMaskViewer.export_fovs_batch` to orchestrate exports through the job runner, logging progress via the standard logger while preserving the legacy return contract for existing notebooks.
+**Rendering & job orchestration**
+- Reuse the pure compositing helpers (`render_fov_to_array`, `render_crop_to_array`, `render_roi_to_array`) for all export modes, ensuring consistent colour/overlay output without UI state coupling.
+- Drive exports through `ueler.export.job.Job`, capturing structured per-item results, cancellation, and observable progress that feeds the new UI components.
 
 **Developer experience**
-- Extended fast-test stubs (OpenCV, scikit-image, tifffile, matplotlib, dask) so rendering and export suites run in lightweight environments without optional dependencies.
-- Retained the packaged namespace and tooling improvements introduced during `v0.2.0-alpha`, keeping compatibility shims and Makefile targets in place.
+- Expanded the lightweight matplotlib bootstrap to stub text, backend, patches, widgets, and `mpl_toolkits.axes_grid1` helpers so export suites run without heavy graphics dependencies.
+- Kept the namespace migration, compatibility shims, packaging metadata, and Makefile utilities introduced earlier in the `v0.2.0` cycle.
 
 **Verification**
-- `python -m unittest tests.test_rendering tests.test_export_fovs_batch`
-- `python -m unittest discover tests`
+- `python -m unittest tests.test_export_job tests.test_export_fovs_batch`
+- `python -m unittest tests.test_rendering`
 
 ## Earlier Updates  
 

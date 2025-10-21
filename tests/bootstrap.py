@@ -722,6 +722,7 @@ def _ensure_matplotlib_stub() -> None:
         return
 
     matplotlib_stub = types.ModuleType(_MATPLOTLIB)
+    matplotlib_stub.__path__ = []  # type: ignore[attr-defined]
     pyplot_stub = types.ModuleType(_MATPLOTLIB_PYPLOT)
 
     class _Canvas:
@@ -771,9 +772,89 @@ def _ensure_matplotlib_stub() -> None:
 
     pyplot_stub.subplots = _subplots  # type: ignore[attr-defined]
     pyplot_stub.show = _show  # type: ignore[attr-defined]
+    pyplot_stub.close = lambda *_args, **_kwargs: None  # type: ignore[attr-defined]
     matplotlib_stub.pyplot = pyplot_stub  # type: ignore[attr-defined]
     sys.modules[_MATPLOTLIB] = matplotlib_stub
     sys.modules[_MATPLOTLIB_PYPLOT] = pyplot_stub
+
+    text_module_name = f"{_MATPLOTLIB}.text"
+    text_stub = types.ModuleType(text_module_name)
+
+    class _Annotation:  # pragma: no cover - simple stub
+        def __init__(self, *_args, **_kwargs):
+            return None
+
+    text_stub.Annotation = _Annotation  # type: ignore[attr-defined]
+    matplotlib_stub.text = text_stub  # type: ignore[attr-defined]
+    sys.modules[text_module_name] = text_stub
+
+    backend_bases_name = f"{_MATPLOTLIB}.backend_bases"
+    backend_stub = types.ModuleType(backend_bases_name)
+
+    class _MouseButton:  # pragma: no cover - simple stub
+        LEFT = 1
+        RIGHT = 3
+        MIDDLE = 2
+
+    backend_stub.MouseButton = _MouseButton  # type: ignore[attr-defined]
+    matplotlib_stub.backend_bases = backend_stub  # type: ignore[attr-defined]
+    sys.modules[backend_bases_name] = backend_stub
+
+    patches_name = f"{_MATPLOTLIB}.patches"
+    patches_stub = types.ModuleType(patches_name)
+
+    class _Rectangle:  # pragma: no cover - simple stub
+        def __init__(self, *_args, **_kwargs):
+            return None
+
+    patches_stub.Rectangle = _Rectangle  # type: ignore[attr-defined]
+    class _Polygon:  # pragma: no cover - simple stub
+        def __init__(self, *_args, **_kwargs):
+            return None
+
+    patches_stub.Polygon = _Polygon  # type: ignore[attr-defined]
+    matplotlib_stub.patches = patches_stub  # type: ignore[attr-defined]
+    sys.modules[patches_name] = patches_stub
+
+    axes_grid1_name = "mpl_toolkits.axes_grid1"
+    axes_grid1_stub = types.ModuleType(axes_grid1_name)
+
+    class _AxesLocator:  # pragma: no cover - simple stub
+        def append_axes(self, *_args, **_kwargs):
+            return SimpleNamespace()
+
+    def _make_axes_locatable(*_args, **_kwargs):  # pragma: no cover - simple stub
+        return _AxesLocator()
+
+    axes_grid1_stub.make_axes_locatable = _make_axes_locatable  # type: ignore[attr-defined]
+    anchored_name = f"{axes_grid1_name}.anchored_artists"
+    anchored_stub = types.ModuleType(anchored_name)
+
+    class _AnchoredSizeBar:  # pragma: no cover - simple stub
+        def __init__(self, *_args, **_kwargs):
+            return None
+
+    anchored_stub.AnchoredSizeBar = _AnchoredSizeBar  # type: ignore[attr-defined]
+    axes_grid1_stub.anchored_artists = anchored_stub  # type: ignore[attr-defined]
+    sys.modules[axes_grid1_name] = axes_grid1_stub
+    sys.modules[anchored_name] = anchored_stub
+
+    widgets_name = f"{_MATPLOTLIB}.widgets"
+    widgets_stub = types.ModuleType(widgets_name)
+
+    class _RectangleSelector:  # pragma: no cover - simple stub
+        def __init__(self, *_args, **_kwargs):
+            self.to_draw = SimpleNamespace(set_visible=lambda *_a, **_k: None)
+
+        def set_active(self, *_args, **_kwargs):
+            return None
+
+        def disconnect_events(self):  # pragma: no cover - simple stub
+            return None
+
+    widgets_stub.RectangleSelector = _RectangleSelector  # type: ignore[attr-defined]
+    matplotlib_stub.widgets = widgets_stub  # type: ignore[attr-defined]
+    sys.modules[widgets_name] = widgets_stub
 
 def _install_seaborn_stub() -> None:
     sys.modules.pop(_SEABORN, None)

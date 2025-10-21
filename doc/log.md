@@ -1,3 +1,17 @@
+### v0.2.0-rc1
+**Batch export UI**
+- Replaced the placeholder export plugin with `BatchExportPlugin`, adding mode-aware controls, marker set selection, output location tools, and asynchronous Start/Cancel handling with progress, status messages, and output links.
+- Added mode-specific panels for Full FOV, Single Cells, and ROIs, including cell table filters, ROI selectors, crop sizing, and a Matplotlib-backed preview to validate single-cell settings before starting long runs.
+- Surfaced scale-bar toggles and DPI/downsample controls across all export modes; the pipeline records the requested ratios ahead of the Phase 4 sizing work.
+
+**Job integration & rendering reuse**
+- Wired the plugin to build `Job` items per mode so exports share structured progress, cancellation, and per-item result tracking without blocking the UI thread.
+- Reused the pure rendering helpers for FOV, crop, and ROI exports, ensuring consistent compositing across interactive previews and background jobs.
+
+**Matplotlib bootstrap & planning docs**
+- Expanded the test bootstrap with stubs for `matplotlib.text`, `matplotlib.backend_bases`, `matplotlib.patches`, `matplotlib.widgets`, and `mpl_toolkits.axes_grid1` so export suites run in dependency-light environments.
+- Marked the Phase 3 checklist complete in `dev_note/batch_export.md` and noted the pending scale-bar sizing follow-up planned for Phase 4.
+
 ### v0.2.0-beta
 **Batch export groundwork**
 - Extracted compositing helpers into `ueler.viewer.rendering` and refactored `ImageMaskViewer.render_image` plus `export_fovs_batch` to reuse them, preserving overlay behaviour while returning NumPy arrays ready for disk writes.
