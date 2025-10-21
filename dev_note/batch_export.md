@@ -63,28 +63,30 @@ This plan describes a phased migration from the current minimal placeholder and 
 Goals: separate rendering logic from UI state so exports can be invoked from multiple entry points.
 
 #### Phase 1 Action Plan (2025-10-21)
-- [x] Capture the current `export_fovs_batch` behaviour with smoke tests covering a success path and a missing-channel failure.
-- [x] Extract pure rendering helpers (`render_fov_to_array`, `render_crop_to_array`, `render_roi_to_array`) so downstream code no longer relies on widget state.
-- [x] Update `ImageMaskViewer.render_image` to delegate to the new helpers and keep legacy callers working.
-- [x] Back the renderer refactor with unit tests using synthetic fixtures to cover colour blending, annotation overlays, and mask outlines.
-
-- [x] Add small unit tests for `export_fovs_batch` happy path and one failure mode (missing channel) to document current behavior prior to refactor.
-- [x] Extract a renderer API in `ueler/image_utils.py` or `ueler/viewer/rendering.py` with signatures such as:
-  - [x] `render_fov_to_array(fov_name, marker_set, downsample_factor, xym=None, xym_ds=None, mask_options=None, scale_bar=None) -> numpy.ndarray`
-  - [x] `render_crop_to_array(fov_name, marker_set, center_xy, size_px, downsample_factor, ...) -> numpy.ndarray`
-  - [x] `render_roi_to_array(fov_name, roi_definition, marker_set, overrides...) -> numpy.ndarray`
-  - [x] Note: renderer functions used by the export pipeline should return image arrays but must NOT display or show figures during export. Any Matplotlib figure objects used internally should be closed or rendered off-screen to avoid UI popups.
-- [x] Update `ImageMaskViewer.render_image` to call the new renderer; keep a thin compatibility shim temporarily.
-- [x] Add unit tests for the new renderer functions (use small synthetic images from `tests/run_viewer_dataset` or tiny fixtures).
+- [x] Capture current `export_fovs_batch` behaviour with smoke tests covering:
+  - [x] Success path
+  - [x] Missing-channel failure mode
+- [x] Extract pure rendering helpers (`render_fov_to_array`, `render_crop_to_array`, `render_roi_to_array`) so downstream code no longer depends on widget state.
+  - [x] Implement these in `ueler/image_utils.py` or `ueler/viewer/rendering.py` with signatures such as:
+    - `render_fov_to_array(fov_name, marker_set, downsample_factor, xym=None, xym_ds=None, mask_options=None, scale_bar=None) -> np.ndarray`
+    - `render_crop_to_array(fov_name, marker_set, center_xy, size_px, downsample_factor, ...) -> np.ndarray`
+    - `render_roi_to_array(fov_name, roi_definition, marker_set, overrides...) -> np.ndarray`
+  - [x] Ensure renderer functions return image arrays without displaying figures; any Matplotlib objects must render off-screen or be closed.
+- [x] Update `ImageMaskViewer.render_image` to delegate to the new renderer and maintain backward compatibility via a thin shim.
+- [x] Back the renderer refactor with unit tests using synthetic fixtures to cover:
+  - [x] Colour blending
+  - [x] Annotation overlays
+  - [x] Mask outlines
 
 ### Phase 2 — Build export job runner and API (non-UI)
 Goals: provide a programmatic API that runs exports, reports progress, and supports cancellation.
-- [ ] Create `ueler/export/job.py` with a simple `Job` class:
-  - [ ] Inputs: mode, items (list of fov / cell / ROI descriptors), marker_set, output_dir, file_format, overrides
-  - [ ] Methods: `start()`, `cancel()`, `status()` — `status()` returns per-item states and overall progress
-  - [ ] Implementation: `start()` runs a worker loop that calls the renderer functions and writes files, catching exceptions and updating per-item results
-- [ ] Wire `ImageMaskViewer.export_fovs_batch` to use the new Job runner internally (backwards compatible) or provide a thin adapter.
-- [ ] Add logging and structured error reporting (error type, trace) rather than only string messages.
+- [x] Create `ueler/export/job.py` with a simple `Job` class:
+  - [x] Inputs: mode, items (list of fov / cell / ROI descriptors), marker_set, output_dir, file_format, overrides
+  - [x] Methods: `start()`, `cancel()`, `status()` — `status()` returns per-item states and overall progress
+  - [x] Implementation: `start()` runs a worker loop that calls the renderer functions and writes files, catching exceptions and updating per-item results
+- [x] Wire `ImageMaskViewer.export_fovs_batch` to use the new Job runner internally (backwards compatible) or provide a thin adapter.
+- [x] Add logging and structured error reporting (error type, trace) rather than only string messages.
+- [x] Add unit coverage for the Job runner (success, failure, cancellation) to lock in the orchestration contract.
 
 ### Phase 3 — UI plugin & UX
 Goals: provide a user-facing tab to select mode, configure options and start/cancel jobs with progress UI.

@@ -7,6 +7,11 @@
 - Created `tests/test_rendering.py` to lock in colour compositing, annotation blending, mask overlays, and ROI/crop behaviour through synthetic fixtures.
 - Added `tests/test_export_fovs_batch.py` smoke coverage for the existing export loop, including success and missing-channel failure cases aligned with the current API surface.
 
+**Export orchestration**
+- Introduced `ueler/export/job.py` with a sequential `ExportJob` runner that tracks per-item status, structured errors, and cancellation flags.
+- Reworked `ImageMaskViewer.export_fovs_batch` to delegate work to the job runner, keeping UI state snapshots intact while emitting structured progress logs.
+- Backed the orchestration layer with `tests/test_export_job.py`, covering success, error, and cancellation scenarios.
+
 ### v0.2.0-alpha
 See [issue #4](https://github.com/HartmannLab/UELer/issues/4) for an overview.
 

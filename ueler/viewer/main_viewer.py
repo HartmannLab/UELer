@@ -1,8 +1,9 @@
 # viewer.py
 
+import logging
 import os
 import numpy as np
-from typing import Optional
+from typing import Any, Dict, Optional
 import matplotlib.pyplot as plt
 from matplotlib.colors import to_rgb
 from matplotlib.text import Annotation
@@ -52,6 +53,7 @@ from ueler.viewer.rendering import (
     MaskRenderSettings,
     render_fov_to_array,
 )
+from ueler.export import ExportJob
 # viewer/main_viewer.py
 
 from weakref import WeakKeyDictionary
@@ -71,253 +73,259 @@ __all__ = ["ImageMaskViewer"]
 
 
 def _unique_annotation_values(array):
-    """Return the sorted unique values from an annotation array."""
-    try:
-        data = array.compute()
-    except AttributeError:
-        data = np.asarray(array)
-    except Exception:
-        return np.array([], dtype=np.int32)
+    def export_fovs_batch(
+        self,
+        marker_set_name,
+        output_dir=None,
+        fovs=None,
+        surfix=None,
+        file_format="png",
+        downsample_factor=None,
+        dpi=300,
+        figure_size=None,
+        show_progress=True,
+    ):
+        """Export multiple FOVs using a specified marker set."""
 
-    try:
-        values = np.unique(np.asarray(data))
-    except Exception:
-        return np.array([], dtype=np.int32)
+        import time
+        from IPython.display import clear_output
 
-    finite_values = values[np.isfinite(values)] if np.issubdtype(values.dtype, np.inexact) else values
-    if finite_values.size == 0:
-        return np.array([], dtype=np.int32)
-    return finite_values.astype(np.int32, copy=False)
+        logger = logging.getLogger(__name__)
+        results: Dict[str, Any] = {}
 
-class ImageMaskViewer:
-    def __init__(self, base_folder, masks_folder=None, annotations_folder=None):
-        self.initialized = False
-        self.base_folder = base_folder
-        self.masks_folder = masks_folder
-        if annotations_folder is None:
-            candidate = os.path.join(self.base_folder, "annotations")
-            self.annotations_folder = candidate if os.path.isdir(candidate) else None
-        else:
-            self.annotations_folder = annotations_folder
+        if marker_set_name not in self.marker_sets:
+            raise ValueError(f"Marker set '{marker_set_name}' not found.")
 
-        # Add this flag
-        self.masks_available = self.masks_folder is not None
-        self.annotations_available = self.annotations_folder is not None
+        if output_dir is None:
+            output_dir = os.path.join(self.base_folder, f"exported_{marker_set_name}")
+        os.makedirs(output_dir, exist_ok=True)
 
-        # This is the surfix for the mask to be linked
-        self.mask_key = None
+        if fovs is None:
+            fovs = list(self.available_fovs)
+        elif isinstance(fovs, str):
+            fovs = [fovs]
 
-        # Initialize the cell table
-        self.cell_table = None
+        if downsample_factor is None:
+            downsample_factor = self.current_downsample_factor
 
-        # Specifiy the keys for the x, y and label columns in the cell table
-        self.x_key = "X"
-        self.y_key = "Y"
-        self.label_key = "label"
-        self.mask_key = "mask"
-        self.fov_key = "fov"
+        current_state = {
+            "fov": self.ui_component.image_selector.value,
+            "channels": self.ui_component.channel_selector.value,
+            "downsample_factor": self.current_downsample_factor,
+            "channel_settings": {},
+            "mask_settings": {},
+        }
 
-        self._debug = False
+        for ch in current_state["channels"]:
+            if ch in self.ui_component.color_controls:
+                current_state["channel_settings"][ch] = {
+                    "color": self.ui_component.color_controls[ch].value,
+                    "contrast_min": self.ui_component.contrast_min_controls[ch].value,
+                    "contrast_max": self.ui_component.contrast_max_controls[ch].value,
+                }
 
-        # Initialize variables
-        self.available_fovs = [fov for fov in os.listdir(self.base_folder)
-                               if os.path.isdir(os.path.join(self.base_folder, fov))]
-        if not self.available_fovs:
-            raise ValueError("No FOVs found in the base folder.")
+        if self.masks_available:
+            for mask_name in self.mask_names:
+                if mask_name in self.ui_component.mask_display_controls:
+                    current_state["mask_settings"][mask_name] = {
+                        "visible": self.ui_component.mask_display_controls[mask_name].value,
+                        "color": (
+                            self.ui_component.mask_color_controls[mask_name].value
+                            if mask_name in self.ui_component.mask_color_controls
+                            else None
+                        ),
+                    }
 
-        # Initialize caches and other variables
-        self.max_cache_size = 3
+        original_figsize = self.image_display.fig.get_size_inches()
+        total_fovs = len(fovs)
 
-        # Initialize current downsample factor
-        self.downsample_factors = DOWNSAMPLE_FACTORS
-        self.current_downsample_factor = 8  # Initial downsample factor
+        try:
+            marker_set = self.marker_sets[marker_set_name]
+            selected_channels = tuple(marker_set["selected_channels"])
+            channel_settings = marker_set["channel_settings"]
 
-        self.image_cache = OrderedDict()
-        self.mask_cache = OrderedDict()
-        self.edge_masks_cache = {}
-        self.label_masks_cache = {}
-        self.annotation_cache = OrderedDict()
-        self.annotation_label_cache = {}
-        self.annotation_names_set = set()
-        self.annotation_names = []
-        self.annotation_palettes = {}
-        self.annotation_class_labels = {}
-        self.annotation_class_ids = {}
-        self.annotation_display_enabled = False
-        self.active_annotation_name: Optional[str] = None
-        self.annotation_overlay_mode = "combined"
-        self.annotation_label_display_mode = "id"
-        self.annotation_overlay_alpha = 0.5
-        self._control_section_titles = []
+            self.ui_component.channel_selector.value = tuple(selected_channels)
+            self.update_controls(None)
 
-        self.channel_names_set = set()
-        self.channel_max_values = {}
-        self.mask_names_set = set()
-        self.predefined_colors = PREDEFINED_COLORS
-        self._status_image = {}
+            for ch in selected_channels:
+                if ch in self.ui_component.color_controls and ch in channel_settings:
+                    self.ui_component.color_controls[ch].value = channel_settings[ch]["color"]
+                    self.ui_component.contrast_min_controls[ch].value = channel_settings[ch]["contrast_min"]
+                    self.ui_component.contrast_max_controls[ch].value = channel_settings[ch]["contrast_max"]
 
-        # ROI management
-        self.roi_manager = ROIManager(self.base_folder)
-        self.roi_plugin: Optional[ROIManagerPlugin] = None
+            if figure_size is not None:
+                self.image_display.fig.set_size_inches(figure_size)
 
-        # Initialize marker sets
-        self.marker_sets = {}
+            start_time = time.time()
+            items = [
+                {"id": fov, "fov": fov, "index": index, "total": total_fovs}
+                for index, fov in enumerate(fovs, start=1)
+            ]
 
-        # Initialize current_label_masks
-        self.current_label_masks = {}
+            def _export_worker(payload: Dict[str, Any]) -> str:
+                index = payload["index"]
+                total = payload["total"]
+                fov = payload["fov"]
 
-        # Load the status images
-        self.load_status_images()
+                if show_progress:
+                    clear_output(wait=True)
+                    print(f"Exporting FOV {index}/{total}: {fov}")
+                    print(f"Time elapsed: {time.time() - start_time:.2f} seconds")
 
-        # Load the first FOV and set image dimensions
-        self.load_fov(self.available_fovs[1])
-        fov_images = self.image_cache[self.available_fovs[1]]
-        first_channel_image = next(iter(fov_images.values()))
-        self.height, self.width = first_channel_image.shape
+                temp_current_fov = self.ui_component.image_selector.value
+                try:
+                    self.load_fov(fov, selected_channels)
+                    fov_images = self.image_cache[fov]
 
-        # Calculate the downsample factor based on image size
-        self.current_downsample_factor = calculate_downsample_factor(self.width, self.height)
+                    missing_channels = [
+                        ch for ch in selected_channels if ch not in fov_images or fov_images[ch] is None
+                    ]
+                    if missing_channels:
+                        raise ValueError(
+                            f"Missing or failed to load channels: {', '.join(missing_channels)}"
+                        )
 
-        # Ensure the downsample factor is one of the allowed factors
-        if self.current_downsample_factor not in self.downsample_factors:
-            # Choose the closest allowed downsample factor
-            self.current_downsample_factor = max(
-                [factor for factor in self.downsample_factors if factor <= self.current_downsample_factor],
-                default=1
+                    first_channel = next(
+                        (fov_images[ch] for ch in selected_channels if fov_images[ch] is not None),
+                        None,
+                    )
+                    if first_channel is None:
+                        raise ValueError("No valid channels found in this FOV")
+
+                    height, width = first_channel.shape
+                    self.ui_component.image_selector.value = fov
+
+                    downsample_factor_adjusted = min(
+                        downsample_factor,
+                        min(max(1, width // 2), max(1, height // 2)),
+                    )
+                    if downsample_factor_adjusted < 1:
+                        downsample_factor_adjusted = 1
+
+                    if show_progress:
+                        print(f"Using downsample factor: {downsample_factor_adjusted}")
+
+                    xmin, xmax, ymin, ymax = 0, width, 0, height
+                    xmin_ds = xmin // downsample_factor_adjusted
+                    xmax_ds = xmin_ds + (xmax - xmin) // downsample_factor_adjusted
+                    ymin_ds = ymin // downsample_factor_adjusted
+                    ymax_ds = ymin_ds + (ymax - ymin) // downsample_factor_adjusted
+
+                    if show_progress:
+                        print(
+                            "Rendering image: size "
+                            f"{xmax - xmin}x{ymax - ymin} → {xmax_ds - xmin_ds}x{ymax_ds - ymin_ds}"
+                        )
+
+                    combined = self.render_image(
+                        selected_channels,
+                        downsample_factor_adjusted,
+                        (xmin, xmax, ymin, ymax),
+                        (xmin_ds, xmax_ds, ymin_ds, ymax_ds),
+                    )
+
+                    img_array = np.asarray(combined, dtype=np.float32)
+                    img_array = np.clip(img_array, 0.0, 1.0)
+                    img_array = (img_array * 255).astype(np.uint8)
+
+                    if img_array.shape[0] < 2 or img_array.shape[1] < 2:
+                        raise ValueError(f"Image too small: {img_array.shape}")
+
+                    filename = (
+                        f"{fov}_{surfix}.{file_format}"
+                        if surfix is not None
+                        else f"{fov}.{file_format}"
+                    )
+                    output_path = os.path.join(output_dir, filename)
+                    imsave(output_path, img_array)
+
+                    if show_progress:
+                        print(f"Successfully exported {fov} to {output_path}")
+
+                    return output_path
+                finally:
+                    self.ui_component.image_selector.value = temp_current_fov
+
+            job = ExportJob(
+                mode="full_fov",
+                items=items,
+                output_dir=output_dir,
+                file_format=file_format,
+                worker=_export_worker,
+                overrides={
+                    "marker_set": marker_set_name,
+                    "downsample_factor": downsample_factor,
+                    "dpi": dpi,
+                    "figure_size": figure_size,
+                    "surfix": surfix,
+                },
+                logger=logger,
             )
 
-        # Initialize image output and image display
-        self.image_output = Output()
-        with self.image_output:
-            self.image_display = ImageDisplay(self.width, self.height)
-            self.image_display.main_viewer = self
-            plt.show()
+            job.start()
+            snapshot = job.status()
 
-        # Initialize widgets
-        create_widgets(self)
-        self.annotation_palette_editor = AnnotationPaletteEditor(
-            self.apply_annotation_palette_changes,
-            self.close_annotation_editor,
-        )
-        self.ui_component.annotation_editor_host.children = (self.annotation_palette_editor,)
-        self.ui_component.annotation_editor_host.layout.display = ""
-        self._refresh_annotation_control_states()
+            for entry in snapshot["items"]:
+                fov_name = entry["item"]["fov"]
+                status_value = entry["status"]
+                if status_value == "succeeded":
+                    results[fov_name] = True
+                elif status_value == "failed":
+                    error = entry.get("error") or {}
+                    error_type = error.get("type") or "Error"
+                    message = error.get("message") or ""
+                    combined_message = f"{error_type}: {message}".strip()
+                    results[fov_name] = combined_message or error_type
+                elif status_value == "cancelled":
+                    results[fov_name] = "Cancelled"
+                else:
+                    results[fov_name] = status_value
 
-        # Setup widget observers
-        self.setup_widget_observers()
+            if show_progress:
+                clear_output(wait=True)
+                successful = sum(1 for value in results.values() if value is True)
+                print(f"Export complete: {successful}/{total_fovs} FOVs exported successfully")
+                failures = [(name, value) for name, value in results.items() if value is not True]
+                if failures:
+                    print("The following FOVs had errors:")
+                    for name, error in failures:
+                        print(f"  {name}: {error}")
 
-        # Setup event connections
-        self.setup_event_connections()
+            logger.info(
+                "Batch export finished (marker_set=%s, state=%s, succeeded=%d, failed=%d, cancelled=%d)",
+                marker_set_name,
+                snapshot["state"],
+                sum(1 for entry in snapshot["items"] if entry["status"] == "succeeded"),
+                sum(1 for entry in snapshot["items"] if entry["status"] == "failed"),
+                sum(1 for entry in snapshot["items"] if entry["status"] == "cancelled"),
+            )
 
-        # Initial setup
-        self.update_marker_set_dropdown()
-        self.update_controls(None)
-        self.on_image_change(None)
-        self.update_display(self.current_downsample_factor)
+        finally:
+            self.image_display.fig.set_size_inches(original_figsize)
 
-        self.SidePlots = SimpleNamespace()
-        self.BottomPlots = SimpleNamespace()
+            self.ui_component.image_selector.value = current_state["fov"]
+            self.ui_component.channel_selector.value = current_state["channels"]
+            self.update_controls(None)
 
-        self.load_widget_states(os.path.join(self.base_folder, ".UELer", 'widget_states.json'))
+            for ch, settings in current_state["channel_settings"].items():
+                if ch in self.ui_component.color_controls:
+                    self.ui_component.color_controls[ch].value = settings["color"]
+                    self.ui_component.contrast_min_controls[ch].value = settings["contrast_min"]
+                    self.ui_component.contrast_max_controls[ch].value = settings["contrast_max"]
 
-        # Setup attribute observers
-        self.setup_attr_observers()
-
-        self.initialized = True
-    
-    def after_all_plugins_loaded(self):
-        # loop through all the attributes of self.SidePlots, call the `after_all_plugins_loaded`` method
-        for attr_name in dir(self.SidePlots):
-            attr = getattr(self.SidePlots, attr_name)
-            if isinstance(attr, PluginBase):
-                if self._debug:
-                    print(f"Calling after_all_plugins_loaded for {attr_name}")
-                attr.after_all_plugins_loaded()
-            else:
-                if self._debug:
-                    print(f"Skipping {attr_name}")
-
-
-    def dynamically_load_plugins(self):
-        plugin_dir = os.path.join(os.path.dirname(__file__), 'plugin')
-        for filename in os.listdir(plugin_dir):
-            if filename.endswith('.py') and not filename.startswith('_'):
-                if self._debug:
-                    print(f"Loading plugin: {filename}")
-                module_name = filename[:-3]
-                module_path = f"ueler.viewer.plugin.{module_name}"
-                module = importlib.import_module(module_path)
-
-                for attr_name in dir(module):
-                    plugin_candidate = getattr(module, attr_name)
+            if self.masks_available:
+                for mask_name, settings in current_state["mask_settings"].items():
+                    if mask_name in self.ui_component.mask_display_controls:
+                        self.ui_component.mask_display_controls[mask_name].value = settings["visible"]
                     if (
-                        isinstance(plugin_candidate, type)
-                        and issubclass(plugin_candidate, PluginBase)
-                        and plugin_candidate is not PluginBase
+                        mask_name in self.ui_component.mask_color_controls
+                        and settings["color"] is not None
                     ):
-                        instance = plugin_candidate(self, 6, 3)
-                        self.SidePlots.__dict__[f"{module_name}_output"] = instance
-                        if module_name == 'roi_manager_plugin':
-                            self.roi_plugin = instance
-                        
+                        self.ui_component.mask_color_controls[mask_name].value = settings["color"]
 
-    def setup_event_connections(self):
-        # Handle cache size changes
-        self.ui_component.cache_size_input.observe(self.on_cache_size_change, names='value')
+            self.update_display(current_state["downsample_factor"])
 
-
-    def on_cache_size_change(self, change):
-        """Handle changes to the cache size input."""
-        self.max_cache_size = self.ui_component.cache_size_input.value
-        print(f"Cache size set to {self.max_cache_size}.")
-
-        # Trim caches if necessary
-        while len(self.image_cache) > self.max_cache_size:
-            removed_fov, _ = self.image_cache.popitem(last=False)
-            print(f"Removed FOV '{removed_fov}' from image cache due to cache size limit.")
-
-        while len(self.mask_cache) > self.max_cache_size:
-            removed_fov, _ = self.mask_cache.popitem(last=False)
-            self.edge_masks_cache.pop(removed_fov, None)
-            self.label_masks_cache.pop(removed_fov, None)
-            print(f"Removed FOV '{removed_fov}' from mask cache due to cache size limit.")
-
-        while len(self.annotation_cache) > self.max_cache_size:
-            removed_fov, _ = self.annotation_cache.popitem(last=False)
-            self.annotation_label_cache.pop(removed_fov, None)
-            print(f"Removed FOV '{removed_fov}' from annotation cache due to cache size limit.")
-
-    def load_fov(self, fov_name, requested_channels=None):
-        """Load images and masks for a FOV into the cache."""
-        # Load images if not in cache
-        if fov_name not in self.image_cache:
-            # Load channel structures
-            channels = load_channel_struct_fov(fov_name, self.base_folder)
-            # Add to cache
-            self.image_cache[fov_name] = channels
-
-        # If the requested channels are not provided, take the first channel
-        if requested_channels is None:
-            channel_list = list(self.image_cache[fov_name].keys())
-            requested_channels = (channel_list[0],)
-
-        for ch in requested_channels:
-            # for self.image_cache[fov_name][ch] is None, load the image
-            if self.image_cache[fov_name][ch] is None:
-                # Load images for FOV
-                self.image_cache[fov_name][ch] = load_one_channel_fov(fov_name, self.base_folder, self.channel_max_values, ch)
-                self._sync_channel_controls(ch)
-
-        self.image_cache.move_to_end(fov_name)
-
-        # Remove least recently used if cache exceeds max size
-        while len(self.image_cache) > self.max_cache_size:
-            removed_fov, _ = self.image_cache.popitem(last=False)
-            print(f"Removed FOV '{removed_fov}' from image cache.")
-
-        else:
-            # Move the accessed FOV to the end to mark it as recently used
-            self.image_cache.move_to_end(fov_name)
+        return results
 
         # Load masks only if masks are available
         if self.masks_available:
