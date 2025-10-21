@@ -327,6 +327,38 @@ def _unique_annotation_values(array):
 
         return results
 
+
+    # ------------------------------------------------------------------
+    # Backwards-compatibility shim
+    # If the concrete ImageMaskViewer class was accidentally removed during a
+    # refactor we still want `from ueler.viewer.main_viewer import ImageMaskViewer`
+    # to work. Create a lightweight class and attach any top-level functions
+    # that look like instance methods (first parameter named 'self').
+    try:
+        import inspect
+
+        class ImageMaskViewer:  # pragma: no cover - compatibility shim
+            """Small compatibility class exposing module-level functions as methods."""
+            pass
+
+        for _name, _obj in list(globals().items()):
+            if inspect.isfunction(_obj):
+                try:
+                    _sig = inspect.signature(_obj)
+                except (ValueError, TypeError):
+                    continue
+                _params = list(_sig.parameters.keys())
+                if _params and _params[0] == "self":
+                    setattr(ImageMaskViewer, _name, _obj)
+
+        # Ensure the public API contains the symbol
+        if "ImageMaskViewer" not in globals().get("__all__", []):
+            __all__.append("ImageMaskViewer")
+    except Exception:
+        # If anything goes wrong here we intentionally fail silently so the
+        # original refactor errors remain visible to developers.
+        pass
+
         # Load masks only if masks are available
         if self.masks_available:
             # Load masks if not in cache

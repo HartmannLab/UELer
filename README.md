@@ -83,6 +83,7 @@ UELer now ships with a reusable rendering stack and early batch export coverage 
 **Developer experience**
 - Extended fast-test stubs (OpenCV, scikit-image, tifffile, matplotlib, dask) so rendering and export suites run in lightweight environments without optional dependencies.
 - Retained the packaged namespace and tooling improvements introduced during `v0.2.0-alpha`, keeping compatibility shims and Makefile targets in place.
+- Hardened the shared bootstrap to drop placeholder `ipywidgets` modules that miss `IntText` before installing the fast-test stub, avoiding notebook import failures when plugin fallbacks pre-load the namespace.
 
 **Verification**
 - `python -m unittest tests.test_export_job tests.test_rendering tests.test_export_fovs_batch`

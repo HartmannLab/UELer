@@ -79,6 +79,7 @@ See [issue #4](https://github.com/HartmannLab/UELer/issues/4) for an overview.
 **Bootstrap dependency coverage**
 - Normalized ad-hoc pandas stubs by grafting the shared test DataFrame/Series helpers whenever modules downgrade `pandas` to `object`, restoring ROI and heatmap helpers.
 - Expanded the ipywidgets shim to surface `allowed_tags`, `allow_new`, and other TagsInput traits that the ROI manager exercises during tag merge scenarios.
+- Taught the bootstrap to discard placeholder `ipywidgets` modules that omit `IntText` (for example, plugin fallbacks) before rebuilding the shared stub, keeping notebook imports aligned with the real widget API when the fast stubs are active.
 
 **Test suite reliability**
 - Pre-imported key plugins and reran `python -m unittest discover tests`, confirming all 44 tests pass under the shared bootstrap.

@@ -15,7 +15,6 @@ from matplotlib.patches import Polygon
 from matplotlib.widgets import RectangleSelector
 # from skimage.measure import find_contours
 from skimage.segmentation import find_boundaries
-import cv2
 import math
 from matplotlib.backend_bases import MouseButton
 from ueler.viewer.decorators import update_status_bar
