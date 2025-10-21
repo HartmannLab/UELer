@@ -1,4 +1,4 @@
-## FOV (image) load cycle — concise overview
+# FOV (image) load cycle — concise overview
 
 This document describes the runtime steps the viewer takes when loading and displaying a Field of View (FOV). It references the main functions and files involved so developers can quickly understand the call flow.
 
@@ -81,11 +81,11 @@ Files to inspect for implementation details
 
 This summary is intentionally concise; expand any section with code excerpts or a diagram on request.
 
-### Future improvements
-#### **Enable loading multiple FOV tiles into the same view**
+## Future improvements
+### **Enable loading multiple FOV tiles into the same view**
 Related issue: [#3](https://github.com/HartmannLab/UELer/issues/3)
 
-##### Original post
+### Original post
 Currently, users can only view individual FOV (Field of View) images separately. It would be valuable to allow loading multiple FOV tiles into the same view if the user requests this, enabling the display of all FOVs on the same slide for easier comparison and analysis.
 
 Implement a feature that lets users choose to load all FOV tiles together in a single view. This will require adjustments to how FOV images are currently handled, including:
@@ -96,7 +96,7 @@ Implement a feature that lets users choose to load all FOV tiles together in a s
 
 This enhancement will improve usability for users needing to visualize the complete set of FOVs together.
 
-##### Implementation notes
+### Implementation notes
 
 Below are implementation notes for supporting map-based multi-FOV views while preserving the current per-FOV storage format and keeping the rest of the application unchanged.
 
