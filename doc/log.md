@@ -1,3 +1,5 @@
+### v0.2.0-beta
+
 ### v0.2.0-alpha
 See [issue #4](https://github.com/HartmannLab/UELer/issues/4) for an overview.
 
