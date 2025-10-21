@@ -80,13 +80,12 @@ Goals: separate rendering logic from UI state so exports can be invoked from mul
 
 ### Phase 2 — Build export job runner and API (non-UI)
 Goals: provide a programmatic API that runs exports, reports progress, and supports cancellation.
-- [x] Create `ueler/export/job.py` with a simple `Job` class:
-  - [x] Inputs: mode, items (list of fov / cell / ROI descriptors), marker_set, output_dir, file_format, overrides
-  - [x] Methods: `start()`, `cancel()`, `status()` — `status()` returns per-item states and overall progress
-  - [x] Implementation: `start()` runs a worker loop that calls the renderer functions and writes files, catching exceptions and updating per-item results
-- [x] Wire `ImageMaskViewer.export_fovs_batch` to use the new Job runner internally (backwards compatible) or provide a thin adapter.
-- [x] Add logging and structured error reporting (error type, trace) rather than only string messages.
-- [x] Add unit coverage for the Job runner (success, failure, cancellation) to lock in the orchestration contract.
+- [ ] Create `ueler/export/job.py` with a simple `Job` class:
+  - [ ] Inputs: mode, items (list of fov / cell / ROI descriptors), marker_set, output_dir, file_format, overrides
+  - [ ] Methods: `start()`, `cancel()`, `status()` — `status()` returns per-item states and overall progress
+  - [ ] Implementation: `start()` runs a worker loop that calls the renderer functions and writes files, catching exceptions and updating per-item results
+- [ ] Wire `ImageMaskViewer.export_fovs_batch` to use the new Job runner internally (backwards compatible) or provide a thin adapter.
+- [ ] Add logging and structured error reporting (error type, trace) rather than only string messages.
 
 ### Phase 3 — UI plugin & UX
 Goals: provide a user-facing tab to select mode, configure options and start/cancel jobs with progress UI.
