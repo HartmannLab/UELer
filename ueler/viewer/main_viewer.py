@@ -1890,19 +1890,19 @@ class ImageMaskViewer:
                     fov_images = self.image_cache[fov_name]
 
                     missing = [ch for ch in selected_channels if fov_images.get(ch) is None]
-                    if missing:
-                        raise ValueError(
-                            "Missing or failed to load channels: " + ", ".join(missing)
+                    available_channels = [ch for ch in selected_channels if fov_images.get(ch) is not None]
+                    if missing and available_channels:
+                        # Log and continue with the subset of available channels instead of failing the whole FOV.
+                        logger.warning(
+                            "FOV '%s': missing channels %s — exporting with available channels %s",
+                            fov_name,
+                            ", ".join(missing),
+                            ", ".join(available_channels),
                         )
+                    if not available_channels:
+                        raise ValueError("No valid channels found in this FOV")
 
-                    first_channel = next(
-                        (
-                            fov_images[ch]
-                            for ch in selected_channels
-                            if fov_images.get(ch) is not None
-                        ),
-                        None,
-                    )
+                    first_channel = next((fov_images[ch] for ch in available_channels), None)
                     if first_channel is None:
                         raise ValueError("No valid channels found in this FOV")
 
