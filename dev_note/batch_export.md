@@ -127,6 +127,16 @@ Goals: Enable users to include or exclude mask and annotation overlays in export
   - [x] Thread the overlay snapshot through job overrides and worker call sites.
   - [x] Back the new flow with unit tests that assert overlays are respected for FOV, cell, and ROI exports.
 
+### Phase 3b —  Fixing the mask outline rendering
+Goals: Ensure that mask outlines are rendered for each cell correctly, not just based on a binary mask of presence/absence. Also the thickness of the outline should be adjustable.
+- [ ] Review the current implementation of mask outline rendering in the renderer functions.
+- [ ] Modify the rendering logic to ensure that outlines are drawn around each individual cell based on
+  - [ ] the segmentation mask and
+  - [ ] the specified outline thickness.
+- [ ] Add UI controls in the plugin to allow users to adjust the outline thickness for masks.
+- [ ] Back the changes with unit tests to verify that mask outlines are rendered correctly for various thickness settings.
+
+
 ### Phase 4 — Per-ROI and Per-Cell features
 Goals: support ROI-level overrides and per-cell crops with scale bars and marker overlays.
 - [ ] Add ROI export support to the Job runner: accept per-ROI metadata (explicit crop size, marker set override, scale bar settings). When per-ROI settings are not provided, apply either ROI-native settings or a chosen global profile.
