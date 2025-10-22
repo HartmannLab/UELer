@@ -138,6 +138,16 @@ Goals: Ensure that mask outlines are rendered for each cell correctly, not just 
 - [x] Extend the automated test suite to cover per-cell outline rendering across multiple thicknesses (unit tests for the renderer helpers + an integration test for the export job path).
 - [x] Update user-facing documentation (`README.md`, `doc/log.md`) and implementation notes (`dev_note/github_issues.md`) after landing the feature.
 
+#### Phase 3c — Fixing Mask Outline Rendering (Again)
+Now the main viewer and the batch export plugin share the same rendering logic for mask outlines, but both are not rendering outlines per cell correctly. All cells are still being merged into a few large patches instead of each cell having its own individual outline.
+
+Goals:
+Individually outline each cell in both the main viewer and the batch export plugin. Additionally, introduce a separate control for adjusting the outline thickness in the main viewer. The outline thickness setting in the batch export plugin should remain local to that plugin, rather than affecting the global settings in the main viewer (but take the global setting by default).
+
+- [ ] Update the main viewer's rendering logic to ensure that each cell is outlined individually, rather than merging multiple cells into a single outline patch.
+- [ ] Add a dedicated control in the main viewer's UI for adjusting the outline thickness of masks.
+- [ ] Ensure that the batch export plugin continues to use its own outline thickness setting, independent of the main viewer's setting, while defaulting to the main viewer's current thickness value when the plugin is opened.
+- [ ] Extend the test suite to validate that both the main viewer and the batch export plugin correctly render individual cell outlines with the specified thickness settings.
 
 ### Phase 4 — Per-ROI and Per-Cell features
 Goals: support ROI-level overrides and per-cell crops with scale bars and marker overlays.
