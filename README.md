@@ -74,6 +74,11 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 ### v0.2.0-rc1
 The release candidate combines the new Batch Export UI with the rendering and job runner refactors introduced across the `v0.2.0-alpha` and `v0.2.0-beta` milestones.
 
+**Mask & annotation exports**
+- Snapshot the viewer's current mask/annotation state and replay it during batch jobs so exported images honour in-app overlay visibility, colours, and modes.
+- Added overlay toggles with availability hints to the Batch Export plugin, letting users opt into masks/annotations per run without surfacing invalid options when datasets lack overlays.
+- Extended the renderer with alpha and outline blending plus new tests that cover translucent and outline masks alongside overlay snapshot reconstruction.
+
 **Batch export UI & UX**
 - Replaced the placeholder plugin with `BatchExportPlugin`, offering mode selection (Full FOV, Single Cells, ROIs), marker profiles, output configuration, and asynchronous Start/Cancel controls with progress feedback.
 - Added per-mode panels with cell filtering, ROI selectors, crop sizing, and a single-cell preview workflow that uses the shared rendering helpers before launching full jobs.
@@ -88,8 +93,8 @@ The release candidate combines the new Batch Export UI with the rendering and jo
 - Kept the namespace migration, compatibility shims, packaging metadata, and Makefile utilities introduced earlier in the `v0.2.0` cycle.
 
 **Verification**
-- `python -m unittest tests.test_export_job tests.test_export_fovs_batch`
-- `python -m unittest tests.test_rendering`
+- `python -m unittest tests.test_rendering tests.test_export_fovs_batch`
+- `python -m unittest tests.test_export_job`
 
 ## Earlier Updates  
 

@@ -35,7 +35,15 @@ from ipywidgets import (
 from matplotlib import pyplot as plt
 from matplotlib.colors import to_rgb
 
-from ..rendering import ChannelRenderSettings, render_crop_to_array, render_fov_to_array, render_roi_to_array
+from ..rendering import (
+    AnnotationRenderSettings,
+    ChannelRenderSettings,
+    MaskRenderSettings,
+    OverlaySnapshot,
+    render_crop_to_array,
+    render_fov_to_array,
+    render_roi_to_array,
+)
 from .plugin_base import PluginBase
 
 PLACEHOLDER_MESSAGE = "Batch export UI is now available."
@@ -81,6 +89,11 @@ class BatchExportPlugin(PluginBase):
         self._cell_filter_snapshot = ""
         self._roi_records: Dict[str, Dict[str, Any]] = {}
         self._seen_results: set[str] = set()
+        self._overlay_snapshot: Optional[OverlaySnapshot] = None
+        self._overlay_cache: Dict[
+            tuple[str, int],
+            tuple[Optional[AnnotationRenderSettings], tuple[MaskRenderSettings, ...]],
+        ] = {}
 
         self._build_widgets()
         self._build_layout()
@@ -90,6 +103,7 @@ class BatchExportPlugin(PluginBase):
         self.refresh_fov_options()
         self.refresh_cell_options()
         self.refresh_roi_options()
+        self.refresh_overlay_capabilities()
 
         self.setup_widget_observers()
         self.initialized = True
@@ -168,6 +182,20 @@ class BatchExportPlugin(PluginBase):
             layout=Layout(width="100%"),
             style=style_auto,
         )
+
+        self.ui_component.include_annotations = Checkbox(
+            value=True,
+            description="Include annotations",
+            indent=False,
+            layout=Layout(width="auto"),
+        )
+        self.ui_component.include_masks = Checkbox(
+            value=True,
+            description="Include masks",
+            indent=False,
+            layout=Layout(width="auto"),
+        )
+        self.ui_component.overlay_hint = HTML(value="", layout=Layout(width="100%"))
 
         self.ui_component.start_button = Button(
             description="Start",
@@ -342,6 +370,11 @@ class BatchExportPlugin(PluginBase):
                 ),
                 self.ui_component.include_scale_bar,
                 self.ui_component.scale_bar_ratio,
+                HBox(
+                    [self.ui_component.include_annotations, self.ui_component.include_masks],
+                    layout=Layout(gap="16px", align_items="center"),
+                ),
+                self.ui_component.overlay_hint,
                 self.ui_component.mode_tabs,
                 HBox(
                     [self.ui_component.start_button, self.ui_component.cancel_button],
@@ -467,6 +500,56 @@ class BatchExportPlugin(PluginBase):
         selected = tuple(value for _, value in options[: min(3, len(options))])
         self.ui_component.roi_selection.value = selected
 
+    def refresh_overlay_capabilities(self) -> None:
+        masks_available = bool(getattr(self.main_viewer, "masks_available", False))
+        annotations_available = bool(getattr(self.main_viewer, "annotations_available", False))
+        include_masks = self.ui_component.include_masks
+        include_annotations = self.ui_component.include_annotations
+
+        masks_were_disabled = include_masks.disabled
+        annotations_were_disabled = include_annotations.disabled
+
+        mask_controls = getattr(self.main_viewer.ui_component, "mask_display_controls", {})
+        visible_masks = any(getattr(cb, "value", False) for cb in mask_controls.values()) if masks_available else False
+
+        annotation_active = bool(
+            annotations_available
+            and getattr(self.main_viewer, "annotation_display_enabled", False)
+            and getattr(self.main_viewer, "active_annotation_name", None)
+        )
+
+        hints: list[str] = []
+
+        if not masks_available or not visible_masks:
+            include_masks.value = False
+            include_masks.disabled = True
+            if not masks_available:
+                hints.append("Masks unavailable for this dataset.")
+            else:
+                hints.append("Enable at least one mask overlay in the viewer to export masks.")
+        else:
+            include_masks.disabled = False
+            if masks_were_disabled and not include_masks.value:
+                include_masks.value = True
+
+        if not annotation_active:
+            include_annotations.value = False
+            include_annotations.disabled = True
+            if not annotations_available:
+                hints.append("Annotations unavailable for this dataset.")
+            else:
+                hints.append("Activate annotation overlays in the viewer to export them.")
+        else:
+            include_annotations.disabled = False
+            if annotations_were_disabled and not include_annotations.value:
+                include_annotations.value = True
+
+        if hints:
+            message = " ".join(hints)
+            self.ui_component.overlay_hint.value = f"<span style='color:#666;'>{message}</span>"
+        else:
+            self.ui_component.overlay_hint.value = ""
+
     # ------------------------------------------------------------------
     # Trait / event handlers
     # ------------------------------------------------------------------
@@ -483,6 +566,7 @@ class BatchExportPlugin(PluginBase):
     # Plugin lifecycle hooks ------------------------------------------------------
     def on_fov_change(self) -> None:  # type: ignore[override]
         self.refresh_roi_options()
+        self.refresh_overlay_capabilities()
 
     def on_cell_table_change(self) -> None:  # type: ignore[override]
         self.refresh_cell_options()
@@ -490,6 +574,7 @@ class BatchExportPlugin(PluginBase):
     def on_mv_update_display(self) -> None:  # type: ignore[override]
         if self.ui_component.roi_limit_to_fov.value:
             self.refresh_roi_options()
+        self.refresh_overlay_capabilities()
 
     def after_all_plugins_loaded(self) -> None:  # type: ignore[override]
         super().after_all_plugins_loaded()
@@ -497,6 +582,7 @@ class BatchExportPlugin(PluginBase):
         self.refresh_fov_options()
         self.refresh_cell_options()
         self.refresh_roi_options()
+        self.refresh_overlay_capabilities()
 
     # ------------------------------------------------------------------
     # Export orchestration
@@ -515,6 +601,13 @@ class BatchExportPlugin(PluginBase):
             dpi = max(1, int(self.ui_component.dpi_input.value or 1))
             scale_bar = self.ui_component.include_scale_bar.value
             scale_ratio = float(self.ui_component.scale_bar_ratio.value)
+            include_annotations = bool(self.ui_component.include_annotations.value)
+            include_masks = bool(self.ui_component.include_masks.value)
+
+            overlay_snapshot = self._capture_overlay_snapshot(
+                include_masks=include_masks,
+                include_annotations=include_annotations,
+            )
 
             job = self._build_job(
                 mode=mode,
@@ -525,6 +618,9 @@ class BatchExportPlugin(PluginBase):
                 dpi=dpi,
                 include_scale_bar=scale_bar,
                 scale_ratio=scale_ratio,
+                include_annotations=include_annotations,
+                include_masks=include_masks,
+                overlay_snapshot=overlay_snapshot,
             )
         except Exception as exc:
             self._notify(f"Unable to start export: {exc}", level="error")
@@ -586,6 +682,47 @@ class BatchExportPlugin(PluginBase):
         self._current_job = None
         self._current_future = None
 
+    def _capture_overlay_snapshot(
+        self,
+        *,
+        include_masks: bool,
+        include_annotations: bool,
+    ) -> OverlaySnapshot:
+        snapshot = self.main_viewer.capture_overlay_snapshot(
+            include_masks=include_masks,
+            include_annotations=include_annotations,
+        )
+        self._overlay_snapshot = snapshot
+        self._overlay_cache.clear()
+        return snapshot
+
+    def _resolve_overlays_for_fov(
+        self,
+        fov_name: str,
+        downsample: int,
+        snapshot: OverlaySnapshot,
+    ) -> tuple[Optional[AnnotationRenderSettings], tuple[MaskRenderSettings, ...]]:
+        if snapshot is not self._overlay_snapshot:
+            self._overlay_snapshot = snapshot
+            self._overlay_cache.clear()
+
+        if not snapshot.include_masks and not snapshot.include_annotations:
+            return None, ()
+
+        key = (fov_name, downsample)
+        cached = self._overlay_cache.get(key)
+        if cached is not None:
+            return cached
+
+        annotation_settings, mask_settings = self.main_viewer.build_overlay_settings_from_snapshot(
+            fov_name,
+            downsample,
+            snapshot,
+        )
+        cached_result = (annotation_settings, mask_settings)
+        self._overlay_cache[key] = cached_result
+        return cached_result
+
     def _build_job(
         self,
         *,
@@ -597,6 +734,9 @@ class BatchExportPlugin(PluginBase):
         dpi: int,
         include_scale_bar: bool,
         scale_ratio: float,
+        include_annotations: bool,
+        include_masks: bool,
+        overlay_snapshot: OverlaySnapshot,
     ):
         overrides = {
             "downsample_factor": downsample,
@@ -604,6 +744,8 @@ class BatchExportPlugin(PluginBase):
             "include_scale_bar": include_scale_bar,
             "scale_bar_ratio": scale_ratio,
             "filter": self._cell_filter_snapshot,
+            "include_annotations": include_annotations,
+            "include_masks": include_masks,
         }
 
         builder = {
@@ -623,6 +765,7 @@ class BatchExportPlugin(PluginBase):
             dpi=dpi,
             include_scale_bar=include_scale_bar,
             scale_ratio=scale_ratio,
+            overlay_snapshot=overlay_snapshot,
         )
 
         from ueler.export.job import Job  # Local import to avoid circular dependency at module import time
@@ -654,6 +797,7 @@ class BatchExportPlugin(PluginBase):
         dpi: int,
         include_scale_bar: bool,
         scale_ratio: float,
+        overlay_snapshot: OverlaySnapshot,
     ):
         from ueler.export.job import JobItem
 
@@ -679,6 +823,7 @@ class BatchExportPlugin(PluginBase):
                 dpi=dpi,
                 include_scale_bar=include_scale_bar,
                 scale_ratio=scale_ratio,
+                overlay_snapshot=overlay_snapshot,
             )
 
             metadata = {
@@ -708,6 +853,7 @@ class BatchExportPlugin(PluginBase):
         dpi: int,
         include_scale_bar: bool,
         scale_ratio: float,
+        overlay_snapshot: OverlaySnapshot,
     ):
         from ueler.export.job import JobItem
 
@@ -750,6 +896,7 @@ class BatchExportPlugin(PluginBase):
                 dpi=dpi,
                 include_scale_bar=include_scale_bar,
                 scale_ratio=scale_ratio,
+                overlay_snapshot=overlay_snapshot,
             )
 
             metadata = {
@@ -781,6 +928,7 @@ class BatchExportPlugin(PluginBase):
         dpi: int,
         include_scale_bar: bool,
         scale_ratio: float,
+        overlay_snapshot: OverlaySnapshot,
     ):
         from ueler.export.job import JobItem
 
@@ -811,6 +959,7 @@ class BatchExportPlugin(PluginBase):
                 dpi=dpi,
                 include_scale_bar=include_scale_bar,
                 scale_ratio=scale_ratio,
+                overlay_snapshot=overlay_snapshot,
             )
 
             metadata = {
@@ -845,15 +994,23 @@ class BatchExportPlugin(PluginBase):
         dpi: int,
         include_scale_bar: bool,
         scale_ratio: float,
+        overlay_snapshot: OverlaySnapshot,
     ) -> Dict[str, Any]:
         self.main_viewer.load_fov(fov_name, marker_profile.selected_channels)
         channel_arrays = self.main_viewer.image_cache[fov_name]
+        annotation_settings, mask_settings = self._resolve_overlays_for_fov(
+            fov_name,
+            downsample,
+            overlay_snapshot,
+        )
         array = render_fov_to_array(
             fov_name,
             channel_arrays,
             marker_profile.selected_channels,
             marker_profile.channel_settings,
             downsample_factor=downsample,
+            annotation=annotation_settings,
+            masks=mask_settings,
         )
         image = self._finalise_array(array, include_scale_bar, scale_ratio)
         self._write_image(image, output_path, file_format, dpi)
@@ -871,6 +1028,7 @@ class BatchExportPlugin(PluginBase):
         dpi: int,
         include_scale_bar: bool,
         scale_ratio: float,
+        overlay_snapshot: OverlaySnapshot,
     ) -> Dict[str, Any]:
         fov_key = getattr(self.main_viewer, "fov_key", "fov")
         x_key = getattr(self.main_viewer, "x_key", "X")
@@ -880,6 +1038,11 @@ class BatchExportPlugin(PluginBase):
 
         self.main_viewer.load_fov(fov_name, marker_profile.selected_channels)
         channel_arrays = self.main_viewer.image_cache[fov_name]
+        annotation_settings, mask_settings = self._resolve_overlays_for_fov(
+            fov_name,
+            downsample,
+            overlay_snapshot,
+        )
         array = render_crop_to_array(
             fov_name,
             channel_arrays,
@@ -888,6 +1051,8 @@ class BatchExportPlugin(PluginBase):
             center_xy=center_xy,
             size_px=crop_size,
             downsample_factor=downsample,
+            annotation=annotation_settings,
+            masks=mask_settings,
         )
         image = self._finalise_array(array, include_scale_bar, scale_ratio)
         self._write_image(image, output_path, file_format, dpi)
@@ -904,10 +1069,16 @@ class BatchExportPlugin(PluginBase):
         dpi: int,
         include_scale_bar: bool,
         scale_ratio: float,
+        overlay_snapshot: OverlaySnapshot,
     ) -> Dict[str, Any]:
         fov_name = roi.get("fov")
         self.main_viewer.load_fov(fov_name, marker_profile.selected_channels)
         channel_arrays = self.main_viewer.image_cache[fov_name]
+        annotation_settings, mask_settings = self._resolve_overlays_for_fov(
+            fov_name,
+            downsample,
+            overlay_snapshot,
+        )
         array = render_roi_to_array(
             fov_name,
             channel_arrays,
@@ -915,6 +1086,8 @@ class BatchExportPlugin(PluginBase):
             marker_profile.channel_settings,
             roi_definition=roi,
             downsample_factor=downsample,
+            annotation=annotation_settings,
+            masks=mask_settings,
         )
         image = self._finalise_array(array, include_scale_bar, scale_ratio)
         self._write_image(image, output_path, file_format, dpi)

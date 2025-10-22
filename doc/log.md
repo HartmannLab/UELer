@@ -1,4 +1,10 @@
 ### v0.2.0-rc1
+**Mask & annotation exports**
+- Captured live overlay settings with `ImageMaskViewer.capture_overlay_snapshot` and replayed them inside batch jobs so exported images mirror in-viewer mask and annotation selections.
+- Added opt-in toggles plus availability hints to the Batch Export plugin, keeping overlay options discoverable while preventing invalid selections on datasets without masks or annotations.
+- Threaded overlay snapshots through every export worker (FOV, cell, ROI) and extended renderer helpers with alpha/outline blending to honour mask colours and annotation palettes.
+- Expanded `tests/test_rendering.py` with translucent/outline mask coverage and added snapshot reconstruction checks to `tests/test_export_fovs_batch.py` to guard future regressions.
+
 **Batch export UI**
 - Replaced the placeholder export plugin with `BatchExportPlugin`, adding mode-aware controls, marker set selection, output location tools, and asynchronous Start/Cancel handling with progress, status messages, and output links.
 - Added mode-specific panels for Full FOV, Single Cells, and ROIs, including cell table filters, ROI selectors, crop sizing, and a Matplotlib-backed preview to validate single-cell settings before starting long runs.
@@ -11,6 +17,10 @@
 **Matplotlib bootstrap & planning docs**
 - Expanded the test bootstrap with stubs for `matplotlib.text`, `matplotlib.backend_bases`, `matplotlib.patches`, `matplotlib.widgets`, and `mpl_toolkits.axes_grid1` so export suites run in dependency-light environments.
 - Marked the Phase 3 checklist complete in `dev_note/batch_export.md` and noted the pending scale-bar sizing follow-up planned for Phase 4.
+
+**Verification**
+- `python -m unittest tests.test_rendering tests.test_export_fovs_batch`
+- `python -m unittest tests.test_export_job`
 
 ### v0.2.0-beta
 **Batch export groundwork**

@@ -112,6 +112,21 @@ Goals: provide a user-facing tab to select mode, configure options and start/can
 - [x] Implement per-mode data binding: Full FOV uses selected FOVs, Single Cells consumes filter text and preview, ROIs binds to ROI manager selection widget.
 - [x] Surface progress/log output via `ipywidgets.Output` and status bar, ensuring thread-safe updates on the main event loop.
 
+### Phase 3a — Supporting masks and annotations in exports
+Goals: Enable users to include or exclude mask and annotation overlays in exported images, reusing the existing viewer state wherever possible.
+- [x] Capture the current mask and annotation settings from the viewer when initiating an export job.
+  - [x] Define an overlay snapshot structure that can be reused by the plugin workers and new tests.
+  - [x] Add a `capture_overlay_snapshot` helper on the viewer that records annotation state, mask toggles, and colours.
+- [x] Update renderer functions to accept options for mask and annotation overlays (e.g., colors, visibility, outlines).
+  - [x] Expand mask/annotation render dataclasses if additional attributes (alpha, outline mode) are required by the snapshot.
+  - [x] Ensure helper methods gracefully handle missing overlays using the snapshot inputs.
+- [x] Extend the plugin UI to let users choose whether to include masks and annotations in their exports.
+  - [x] Add opt-in checkboxes for masks/annotations and wire them into the job-builder pipeline.
+  - [x] Display an inline hint when masks or annotations are unavailable for the selected dataset.
+- [x] Ensure the export job runner correctly passes these options to the renderer.
+  - [x] Thread the overlay snapshot through job overrides and worker call sites.
+  - [x] Back the new flow with unit tests that assert overlays are respected for FOV, cell, and ROI exports.
+
 ### Phase 4 — Per-ROI and Per-Cell features
 Goals: support ROI-level overrides and per-cell crops with scale bars and marker overlays.
 - [ ] Add ROI export support to the Job runner: accept per-ROI metadata (explicit crop size, marker set override, scale bar settings). When per-ROI settings are not provided, apply either ROI-native settings or a chosen global profile.
@@ -120,7 +135,6 @@ Goals: support ROI-level overrides and per-cell crops with scale bars and marker
 - [ ] Scale bar sizing and PDF gallery behavior:
   - [ ] When a scale bar is requested, the export pipeline must compute a scale bar length such that the drawn length is <= 10% of the exported image width in pixels. Choose a round/clean physical length (e.g., 1 µm, 2 µm, 5 µm, 10 µm, etc.) that satisfies this constraint and is appropriate for the image resolution and DPI.
   - [ ] When exporting multiple ROIs into a single gallery PDF (future feature), each ROI may have a different scale bar appropriate for its crop size; the Job runner should support generating a per-ROI scale bar and render each ROI to a PDF page or grid cell. The gallery exporter should accept layout parameters (rows x cols) and pagination behavior.
-  - [ ] Implement the PDF gallery output as an optional output format for ROI batches, where individual ROI images are placed into an arrayed PDF (one ROI per page or arranged in a grid). Each ROI entry in the PDF should include its own scale bar (if requested) and caption/metadata (ROI id, source FOV, export settings).
 
 ### Phase 5 — Performance, parallelism, and reliability
 Goals: make large batch runs efficient and robust.
@@ -148,3 +162,7 @@ Goals: make large batch runs efficient and robust.
 - Exports for all three modes (Full FOV, Single Cells, ROIs) are supported end-to-end (image files written and matching requested settings).
 - Exports are cancellable and do not block the main viewer UI.
 - Tests cover core functionality and CI runs them (basic unit tests + a small integration smoke test).
+
+
+
+  - [ ] Implement the PDF gallery output as an optional output format for ROI batches, where individual ROI images are placed into an arrayed PDF (one ROI per page or arranged in a grid). Each ROI entry in the PDF should include its own scale bar (if requested) and caption/metadata (ROI id, source FOV, export settings).

@@ -10,6 +10,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Mapping, Optional, Sequence, Tuple
 
+try:  # pragma: no cover - optional dependency is validated via higher-level tests
+    from skimage.segmentation import find_boundaries  # type: ignore
+except Exception:  # pragma: no cover - allow environments without skimage
+    find_boundaries = None  # type: ignore[assignment]
+
 import numpy as np
 
 
@@ -72,6 +77,32 @@ class AnnotationRenderSettings:
 class MaskRenderSettings:
     array: np.ndarray
     color: ColorTuple
+    alpha: float = 1.0
+    mode: str = "fill"
+
+
+@dataclass(frozen=True)
+class AnnotationOverlaySnapshot:
+    name: str
+    alpha: float
+    mode: str
+    palette: Mapping[str, str]
+
+
+@dataclass(frozen=True)
+class MaskOverlaySnapshot:
+    name: str
+    color: ColorTuple
+    alpha: float = 1.0
+    mode: str = "outline"
+
+
+@dataclass(frozen=True)
+class OverlaySnapshot:
+    include_annotations: bool
+    include_masks: bool
+    annotation: Optional[AnnotationOverlaySnapshot] = None
+    masks: Tuple[MaskOverlaySnapshot, ...] = ()
 
 
 def _infer_region(channel_arrays: Mapping[str, object], selected: Sequence[str]) -> Region:
@@ -108,6 +139,41 @@ def _derive_downsampled_region(region: Region, downsample: int) -> Region:
 
 def _normalise_color(color: ColorTuple) -> np.ndarray:
     return np.asarray(color, dtype=np.float32).reshape(1, 1, 3)
+
+
+def _binary_erosion_4(mask_bool: np.ndarray) -> np.ndarray:
+    if mask_bool.shape[0] < 3 or mask_bool.shape[1] < 3:
+        return np.zeros_like(mask_bool, dtype=bool)
+    eroded = np.zeros_like(mask_bool, dtype=bool)
+    center = mask_bool[1:-1, 1:-1]
+    neighbours = (
+        mask_bool[:-2, 1:-1],
+        mask_bool[2:, 1:-1],
+        mask_bool[1:-1, :-2],
+        mask_bool[1:-1, 2:],
+    )
+    eroded[1:-1, 1:-1] = center & neighbours[0] & neighbours[1] & neighbours[2] & neighbours[3]
+    return eroded
+
+
+def _resolve_mask_pixels(mask_bool: np.ndarray, mask: MaskRenderSettings) -> np.ndarray:
+    mode = (mask.mode or "fill").lower()
+    if mode == "outline":
+        if find_boundaries is not None:
+            return find_boundaries(mask_bool.astype(bool, copy=False), mode="inner")
+        eroded = _binary_erosion_4(mask_bool)
+        return mask_bool & ~eroded
+    if mode == "fill":
+        return mask_bool
+    raise ValueError(f"Unsupported mask render mode: {mask.mode}")
+
+
+def _blend_mask_pixels(result: np.ndarray, affected: np.ndarray, colour: np.ndarray, alpha: float) -> None:
+    if alpha >= 1.0:
+        result[affected] = colour
+        return
+    existing = result[affected]
+    result[affected] = (1.0 - alpha) * existing + alpha * colour
 
 
 def _composite_channels(
@@ -180,8 +246,14 @@ def _apply_mask_overlays(
                 "Mask dimensions do not match composite output for the requested region"
             )
         mask_bool = mask_region.astype(bool, copy=False)
-        if np.any(mask_bool):
-            result[mask_bool] = _normalise_color(mask.color)
+        if not np.any(mask_bool):
+            continue
+        affected = _resolve_mask_pixels(mask_bool, mask)
+        if not np.any(affected):
+            continue
+        colour = _normalise_color(mask.color)
+        alpha = float(np.clip(mask.alpha, 0.0, 1.0))
+        _blend_mask_pixels(result, affected, colour, alpha)
     return result
 
 
@@ -319,9 +391,12 @@ def render_roi_to_array(
 
 
 __all__ = [
+    "AnnotationOverlaySnapshot",
     "AnnotationRenderSettings",
     "ChannelRenderSettings",
+    "MaskOverlaySnapshot",
     "MaskRenderSettings",
+    "OverlaySnapshot",
     "render_crop_to_array",
     "render_fov_to_array",
     "render_roi_to_array",

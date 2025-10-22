@@ -48,9 +48,12 @@ from ueler.viewer.color_palettes import (
     merge_palette_updates,
 )
 from ueler.viewer.rendering import (
+    AnnotationOverlaySnapshot,
     AnnotationRenderSettings,
     ChannelRenderSettings,
+    MaskOverlaySnapshot,
     MaskRenderSettings,
+    OverlaySnapshot,
     render_fov_to_array,
 )
 from ueler.export.job import Job, JobItem
@@ -1248,6 +1251,132 @@ class ImageMaskViewer:
             annotation=annotation_settings,
             masks=mask_settings,
         )
+
+    # ------------------------------------------------------------------
+    # Export overlay helpers
+    # ------------------------------------------------------------------
+    def capture_overlay_snapshot(
+        self,
+        *,
+        include_annotations: bool = True,
+        include_masks: bool = True,
+    ) -> OverlaySnapshot:
+        """Capture the viewer's current overlay configuration for exports."""
+
+        use_annotations = bool(include_annotations and self.annotations_available and self.annotation_display_enabled)
+        annotation_snapshot: Optional[AnnotationOverlaySnapshot] = None
+
+        if use_annotations and self.active_annotation_name:
+            name = self.active_annotation_name
+            palette = dict(self.annotation_palettes.get(name, {}))
+            annotation_snapshot = AnnotationOverlaySnapshot(
+                name=name,
+                alpha=float(self.annotation_overlay_alpha),
+                mode=str(self.annotation_overlay_mode),
+                palette=palette,
+            )
+
+        mask_snapshots: list[MaskOverlaySnapshot] = []
+        use_masks = bool(include_masks and self.masks_available)
+        if use_masks:
+            mask_controls = getattr(self.ui_component, "mask_display_controls", {})
+            color_controls = getattr(self.ui_component, "mask_color_controls", {})
+            for mask_name, checkbox in mask_controls.items():
+                if not checkbox.value:
+                    continue
+                color_widget = color_controls.get(mask_name)
+                color_key = color_widget.value if color_widget is not None else None
+                if isinstance(color_key, str):
+                    colour_value = self.predefined_colors.get(color_key, color_key)
+                else:
+                    colour_value = self.predefined_colors.get(str(color_key), "#FFFFFF")
+                mask_snapshots.append(
+                    MaskOverlaySnapshot(
+                        name=mask_name,
+                        color=to_rgb(colour_value),
+                        alpha=1.0,
+                        mode="outline",
+                    )
+                )
+
+        return OverlaySnapshot(
+            include_annotations=use_annotations,
+            include_masks=use_masks,
+            annotation=annotation_snapshot,
+            masks=tuple(mask_snapshots),
+        )
+
+    def build_overlay_settings_from_snapshot(
+        self,
+        fov_name: str,
+        downsample_factor: int,
+        snapshot: OverlaySnapshot,
+    ) -> tuple[Optional[AnnotationRenderSettings], tuple[MaskRenderSettings, ...]]:
+        """Reconstruct render settings for overlays based on a captured snapshot."""
+
+        annotation_settings: Optional[AnnotationRenderSettings] = None
+        mask_settings: list[MaskRenderSettings] = []
+
+        if snapshot.include_annotations and snapshot.annotation:
+            name = snapshot.annotation.name
+            annotation_ds = None
+            label_cache = self.annotation_label_cache.get(fov_name, {}).get(name)
+            if label_cache:
+                annotation_ds = label_cache.get(downsample_factor)
+            if annotation_ds is None:
+                raw_annotation = self.annotation_cache.get(fov_name, {}).get(name)
+                if raw_annotation is not None:
+                    annotation_ds = raw_annotation[::downsample_factor, ::downsample_factor]
+
+            if annotation_ds is not None:
+                try:
+                    annotation_array = annotation_ds.compute()
+                except AttributeError:
+                    annotation_array = np.asarray(annotation_ds)
+
+                class_ids = _unique_annotation_values(annotation_array)
+                if class_ids.size == 0:
+                    class_ids = np.array([0], dtype=np.int32)
+                colormap = build_discrete_colormap(class_ids, snapshot.annotation.palette)
+                annotation_settings = AnnotationRenderSettings(
+                    array=annotation_array,
+                    colormap=colormap,
+                    alpha=float(snapshot.annotation.alpha),
+                    mode=str(snapshot.annotation.mode),
+                )
+
+        if snapshot.include_masks and snapshot.masks:
+            mask_cache = self.label_masks_cache.get(fov_name, {})
+            for mask_snapshot in snapshot.masks:
+                ds_cache = mask_cache.get(mask_snapshot.name)
+                mask_ds = None
+                if ds_cache:
+                    mask_ds = ds_cache.get(downsample_factor)
+                if mask_ds is None:
+                    raw_mask = self.mask_cache.get(fov_name, {}).get(mask_snapshot.name)
+                    if raw_mask is not None:
+                        mask_ds = raw_mask[::downsample_factor, ::downsample_factor]
+                if mask_ds is None:
+                    continue
+
+                try:
+                    mask_array = mask_ds.compute()
+                except AttributeError:
+                    mask_array = np.asarray(mask_ds)
+
+                if mask_array.size == 0:
+                    continue
+
+                mask_settings.append(
+                    MaskRenderSettings(
+                        array=mask_array.astype(bool, copy=False),
+                        color=mask_snapshot.color,
+                        alpha=float(mask_snapshot.alpha),
+                        mode=str(mask_snapshot.mode),
+                    )
+                )
+
+        return annotation_settings, tuple(mask_settings)
 
     def update_display(self, downsample_factor=8):
         """Update the display with the current downsample factor and visible area."""

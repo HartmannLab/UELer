@@ -246,6 +246,70 @@ class ExportFOVsBatchTests(unittest.TestCase):
         viewer._merge_channel_max = MethodType(lambda self, *_args, **_kwargs: None, viewer)
         return viewer
 
+    def _configure_overlays(self, viewer: ImageMaskViewer) -> None:
+        mask_array = np.array(
+            [
+                [0, 1, 0],
+                [1, 1, 1],
+                [0, 1, 0],
+            ],
+            dtype=np.uint8,
+        )
+        annotation_array = np.array(
+            [
+                [0, 1, 0],
+                [1, 2, 1],
+                [0, 1, 0],
+            ],
+            dtype=np.int32,
+        )
+
+        viewer.masks_available = True
+        viewer.annotations_available = True
+        viewer.annotation_display_enabled = True
+        viewer.active_annotation_name = "ANN"
+        viewer.annotation_overlay_mode = "combined"
+        viewer.annotation_overlay_alpha = 0.4
+        viewer.mask_names = ["MASK1"]
+        viewer.mask_cache = {"FOV_A": {"MASK1": mask_array}}
+        viewer.label_masks_cache = {}
+        viewer.annotation_cache = {"FOV_A": {"ANN": annotation_array}}
+        viewer.annotation_label_cache = {"FOV_A": {"ANN": {1: annotation_array}}}
+        viewer.annotation_palettes = {"ANN": {"1": "#00ff00", "2": "#ff00ff"}}
+
+        viewer.ui_component.mask_display_controls = {
+            "MASK1": SimpleNamespace(value=True)
+        }
+        viewer.ui_component.mask_color_controls = {
+            "MASK1": SimpleNamespace(value="Blue")
+        }
+
+    def test_capture_overlay_snapshot_and_rebuild(self) -> None:
+        viewer = self._make_viewer()
+        self._configure_overlays(viewer)
+
+        snapshot = viewer.capture_overlay_snapshot(include_annotations=True, include_masks=True)
+        self.assertTrue(snapshot.include_annotations)
+        self.assertTrue(snapshot.include_masks)
+        self.assertIsNotNone(snapshot.annotation)
+        self.assertEqual(snapshot.masks[0].name, "MASK1")
+
+        annotation_settings, mask_settings = viewer.build_overlay_settings_from_snapshot(
+            "FOV_A",
+            1,
+            snapshot,
+        )
+
+        self.assertIsNotNone(annotation_settings)
+        self.assertEqual(len(mask_settings), 1)
+        self.assertEqual(mask_settings[0].mode, "outline")
+        self.assertTrue(mask_settings[0].array.any())
+
+        # Disable annotations and masks via include flags
+        snapshot_disabled = viewer.capture_overlay_snapshot(include_annotations=False, include_masks=False)
+        self.assertFalse(snapshot_disabled.include_annotations)
+        self.assertFalse(snapshot_disabled.include_masks)
+
     def test_export_fovs_batch_writes_file(self) -> None:
         viewer = self._make_viewer()
         output_dir = self.base_path / "exports"

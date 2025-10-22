@@ -68,6 +68,45 @@ class RenderingHelpersTests(unittest.TestCase):
         )
         np.testing.assert_allclose(result[1, 1], [0.0, 0.0, 1.0], atol=1e-6)
 
+    def test_render_fov_to_array_with_translucent_masks(self) -> None:
+        mask_array = np.zeros((4, 4), dtype=bool)
+        mask_array[0, 0] = True
+        mask = MaskRenderSettings(array=mask_array, color=(0.0, 0.0, 1.0), alpha=0.5)
+        result = render_fov_to_array(
+            "FOV",
+            self.channels,
+            ("A", "B"),
+            self.settings,
+            downsample_factor=1,
+            masks=[mask],
+        )
+        expected = 0.5 * np.array([1.0, 0.5, 0.0]) + 0.5 * np.array([0.0, 0.0, 1.0])
+        np.testing.assert_allclose(result[0, 0], expected, atol=1e-6)
+
+    def test_render_fov_to_array_outline_mode_without_skimage(self) -> None:
+        from ueler.viewer import rendering as rendering_mod
+
+        original_find_boundaries = rendering_mod.find_boundaries
+        rendering_mod.find_boundaries = None
+        try:
+            mask_array = np.ones((4, 4), dtype=bool)
+            mask = MaskRenderSettings(array=mask_array, color=(0.0, 0.0, 1.0), mode="outline")
+            result = render_fov_to_array(
+                "FOV",
+                self.channels,
+                ("A", "B"),
+                self.settings,
+                downsample_factor=1,
+                masks=[mask],
+            )
+        finally:
+            rendering_mod.find_boundaries = original_find_boundaries
+
+        # Centre pixel remains unchanged (outline only affects border)
+        np.testing.assert_allclose(result[1, 1], [1.0, 0.5, 0.0], atol=1e-6)
+        # Corner pixel is recoloured blue by the outline mask
+        np.testing.assert_allclose(result[0, 0], [0.0, 0.0, 1.0], atol=1e-6)
+
     def test_render_crop_to_array_uses_requested_region(self) -> None:
         crop = render_crop_to_array(
             "FOV",
