@@ -224,6 +224,7 @@ class ExportFOVsBatchTests(unittest.TestCase):
             }
         )
         viewer.current_downsample_factor = 1
+        viewer.mask_outline_thickness = 1
         viewer.ui_component = SimpleNamespace(
             image_selector=SimpleNamespace(value="FOV_A"),
             channel_selector=SimpleNamespace(value=("DNA",)),
@@ -304,6 +305,7 @@ class ExportFOVsBatchTests(unittest.TestCase):
         self.assertEqual(len(mask_settings), 1)
         self.assertEqual(mask_settings[0].mode, "outline")
         self.assertTrue(mask_settings[0].array.any())
+        self.assertEqual(mask_settings[0].outline_thickness, 1)
 
         # Disable annotations and masks via include flags
         snapshot_disabled = viewer.capture_overlay_snapshot(include_annotations=False, include_masks=False)

@@ -79,6 +79,7 @@ class MaskRenderSettings:
     color: ColorTuple
     alpha: float = 1.0
     mode: str = "fill"
+    outline_thickness: int = 1
 
 
 @dataclass(frozen=True)
@@ -95,6 +96,7 @@ class MaskOverlaySnapshot:
     color: ColorTuple
     alpha: float = 1.0
     mode: str = "outline"
+    outline_thickness: int = 1
 
 
 @dataclass(frozen=True)
@@ -141,30 +143,76 @@ def _normalise_color(color: ColorTuple) -> np.ndarray:
     return np.asarray(color, dtype=np.float32).reshape(1, 1, 3)
 
 
-def _binary_erosion_4(mask_bool: np.ndarray) -> np.ndarray:
-    if mask_bool.shape[0] < 3 or mask_bool.shape[1] < 3:
-        return np.zeros_like(mask_bool, dtype=bool)
-    eroded = np.zeros_like(mask_bool, dtype=bool)
-    center = mask_bool[1:-1, 1:-1]
-    neighbours = (
-        mask_bool[:-2, 1:-1],
-        mask_bool[2:, 1:-1],
-        mask_bool[1:-1, :-2],
-        mask_bool[1:-1, 2:],
-    )
-    eroded[1:-1, 1:-1] = center & neighbours[0] & neighbours[1] & neighbours[2] & neighbours[3]
-    return eroded
+def _label_boundaries(mask_labels: np.ndarray) -> np.ndarray:
+    labels = mask_labels.astype(np.int64, copy=False)
+    boundaries = np.zeros(labels.shape, dtype=bool)
+    if labels.size == 0:
+        return boundaries
+
+    interior = labels != 0
+
+    north = np.zeros_like(boundaries)
+    north[1:, :] = labels[1:, :] != labels[:-1, :]
+
+    south = np.zeros_like(boundaries)
+    south[:-1, :] = labels[:-1, :] != labels[1:, :]
+
+    east = np.zeros_like(boundaries)
+    east[:, :-1] = labels[:, :-1] != labels[:, 1:]
+
+    west = np.zeros_like(boundaries)
+    west[:, 1:] = labels[:, 1:] != labels[:, :-1]
+
+    boundaries |= (north | south | east | west) & interior
+
+    if labels.shape[0] > 0:
+        boundaries[0, :] |= labels[0, :] != 0
+        boundaries[-1, :] |= labels[-1, :] != 0
+    if labels.shape[1] > 0:
+        boundaries[:, 0] |= labels[:, 0] != 0
+        boundaries[:, -1] |= labels[:, -1] != 0
+
+    return boundaries
 
 
-def _resolve_mask_pixels(mask_bool: np.ndarray, mask: MaskRenderSettings) -> np.ndarray:
+def _binary_dilation_4(mask_bool: np.ndarray, iterations: int) -> np.ndarray:
+    if iterations <= 0:
+        return mask_bool
+    result = mask_bool.astype(bool, copy=False)
+    if result.size == 0:
+        return result
+    for _ in range(iterations):
+        expanded = result.copy()
+        if result.shape[0] > 1:
+            expanded[0, :] |= result[1, :]
+            expanded[-1, :] |= result[-2, :]
+        if result.shape[1] > 1:
+            expanded[:, 0] |= result[:, 1]
+            expanded[:, -1] |= result[:, -2]
+        if result.shape[0] > 2 and result.shape[1] > 2:
+            expanded[1:-1, 1:-1] |= result[:-2, 1:-1]
+            expanded[1:-1, 1:-1] |= result[2:, 1:-1]
+            expanded[1:-1, 1:-1] |= result[1:-1, :-2]
+            expanded[1:-1, 1:-1] |= result[1:-1, 2:]
+        result = expanded
+    return result
+
+
+def _resolve_mask_pixels(mask_array: np.ndarray, mask: MaskRenderSettings) -> np.ndarray:
     mode = (mask.mode or "fill").lower()
     if mode == "outline":
-        if find_boundaries is not None:
-            return find_boundaries(mask_bool.astype(bool, copy=False), mode="inner")
-        eroded = _binary_erosion_4(mask_bool)
-        return mask_bool & ~eroded
+        labels = mask_array.astype(np.int64, copy=False)
+        baseline = (
+            find_boundaries(labels, mode="inner")
+            if find_boundaries is not None
+            else _label_boundaries(labels)
+        )
+        thickness = max(1, int(getattr(mask, "outline_thickness", 1)))
+        if thickness > 1:
+            baseline = _binary_dilation_4(baseline, thickness - 1)
+        return baseline
     if mode == "fill":
-        return mask_bool
+        return mask_array.astype(bool, copy=False)
     raise ValueError(f"Unsupported mask render mode: {mask.mode}")
 
 

@@ -4,11 +4,13 @@
 - Added opt-in toggles plus availability hints to the Batch Export plugin, keeping overlay options discoverable while preventing invalid selections on datasets without masks or annotations.
 - Threaded overlay snapshots through every export worker (FOV, cell, ROI) and extended renderer helpers with alpha/outline blending to honour mask colours and annotation palettes.
 - Expanded `tests/test_rendering.py` with translucent/outline mask coverage and added snapshot reconstruction checks to `tests/test_export_fovs_batch.py` to guard future regressions.
+- Replaced binary edge approximations with label-aware mask outlines, added an adjustable thickness control, and hardened the fallback path so NumPy-only environments still produce per-cell contours backed by new renderer tests.
 
 **Batch export UI**
 - Replaced the placeholder export plugin with `BatchExportPlugin`, adding mode-aware controls, marker set selection, output location tools, and asynchronous Start/Cancel handling with progress, status messages, and output links.
 - Added mode-specific panels for Full FOV, Single Cells, and ROIs, including cell table filters, ROI selectors, crop sizing, and a Matplotlib-backed preview to validate single-cell settings before starting long runs.
 - Surfaced scale-bar toggles and DPI/downsample controls across all export modes; the pipeline records the requested ratios ahead of the Phase 4 sizing work.
+- Added a mask outline thickness slider that synchronises with the viewer so exports and interactive previews apply the same contour width.
 
 **Job integration & rendering reuse**
 - Wired the plugin to build `Job` items per mode so exports share structured progress, cancellation, and per-item result tracking without blocking the UI thread.

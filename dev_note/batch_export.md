@@ -129,12 +129,14 @@ Goals: Enable users to include or exclude mask and annotation overlays in export
 
 ### Phase 3b —  Fixing the mask outline rendering
 Goals: Ensure that mask outlines are rendered for each cell correctly, not just based on a binary mask of presence/absence. Also the thickness of the outline should be adjustable.
-- [ ] Review the current implementation of mask outline rendering in the renderer functions.
-- [ ] Modify the rendering logic to ensure that outlines are drawn around each individual cell based on
-  - [ ] the segmentation mask and
-  - [ ] the specified outline thickness.
-- [ ] Add UI controls in the plugin to allow users to adjust the outline thickness for masks.
-- [ ] Back the changes with unit tests to verify that mask outlines are rendered correctly for various thickness settings.
+
+#### Phase 3b Action Plan (2025-10-22)
+- [x] Review the current mask overlay pipeline (viewer rendering helpers, snapshot wiring, plugin usage) to confirm where label data is discarded and how outline arrays are constructed today.
+- [x] Update renderer logic so outline mode operates on per-label segmentation masks, supports configurable outline thickness, and gracefully degrades when `skimage` is unavailable.
+- [x] Thread the outline thickness setting through `MaskOverlaySnapshot`, `MaskRenderSettings`, and the viewer/plugin plumbing so exports and on-screen previews remain consistent.
+- [x] Add an outline thickness control to the Batch Export plugin UI (including sensible defaults and validation) and sync it with the viewer overlay settings when applicable.
+- [x] Extend the automated test suite to cover per-cell outline rendering across multiple thicknesses (unit tests for the renderer helpers + an integration test for the export job path).
+- [x] Update user-facing documentation (`README.md`, `doc/log.md`) and implementation notes (`dev_note/github_issues.md`) after landing the feature.
 
 
 ### Phase 4 — Per-ROI and Per-Cell features

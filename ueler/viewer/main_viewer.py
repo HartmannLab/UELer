@@ -15,7 +15,6 @@ from types import SimpleNamespace
 from ipywidgets import IntText, Output, Dropdown, FloatSlider, Checkbox, Button, VBox, HBox, Layout, Widget
 from IPython.display import display
 import pandas as pd
-from skimage.segmentation import find_boundaries
 # Import modules
 from ueler.constants import PREDEFINED_COLORS, DOWNSAMPLE_FACTORS, UICOMPNENTS_SKIP
 from ueler.data_loader import (
@@ -156,6 +155,7 @@ class ImageMaskViewer:
         self.annotation_overlay_mode = "combined"
         self.annotation_label_display_mode = "id"
         self.annotation_overlay_alpha = 0.5
+        self.mask_outline_thickness = 1
         self._control_section_titles = []
 
         self.channel_names_set = set()
@@ -1230,13 +1230,14 @@ class ImageMaskViewer:
                     mask_array = np.asarray(label_mask_ds)
                 if mask_array.size == 0:
                     continue
-                edge_mask = find_boundaries(mask_array, mode="inner")
                 color_key = controls.mask_color_controls[mask_name].value
                 color_value = self.predefined_colors.get(color_key, color_key)
                 mask_settings.append(
                     MaskRenderSettings(
-                        array=edge_mask.astype(bool, copy=False),
+                        array=mask_array,
                         color=to_rgb(color_value),
+                        mode="outline",
+                        outline_thickness=int(self.mask_outline_thickness),
                     )
                 )
 
@@ -1296,6 +1297,7 @@ class ImageMaskViewer:
                         color=to_rgb(colour_value),
                         alpha=1.0,
                         mode="outline",
+                        outline_thickness=int(self.mask_outline_thickness),
                     )
                 )
 
@@ -1369,10 +1371,11 @@ class ImageMaskViewer:
 
                 mask_settings.append(
                     MaskRenderSettings(
-                        array=mask_array.astype(bool, copy=False),
+                        array=mask_array,
                         color=mask_snapshot.color,
                         alpha=float(mask_snapshot.alpha),
                         mode=str(mask_snapshot.mode),
+                        outline_thickness=int(getattr(mask_snapshot, "outline_thickness", 1)),
                     )
                 )
 

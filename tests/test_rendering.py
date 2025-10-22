@@ -89,7 +89,8 @@ class RenderingHelpersTests(unittest.TestCase):
         original_find_boundaries = rendering_mod.find_boundaries
         rendering_mod.find_boundaries = None
         try:
-            mask_array = np.ones((4, 4), dtype=bool)
+            mask_array = np.zeros((4, 4), dtype=np.int32)
+            mask_array[1:3, 1:3] = 1
             mask = MaskRenderSettings(array=mask_array, color=(0.0, 0.0, 1.0), mode="outline")
             result = render_fov_to_array(
                 "FOV",
@@ -99,13 +100,46 @@ class RenderingHelpersTests(unittest.TestCase):
                 downsample_factor=1,
                 masks=[mask],
             )
+            tinted = np.all(np.isclose(result, [0.0, 0.0, 1.0], atol=1e-6), axis=2)
+            expected = rendering_mod._label_boundaries(mask_array)
+            np.testing.assert_array_equal(tinted, expected)
+            np.testing.assert_allclose(result[0, 0], [1.0, 0.5, 0.0], atol=1e-6)
         finally:
             rendering_mod.find_boundaries = original_find_boundaries
 
-        # Centre pixel remains unchanged (outline only affects border)
-        np.testing.assert_allclose(result[1, 1], [1.0, 0.5, 0.0], atol=1e-6)
-        # Corner pixel is recoloured blue by the outline mask
-        np.testing.assert_allclose(result[0, 0], [0.0, 0.0, 1.0], atol=1e-6)
+    def test_render_fov_outline_thickness_expands_boundaries(self) -> None:
+        from ueler.viewer import rendering as rendering_mod
+
+        mask_array = np.zeros((4, 4), dtype=np.int32)
+        mask_array[1, 1] = 1
+        thin_mask = MaskRenderSettings(array=mask_array, color=(0.0, 0.0, 1.0), mode="outline", outline_thickness=1)
+        thick_mask = MaskRenderSettings(array=mask_array, color=(0.0, 0.0, 1.0), mode="outline", outline_thickness=3)
+
+        thin_result = render_fov_to_array(
+            "FOV",
+            self.channels,
+            ("A", "B"),
+            self.settings,
+            downsample_factor=1,
+            masks=[thin_mask],
+        )
+        thick_result = render_fov_to_array(
+            "FOV",
+            self.channels,
+            ("A", "B"),
+            self.settings,
+            downsample_factor=1,
+            masks=[thick_mask],
+        )
+
+        thin_outline = np.all(np.isclose(thin_result, [0.0, 0.0, 1.0], atol=1e-6), axis=2)
+        thick_outline = np.all(np.isclose(thick_result, [0.0, 0.0, 1.0], atol=1e-6), axis=2)
+
+        baseline = rendering_mod._label_boundaries(mask_array)
+        dilated = rendering_mod._binary_dilation_4(baseline, 2)
+
+        np.testing.assert_array_equal(thin_outline, baseline)
+        np.testing.assert_array_equal(thick_outline, dilated)
 
     def test_render_crop_to_array_uses_requested_region(self) -> None:
         crop = render_crop_to_array(

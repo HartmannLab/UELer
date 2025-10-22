@@ -23,6 +23,7 @@ from ipywidgets import (
     HBox,
     HTML,
     IntProgress,
+    IntSlider,
     IntText,
     Layout,
     Output,
@@ -194,6 +195,16 @@ class BatchExportPlugin(PluginBase):
             description="Include masks",
             indent=False,
             layout=Layout(width="auto"),
+        )
+        self.ui_component.mask_outline_thickness = IntSlider(
+            value=max(1, int(getattr(self.main_viewer, "mask_outline_thickness", 1))),
+            min=1,
+            max=10,
+            step=1,
+            description="Mask outline px:",
+            layout=Layout(width="100%"),
+            style=style_auto,
+            continuous_update=False,
         )
         self.ui_component.overlay_hint = HTML(value="", layout=Layout(width="100%"))
 
@@ -374,6 +385,7 @@ class BatchExportPlugin(PluginBase):
                     [self.ui_component.include_annotations, self.ui_component.include_masks],
                     layout=Layout(gap="16px", align_items="center"),
                 ),
+                self.ui_component.mask_outline_thickness,
                 self.ui_component.overlay_hint,
                 self.ui_component.mode_tabs,
                 HBox(
@@ -402,6 +414,11 @@ class BatchExportPlugin(PluginBase):
         self.ui_component.cell_apply_filter.on_click(lambda _: self.refresh_cell_options())
         self.ui_component.cell_preview_button.on_click(lambda _: self._preview_single_cell())
         self.ui_component.roi_limit_to_fov.observe(lambda _: self.refresh_roi_options(), names="value")
+        self.ui_component.include_masks.observe(lambda _: self.refresh_overlay_capabilities(), names="value")
+        self.ui_component.mask_outline_thickness.observe(
+            self._on_mask_outline_thickness_change,
+            names="value",
+        )
 
     # ------------------------------------------------------------------
     # UI refresh helpers
@@ -504,6 +521,7 @@ class BatchExportPlugin(PluginBase):
         masks_available = bool(getattr(self.main_viewer, "masks_available", False))
         annotations_available = bool(getattr(self.main_viewer, "annotations_available", False))
         include_masks = self.ui_component.include_masks
+        thickness_widget = self.ui_component.mask_outline_thickness
         include_annotations = self.ui_component.include_annotations
 
         masks_were_disabled = include_masks.disabled
@@ -523,6 +541,7 @@ class BatchExportPlugin(PluginBase):
         if not masks_available or not visible_masks:
             include_masks.value = False
             include_masks.disabled = True
+            thickness_widget.disabled = True
             if not masks_available:
                 hints.append("Masks unavailable for this dataset.")
             else:
@@ -531,6 +550,10 @@ class BatchExportPlugin(PluginBase):
             include_masks.disabled = False
             if masks_were_disabled and not include_masks.value:
                 include_masks.value = True
+            viewer_thickness = int(getattr(self.main_viewer, "mask_outline_thickness", 1))
+            if thickness_widget.value != viewer_thickness:
+                thickness_widget.value = viewer_thickness
+            thickness_widget.disabled = not include_masks.value
 
         if not annotation_active:
             include_annotations.value = False
@@ -559,6 +582,30 @@ class BatchExportPlugin(PluginBase):
             return
         index = list(self._MODE_LABELS).index(new_mode)
         self.ui_component.mode_tabs.selected_index = index
+
+    def _on_mask_outline_thickness_change(self, change) -> None:
+        widget = self.ui_component.mask_outline_thickness
+        try:
+            thickness = int(change.get("new", 1))
+        except (TypeError, ValueError):
+            thickness = 1
+        if thickness < 1:
+            thickness = 1
+        if widget.value != thickness:
+            widget.value = thickness
+            return
+
+        previous = int(getattr(self.main_viewer, "mask_outline_thickness", 1))
+        if previous == thickness:
+            return
+
+        self.main_viewer.mask_outline_thickness = thickness
+        self._overlay_snapshot = None
+        self._overlay_cache.clear()
+        try:
+            self.main_viewer.update_display(self.main_viewer.current_downsample_factor)
+        except Exception:  # pragma: no cover - defensive viewer refresh guard
+            pass
 
     def _toggle_fov_selector(self, use_all: bool) -> None:
         self.ui_component.full_fov_selector.disabled = use_all
@@ -603,6 +650,8 @@ class BatchExportPlugin(PluginBase):
             scale_ratio = float(self.ui_component.scale_bar_ratio.value)
             include_annotations = bool(self.ui_component.include_annotations.value)
             include_masks = bool(self.ui_component.include_masks.value)
+            thickness = int(self.ui_component.mask_outline_thickness.value or 1)
+            self.main_viewer.mask_outline_thickness = max(1, thickness)
 
             overlay_snapshot = self._capture_overlay_snapshot(
                 include_masks=include_masks,

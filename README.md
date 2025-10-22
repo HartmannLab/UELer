@@ -78,6 +78,7 @@ The release candidate combines the new Batch Export UI with the rendering and jo
 - Snapshot the viewer's current mask/annotation state and replay it during batch jobs so exported images honour in-app overlay visibility, colours, and modes.
 - Added overlay toggles with availability hints to the Batch Export plugin, letting users opt into masks/annotations per run without surfacing invalid options when datasets lack overlays.
 - Extended the renderer with alpha and outline blending plus new tests that cover translucent and outline masks alongside overlay snapshot reconstruction.
+- Upgraded mask outlines to respect per-cell label maps with an adjustable thickness slider; the renderer now falls back to a pure NumPy boundary finder when `skimage` is absent, and tests cover both baseline and dilated contours.
 
 **Batch export UI & UX**
 - Replaced the placeholder plugin with `BatchExportPlugin`, offering mode selection (Full FOV, Single Cells, ROIs), marker profiles, output configuration, and asynchronous Start/Cancel controls with progress feedback.
