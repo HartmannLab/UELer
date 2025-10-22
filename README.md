@@ -80,6 +80,12 @@ The release candidate combines the new Batch Export UI with the rendering and jo
 - Extended the renderer with alpha and outline blending plus new tests that cover translucent and outline masks alongside overlay snapshot reconstruction.
 - Upgraded mask outlines to respect per-cell label maps with an adjustable thickness slider; the renderer now falls back to a pure NumPy boundary finder when `skimage` is absent, and tests cover both baseline and dilated contours.
 
+**Mask outline controls & plugin independence**
+- Added a main-viewer mask-outline slider that updates the live render and notifies plugins without forcing feedback loops.
+- Seeded the Batch Export plugin's slider from the viewer while preserving a local override that flows through overlay snapshots, cache keys, and export workers.
+- Hardened synchronisation so viewer-driven changes are adopted only when the plugin has not diverged, keeping exports and on-screen previews aligned without clobbering local adjustments.
+- Expanded `tests/test_rendering.py` and `tests/test_export_fovs_batch.py` with label-preserving outline assertions and slider sync regressions.
+
 **Batch export UI & UX**
 - Replaced the placeholder plugin with `BatchExportPlugin`, offering mode selection (Full FOV, Single Cells, ROIs), marker profiles, output configuration, and asynchronous Start/Cancel controls with progress feedback.
 - Added per-mode panels with cell filtering, ROI selectors, crop sizing, and a single-cell preview workflow that uses the shared rendering helpers before launching full jobs.

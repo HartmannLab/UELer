@@ -18,6 +18,7 @@ from ipywidgets import (
     TagsInput,
     HTML,
     ToggleButtons,
+    IntSlider,
 )
 from IPython.display import display
 from types import SimpleNamespace
@@ -350,6 +351,17 @@ class uicomponents:
                 gap='6px',
                 padding='4px 0'
             )
+        )
+
+        self.mask_outline_thickness_slider = IntSlider(
+            value=1,
+            min=1,
+            max=10,
+            step=1,
+            description='Mask outline px:',
+            layout=Layout(width='100%'),
+            style={'description_width': '150px'},
+            continuous_update=False,
         )
 
         self.no_channels_label = HTML(value='<i>No channels selected.</i>')

@@ -293,10 +293,9 @@ def _apply_mask_overlays(
             raise ValueError(
                 "Mask dimensions do not match composite output for the requested region"
             )
-        mask_bool = mask_region.astype(bool, copy=False)
-        if not np.any(mask_bool):
+        if not np.any(mask_region):
             continue
-        affected = _resolve_mask_pixels(mask_bool, mask)
+        affected = _resolve_mask_pixels(mask_region, mask)
         if not np.any(affected):
             continue
         colour = _normalise_color(mask.color)

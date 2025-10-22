@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, Mapping, Optional, Sequence
+from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 from IPython import get_ipython
@@ -39,6 +39,7 @@ from matplotlib.colors import to_rgb
 from ..rendering import (
     AnnotationRenderSettings,
     ChannelRenderSettings,
+    MaskOverlaySnapshot,
     MaskRenderSettings,
     OverlaySnapshot,
     render_crop_to_array,
@@ -90,9 +91,15 @@ class BatchExportPlugin(PluginBase):
         self._cell_filter_snapshot = ""
         self._roi_records: Dict[str, Dict[str, Any]] = {}
         self._seen_results: set[str] = set()
+        initial_outline = max(1, int(getattr(self.main_viewer, "mask_outline_thickness", 1)))
+        self._viewer_outline_thickness = initial_outline
+        self._mask_outline_thickness = initial_outline
+        self._mask_outline_overridden = False
+        self._suspend_outline_widget_callback = False
+
         self._overlay_snapshot: Optional[OverlaySnapshot] = None
         self._overlay_cache: Dict[
-            tuple[str, int],
+            tuple[str, int, Tuple[int, ...]],
             tuple[Optional[AnnotationRenderSettings], tuple[MaskRenderSettings, ...]],
         ] = {}
 
@@ -197,7 +204,7 @@ class BatchExportPlugin(PluginBase):
             layout=Layout(width="auto"),
         )
         self.ui_component.mask_outline_thickness = IntSlider(
-            value=max(1, int(getattr(self.main_viewer, "mask_outline_thickness", 1))),
+            value=self._mask_outline_thickness,
             min=1,
             max=10,
             step=1,
@@ -518,14 +525,12 @@ class BatchExportPlugin(PluginBase):
         self.ui_component.roi_selection.value = selected
 
     def refresh_overlay_capabilities(self) -> None:
+        include_masks = self.ui_component.include_masks
+        include_annotations = self.ui_component.include_annotations
+        thickness_widget = self.ui_component.mask_outline_thickness
+
         masks_available = bool(getattr(self.main_viewer, "masks_available", False))
         annotations_available = bool(getattr(self.main_viewer, "annotations_available", False))
-        include_masks = self.ui_component.include_masks
-        thickness_widget = self.ui_component.mask_outline_thickness
-        include_annotations = self.ui_component.include_annotations
-
-        masks_were_disabled = include_masks.disabled
-        annotations_were_disabled = include_annotations.disabled
 
         mask_controls = getattr(self.main_viewer.ui_component, "mask_display_controls", {})
         visible_masks = any(getattr(cb, "value", False) for cb in mask_controls.values()) if masks_available else False
@@ -536,25 +541,73 @@ class BatchExportPlugin(PluginBase):
             and getattr(self.main_viewer, "active_annotation_name", None)
         )
 
-        hints: list[str] = []
+        masks_were_disabled = include_masks.disabled
+        annotations_were_disabled = include_annotations.disabled
 
-        if not masks_available or not visible_masks:
+        hints: list[str] = []
+        hints.extend(
+            self._refresh_mask_controls(
+                include_masks=include_masks,
+                thickness_widget=thickness_widget,
+                masks_available=masks_available,
+                visible_masks=visible_masks,
+                masks_were_disabled=masks_were_disabled,
+            )
+        )
+        hints.extend(
+            self._refresh_annotation_controls(
+                include_annotations=include_annotations,
+                annotations_available=annotations_available,
+                annotation_active=annotation_active,
+                annotations_were_disabled=annotations_were_disabled,
+            )
+        )
+        self._apply_overlay_hint(hints)
+
+    def _refresh_mask_controls(
+        self,
+        *,
+        include_masks,
+        thickness_widget,
+        masks_available: bool,
+        visible_masks: bool,
+        masks_were_disabled: bool,
+    ) -> list[str]:
+        hints: list[str] = []
+        if not masks_available:
             include_masks.value = False
             include_masks.disabled = True
             thickness_widget.disabled = True
-            if not masks_available:
-                hints.append("Masks unavailable for this dataset.")
-            else:
-                hints.append("Enable at least one mask overlay in the viewer to export masks.")
-        else:
-            include_masks.disabled = False
-            if masks_were_disabled and not include_masks.value:
-                include_masks.value = True
-            viewer_thickness = int(getattr(self.main_viewer, "mask_outline_thickness", 1))
-            if thickness_widget.value != viewer_thickness:
-                thickness_widget.value = viewer_thickness
-            thickness_widget.disabled = not include_masks.value
+            hints.append("Masks unavailable for this dataset.")
+            return hints
 
+        if not visible_masks:
+            include_masks.value = False
+            include_masks.disabled = True
+            thickness_widget.disabled = True
+            hints.append("Enable at least one mask overlay in the viewer to export masks.")
+            return hints
+
+        include_masks.disabled = False
+        if masks_were_disabled and not include_masks.value:
+            include_masks.value = True
+
+        if getattr(self.main_viewer, "initialized", False):
+            viewer_thickness = max(1, int(getattr(self.main_viewer, "mask_outline_thickness", 1)))
+            self._sync_mask_outline_with_viewer(viewer_thickness, thickness_widget)
+
+        thickness_widget.disabled = not include_masks.value
+        return hints
+
+    def _refresh_annotation_controls(
+        self,
+        *,
+        include_annotations,
+        annotations_available: bool,
+        annotation_active: bool,
+        annotations_were_disabled: bool,
+    ) -> list[str]:
+        hints: list[str] = []
         if not annotation_active:
             include_annotations.value = False
             include_annotations.disabled = True
@@ -562,16 +615,42 @@ class BatchExportPlugin(PluginBase):
                 hints.append("Annotations unavailable for this dataset.")
             else:
                 hints.append("Activate annotation overlays in the viewer to export them.")
-        else:
-            include_annotations.disabled = False
-            if annotations_were_disabled and not include_annotations.value:
-                include_annotations.value = True
+            return hints
 
+        include_annotations.disabled = False
+        if annotations_were_disabled and not include_annotations.value:
+            include_annotations.value = True
+        return hints
+
+    def _apply_overlay_hint(self, hints: Sequence[str]) -> None:
         if hints:
             message = " ".join(hints)
             self.ui_component.overlay_hint.value = f"<span style='color:#666;'>{message}</span>"
         else:
             self.ui_component.overlay_hint.value = ""
+
+    def _sync_mask_outline_with_viewer(self, viewer_thickness: int, thickness_widget) -> None:
+        self._viewer_outline_thickness = viewer_thickness
+        if self._mask_outline_overridden and self._mask_outline_thickness == viewer_thickness:
+            self._mask_outline_overridden = False
+        if self._mask_outline_overridden:
+            if thickness_widget.value != self._mask_outline_thickness:
+                self._set_mask_outline_slider_value(self._mask_outline_thickness)
+            return
+        if self._mask_outline_thickness != viewer_thickness:
+            self._mask_outline_thickness = viewer_thickness
+        if thickness_widget.value != self._mask_outline_thickness:
+            self._set_mask_outline_slider_value(self._mask_outline_thickness)
+
+    def _set_mask_outline_slider_value(self, thickness: int) -> None:
+        widget = self.ui_component.mask_outline_thickness
+        if widget is None:
+            return
+        self._suspend_outline_widget_callback = True
+        try:
+            widget.value = max(1, int(thickness))
+        finally:
+            self._suspend_outline_widget_callback = False
 
     # ------------------------------------------------------------------
     # Trait / event handlers
@@ -584,6 +663,8 @@ class BatchExportPlugin(PluginBase):
         self.ui_component.mode_tabs.selected_index = index
 
     def _on_mask_outline_thickness_change(self, change) -> None:
+        if self._suspend_outline_widget_callback:
+            return
         widget = self.ui_component.mask_outline_thickness
         try:
             thickness = int(change.get("new", 1))
@@ -592,20 +673,15 @@ class BatchExportPlugin(PluginBase):
         if thickness < 1:
             thickness = 1
         if widget.value != thickness:
-            widget.value = thickness
+            self._set_mask_outline_slider_value(thickness)
+
+        if thickness == self._mask_outline_thickness:
             return
 
-        previous = int(getattr(self.main_viewer, "mask_outline_thickness", 1))
-        if previous == thickness:
-            return
-
-        self.main_viewer.mask_outline_thickness = thickness
+        self._mask_outline_thickness = thickness
+        self._mask_outline_overridden = thickness != self._viewer_outline_thickness
         self._overlay_snapshot = None
         self._overlay_cache.clear()
-        try:
-            self.main_viewer.update_display(self.main_viewer.current_downsample_factor)
-        except Exception:  # pragma: no cover - defensive viewer refresh guard
-            pass
 
     def _toggle_fov_selector(self, use_all: bool) -> None:
         self.ui_component.full_fov_selector.disabled = use_all
@@ -631,6 +707,23 @@ class BatchExportPlugin(PluginBase):
         self.refresh_roi_options()
         self.refresh_overlay_capabilities()
 
+    def on_viewer_mask_outline_change(self, thickness: int) -> None:
+        try:
+            viewer_thickness = max(1, int(thickness))
+        except (TypeError, ValueError):
+            viewer_thickness = 1
+        self._viewer_outline_thickness = viewer_thickness
+        if self._mask_outline_overridden and self._mask_outline_thickness != viewer_thickness:
+            return
+        if self._mask_outline_overridden and self._mask_outline_thickness == viewer_thickness:
+            self._mask_outline_overridden = False
+        if not self._mask_outline_overridden:
+            if self._mask_outline_thickness != viewer_thickness:
+                self._mask_outline_thickness = viewer_thickness
+            self._set_mask_outline_slider_value(viewer_thickness)
+            self._overlay_snapshot = None
+            self._overlay_cache.clear()
+
     # ------------------------------------------------------------------
     # Export orchestration
     # ------------------------------------------------------------------
@@ -650,8 +743,10 @@ class BatchExportPlugin(PluginBase):
             scale_ratio = float(self.ui_component.scale_bar_ratio.value)
             include_annotations = bool(self.ui_component.include_annotations.value)
             include_masks = bool(self.ui_component.include_masks.value)
-            thickness = int(self.ui_component.mask_outline_thickness.value or 1)
-            self.main_viewer.mask_outline_thickness = max(1, thickness)
+            thickness = max(1, int(self.ui_component.mask_outline_thickness.value or 1))
+            if thickness != self._mask_outline_thickness:
+                self._mask_outline_thickness = thickness
+            self._mask_outline_overridden = thickness != self._viewer_outline_thickness
 
             overlay_snapshot = self._capture_overlay_snapshot(
                 include_masks=include_masks,
@@ -741,6 +836,24 @@ class BatchExportPlugin(PluginBase):
             include_masks=include_masks,
             include_annotations=include_annotations,
         )
+        if include_masks and snapshot.masks:
+            adjusted_masks: list[MaskOverlaySnapshot] = []
+            for mask_snapshot in snapshot.masks:
+                adjusted_masks.append(
+                    MaskOverlaySnapshot(
+                        name=mask_snapshot.name,
+                        color=mask_snapshot.color,
+                        alpha=mask_snapshot.alpha,
+                        mode=mask_snapshot.mode,
+                        outline_thickness=self._mask_outline_thickness,
+                    )
+                )
+            snapshot = OverlaySnapshot(
+                include_annotations=snapshot.include_annotations,
+                include_masks=snapshot.include_masks,
+                annotation=snapshot.annotation,
+                masks=tuple(adjusted_masks),
+            )
         self._overlay_snapshot = snapshot
         self._overlay_cache.clear()
         return snapshot
@@ -758,7 +871,10 @@ class BatchExportPlugin(PluginBase):
         if not snapshot.include_masks and not snapshot.include_annotations:
             return None, ()
 
-        key = (fov_name, downsample)
+        mask_thicknesses: Tuple[int, ...] = tuple(
+            int(getattr(mask, "outline_thickness", 1)) for mask in snapshot.masks
+        )
+        key = (fov_name, downsample, mask_thicknesses)
         cached = self._overlay_cache.get(key)
         if cached is not None:
             return cached
@@ -768,6 +884,17 @@ class BatchExportPlugin(PluginBase):
             downsample,
             snapshot,
         )
+        if mask_settings:
+            mask_settings = tuple(
+                MaskRenderSettings(
+                    array=mask.array,
+                    color=mask.color,
+                    alpha=mask.alpha,
+                    mode=mask.mode,
+                    outline_thickness=self._mask_outline_thickness,
+                )
+                for mask in mask_settings
+            )
         cached_result = (annotation_settings, mask_settings)
         self._overlay_cache[key] = cached_result
         return cached_result

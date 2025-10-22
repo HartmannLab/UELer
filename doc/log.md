@@ -6,6 +6,12 @@
 - Expanded `tests/test_rendering.py` with translucent/outline mask coverage and added snapshot reconstruction checks to `tests/test_export_fovs_batch.py` to guard future regressions.
 - Replaced binary edge approximations with label-aware mask outlines, added an adjustable thickness control, and hardened the fallback path so NumPy-only environments still produce per-cell contours backed by new renderer tests.
 
+**Mask outline controls & plugin independence**
+- Added a dedicated mask-outline thickness slider to the main viewer, seeded from the current render state and wired into plugin notifications so on-screen previews refresh immediately.
+- Taught `BatchExportPlugin` to seed its slider from the viewer once, then maintain an independent thickness value for exports while respecting viewer-driven updates when the user has not overridden it.
+- Propagated plugin-specific thickness through overlay snapshots, cache keys, and export workers so batch images honour local overrides without disturbing the live viewer.
+- Extended `tests/test_rendering.py` and `tests/test_export_fovs_batch.py` with label-boundary regressions and slider sync cases to lock in per-cell contours across both surfaces.
+
 **Batch export UI**
 - Replaced the placeholder export plugin with `BatchExportPlugin`, adding mode-aware controls, marker set selection, output location tools, and asynchronous Start/Cancel handling with progress, status messages, and output links.
 - Added mode-specific panels for Full FOV, Single Cells, and ROIs, including cell table filters, ROI selectors, crop sizing, and a Matplotlib-backed preview to validate single-cell settings before starting long runs.

@@ -141,6 +141,41 @@ class RenderingHelpersTests(unittest.TestCase):
         np.testing.assert_array_equal(thin_outline, baseline)
         np.testing.assert_array_equal(thick_outline, dilated)
 
+    def test_render_fov_outline_preserves_label_boundaries(self) -> None:
+        from ueler.viewer import rendering as rendering_mod
+
+        mask_array = np.array(
+            [
+                [0, 1, 1, 0, 2, 2, 0],
+                [0, 1, 1, 0, 2, 2, 0],
+                [0, 0, 0, 0, 0, 0, 0],
+                [0, 3, 3, 0, 4, 4, 0],
+                [0, 3, 3, 0, 4, 4, 0],
+            ],
+            dtype=np.int32,
+        )
+        mask = MaskRenderSettings(array=mask_array, color=(0.0, 0.0, 1.0), mode="outline", outline_thickness=1)
+
+        channels = {"A": np.ones(mask_array.shape, dtype=np.float32)}
+        settings = {
+            "A": ChannelRenderSettings(color=(1.0, 0.0, 0.0), contrast_min=0.0, contrast_max=1.0)
+        }
+        result = render_fov_to_array(
+            "FOV",
+            channels,
+            ("A",),
+            settings,
+            downsample_factor=1,
+            masks=[mask],
+        )
+
+        tinted = np.all(np.isclose(result, [0.0, 0.0, 1.0], atol=1e-6), axis=2)
+        expected = rendering_mod._label_boundaries(mask_array)
+
+        np.testing.assert_array_equal(tinted, expected)
+        self.assertFalse(tinted[1, 3])
+        self.assertFalse(tinted[3, 3])
+
     def test_render_crop_to_array_uses_requested_region(self) -> None:
         crop = render_crop_to_array(
             "FOV",

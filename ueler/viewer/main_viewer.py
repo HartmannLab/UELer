@@ -156,6 +156,7 @@ class ImageMaskViewer:
         self.annotation_label_display_mode = "id"
         self.annotation_overlay_alpha = 0.5
         self.mask_outline_thickness = 1
+        self._suspend_mask_outline_sync = False
         self._control_section_titles = []
 
         self.channel_names_set = set()
@@ -173,6 +174,7 @@ class ImageMaskViewer:
 
         # Initialize current_label_masks
         self.current_label_masks = {}
+        self.full_resolution_label_masks = {}
 
         # Load the status images
         self.load_status_images()
@@ -203,6 +205,10 @@ class ImageMaskViewer:
 
         # Initialize widgets
         create_widgets(self)
+        mask_slider = getattr(self.ui_component, "mask_outline_thickness_slider", None)
+        if mask_slider is not None:
+            mask_slider.observe(self._on_mask_outline_slider_change, names="value")
+            self._set_mask_outline_slider_value(self.mask_outline_thickness)
         self.annotation_palette_editor = AnnotationPaletteEditor(
             self.apply_annotation_palette_changes,
             self.close_annotation_editor,
@@ -790,6 +796,11 @@ class ImageMaskViewer:
 
         mask_widgets = []
         if self.masks_available:
+            outline_slider = getattr(self.ui_component, "mask_outline_thickness_slider", None)
+            if outline_slider is not None:
+                outline_slider.disabled = not bool(self.mask_names)
+                self._set_mask_outline_slider_value(self.mask_outline_thickness)
+                mask_widgets.append(outline_slider)
             for mask_name in self.mask_names:
                 # Checkbox to display/hide mask
                 if mask_name in self.ui_component.mask_display_controls:
@@ -1419,44 +1430,95 @@ class ImageMaskViewer:
         if self.masks_available:
             self.current_label_masks = {}
             self.full_resolution_label_masks = {}
-            selected_masks = [mask_name for mask_name, cb in self.ui_component.mask_display_controls.items() if cb.value]
+            selected_masks = [
+                mask_name
+                for mask_name, cb in self.ui_component.mask_display_controls.items()
+                if getattr(cb, "value", False)
+            ]
             for mask_name in selected_masks:
-                if mask_name in self.label_masks_cache[self.ui_component.image_selector.value]:
-                    label_mask_dict = self.label_masks_cache[self.ui_component.image_selector.value][mask_name]
-                    # Get the full-resolution mask (downsample factor of 1)
+                label_cache = self.label_masks_cache.get(self.ui_component.image_selector.value, {})
+                label_mask_dict = label_cache.get(mask_name)
+                if not label_mask_dict:
+                    continue
+                if 1 in label_mask_dict:
                     label_mask_full = label_mask_dict[1]
-                    # Get the downsampled mask for current view
-                    label_mask_ds = label_mask_dict[downsample_factor]
-                    self.current_label_masks[mask_name] = label_mask_ds[ymin_ds:ymax_ds, xmin_ds:xmax_ds]
                     self.full_resolution_label_masks[mask_name] = label_mask_full
+                label_mask_ds = label_mask_dict.get(downsample_factor)
+                if label_mask_ds is None:
+                    continue
+                self.current_label_masks[mask_name] = label_mask_ds[ymin_ds:ymax_ds, xmin_ds:xmax_ds]
 
-            self.image_display.update_patches()
-        
+            if hasattr(self.image_display, "update_patches"):
+                self.image_display.update_patches()
+
         self.inform_plugins('on_mv_update_display')
 
-        # Update the displayed image
-        self.image_display.img_display.set_data(combined)
-        self.image_display.combined = combined
-        self.image_display.img_display.set_extent(xym_r)  # Adjust extent to match axis limits
-        self.image_display.fig.canvas.draw_idle()
+    # ------------------------------------------------------------------
+    # Mask outline controls
+    # ------------------------------------------------------------------
+    def _set_mask_outline_slider_value(self, thickness: int) -> None:
+        slider = getattr(self.ui_component, "mask_outline_thickness_slider", None)
+        if slider is None:
+            return
+        try:
+            thickness = max(1, int(thickness))
+        except (TypeError, ValueError):
+            thickness = 1
+        if int(slider.value) == thickness:
+            return
+        self._suspend_mask_outline_sync = True
+        try:
+            slider.value = thickness
+        finally:
+            self._suspend_mask_outline_sync = False
 
-        # Update the current label masks for interaction only if masks are available
-        if self.masks_available:
-            self.current_label_masks = {}
-            self.full_resolution_label_masks = {}
-            for mask_name in selected_masks:
-                if mask_name in self.label_masks_cache[self.ui_component.image_selector.value]:
-                    label_mask_dict = self.label_masks_cache[self.ui_component.image_selector.value][mask_name]
-                    # Get the full-resolution mask (downsample factor of 1)
-                    label_mask_full = label_mask_dict[1]
-                    # Get the downsampled mask for current view
-                    label_mask_ds = label_mask_dict[downsample_factor]
-                    self.current_label_masks[mask_name] = label_mask_ds[ymin_ds:ymax_ds, xmin_ds:xmax_ds]
-                    self.full_resolution_label_masks[mask_name] = label_mask_full
+    def _on_mask_outline_slider_change(self, change) -> None:
+        if self._suspend_mask_outline_sync:
+            return
+        try:
+            thickness = max(1, int(change.get("new", 1)))
+        except (TypeError, ValueError):
+            thickness = 1
+        if thickness == int(getattr(self, "mask_outline_thickness", 1)):
+            return
+        self.mask_outline_thickness = thickness
+        if getattr(self, "initialized", False):
+            try:
+                self.update_display(self.current_downsample_factor)
+            except Exception:
+                if self._debug:
+                    print("[viewer] Failed to refresh display after mask outline update")
+        self._notify_plugins_mask_outline_changed(thickness)
 
-            self.image_display.update_patches()
+    def _notify_plugins_mask_outline_changed(self, thickness: int) -> None:
+        sideplots = getattr(self, "SidePlots", None)
+        if sideplots is None:
+            return
+        plugin = getattr(sideplots, "export_fovs_output", None)
+        if hasattr(plugin, "on_viewer_mask_outline_change"):
+            try:
+                plugin.on_viewer_mask_outline_change(thickness)
+            except Exception:
+                if self._debug:
+                    print("[viewer] Plugin notification for mask outline change failed")
+
+    def on_plugin_mask_outline_change(self, thickness: int) -> None:
+        try:
+            thickness = max(1, int(thickness))
+        except (TypeError, ValueError):
+            thickness = 1
+        if thickness == int(getattr(self, "mask_outline_thickness", 1)):
+            return
+        self.mask_outline_thickness = thickness
+        self._set_mask_outline_slider_value(thickness)
+        if getattr(self, "initialized", False):
+            try:
+                self.update_display(self.current_downsample_factor)
+            except Exception:
+                if self._debug:
+                    print("[viewer] Failed to refresh display after plugin mask outline change")
+        self._notify_plugins_mask_outline_changed(thickness)
         
-        self.inform_plugins('on_mv_update_display')
     
     def update_keys(self, *args):
         # Update key attributes based on the loaded widget values.

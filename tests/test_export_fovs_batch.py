@@ -176,6 +176,70 @@ if "mpl_toolkits.axes_grid1.anchored_artists" not in sys.modules:
     sys.modules["mpl_toolkits.axes_grid1.anchored_artists"] = anchored_module
 
 from ueler.viewer.main_viewer import ImageMaskViewer
+from ueler.viewer.plugin.export_fovs import BatchExportPlugin
+
+
+class _StubWidget:
+    def __init__(self, value=None):
+        self._value = value
+        self.disabled = False
+        self._observers = []
+
+    @property
+    def value(self):
+        return self._value
+
+    @value.setter
+    def value(self, new_value):
+        self._value = new_value
+        for callback in tuple(self._observers):
+            callback({"new": new_value, "owner": self})
+
+    def observe(self, callback, names=None):
+        self._observers.append(callback)
+
+
+class _StubHTML:
+    def __init__(self):
+        self.value = ""
+
+
+class _BatchExportViewerStub:
+    def __init__(self, base_path: Path, *, mask_outline_thickness: int = 3) -> None:
+        self.base_folder = str(base_path)
+        self.marker_sets = {
+            "default": {
+                "selected_channels": (),
+                "channel_settings": {},
+            }
+        }
+        self.available_fovs = []
+        self.cell_table = None
+        self.roi_manager = None
+        self.masks_available = True
+        self.annotations_available = False
+        self.annotation_display_enabled = False
+        self.active_annotation_name = None
+        self.mask_outline_thickness = mask_outline_thickness
+        self.current_downsample_factor = 1
+        self.predefined_colors = {"Red": "#ff0000"}
+        self.annotation_overlay_alpha = 1.0
+        self.annotation_overlay_mode = "combined"
+        self.side_plots = SimpleNamespace()
+        setattr(self, "SidePlots", self.side_plots)
+        self.initialized = True
+        self._debug = False
+        self.ui_component = SimpleNamespace(
+            mask_display_controls={"MASK": SimpleNamespace(value=True)},
+            mask_color_controls={"MASK": SimpleNamespace(value="Red")},
+            image_selector=SimpleNamespace(value=None),
+        )
+
+    def capture_overlay_snapshot(self, *, include_masks: bool, include_annotations: bool):  # pragma: no cover - unused in tests
+        raise NotImplementedError
+
+    def build_overlay_settings_from_snapshot(self, *args, **kwargs):  # pragma: no cover - unused in tests
+        raise NotImplementedError
 
 
 class ExportFOVsBatchTests(unittest.TestCase):
@@ -246,6 +310,45 @@ class ExportFOVsBatchTests(unittest.TestCase):
         viewer.load_fov = MethodType(lambda self, _fov, _channels=None: None, viewer)
         viewer._merge_channel_max = MethodType(lambda self, *_args, **_kwargs: None, viewer)
         return viewer
+
+    def _make_export_plugin(self, viewer: _BatchExportViewerStub | None = None):
+        viewer = viewer or _BatchExportViewerStub(self.base_path)
+
+        class _TestBatchExportPlugin(BatchExportPlugin):
+            def setup_widget_observers(self):  # pragma: no cover - override UI wiring for tests
+                return
+
+            def _build_widgets(self):  # pragma: no cover - provide simplified widgets for tests
+                self.ui_component.include_masks = _StubWidget(True)
+                self.ui_component.include_annotations = _StubWidget(False)
+                self.ui_component.mask_outline_thickness = _StubWidget(self._mask_outline_thickness)
+                self.ui_component.overlay_hint = _StubHTML()
+
+            def _build_layout(self):  # pragma: no cover - skipped in tests
+                return
+
+            def _connect_events(self):  # pragma: no cover - manually wire slider observer
+                self.ui_component.mask_outline_thickness.observe(
+                    self._on_mask_outline_thickness_change,
+                    names="value",
+                )
+
+            def refresh_marker_options(self):  # pragma: no cover - not needed for tests
+                return
+
+            def refresh_fov_options(self):  # pragma: no cover - not needed for tests
+                return
+
+            def refresh_cell_options(self):  # pragma: no cover - not needed for tests
+                return
+
+            def refresh_roi_options(self):  # pragma: no cover - not needed for tests
+                return
+
+        plugin = _TestBatchExportPlugin(viewer, width=320, height=480)
+        viewer.SidePlots.export_fovs_output = plugin
+        self.addCleanup(plugin._executor.shutdown, False)
+        return viewer, plugin
 
     def _configure_overlays(self, viewer: ImageMaskViewer) -> None:
         mask_array = np.array(
@@ -351,6 +454,46 @@ class ExportFOVsBatchTests(unittest.TestCase):
         self.assertIn("FOV_A", results)
         self.assertNotEqual(results["FOV_A"], True)
         self.assertFalse(list(output_dir.glob("*.png")), "Unexpected export file was created")
+
+    def test_batch_export_plugin_defaults_to_viewer_outline(self) -> None:
+        viewer_stub = _BatchExportViewerStub(self.base_path, mask_outline_thickness=4)
+        viewer, plugin = self._make_export_plugin(viewer_stub)
+        slider = plugin.ui_component.mask_outline_thickness
+        self.assertEqual(viewer.mask_outline_thickness, 4)
+        self.assertEqual(slider.value, 4)
+        self.assertEqual(plugin._mask_outline_thickness, 4)
+        self.assertFalse(plugin._mask_outline_overridden)
+
+    def test_batch_export_plugin_slider_override_is_local(self) -> None:
+        viewer_stub = _BatchExportViewerStub(self.base_path, mask_outline_thickness=2)
+        viewer, plugin = self._make_export_plugin(viewer_stub)
+        plugin.ui_component.mask_outline_thickness.value = 7
+        self.assertEqual(viewer.mask_outline_thickness, 2)
+        self.assertEqual(plugin._mask_outline_thickness, 7)
+        self.assertTrue(plugin._mask_outline_overridden)
+
+    def test_batch_export_plugin_syncs_with_viewer_when_not_overridden(self) -> None:
+        viewer_stub = _BatchExportViewerStub(self.base_path, mask_outline_thickness=3)
+        viewer, plugin = self._make_export_plugin(viewer_stub)
+        viewer.mask_outline_thickness = 5
+        plugin.on_viewer_mask_outline_change(5)
+        self.assertEqual(plugin._mask_outline_thickness, 5)
+        self.assertFalse(plugin._mask_outline_overridden)
+        self.assertEqual(plugin.ui_component.mask_outline_thickness.value, 5)
+
+    def test_batch_export_plugin_ignores_viewer_update_when_overridden(self) -> None:
+        viewer_stub = _BatchExportViewerStub(self.base_path, mask_outline_thickness=2)
+        viewer, plugin = self._make_export_plugin(viewer_stub)
+        plugin.ui_component.mask_outline_thickness.value = 6
+        self.assertTrue(plugin._mask_outline_overridden)
+        viewer.mask_outline_thickness = 3
+        plugin.on_viewer_mask_outline_change(3)
+        self.assertEqual(plugin._mask_outline_thickness, 6)
+        self.assertEqual(plugin.ui_component.mask_outline_thickness.value, 6)
+        self.assertTrue(plugin._mask_outline_overridden)
+        viewer.mask_outline_thickness = 6
+        plugin.on_viewer_mask_outline_change(6)
+        self.assertFalse(plugin._mask_outline_overridden)
 
 
 if __name__ == "__main__":
