@@ -7,8 +7,6 @@ from typing import Optional
 import matplotlib.pyplot as plt
 from matplotlib.colors import to_rgb
 from matplotlib.text import Annotation
-from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
-import matplotlib.font_manager as fm
 import cv2
 from collections import OrderedDict
 from types import SimpleNamespace
@@ -31,6 +29,7 @@ from ueler.image_utils import (
     get_axis_limits_with_padding,
 )
 from ueler.viewer.images import load_asset_bytes
+from ueler.viewer.scale_bar import compute_scale_bar_spec, effective_pixel_size_nm
 from .ui_components import create_widgets, display_ui, update_wide_plugin_panel
 from .roi_manager import ROIManager
 from ueler.viewer.plugin.roi_manager_plugin import ROIManagerPlugin
@@ -158,6 +157,9 @@ class ImageMaskViewer:
         self.mask_outline_thickness = 1
         self._suspend_mask_outline_sync = False
         self._control_section_titles = []
+        self.pixel_size_nm = 390.0
+        self.scale_bar_fraction = 0.1
+        self._suspend_pixel_size_observer = False
 
         self.channel_names_set = set()
         self.channel_max_values = {}
@@ -205,6 +207,17 @@ class ImageMaskViewer:
 
         # Initialize widgets
         create_widgets(self)
+        pixel_widget = getattr(self.ui_component, "pixel_size_inttext", None)
+        if pixel_widget is not None:
+            try:
+                self.pixel_size_nm = max(1.0, float(pixel_widget.value))
+            except (TypeError, ValueError):
+                self.pixel_size_nm = 390.0
+                self._suspend_pixel_size_observer = True
+                try:
+                    pixel_widget.value = int(self.pixel_size_nm)
+                finally:
+                    self._suspend_pixel_size_observer = False
         mask_slider = getattr(self.ui_component, "mask_outline_thickness_slider", None)
         if mask_slider is not None:
             mask_slider.observe(self._on_mask_outline_slider_change, names="value")
@@ -552,38 +565,26 @@ class ImageMaskViewer:
         # self.marker_set_dropdown.value = None
     
     def on_pixel_size_change(self, change):
-        image_display = self.image_display
-        ax = image_display.ax
-        # Remove existing scalebar if it exists
-        if hasattr(image_display, 'scalebar') and image_display.scalebar:
-            image_display.scalebar.remove()
-        
-        # Determine new length and label
-        if change['new'] == 390:
-            new_length = 102.6
-            new_label = '40 µm'
-        elif change['new'] == 195:
-            new_length = 51.3
-            new_label = '20 µm'
-        elif change['new'] == 98:
-            new_length = 102
-            new_label = '10 µm'
-        
-        # Create and add the new scalebar
-        fontprops = fm.FontProperties(size=12)
-        image_display.scalebar = AnchoredSizeBar(
-            ax.transData,
-            new_length,
-            new_label,
-            'lower right',
-            pad=0.5,
-            color='white',
-            frameon=False,
-            size_vertical=2,
-            fontproperties=fontprops
-        )
-        ax.add_artist(image_display.scalebar)
-        image_display.fig.canvas.draw()
+        if self._suspend_pixel_size_observer:
+            return
+
+        new_value = change.get("new") if isinstance(change, dict) else None
+        try:
+            new_nm = float(new_value)
+        except (TypeError, ValueError):
+            self._restore_pixel_size_widget()
+            return
+
+        if new_nm <= 0:
+            self._restore_pixel_size_widget()
+            return
+
+        if abs(new_nm - self.pixel_size_nm) < 1e-6:
+            return
+
+        self.pixel_size_nm = new_nm
+        self.update_scale_bar()
+        self._notify_plugins_pixel_size_changed(new_nm)
     
     def on_key_change(self, change):
         # dynamically assign the new values to x_key, y_key, label_key, and mask_key
@@ -605,6 +606,67 @@ class ImageMaskViewer:
         new_key = change['new']
         setattr(self, key_name, new_key)
         print(f"{key_name} set to '{new_key}'.")
+
+    def _restore_pixel_size_widget(self) -> None:
+        widget = getattr(self.ui_component, "pixel_size_inttext", None)
+        if widget is None:
+            return
+        self._suspend_pixel_size_observer = True
+        try:
+            widget.value = int(round(max(self.pixel_size_nm, 1.0)))
+        finally:
+            self._suspend_pixel_size_observer = False
+
+    def _notify_plugins_pixel_size_changed(self, pixel_nm: float) -> None:
+        sideplots = getattr(self, "SidePlots", None)
+        plugin = getattr(sideplots, "export_fovs_output", None) if sideplots is not None else None
+        if plugin is None or not hasattr(plugin, "on_viewer_pixel_size_change"):
+            return
+        try:
+            plugin.on_viewer_pixel_size_change(pixel_nm)
+        except Exception:
+            if self._debug:
+                print("[viewer] Plugin notification for pixel size change failed")
+
+    def get_pixel_size_nm(self) -> float:
+        return max(1.0, float(getattr(self, "pixel_size_nm", 390.0)))
+
+    def update_scale_bar(self) -> None:
+        display = getattr(self, "image_display", None)
+        if display is None or not hasattr(display, "update_scale_bar"):
+            return
+
+        pixel_nm = self.get_pixel_size_nm()
+        combined = getattr(display, "combined", None)
+        width = None
+        if combined is not None and hasattr(combined, "shape"):
+            try:
+                width = int(combined.shape[1])
+            except Exception:
+                width = None
+        if not width and hasattr(self, "width"):
+            try:
+                width = int(self.width)
+            except Exception:
+                width = None
+
+        if not width or width <= 0:
+            display.update_scale_bar(None)
+            return
+
+        downsample = max(1, int(getattr(self, "current_downsample_factor", 1)))
+        fraction = float(getattr(self, "scale_bar_fraction", 0.1))
+        try:
+            effective_nm = effective_pixel_size_nm(pixel_nm, downsample)
+            spec = compute_scale_bar_spec(
+                image_width_px=width,
+                pixel_size_nm=effective_nm,
+                max_fraction=max(0.01, min(fraction, 0.5)),
+            )
+        except ValueError:
+            spec = None
+
+        display.update_scale_bar(spec, color="white", font_size=12.0)
 
 
     def _get_channel_stats(self, channel):
@@ -1452,6 +1514,7 @@ class ImageMaskViewer:
                 self.image_display.update_patches()
 
         self.inform_plugins('on_mv_update_display')
+        self.update_scale_bar()
 
     # ------------------------------------------------------------------
     # Mask outline controls

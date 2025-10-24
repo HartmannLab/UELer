@@ -158,14 +158,26 @@ Individually outline each cell in both the main viewer and the batch export plug
 
 ### Phase 4 — Scale bars support
 Goals: support scale bars.
-- [ ] Scale bar sizing and PDF format behavior:
-  - [ ] When a scale bar is requested, the export pipeline must compute a scale bar length such that the drawn length is <= 10% of the exported image width in pixels. Choose a round/clean physical length (e.g., 1 µm, 2 µm, 5 µm, 10 µm, etc.) that satisfies this constraint and is appropriate for the image resolution and DPI.
-    - [ ] Refactor how the viewer handle scale bars to expose a helper that computes recommended scale bar lengths given image pixel size, physical size, and desired max fraction of image width.
-    - [ ] Ensure both the export job runner and the main viewer calls this helper for displaying the scale bar.
-  - [ ] For non-PDF formats (PNG, JPEG, TIFF), draw the scale bar directly onto the exported image at the bottom-right corner using Matplotlib's `AnchoredSizeBar` or similar logic.
-  - [ ] For PDF exports, draw the scale bar as part of the Matplotlib figure prior to saving to PDF, ensuring it scales correctly with figure size and DPI.
-- [ ] Add a small helper to compute scale bar pixel size for exported DPI/figure size and optionally draw it into images (reuse Matplotlib `AnchoredSizeBar` logic).
+- [x] Scale bar sizing and PDF format behavior:
+  - [x] When a scale bar is requested, the export pipeline must compute a scale bar length such that the drawn length is <= 10% of the exported image width in pixels. Choose a round/clean physical length (e.g., 1 µm, 2 µm, 5 µm, 10 µm, etc.) that satisfies this constraint and is appropriate for the image resolution and DPI.
+    - [x] Refactor how the viewer handle scale bars to expose a helper that computes recommended scale bar lengths given image pixel size, physical size, and desired max fraction of image width.
+    - [x] Ensure both the export job runner and the main viewer calls this helper for displaying the scale bar.
+  - [x] For non-PDF formats (PNG, JPEG, TIFF), draw the scale bar directly onto the exported image at the bottom-right corner using Matplotlib's `AnchoredSizeBar` or similar logic.
+  - [x] For PDF exports, draw the scale bar as part of the Matplotlib figure prior to saving to PDF, ensuring it scales correctly with figure size and DPI.
+- [x] Add a small helper to compute scale bar pixel size for exported DPI/figure size and optionally draw it into images (reuse Matplotlib `AnchoredSizeBar` logic).
 
+#### Phase 4 Action Plan (2025-10-24)
+- [x] Inventory current scale bar usage across viewer and export paths, capturing required metadata (pixel size, DPI, physical size) to inform the shared helper. *(Supports: "When a scale bar is requested…" checklist)*
+- [x] Design and implement a `compute_scale_bar_length` helper that rounds to tidy physical lengths while enforcing the ≤10% image-width rule; expose via a shared module and document expected inputs/outputs. *(Supports: "Refactor how the viewer handle scale bars…" checklist)*
+- [x] Thread the new helper through the viewer HUD and export job runner so both invoke it when scale bars are enabled; update existing call sites and remove ad-hoc calculations. *(Supports: "Ensure both the export job runner and the main viewer calls this helper…" checklist)*
+- [x] Implement draw helpers for raster exports using Matplotlib `AnchoredSizeBar`, ensuring placement at the bottom-right corner with padding and colour that respects theme settings. *(Supports: "For non-PDF formats …" checklist)*
+- [x] Extend the PDF export pipeline to add the scale bar to the Matplotlib figure prior to save, handling figure DPI/size scaling and ensuring consistent typography. *(Supports: "For PDF exports …" checklist)*
+- [x] Provide a reusable routine that converts computed physical length + DPI into pixel units and optionally renders the bar; add validation/unit tests for edge cases (very small images, unusual DPI). *(Supports: "Add a small helper to compute scale bar pixel size …" checklist)*
+- [x] Update automated tests to cover helper rounding logic, raster draw output, and PDF figure integration; add regression fixtures if needed. *(Ensures Phase 4 deliverables are verifiable)*
+
+### Phase 4a - Scale Bar Issue Fixes
+Goals: fix issues found in scale bar implementation during Phase 4.
+- [ ] Fix issue where scale bar length calculation does not account for downsample factor correctly, leading to undersized scale bars even in the main viewer.
 
 ### Phase 5 — Performance, parallelism, and reliability
 Goals: make large batch runs efficient and robust.

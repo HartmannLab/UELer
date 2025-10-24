@@ -1,3 +1,16 @@
+### v0.2.0-rc2
+**Scale bar automation**
+- Added `ueler.viewer.scale_bar` with an engineering-rounding helper that produces <=10% frame length bars, formats labels in µm/mm, and tolerates Matplotlib-free environments via graceful fallbacks.
+- Updated the main viewer to recompute scale bars whenever pixel size, downsample level, or view extents change so interactive previews stay aligned with physical measurements.
+
+**Batch export scale bars**
+- Threaded pixel size through batch jobs, captured the computed scale bar spec in `_finalise_array`, and rendered consistent bars into PNG/JPEG/TIFF outputs along with PDF documents.
+- Centralised raster/PDF scale bar drawing via `_render_with_scale_bar` and `_write_pdf_with_scale_bar`, ensuring placement consistency across export formats while preserving overlay snapshots and mask controls.
+
+**Testing & documentation**
+- Added `tests/test_scale_bar_helper.py` to lock in rounding behaviour and effective pixel sizing, and refreshed `tests/test_export_fovs_batch.py` with ipywidgets/matplotlib stubs to cover the new export pipeline.
+- Ran `python -m unittest tests.test_scale_bar_helper tests.test_export_fovs_batch` and updated the Phase 4 checklist plus supporting docs to reflect completion of the scale bar deliverables.
+
 ### v0.2.0-rc1
 **Mask & annotation exports**
 - Captured live overlay settings with `ImageMaskViewer.capture_overlay_snapshot` and replayed them inside batch jobs so exported images mirror in-viewer mask and annotation selections.

@@ -46,6 +46,12 @@ from ..rendering import (
     render_fov_to_array,
     render_roi_to_array,
 )
+from ..scale_bar import (
+    ScaleBarSpec,
+    add_scale_bar,
+    compute_scale_bar_spec,
+    effective_pixel_size_nm,
+)
 from .plugin_base import PluginBase
 
 PLACEHOLDER_MESSAGE = "Batch export UI is now available."
@@ -102,6 +108,7 @@ class BatchExportPlugin(PluginBase):
             tuple[str, int, Tuple[int, ...]],
             tuple[Optional[AnnotationRenderSettings], tuple[MaskRenderSettings, ...]],
         ] = {}
+        self._viewer_pixel_size_nm = float(getattr(self.main_viewer, "get_pixel_size_nm", lambda: 390.0)())
 
         self._build_widgets()
         self._build_layout()
@@ -724,6 +731,12 @@ class BatchExportPlugin(PluginBase):
             self._overlay_snapshot = None
             self._overlay_cache.clear()
 
+    def on_viewer_pixel_size_change(self, pixel_size_nm: float) -> None:
+        try:
+            self._viewer_pixel_size_nm = max(1.0, float(pixel_size_nm))
+        except (TypeError, ValueError):
+            self._viewer_pixel_size_nm = float(getattr(self.main_viewer, "get_pixel_size_nm", lambda: 390.0)())
+
     # ------------------------------------------------------------------
     # Export orchestration
     # ------------------------------------------------------------------
@@ -744,6 +757,13 @@ class BatchExportPlugin(PluginBase):
             include_annotations = bool(self.ui_component.include_annotations.value)
             include_masks = bool(self.ui_component.include_masks.value)
             thickness = max(1, int(self.ui_component.mask_outline_thickness.value or 1))
+            pixel_size_nm = float(
+                getattr(
+                    self,
+                    "_viewer_pixel_size_nm",
+                    getattr(self.main_viewer, "get_pixel_size_nm", lambda: 390.0)(),
+                )
+            )
             if thickness != self._mask_outline_thickness:
                 self._mask_outline_thickness = thickness
             self._mask_outline_overridden = thickness != self._viewer_outline_thickness
@@ -762,6 +782,7 @@ class BatchExportPlugin(PluginBase):
                 dpi=dpi,
                 include_scale_bar=scale_bar,
                 scale_ratio=scale_ratio,
+                pixel_size_nm=pixel_size_nm,
                 include_annotations=include_annotations,
                 include_masks=include_masks,
                 overlay_snapshot=overlay_snapshot,
@@ -910,6 +931,7 @@ class BatchExportPlugin(PluginBase):
         dpi: int,
         include_scale_bar: bool,
         scale_ratio: float,
+        pixel_size_nm: float,
         include_annotations: bool,
         include_masks: bool,
         overlay_snapshot: OverlaySnapshot,
@@ -919,6 +941,7 @@ class BatchExportPlugin(PluginBase):
             "dpi": dpi,
             "include_scale_bar": include_scale_bar,
             "scale_bar_ratio": scale_ratio,
+            "pixel_size_nm": pixel_size_nm,
             "filter": self._cell_filter_snapshot,
             "include_annotations": include_annotations,
             "include_masks": include_masks,
@@ -941,6 +964,7 @@ class BatchExportPlugin(PluginBase):
             dpi=dpi,
             include_scale_bar=include_scale_bar,
             scale_ratio=scale_ratio,
+            pixel_size_nm=pixel_size_nm,
             overlay_snapshot=overlay_snapshot,
         )
 
@@ -973,6 +997,7 @@ class BatchExportPlugin(PluginBase):
         dpi: int,
         include_scale_bar: bool,
         scale_ratio: float,
+        pixel_size_nm: float,
         overlay_snapshot: OverlaySnapshot,
     ):
         from ueler.export.job import JobItem
@@ -999,6 +1024,7 @@ class BatchExportPlugin(PluginBase):
                 dpi=dpi,
                 include_scale_bar=include_scale_bar,
                 scale_ratio=scale_ratio,
+                pixel_size_nm=pixel_size_nm,
                 overlay_snapshot=overlay_snapshot,
             )
 
@@ -1029,6 +1055,7 @@ class BatchExportPlugin(PluginBase):
         dpi: int,
         include_scale_bar: bool,
         scale_ratio: float,
+        pixel_size_nm: float,
         overlay_snapshot: OverlaySnapshot,
     ):
         from ueler.export.job import JobItem
@@ -1072,6 +1099,7 @@ class BatchExportPlugin(PluginBase):
                 dpi=dpi,
                 include_scale_bar=include_scale_bar,
                 scale_ratio=scale_ratio,
+                pixel_size_nm=pixel_size_nm,
                 overlay_snapshot=overlay_snapshot,
             )
 
@@ -1104,6 +1132,7 @@ class BatchExportPlugin(PluginBase):
         dpi: int,
         include_scale_bar: bool,
         scale_ratio: float,
+        pixel_size_nm: float,
         overlay_snapshot: OverlaySnapshot,
     ):
         from ueler.export.job import JobItem
@@ -1135,6 +1164,7 @@ class BatchExportPlugin(PluginBase):
                 dpi=dpi,
                 include_scale_bar=include_scale_bar,
                 scale_ratio=scale_ratio,
+                pixel_size_nm=pixel_size_nm,
                 overlay_snapshot=overlay_snapshot,
             )
 
@@ -1170,6 +1200,7 @@ class BatchExportPlugin(PluginBase):
         dpi: int,
         include_scale_bar: bool,
         scale_ratio: float,
+        pixel_size_nm: float,
         overlay_snapshot: OverlaySnapshot,
     ) -> Dict[str, Any]:
         self.main_viewer.load_fov(fov_name, marker_profile.selected_channels)
@@ -1188,9 +1219,18 @@ class BatchExportPlugin(PluginBase):
             annotation=annotation_settings,
             masks=mask_settings,
         )
-        image = self._finalise_array(array, include_scale_bar, scale_ratio)
-        self._write_image(image, output_path, file_format, dpi)
-        return {"output_path": output_path}
+        image, spec = self._finalise_array(
+            array,
+            include_scale_bar=include_scale_bar,
+            scale_ratio=scale_ratio,
+            pixel_size_nm=pixel_size_nm,
+            downsample=downsample,
+        )
+        self._write_image(image, output_path, file_format, dpi, scale_bar_spec=spec)
+        payload: Dict[str, Any] = {"output_path": output_path}
+        if spec is not None:
+            payload["metadata"] = {"scale_bar_um": spec.physical_length_um}
+        return payload
 
     def _export_cell_worker(
         self,
@@ -1204,6 +1244,7 @@ class BatchExportPlugin(PluginBase):
         dpi: int,
         include_scale_bar: bool,
         scale_ratio: float,
+        pixel_size_nm: float,
         overlay_snapshot: OverlaySnapshot,
     ) -> Dict[str, Any]:
         fov_key = getattr(self.main_viewer, "fov_key", "fov")
@@ -1230,9 +1271,18 @@ class BatchExportPlugin(PluginBase):
             annotation=annotation_settings,
             masks=mask_settings,
         )
-        image = self._finalise_array(array, include_scale_bar, scale_ratio)
-        self._write_image(image, output_path, file_format, dpi)
-        return {"output_path": output_path}
+        image, spec = self._finalise_array(
+            array,
+            include_scale_bar=include_scale_bar,
+            scale_ratio=scale_ratio,
+            pixel_size_nm=pixel_size_nm,
+            downsample=downsample,
+        )
+        self._write_image(image, output_path, file_format, dpi, scale_bar_spec=spec)
+        payload: Dict[str, Any] = {"output_path": output_path}
+        if spec is not None:
+            payload["metadata"] = {"scale_bar_um": spec.physical_length_um}
+        return payload
 
     def _export_roi_worker(
         self,
@@ -1245,6 +1295,7 @@ class BatchExportPlugin(PluginBase):
         dpi: int,
         include_scale_bar: bool,
         scale_ratio: float,
+        pixel_size_nm: float,
         overlay_snapshot: OverlaySnapshot,
     ) -> Dict[str, Any]:
         fov_name = roi.get("fov")
@@ -1265,9 +1316,18 @@ class BatchExportPlugin(PluginBase):
             annotation=annotation_settings,
             masks=mask_settings,
         )
-        image = self._finalise_array(array, include_scale_bar, scale_ratio)
-        self._write_image(image, output_path, file_format, dpi)
-        return {"output_path": output_path}
+        image, spec = self._finalise_array(
+            array,
+            include_scale_bar=include_scale_bar,
+            scale_ratio=scale_ratio,
+            pixel_size_nm=pixel_size_nm,
+            downsample=downsample,
+        )
+        self._write_image(image, output_path, file_format, dpi, scale_bar_spec=spec)
+        payload: Dict[str, Any] = {"output_path": output_path}
+        if spec is not None:
+            payload["metadata"] = {"scale_bar_um": spec.physical_length_um}
+        return payload
 
     # ------------------------------------------------------------------
     # Utility helpers
@@ -1303,26 +1363,46 @@ class BatchExportPlugin(PluginBase):
         os.makedirs(path, exist_ok=True)
         return path
 
-    def _finalise_array(self, array: np.ndarray, include_scale_bar: bool, scale_ratio: float) -> np.ndarray:
+    def _finalise_array(
+        self,
+        array: np.ndarray,
+        *,
+        include_scale_bar: bool,
+        scale_ratio: float,
+        pixel_size_nm: float,
+        downsample: int,
+    ) -> tuple[np.ndarray, Optional[ScaleBarSpec]]:
         image = np.clip(np.asarray(array, dtype=np.float32), 0.0, 1.0)
+        spec: Optional[ScaleBarSpec] = None
         if include_scale_bar:
-            # Placeholder for Phase 4 scale bar integration; metadata already propagated.
-            pass
-        return (image * 255).astype(np.uint8)
+            try:
+                fraction = max(0.01, min(float(scale_ratio) / 100.0, 0.5))
+                effective_nm = effective_pixel_size_nm(pixel_size_nm, max(1, int(downsample)))
+                spec = compute_scale_bar_spec(
+                    image_width_px=int(image.shape[1]),
+                    pixel_size_nm=effective_nm,
+                    max_fraction=fraction,
+                )
+            except ValueError:
+                spec = None
+        return (image * 255).astype(np.uint8), spec
 
-    def _write_image(self, array: np.ndarray, output_path: str, file_format: str, dpi: int) -> None:
+    def _write_image(
+        self,
+        array: np.ndarray,
+        output_path: str,
+        file_format: str,
+        dpi: int,
+        *,
+        scale_bar_spec: Optional[ScaleBarSpec] = None,
+    ) -> None:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         fmt = file_format.lower()
         if fmt == "pdf":
-            height, width = array.shape[:2]
-            fig_w = max(width / dpi, 1.0)
-            fig_h = max(height / dpi, 1.0)
-            fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=dpi)
-            ax.axis("off")
-            ax.imshow(array)
-            fig.savefig(output_path, dpi=dpi, bbox_inches="tight", pad_inches=0)
-            plt.close(fig)
+            self._write_pdf_with_scale_bar(array, output_path, dpi, scale_bar_spec)
         else:
+            if scale_bar_spec is not None:
+                array = self._render_with_scale_bar(array, scale_bar_spec, dpi)
             saver = self._resolve_imsave()
             saver(output_path, array)
 
@@ -1338,6 +1418,53 @@ class BatchExportPlugin(PluginBase):
                     "Neither skimage.io.imsave nor imageio.imwrite is available for writing images"
                 ) from exc
         return _imsave
+
+    def _render_with_scale_bar(
+        self,
+        array: np.ndarray,
+        spec: ScaleBarSpec,
+        dpi: int,
+    ) -> np.ndarray:
+        height, width = array.shape[:2]
+        fig = None
+        try:
+            fig = plt.figure(figsize=(max(width / dpi, 1.0), max(height / dpi, 1.0)), dpi=dpi)
+            ax = fig.add_axes([0, 0, 1, 1])
+            ax.imshow(array)
+            ax.axis("off")
+            add_scale_bar(ax, spec, color="white", font_size=12.0)
+            fig.canvas.draw()
+            if hasattr(fig.canvas, "buffer_rgba"):
+                buffer = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
+                buffer = buffer.reshape((height, width, 4))
+                return buffer[..., :3].copy()
+            return array
+        except Exception:
+            return array
+        finally:
+            if fig is not None:
+                plt.close(fig)
+
+    def _write_pdf_with_scale_bar(
+        self,
+        array: np.ndarray,
+        output_path: str,
+        dpi: int,
+        spec: Optional[ScaleBarSpec],
+    ) -> None:
+        fig = None
+        try:
+            height, width = array.shape[:2]
+            fig = plt.figure(figsize=(max(width / dpi, 1.0), max(height / dpi, 1.0)), dpi=dpi)
+            ax = fig.add_axes([0, 0, 1, 1])
+            ax.imshow(array)
+            ax.axis("off")
+            if spec is not None:
+                add_scale_bar(ax, spec, color="white", font_size=12.0)
+            fig.savefig(output_path, dpi=dpi, bbox_inches="tight", pad_inches=0)
+        finally:
+            if fig is not None:
+                plt.close(fig)
 
     def _progress_callback(self, status) -> None:
         self._dispatch_to_main(lambda: self._update_progress_ui(status=status))

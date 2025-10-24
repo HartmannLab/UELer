@@ -36,7 +36,7 @@ class ImageDisplay:
             origin='upper'
         )
         self.ax.axis("off")
-        self._add_scale_bar()
+        self.scalebar = None
         self.mask_id_annotation = self._create_annotation()
         self._setup_event_connections()
         self.selected_masks_label = set() # Set to track selected mask labels
@@ -61,21 +61,32 @@ class ImageDisplay:
 
         return np.array(data, copy=True)
 
-    def _add_scale_bar(self):
-        fontprops = fm.FontProperties(size=10)
-        scalebar = AnchoredSizeBar(
-            self.ax.transData,
-            102.6,  # Adjust scale bar length as needed
-            '40 µm',
-            'lower right',
-            pad=0.5,
-            color='white',
-            frameon=False,
-            size_vertical=2,
-            fontproperties=fontprops
-        )
-        self.ax.add_artist(scalebar)
-        self.scalebar = scalebar
+    def update_scale_bar(self, spec, *, color: str = "white", font_size: float = 12.0) -> None:
+        """Update the anchored scale bar artist for the current axes."""
+
+        if hasattr(self, "scalebar") and self.scalebar is not None:
+            try:
+                self.scalebar.remove()
+            except Exception:  # pragma: no cover - defensive cleanup
+                pass
+            self.scalebar = None
+
+        if spec is None:
+            self.fig.canvas.draw_idle()
+            return
+
+        try:
+            from ueler.viewer.scale_bar import add_scale_bar
+
+            self.scalebar = add_scale_bar(
+                self.ax,
+                spec,
+                color=color,
+                font_size=font_size,
+            )
+        except Exception:  # pragma: no cover - fallback when Matplotlib back-end is mocked
+            self.scalebar = None
+        self.fig.canvas.draw_idle()
 
     def _create_annotation(self):
         return self.ax.annotate(

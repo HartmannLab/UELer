@@ -175,6 +175,87 @@ if "mpl_toolkits.axes_grid1.anchored_artists" not in sys.modules:
     anchored_module.AnchoredSizeBar = _AnchoredSizeBar  # type: ignore[attr-defined]
     sys.modules["mpl_toolkits.axes_grid1.anchored_artists"] = anchored_module
 
+ipywidgets_module = sys.modules.get("ipywidgets")
+if ipywidgets_module is None:
+    ipywidgets_module = types.ModuleType("ipywidgets")
+    sys.modules["ipywidgets"] = ipywidgets_module
+
+if not hasattr(ipywidgets_module, "Widget"):
+    class _BaseWidget:
+        def __init__(self, *args, **kwargs):
+            self.value = kwargs.get("value")
+            self.options = kwargs.get("options", ())
+            self.description = kwargs.get("description")
+            self.layout = kwargs.get("layout")
+            self.style = kwargs.get("style")
+            self.disabled = kwargs.get("disabled", False)
+            self.children = kwargs.get("children", ())
+            self.button_style = kwargs.get("button_style", "")
+            self.icon = kwargs.get("icon")
+            self._observers = []
+
+        def observe(self, callback, names=None):
+            self._observers.append(callback)
+
+        def set_title(self, *_args):  # pragma: no cover - tab helper
+            return
+
+    ipywidgets_module.Widget = _BaseWidget
+
+if not hasattr(ipywidgets_module, "Layout"):
+    class Layout:  # pragma: no cover - minimal stub
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    ipywidgets_module.Layout = Layout
+
+if not hasattr(ipywidgets_module, "Output"):
+    class Output(ipywidgets_module.Widget):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def clear_output(self):
+            return
+
+    ipywidgets_module.Output = Output
+
+if not hasattr(ipywidgets_module, "Tab"):
+    class Tab(ipywidgets_module.Widget):
+        pass
+
+    ipywidgets_module.Tab = Tab
+
+if not hasattr(ipywidgets_module, "HTML"):
+    class HTML(ipywidgets_module.Widget):
+        pass
+
+    ipywidgets_module.HTML = HTML
+
+
+def _ensure_widget(name):  # pragma: no cover - helper for stubs
+    if not hasattr(ipywidgets_module, name):
+        setattr(ipywidgets_module, name, type(name, (ipywidgets_module.Widget,), {}))
+
+
+for widget_name in (
+    "Button",
+    "Checkbox",
+    "Dropdown",
+    "FloatSlider",
+    "HBox",
+    "IntProgress",
+    "IntSlider",
+    "IntText",
+    "SelectMultiple",
+    "Text",
+    "ToggleButtons",
+    "VBox",
+):
+    _ensure_widget(widget_name)
+
 from ueler.viewer.main_viewer import ImageMaskViewer
 from ueler.viewer.plugin.export_fovs import BatchExportPlugin
 
@@ -229,6 +310,7 @@ class _BatchExportViewerStub:
         setattr(self, "SidePlots", self.side_plots)
         self.initialized = True
         self._debug = False
+        self.pixel_size_nm = 390.0
         self.ui_component = SimpleNamespace(
             mask_display_controls={"MASK": SimpleNamespace(value=True)},
             mask_color_controls={"MASK": SimpleNamespace(value="Red")},
@@ -240,6 +322,9 @@ class _BatchExportViewerStub:
 
     def build_overlay_settings_from_snapshot(self, *args, **kwargs):  # pragma: no cover - unused in tests
         raise NotImplementedError
+
+    def get_pixel_size_nm(self):  # pragma: no cover - used indirectly in tests
+        return self.pixel_size_nm
 
 
 class ExportFOVsBatchTests(unittest.TestCase):
@@ -289,6 +374,7 @@ class ExportFOVsBatchTests(unittest.TestCase):
         )
         viewer.current_downsample_factor = 1
         viewer.mask_outline_thickness = 1
+        viewer.pixel_size_nm = 390.0
         viewer.ui_component = SimpleNamespace(
             image_selector=SimpleNamespace(value="FOV_A"),
             channel_selector=SimpleNamespace(value=("DNA",)),
@@ -309,6 +395,7 @@ class ExportFOVsBatchTests(unittest.TestCase):
         viewer.update_display = MethodType(lambda self, _factor: None, viewer)
         viewer.load_fov = MethodType(lambda self, _fov, _channels=None: None, viewer)
         viewer._merge_channel_max = MethodType(lambda self, *_args, **_kwargs: None, viewer)
+        viewer.get_pixel_size_nm = MethodType(lambda self: getattr(self, "pixel_size_nm", 390.0), viewer)
         return viewer
 
     def _make_export_plugin(self, viewer: _BatchExportViewerStub | None = None):

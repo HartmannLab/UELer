@@ -71,37 +71,24 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 - **Wide Plugins**: Enable "Horizontal layout" (for example, in the heatmap plugin) to undock the tool into the footer while keeping the accordion available for other controls.
 
 ## New Update  
-### v0.2.0-rc1
-The release candidate combines the new Batch Export UI with the rendering and job runner refactors introduced across the `v0.2.0-alpha` and `v0.2.0-beta` milestones.
+### v0.2.0-rc2
+The second release candidate delivers automatic scale bars across the viewer and batch export workflows while retaining the Batch Export UI, overlay plumbing, and job runner improvements from earlier `v0.2.0` milestones.
 
-**Mask & annotation exports**
-- Snapshot the viewer's current mask/annotation state and replay it during batch jobs so exported images honour in-app overlay visibility, colours, and modes.
-- Added overlay toggles with availability hints to the Batch Export plugin, letting users opt into masks/annotations per run without surfacing invalid options when datasets lack overlays.
-- Extended the renderer with alpha and outline blending plus new tests that cover translucent and outline masks alongside overlay snapshot reconstruction.
-- Upgraded mask outlines to respect per-cell label maps with an adjustable thickness slider; the renderer now falls back to a pure NumPy boundary finder when `skimage` is absent, and tests cover both baseline and dilated contours.
+**Scale bar automation**
+- Added `ueler.viewer.scale_bar` with an engineering-style rounding helper that picks tidy physical lengths (≤10 % of the frame) and formats labels in µm/mm as needed.
+- Refreshed the main viewer so the scale bar updates whenever pixel size, downsample, or view extents change, ensuring on-screen measurements stay accurate without manual tweaks.
+- Batch exports now draw the same scale bar into PNG/JPEG/TIFF outputs and embed it ahead of PDF saves, capturing the computed length in per-item metadata.
 
-**Mask outline controls & plugin independence**
-- Added a main-viewer mask-outline slider that updates the live render and notifies plugins without forcing feedback loops.
-- Seeded the Batch Export plugin's slider from the viewer while preserving a local override that flows through overlay snapshots, cache keys, and export workers.
-- Hardened synchronisation so viewer-driven changes are adopted only when the plugin has not diverged, keeping exports and on-screen previews aligned without clobbering local adjustments.
-- Expanded `tests/test_rendering.py` and `tests/test_export_fovs_batch.py` with label-preserving outline assertions and slider sync regressions.
+**Batch export experience**
+- The plugin continues to provide mode-aware exports (Full FOV, Single Cells, ROIs), overlay snapshots, and cancellation-ready jobs, now seeded with the viewer's pixel size to keep in-app and exported measurements in sync.
+- Raster/PDF writers share a Matplotlib-based overlay helper, guaranteeing consistent styling and placement across formats while preserving previous mask/annotation options.
 
-**Batch export UI & UX**
-- Replaced the placeholder plugin with `BatchExportPlugin`, offering mode selection (Full FOV, Single Cells, ROIs), marker profiles, output configuration, and asynchronous Start/Cancel controls with progress feedback.
-- Added per-mode panels with cell filtering, ROI selectors, crop sizing, and a single-cell preview workflow that uses the shared rendering helpers before launching full jobs.
-- Surfaced scale-bar toggles and PDF/bitmap format handling; scale-bar sizing hooks are in place ahead of the Phase 4 implementation.
-
-**Rendering & job orchestration**
-- Reuse the pure compositing helpers (`render_fov_to_array`, `render_crop_to_array`, `render_roi_to_array`) for all export modes, ensuring consistent colour/overlay output without UI state coupling.
-- Drive exports through `ueler.export.job.Job`, capturing structured per-item results, cancellation, and observable progress that feeds the new UI components.
-
-**Developer experience**
-- Expanded the lightweight matplotlib bootstrap to stub text, backend, patches, widgets, and `mpl_toolkits.axes_grid1` helpers so export suites run without heavy graphics dependencies.
-- Kept the namespace migration, compatibility shims, packaging metadata, and Makefile utilities introduced earlier in the `v0.2.0` cycle.
+**Rendering & tests**
+- Extended `_finalise_array` to return scale bar specifications, introduced `_render_with_scale_bar`/`_write_pdf_with_scale_bar`, and added fallbacks for environments lacking full Matplotlib bindings.
+- Added `tests/test_scale_bar_helper.py` to lock in rounding behaviour and effective pixel sizing, alongside updates to the existing batch export suite (with fresh ipywidgets/matplotlib stubs) to cover the new pipeline.
 
 **Verification**
-- `python -m unittest tests.test_rendering tests.test_export_fovs_batch`
-- `python -m unittest tests.test_export_job`
+- `python -m unittest tests.test_scale_bar_helper tests.test_export_fovs_batch`
 
 ## Earlier Updates  
 
