@@ -71,13 +71,14 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 - **Wide Plugins**: Enable "Horizontal layout" (for example, in the heatmap plugin) to undock the tool into the footer while keeping the accordion available for other controls.
 
 ## New Update  
-### v0.2.0-rc2
+### v0.2.0-beta
 The second release candidate delivers automatic scale bars across the viewer and batch export workflows while retaining the Batch Export UI, overlay plumbing, and job runner improvements from earlier `v0.2.0` milestones.
 
 **Scale bar automation**
 - Added `ueler.viewer.scale_bar` with an engineering-style rounding helper that picks tidy physical lengths (≤10 % of the frame) and formats labels in µm/mm as needed.
 - Refreshed the main viewer so the scale bar updates whenever pixel size, downsample, or view extents change, ensuring on-screen measurements stay accurate without manual tweaks.
 - Batch exports now draw the same scale bar into PNG/JPEG/TIFF outputs and embed it ahead of PDF saves, capturing the computed length in per-item metadata.
+- Phase 4a hotfix: the interactive viewer now scales the rendered bar using the active downsample factor, preventing undersized annotations when zoomed out.
 
 **Batch export experience**
 - The plugin continues to provide mode-aware exports (Full FOV, Single Cells, ROIs), overlay snapshots, and cancellation-ready jobs, now seeded with the viewer's pixel size to keep in-app and exported measurements in sync.
@@ -86,6 +87,7 @@ The second release candidate delivers automatic scale bars across the viewer and
 **Rendering & tests**
 - Extended `_finalise_array` to return scale bar specifications, introduced `_render_with_scale_bar`/`_write_pdf_with_scale_bar`, and added fallbacks for environments lacking full Matplotlib bindings.
 - Added `tests/test_scale_bar_helper.py` to lock in rounding behaviour and effective pixel sizing, alongside updates to the existing batch export suite (with fresh ipywidgets/matplotlib stubs) to cover the new pipeline.
+- Extra regression coverage ensures non-unity downsample factors stay accurate in both helper calculations and viewer rendering.
 
 **Verification**
 - `python -m unittest tests.test_scale_bar_helper tests.test_export_fovs_batch`

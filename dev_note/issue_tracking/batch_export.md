@@ -183,9 +183,8 @@ Goals: fix issues found in scale bar implementation during Phase 4.
 - [x] Capture a failing reproduction case in the main viewer and batch export paths, noting the expected versus actual bar length when `current_downsample_factor > 1`.
 - [x] Inspect scale bar helpers and callers to confirm how downsample values propagate; document the effective pixel size formula currently in use.
 - [x] Implement a corrected effective pixel size calculation that matches the rendered downsample ratio (covering both viewer and export arrays) without breaking Phase 4 behaviour.
-- [x] Implement a corrected effective pixel size calculation that matches the rendered downsample ratio (covering both viewer and export arrays) without breaking Phase 4 behaviour.
 - [x] Extend unit tests (e.g., `tests/test_scale_bar_helper.py` and batch export coverage) to exercise non-unity downsample factors and guard against regressions.
-- [ ] Update `README.md`, `doc/log.md`, and `dev_note/github_issues.md` after the fix lands, and mark the Phase 4a checklist item complete.
+- [x] Update `README.md`, `doc/log.md`, and `dev_note/github_issues.md` after the fix lands, and mark the Phase 4a checklist item complete.
 
 ### Phase 5 — Performance, parallelism, and reliability
 Goals: make large batch runs efficient and robust.

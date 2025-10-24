@@ -1,4 +1,8 @@
-### v0.2.0-rc2
+### v0.2.0-beta
+**Phase 4a fixes**
+- Adjusted the viewer's scale bar drawing routine to multiply by the active downsample ratio, fixing undersized bars when zoomed out or exporting at reduced resolution.
+- Extended helper coverage to assert consistent pixel lengths as the effective pixel size changes; reran `python -m unittest tests.test_scale_bar_helper tests.test_export_fovs_batch` to validate the fix.
+
 **Scale bar automation**
 - Added `ueler.viewer.scale_bar` with an engineering-rounding helper that produces <=10% frame length bars, formats labels in µm/mm, and tolerates Matplotlib-free environments via graceful fallbacks.
 - Updated the main viewer to recompute scale bars whenever pixel size, downsample level, or view extents change so interactive previews stay aligned with physical measurements.
@@ -11,7 +15,6 @@
 - Added `tests/test_scale_bar_helper.py` to lock in rounding behaviour and effective pixel sizing, and refreshed `tests/test_export_fovs_batch.py` with ipywidgets/matplotlib stubs to cover the new export pipeline.
 - Ran `python -m unittest tests.test_scale_bar_helper tests.test_export_fovs_batch` and updated the Phase 4 checklist plus supporting docs to reflect completion of the scale bar deliverables.
 
-### v0.2.0-rc1
 **Mask & annotation exports**
 - Captured live overlay settings with `ImageMaskViewer.capture_overlay_snapshot` and replayed them inside batch jobs so exported images mirror in-viewer mask and annotation selections.
 - Added opt-in toggles plus availability hints to the Batch Export plugin, keeping overlay options discoverable while preventing invalid selections on datasets without masks or annotations.
@@ -43,7 +46,6 @@
 - `python -m unittest tests.test_rendering tests.test_export_fovs_batch`
 - `python -m unittest tests.test_export_job`
 
-### v0.2.0-beta
 **Batch export groundwork**
 - Extracted compositing helpers into `ueler.viewer.rendering` and refactored `ImageMaskViewer.render_image` plus `export_fovs_batch` to reuse them, preserving overlay behaviour while returning NumPy arrays ready for disk writes.
 - Added lightweight stubs for optional dependencies (OpenCV, scikit-image, tifffile, matplotlib, dask) so unit tests can execute without the full imaging stack installed.
