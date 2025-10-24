@@ -186,6 +186,15 @@ Goals: fix issues found in scale bar implementation during Phase 4.
 - [x] Extend unit tests (e.g., `tests/test_scale_bar_helper.py` and batch export coverage) to exercise non-unity downsample factors and guard against regressions.
 - [x] Update `README.md`, `doc/log.md`, and `dev_note/github_issues.md` after the fix lands, and mark the Phase 4a checklist item complete.
 
+#### Phase 4b - Cell Export Issue Fixes
+**Goals:** Address issues identified in the cell export implementation during Phase 4a. These issues may not directly relate to scale bars but were discovered during testing.
+- **Problem:** Exported files were blank and preview failed.
+- **Error:** `Preview failed: BatchExportPlugin._finalise_array() takes 2 positional arguments but 4 were given`
+
+- [ ] Investigate the root cause of the blank exports and the argument mismatch error in the `BatchExportPlugin._finalise_array` method.
+- [ ] Implement fixes to ensure that cell exports generate the expected images and that the preview functionality operates correctly without errors.
+- [ ] Add unit tests to cover the cell export functionality and preview generation to prevent similar issues in the future.
+
 ### Phase 5 — Performance, parallelism, and reliability
 Goals: make large batch runs efficient and robust.
 - [ ] Support configurable parallelism in the Job runner (threads or processes). Start with a thread pool for IO-bound tasks; if CPU-bound rendering is observed, add a process pool or Dask integration.
