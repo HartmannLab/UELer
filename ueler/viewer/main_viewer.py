@@ -666,7 +666,12 @@ class ImageMaskViewer:
         except ValueError:
             spec = None
 
-        display.update_scale_bar(spec, color="white", font_size=12.0)
+        display.update_scale_bar(
+            spec,
+            color="white",
+            font_size=12.0,
+            data_pixel_ratio=float(downsample),
+        )
 
 
     def _get_channel_stats(self, channel):

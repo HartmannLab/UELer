@@ -2,6 +2,7 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
+from dataclasses import replace
 from matplotlib.text import Annotation
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
 import matplotlib.font_manager as fm
@@ -61,7 +62,14 @@ class ImageDisplay:
 
         return np.array(data, copy=True)
 
-    def update_scale_bar(self, spec, *, color: str = "white", font_size: float = 12.0) -> None:
+    def update_scale_bar(
+        self,
+        spec,
+        *,
+        color: str = "white",
+        font_size: float = 12.0,
+        data_pixel_ratio: float = 1.0,
+    ) -> None:
         """Update the anchored scale bar artist for the current axes."""
 
         if hasattr(self, "scalebar") and self.scalebar is not None:
@@ -78,9 +86,30 @@ class ImageDisplay:
         try:
             from ueler.viewer.scale_bar import add_scale_bar
 
+            ratio = 1.0
+            try:
+                ratio = float(data_pixel_ratio)
+            except (TypeError, ValueError):
+                ratio = 1.0
+            if not np.isfinite(ratio) or ratio <= 0.0:
+                ratio = 1.0
+
+            adjusted_spec = spec
+            if not math.isclose(ratio, 1.0):
+                try:
+                    adjusted_spec = replace(spec, pixel_length=spec.pixel_length * ratio)
+                except Exception:
+                    from ueler.viewer.scale_bar import ScaleBarSpec  # local import avoids cycle in tests
+
+                    adjusted_spec = ScaleBarSpec(
+                        pixel_length=spec.pixel_length * ratio,
+                        physical_length_um=spec.physical_length_um,
+                        label=spec.label,
+                    )
+
             self.scalebar = add_scale_bar(
                 self.ax,
-                spec,
+                adjusted_spec,
                 color=color,
                 font_size=font_size,
             )
