@@ -1342,11 +1342,20 @@ class BatchExportPlugin(PluginBase):
 
         selected = tuple(data.get("selected_channels", ()))
         raw_settings = data.get("channel_settings", {})
-        settings = {}
+        if not selected:
+            selected = self._fallback_selected_channels()
+        if not selected:
+            raise ValueError(f"Marker set '{marker_name}' has no selected channels.")
+
+        settings: Dict[str, ChannelRenderSettings] = {}
+        missing: list[str] = []
         for channel in selected:
             entry = raw_settings.get(channel)
             if not entry:
-                raise ValueError(f"Marker set '{marker_name}' missing settings for channel '{channel}'.")
+                entry = self._snapshot_channel_settings(channel)
+            if not entry:
+                missing.append(channel)
+                continue
             color_key = entry.get("color")
             color_value = self.main_viewer.predefined_colors.get(color_key, color_key)
             settings[channel] = ChannelRenderSettings(
@@ -1354,7 +1363,51 @@ class BatchExportPlugin(PluginBase):
                 contrast_min=float(entry.get("contrast_min", 0.0)),
                 contrast_max=float(entry.get("contrast_max", 1.0)),
             )
+
+        if missing:
+            missing_text = ", ".join(missing)
+            raise ValueError(
+                f"Channel settings missing for: {missing_text}. Configure the marker set before exporting."
+            )
         return _MarkerProfile(name=marker_name, selected_channels=selected, channel_settings=settings)
+
+    def _fallback_selected_channels(self) -> tuple[str, ...]:
+        ui = getattr(self.main_viewer, "ui_component", None)
+        if ui is None:
+            return ()
+        selector = getattr(ui, "channel_selector", None)
+        value = getattr(selector, "value", ())
+        if isinstance(value, (list, tuple)):
+            return tuple(value)
+        if value:
+            return (value,)
+        return ()
+
+    def _snapshot_channel_settings(self, channel: str) -> Optional[Mapping[str, Any]]:
+        ui = getattr(self.main_viewer, "ui_component", None)
+        if ui is None:
+            return None
+
+        color_controls = getattr(ui, "color_controls", {})
+        contrast_min_controls = getattr(ui, "contrast_min_controls", {})
+        contrast_max_controls = getattr(ui, "contrast_max_controls", {})
+
+        color_widget = color_controls.get(channel) if isinstance(color_controls, Mapping) else None
+        min_widget = contrast_min_controls.get(channel) if isinstance(contrast_min_controls, Mapping) else None
+        max_widget = contrast_max_controls.get(channel) if isinstance(contrast_max_controls, Mapping) else None
+
+        color = getattr(color_widget, "value", None) if color_widget is not None else None
+        contrast_min = getattr(min_widget, "value", None) if min_widget is not None else None
+        contrast_max = getattr(max_widget, "value", None) if max_widget is not None else None
+
+        if color is None or contrast_min is None or contrast_max is None:
+            return None
+
+        return {
+            "color": color,
+            "contrast_min": contrast_min,
+            "contrast_max": contrast_max,
+        }
 
     def _normalise_output_dir(self, value: str) -> str:
         path = value.strip() or os.path.join(self.main_viewer.base_folder, "exports")
@@ -1518,6 +1571,16 @@ class BatchExportPlugin(PluginBase):
             downsample = max(1, int(self.ui_component.downsample_input.value or 1))
             include_scale_bar = self.ui_component.include_scale_bar.value
             scale_ratio = float(self.ui_component.scale_bar_ratio.value)
+            dpi_value = int(self.ui_component.dpi_input.value or 300)
+            include_masks = bool(self.ui_component.include_masks.value)
+            include_annotations = bool(self.ui_component.include_annotations.value)
+            pixel_size_nm = float(
+                getattr(
+                    self,
+                    "_viewer_pixel_size_nm",
+                    getattr(self.main_viewer, "get_pixel_size_nm", lambda: 390.0)(),
+                )
+            )
 
             fov_key = getattr(self.main_viewer, "fov_key", "fov")
             x_key = getattr(self.main_viewer, "x_key", "X")
@@ -1528,6 +1591,15 @@ class BatchExportPlugin(PluginBase):
 
             self.main_viewer.load_fov(fov_value, marker_profile.selected_channels)
             channel_arrays = self.main_viewer.image_cache[fov_value]
+            overlay_snapshot = self._capture_overlay_snapshot(
+                include_masks=include_masks,
+                include_annotations=include_annotations,
+            )
+            annotation_settings, mask_settings = self._resolve_overlays_for_fov(
+                fov_value,
+                downsample,
+                overlay_snapshot,
+            )
             array = render_crop_to_array(
                 fov_value,
                 channel_arrays,
@@ -1536,13 +1608,23 @@ class BatchExportPlugin(PluginBase):
                 center_xy=(float(record.get(x_key)), float(record.get(y_key))),
                 size_px=crop_size,
                 downsample_factor=downsample,
+                annotation=annotation_settings,
+                masks=mask_settings,
             )
-            image = self._finalise_array(array, include_scale_bar, scale_ratio)
+            image, spec = self._finalise_array(
+                array,
+                include_scale_bar=include_scale_bar,
+                scale_ratio=scale_ratio,
+                pixel_size_nm=pixel_size_nm,
+                downsample=downsample,
+            )
+            if spec is not None:
+                image = self._render_with_scale_bar(image, spec, dpi_value)
         except Exception as exc:
             self._notify(f"Preview failed: {exc}", level="error")
             return
 
-        dpi = int(self.ui_component.dpi_input.value or 300)
+        dpi = dpi_value
         height, width = image.shape[:2]
         fig_w = max(width / dpi, 1.5)
         fig_h = max(height / dpi, 1.5)

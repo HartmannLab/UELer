@@ -74,6 +74,11 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 ### v0.2.0-beta
 The second release candidate delivers automatic scale bars across the viewer and batch export workflows while retaining the Batch Export UI, overlay plumbing, and job runner improvements from earlier `v0.2.0` milestones.
 
+**Phase 4b cell export fixes**
+- Marker profiles now fall back to the viewer's active channel selection when stored marker sets lack entries, preventing blank single-cell exports and enforcing per-channel render settings before jobs run.
+- The single-cell preview reuses captured overlays, passes keyword arguments into `_finalise_array`, and draws optional scale bars so the UI preview mirrors batch outputs without triggering the earlier signature error.
+- Extended `tests/test_export_fovs_batch.py` with regression cases covering the fallback logic and preview workflow.
+
 **Scale bar automation**
 - Added `ueler.viewer.scale_bar` with an engineering-style rounding helper that picks tidy physical lengths (≤10 % of the frame) and formats labels in µm/mm as needed.
 - Refreshed the main viewer so the scale bar updates whenever pixel size, downsample, or view extents change, ensuring on-screen measurements stay accurate without manual tweaks.
@@ -91,6 +96,7 @@ The second release candidate delivers automatic scale bars across the viewer and
 
 **Verification**
 - `python -m unittest tests.test_scale_bar_helper tests.test_export_fovs_batch`
+- `python -m unittest tests.test_export_fovs_batch`
 
 ## Earlier Updates  
 

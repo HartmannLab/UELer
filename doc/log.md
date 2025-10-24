@@ -3,6 +3,12 @@
 - Adjusted the viewer's scale bar drawing routine to multiply by the active downsample ratio, fixing undersized bars when zoomed out or exporting at reduced resolution.
 - Extended helper coverage to assert consistent pixel lengths as the effective pixel size changes; reran `python -m unittest tests.test_scale_bar_helper tests.test_export_fovs_batch` to validate the fix.
 
+**Phase 4b cell export fixes**
+- Identified missing marker-set channel selections as the cause of blank single-cell composites; `_resolve_marker_profile` now falls back to the viewer's active channel state and validates per-channel settings before rendering.
+- Reworked `_preview_single_cell` to use keyword arguments when calling `_finalise_array`, reuse captured overlays, and render optional scale bars so previews match batch exports without triggering `TypeError`.
+- Extended `tests/test_export_fovs_batch.py` with targeted coverage for the marker profile fallback and preview workflow to guard the regression.
+- Ran `python -m unittest tests.test_export_fovs_batch` to confirm the Phase 4b fixes.
+
 **Scale bar automation**
 - Added `ueler.viewer.scale_bar` with an engineering-rounding helper that produces <=10% frame length bars, formats labels in µm/mm, and tolerates Matplotlib-free environments via graceful fallbacks.
 - Updated the main viewer to recompute scale bars whenever pixel size, downsample level, or view extents change so interactive previews stay aligned with physical measurements.

@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 from types import MethodType, SimpleNamespace
 
 import numpy as np
+import unittest.mock as mock
 
 if "cv2" not in sys.modules:
     sys.modules["cv2"] = types.ModuleType("cv2")
@@ -258,6 +259,7 @@ for widget_name in (
 
 from ueler.viewer.main_viewer import ImageMaskViewer
 from ueler.viewer.plugin.export_fovs import BatchExportPlugin
+from ueler.viewer.rendering import OverlaySnapshot
 
 
 class _StubWidget:
@@ -283,6 +285,20 @@ class _StubWidget:
 class _StubHTML:
     def __init__(self):
         self.value = ""
+
+
+class _StubOutputWidget:
+    def __init__(self):
+        self.cleared = False
+
+    def clear_output(self):
+        self.cleared = True
+
+    def __enter__(self):  # pragma: no cover - supports context usage
+        return self
+
+    def __exit__(self, *_args):
+        return False
 
 
 class _BatchExportViewerStub:
@@ -581,6 +597,114 @@ class ExportFOVsBatchTests(unittest.TestCase):
         viewer.mask_outline_thickness = 6
         plugin.on_viewer_mask_outline_change(6)
         self.assertFalse(plugin._mask_outline_overridden)
+
+    def test_resolve_marker_profile_uses_ui_channels_when_marker_set_empty(self) -> None:
+        viewer = self._make_viewer()
+        viewer.marker_sets["test"]["selected_channels"] = ()
+        viewer.marker_sets["test"]["channel_settings"] = {}
+        viewer.ui_component.channel_selector = SimpleNamespace(value=("DNA",))
+        viewer.ui_component.color_controls["DNA"].value = "Red"
+        viewer.ui_component.contrast_min_controls["DNA"].value = 0.0
+        viewer.ui_component.contrast_max_controls["DNA"].value = 2.0
+
+        plugin = BatchExportPlugin.__new__(BatchExportPlugin)
+        plugin.main_viewer = viewer
+        plugin.ui_component = SimpleNamespace(marker_set_dropdown=SimpleNamespace(value="test"))
+        plugin._viewer_pixel_size_nm = viewer.pixel_size_nm
+        plugin._mask_outline_thickness = viewer.mask_outline_thickness
+        plugin._mask_outline_overridden = False
+        plugin._overlay_cache = {}
+        plugin._overlay_snapshot = None
+
+        profile = plugin._resolve_marker_profile()
+
+        self.assertEqual(profile.selected_channels, ("DNA",))
+        self.assertIn("DNA", profile.channel_settings)
+        settings = profile.channel_settings["DNA"]
+        self.assertAlmostEqual(settings.contrast_min, 0.0)
+        self.assertAlmostEqual(settings.contrast_max, 2.0)
+
+    def test_preview_single_cell_handles_scale_bar_without_error(self) -> None:
+        viewer = self._make_viewer()
+        viewer.marker_sets["test"]["selected_channels"] = ("DNA",)
+        viewer.marker_sets["test"]["channel_settings"] = {
+            "DNA": {
+                "color": "Red",
+                "contrast_min": 0.0,
+                "contrast_max": 1.0,
+            }
+        }
+        viewer.ui_component.channel_selector.value = ("DNA",)
+        viewer.image_cache["FOV_A"] = {"DNA": np.ones((8, 8), dtype=np.float32)}
+        viewer.load_fov = MethodType(lambda self, _fov, _channels=None: None, viewer)
+        viewer.capture_overlay_snapshot = MethodType(
+            lambda self, include_masks, include_annotations: OverlaySnapshot(
+                include_annotations=include_annotations,
+                include_masks=include_masks,
+                annotation=None,
+                masks=(),
+            ),
+            viewer,
+        )
+        viewer.build_overlay_settings_from_snapshot = MethodType(
+            lambda self, _fov, _downsample, _snapshot: (None, ()),
+            viewer,
+        )
+        viewer.get_pixel_size_nm = MethodType(lambda self: getattr(self, "pixel_size_nm", 390.0), viewer)
+        viewer.fov_key = "fov"
+        viewer.x_key = "X"
+        viewer.y_key = "Y"
+        viewer.label_key = "label"
+
+        plugin = BatchExportPlugin.__new__(BatchExportPlugin)
+        plugin.main_viewer = viewer
+        plugin._mask_outline_thickness = viewer.mask_outline_thickness
+        plugin._viewer_outline_thickness = viewer.mask_outline_thickness
+        plugin._mask_outline_overridden = False
+        plugin._overlay_cache = {}
+        plugin._overlay_snapshot = None
+        plugin._notify = lambda *_args, **_kwargs: None
+        plugin._cell_records = {
+            0: {"fov": "FOV_A", "X": 3.0, "Y": 3.0, "label": "cell0"}
+        }
+        plugin.ui_component = SimpleNamespace(
+            marker_set_dropdown=SimpleNamespace(value="test"),
+            cell_selection=_StubWidget((0,)),
+            cell_crop_size=_StubWidget(6),
+            downsample_input=_StubWidget(1),
+            include_scale_bar=_StubWidget(True),
+            scale_bar_ratio=_StubWidget(10.0),
+            include_masks=_StubWidget(False),
+            include_annotations=_StubWidget(False),
+            dpi_input=_StubWidget(300),
+            cell_preview_output=_StubOutputWidget(),
+        )
+
+        mock_spec = SimpleNamespace(physical_length_um=5.0)
+
+        with mock.patch(
+            "ueler.viewer.plugin.export_fovs.render_crop_to_array",
+            return_value=np.ones((8, 8, 3), dtype=np.float32),
+        ), mock.patch.object(
+            plugin,
+            "_finalise_array",
+            return_value=(np.full((8, 8, 3), 128, dtype=np.uint8), mock_spec),
+        ) as finalise_mock, mock.patch.object(
+            plugin,
+            "_render_with_scale_bar",
+            side_effect=lambda array, _spec, _dpi: array,
+        ) as scale_mock, mock.patch(
+            "ueler.viewer.plugin.export_fovs.plt.subplots",
+            return_value=(
+                SimpleNamespace(),
+                SimpleNamespace(imshow=lambda *_args, **_kwargs: None, axis=lambda *_args, **_kwargs: None),
+            ),
+        ), mock.patch("ueler.viewer.plugin.export_fovs.plt.close"), mock.patch("ueler.viewer.plugin.export_fovs.display"):
+            plugin._preview_single_cell()
+
+        finalise_mock.assert_called_once()
+        scale_mock.assert_called_once()
+        self.assertTrue(plugin.ui_component.cell_preview_output.cleared)
 
 
 if __name__ == "__main__":

@@ -191,9 +191,16 @@ Goals: fix issues found in scale bar implementation during Phase 4.
 - **Problem:** Exported files were blank and preview failed.
 - **Error:** `Preview failed: BatchExportPlugin._finalise_array() takes 2 positional arguments but 4 were given`
 
-- [ ] Investigate the root cause of the blank exports and the argument mismatch error in the `BatchExportPlugin._finalise_array` method.
-- [ ] Implement fixes to ensure that cell exports generate the expected images and that the preview functionality operates correctly without errors.
-- [ ] Add unit tests to cover the cell export functionality and preview generation to prevent similar issues in the future.
+- [x] Investigate the root cause of the blank exports and the argument mismatch error in the `BatchExportPlugin._finalise_array` method.
+- [x] Implement fixes to ensure that cell exports generate the expected images and that the preview functionality operates correctly without errors.
+- [x] Add unit tests to cover the cell export functionality and preview generation to prevent similar issues in the future.
+
+#### Phase 4b Action Plan (2025-10-24)
+- Capture a reproducible failing case for both the single-cell preview and batch export paths, noting input parameters and resulting blank arrays or exceptions.
+- Trace the cell export pipeline (`BatchExportPlugin`, job runner hooks, renderer helpers) to locate where `_finalise_array` is invoked, document the expected signature, and identify mismatched arguments or missing data.
+- Audit intermediate image arrays to confirm whether data becomes blank prior to finalisation; collect minimal fixtures if the issue is data loss rather than signature mismatch.
+- Implement the necessary corrections (e.g., normalise `_finalise_array` signature, adjust callers, ensure arrays are not zeroed) while keeping backwards compatibility for FOV/ROI exports.
+- Extend automated coverage with targeted tests for cell export and preview, including regression checks for the original exception and blank output scenarios.
 
 ### Phase 5 — Performance, parallelism, and reliability
 Goals: make large batch runs efficient and robust.
