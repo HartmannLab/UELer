@@ -1,4 +1,7 @@
 ### v0.2.0-rc1
+**Wide plugin layout**
+- Increased the control panel width in `uiler.viewer.ui_components.split_control_content` from 360px to 6in so wide plugins have more room for complex controls without horizontal scrolling.
+
 **Linked plugin reliability**
 - Called `setup_attr_observers()` after dynamic plugin loading so chart scatter selections immediately propagate to the cell gallery while guarding duplicate observer registration in both scatter plugins (fixes [#14](https://github.com/HartmannLab/UELer/issues/14)).
 - Hardened observer setup flags in `ChartDisplay` and its heatmap counterpart to keep linkage idempotent across repeated viewer displays.

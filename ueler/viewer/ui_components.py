@@ -41,7 +41,7 @@ def build_wide_plugin_pane(control=None, content=None):
     if content is None:
         return VBox(children=(control,), layout=Layout(width='100%', overflow_y='auto'))
 
-    control_box = VBox(children=(control,), layout=Layout(width='320px', flex='0 0 320px', overflow_y='auto', gap='8px'))
+    control_box = VBox(children=(control,), layout=Layout(width='6in', flex='0 0 6in', overflow_y='auto', gap='8px'))
     content_box = VBox(children=(content,), layout=Layout(flex='1 1 auto', overflow='auto', min_height='360px'))
     return HBox(children=(control_box, content_box), layout=Layout(width='100%', gap='12px', align_items='stretch'))
 
