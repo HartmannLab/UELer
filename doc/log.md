@@ -1,3 +1,5 @@
+### v0.2.0-rc1
+
 ### v0.2.0-beta
 **Phase 4a fixes**
 - Adjusted the viewer's scale bar drawing routine to multiply by the active downsample ratio, fixing undersized bars when zoomed out or exporting at reduced resolution.
