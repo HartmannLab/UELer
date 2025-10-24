@@ -68,6 +68,7 @@ class ChartDisplay(PluginBase):
 
         self._scatter_views: "OrderedDict[str, ScatterPlotWidget]" = OrderedDict()
         self._id_counter = itertools.count(1)
+        self._observers_registered = False
 
         self.ui_component = UiComponent(self.main_viewer)
         self._hist_output = Output(layout=Layout(width="100%"))
@@ -591,6 +592,9 @@ class ChartDisplay(PluginBase):
             scatter.set_point_size(self.point_size)
 
     def setup_observe(self):
+        if self._observers_registered:
+            return
+
         def forward_to_cell_gallery(indices):
             if self.ui_component.cell_gallery_linked_checkbox.value:
                 self.main_viewer.SidePlots.cell_gallery_output.set_selected_cells(
@@ -598,6 +602,7 @@ class ChartDisplay(PluginBase):
                 )
 
         self.selected_indices.add_observer(forward_to_cell_gallery)
+        self._observers_registered = True
 
     def color_points(self, selected_indices, selected_colors=None):
         _ = selected_colors  # legacy parameter retained for compatibility

@@ -1,4 +1,10 @@
 ### v0.2.0-rc1
+**Linked plugin reliability**
+- Called `setup_attr_observers()` after dynamic plugin loading so chart scatter selections immediately propagate to the cell gallery while guarding duplicate observer registration in both scatter plugins (fixes [#14](https://github.com/HartmannLab/UELer/issues/14)).
+- Hardened observer setup flags in `ChartDisplay` and its heatmap counterpart to keep linkage idempotent across repeated viewer displays.
+
+**Regression coverage**
+- Added targeted linkage tests in `tests/test_chart_footer_behavior.py`, stubbing heavy imaging dependencies to exercise linked and unlinked flows without the full stack; ran `python -m unittest tests.test_chart_footer_behavior.ChartDisplayFooterTests.test_selection_forwards_to_cell_gallery_when_linked tests.test_chart_footer_behavior.ChartDisplayFooterTests.test_selection_does_not_forward_when_unlinked`.
 
 ### v0.2.0-beta
 **Phase 4a fixes**

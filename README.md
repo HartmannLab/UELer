@@ -89,6 +89,10 @@ The second release candidate delivers automatic scale bars across the viewer and
 - The plugin continues to provide mode-aware exports (Full FOV, Single Cells, ROIs), overlay snapshots, and cancellation-ready jobs, now seeded with the viewer's pixel size to keep in-app and exported measurements in sync.
 - Raster/PDF writers share a Matplotlib-based overlay helper, guaranteeing consistent styling and placement across formats while preserving previous mask/annotation options.
 
+**Linked plugin reliability**
+- Scatter chart plugins now re-run observer setup after dynamic plugin loading, ensuring the cell gallery reflects scatter selections as soon as the link toggle is enabled and avoiding duplicate callbacks when plugins refresh.
+- Added regression coverage in `tests/test_chart_footer_behavior.py` for both linked and unlinked flows, alongside lightweight imaging stubs that keep the fast suite dependency-light.
+
 **Rendering & tests**
 - Extended `_finalise_array` to return scale bar specifications, introduced `_render_with_scale_bar`/`_write_pdf_with_scale_bar`, and added fallbacks for environments lacking full Matplotlib bindings.
 - Added `tests/test_scale_bar_helper.py` to lock in rounding behaviour and effective pixel sizing, alongside updates to the existing batch export suite (with fresh ipywidgets/matplotlib stubs) to cover the new pipeline.

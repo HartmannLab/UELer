@@ -225,6 +225,8 @@ def display_ui(viewer):
         viewer.SidePlots = SidePlots()
         viewer.SidePlots.annotation_display_output = AnnotationDisplay(viewer,6,3)
         viewer.dynamically_load_plugins()
+        if hasattr(viewer, "setup_attr_observers"):
+            viewer.setup_attr_observers()
 
         # Dynamically create Accordion children
         accordion_children = []
