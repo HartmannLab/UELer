@@ -156,14 +156,16 @@ Individually outline each cell in both the main viewer and the batch export plug
 - Update the batch export plugin to seed its local thickness control from the viewer value on activation while preserving independent adjustments during a session.
 - Expand automated coverage: add unit tests for per-cell outline generation, viewer regression tests for the new control, and export integration tests to confirm plugin isolation.
 
-### Phase 4 — Per-ROI and Per-Cell features
-Goals: support ROI-level overrides and per-cell crops with scale bars and marker overlays.
-- [ ] Add ROI export support to the Job runner: accept per-ROI metadata (explicit crop size, marker set override, scale bar settings). When per-ROI settings are not provided, apply either ROI-native settings or a chosen global profile.
-- [ ] Implement `render_crop_to_array` so Single Cells mode can crop around cell coordinates (use `cell_table` and mask/label maps to compute bounding boxes). Add options for padding and size constraints.
-- [ ] Add a small helper to compute scale bar pixel size for exported DPI/figure size and optionally draw it into images (reuse Matplotlib `AnchoredSizeBar` logic).
-- [ ] Scale bar sizing and PDF gallery behavior:
+### Phase 4 — Scale bars support
+Goals: support scale bars.
+- [ ] Scale bar sizing and PDF format behavior:
   - [ ] When a scale bar is requested, the export pipeline must compute a scale bar length such that the drawn length is <= 10% of the exported image width in pixels. Choose a round/clean physical length (e.g., 1 µm, 2 µm, 5 µm, 10 µm, etc.) that satisfies this constraint and is appropriate for the image resolution and DPI.
-  - [ ] When exporting multiple ROIs into a single gallery PDF (future feature), each ROI may have a different scale bar appropriate for its crop size; the Job runner should support generating a per-ROI scale bar and render each ROI to a PDF page or grid cell. The gallery exporter should accept layout parameters (rows x cols) and pagination behavior.
+    - [ ] Refactor how the viewer handle scale bars to expose a helper that computes recommended scale bar lengths given image pixel size, physical size, and desired max fraction of image width.
+    - [ ] Ensure both the export job runner and the main viewer calls this helper for displaying the scale bar.
+  - [ ] For non-PDF formats (PNG, JPEG, TIFF), draw the scale bar directly onto the exported image at the bottom-right corner using Matplotlib's `AnchoredSizeBar` or similar logic.
+  - [ ] For PDF exports, draw the scale bar as part of the Matplotlib figure prior to saving to PDF, ensuring it scales correctly with figure size and DPI.
+- [ ] Add a small helper to compute scale bar pixel size for exported DPI/figure size and optionally draw it into images (reuse Matplotlib `AnchoredSizeBar` logic).
+
 
 ### Phase 5 — Performance, parallelism, and reliability
 Goals: make large batch runs efficient and robust.
@@ -195,3 +197,4 @@ Goals: make large batch runs efficient and robust.
 
 
   - [ ] Implement the PDF gallery output as an optional output format for ROI batches, where individual ROI images are placed into an arrayed PDF (one ROI per page or arranged in a grid). Each ROI entry in the PDF should include its own scale bar (if requested) and caption/metadata (ROI id, source FOV, export settings).
+  - [ ] When exporting multiple ROIs into a single gallery PDF (future feature), each ROI may have a different scale bar appropriate for its crop size; the Job runner should support generating a per-ROI scale bar and render each ROI to a PDF page or grid cell. The gallery exporter should accept layout parameters (rows x cols) and pagination behavior.
