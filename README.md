@@ -6,17 +6,42 @@ You can try UELer without installation by launching it on [Binder](https://mybin
 [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/HartmannLab/UELer/binder-app?urlpath=%2Fdoc%2Ftree%2Fscript%2Frun_ueler.ipynb)
 
 ## Installation
-### Set up the environment (env)
-You can create a compatible env using the environment.yml file in this repository.
-Download the yml file to a preferred folder, change the current directory to it, and then run:
-```shell
-micromamba env create --name ark-analysis-ueler --file environment.yml
-```
-### Install UELer
-Go to the directory where you want to install the tool, and then git clone this repository:
-```
-git clone https://github.com/HartmannLab/UELer.git
-```
+
+### 1. Set up the environment
+
+You can create a compatible environment using the `environment.yml` file provided in this repository.
+
+1. Download the `environment.yml` file to your preferred folder.
+2. Change your current directory to that folder.
+3. Create the environment by running:
+
+   ```shell
+   micromamba env create --name ark-analysis-ueler --file environment.yml
+   ```
+
+### 2. Install UELer
+
+1. Navigate to the directory where you want to install the tool, then clone the repository:
+
+   ```shell
+   git clone https://github.com/HartmannLab/UELer.git
+   ```
+2. Activate your environment:
+
+   ```shell
+   micromamba activate ark-analysis-ueler
+   ```
+3. Change into the cloned UELer directory:
+
+   ```shell
+   cd <path-to-UELer-folder>
+   ```
+4. Install the package in editable mode:
+
+   ```shell
+   pip install -e .
+   ```
+
 ## Updating Your Environment for v0.1.7-alpha (or earlier) users
 If you're using UELer v0.1.7-alpha or earlier, you'll need to update your environment by following these steps:
 1. Activate your environment:
@@ -41,10 +66,9 @@ git pull
 
 ## Getting started
 1. Open your favorite editor that supports Jupyter notebook.
-2. Navigate to the cloned UELer repository, then open the notebook `/script/run_viewer.ipynb`.
+2. Navigate to the cloned UELer repository, then open the notebook `/script/run_ueler.ipynb`.
 3. Select the kernel for an ark-analysis compatible conda/micromamba env.
-4. Change the lines according to the instructions in the notebook: when configuring the `/script/run_viewer.ipynb`, ensure that you specify the following directory paths:
-  - **`viewer_dir`**: The directory path where the UELer folder is located (e.g., `.../UELer`).
+4. Change the lines according to the instructions in the notebook: when configuring the `/script/run_ueler.ipynb`, ensure that you specify the following directory paths:
   - **`base_folder`**: The directory containing the FOV (Field of View) folders with image data (e.g., `.../image_data`).
   - **`masks_folder`**: The directory containing the segmentation `.tif` files for cell segmentation (e.g., `.../segmentation/cellpose_output`).
   - **`cell_table_path`**: The path to the file containing the cell table data (e.g., `.../segmentation/cell_table/cell_table_size_normalized.csv`).
