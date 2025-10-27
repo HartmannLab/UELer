@@ -5,6 +5,7 @@ dependencies:
   - python=3.10
   - pip
   - hdf5
+  - py-opencv
   - scikit-image=0.19
   - dask
   - dask-image
@@ -17,4 +18,5 @@ dependencies:
     - seaborn-image
     - opencv-python
     - watchfiles
+
     - jupyter-scatter[all]
