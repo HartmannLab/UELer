@@ -9,6 +9,7 @@ dependencies:
   - dask
   - dask-image
   - ipydatagrid
+  - py-opencv
   - panel
   - bqplot
   - pip:
