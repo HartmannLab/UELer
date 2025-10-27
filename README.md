@@ -75,7 +75,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 - **Wide Plugins**: Enable "Horizontal layout" (for example, in the heatmap plugin) to undock the tool into the footer while keeping the accordion available for other controls.
 
 ## New Update  
-### v0.2.0-rc1
+### v0.2.0-rc2
 The first release candidate delivers automatic scale bars across the viewer and batch export workflows while retaining the Batch Export UI, overlay plumbing, and job runner improvements from earlier `v0.2.0` milestones.
 
 **Phase 4b cell export fixes**
@@ -102,9 +102,14 @@ The first release candidate delivers automatic scale bars across the viewer and 
 - Added `tests/test_scale_bar_helper.py` to lock in rounding behaviour and effective pixel sizing, alongside updates to the existing batch export suite (with fresh ipywidgets/matplotlib stubs) to cover the new pipeline.
 - Extra regression coverage ensures non-unity downsample factors stay accurate in both helper calculations and viewer rendering.
 
+**FOV detection filtering**
+- Enhanced FOV detection to only recognize directories containing .tif or .tiff files as valid FOVs, preventing misclassification of folders like '.ueler' that lack image data.
+- Added comprehensive unit tests to validate the filtering logic and ensure no regressions in existing functionality.
+
 **Verification**
 - `python -m unittest tests.test_scale_bar_helper tests.test_export_fovs_batch`
 - `python -m unittest tests.test_export_fovs_batch`
+- `python -m unittest tests.test_fov_detection`
 
 ## Earlier Updates  
 

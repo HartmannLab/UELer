@@ -1,3 +1,10 @@
+### v0.2.0-rc2
+**FOV detection filtering**
+- Added `_has_tiff_files()` method to `ueler.viewer.main_viewer.ImageMaskViewer` that checks for .tif/.tiff files in the FOV directory or its 'rescaled' subdirectory, mirroring the logic from `load_channel_struct_fov()` to ensure only directories containing TIFF images are recognized as valid FOVs.
+- Updated `available_fovs` initialization to filter out directories without TIFF files, preventing misclassification of folders like '.ueler' as FOVs (fixes [#29](https://github.com/HartmannLab/UELer/issues/29)).
+- Added comprehensive unit tests in `tests/test_fov_detection.py` covering positive cases (directories with TIFF files), negative cases (empty directories, nonexistent directories), and edge cases (rescaled subdirectories) to guard against regressions.
+- Ran `python -m unittest tests.test_fov_detection` to validate the filtering logic and ensure no existing functionality is broken.
+
 ### v0.2.0-rc1
 **Wide plugin layout**
 - Increased the control panel width in `uiler.viewer.ui_components.split_control_content` from 360px to 6in so wide plugins have more room for complex controls without horizontal scrolling.

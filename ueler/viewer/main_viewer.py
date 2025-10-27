@@ -127,7 +127,7 @@ class ImageMaskViewer:
 
         # Initialize variables
         self.available_fovs = [fov for fov in os.listdir(self.base_folder)
-                               if os.path.isdir(os.path.join(self.base_folder, fov))]
+                               if os.path.isdir(os.path.join(self.base_folder, fov)) and self._has_tiff_files(fov)]
         if not self.available_fovs:
             raise ValueError("No FOVs found in the base folder.")
 
@@ -251,6 +251,25 @@ class ImageMaskViewer:
         self.setup_attr_observers()
 
         self.initialized = True
+    
+    def _has_tiff_files(self, fov_name):
+        """Check if a directory contains .tif or .tiff files, including in 'rescaled' subdirectory."""
+        import glob
+        
+        fov_path = os.path.join(self.base_folder, fov_name)
+        
+        # Check for 'rescaled' subfolder first
+        rescaled_path = os.path.join(fov_path, 'rescaled')
+        if os.path.isdir(rescaled_path):
+            channel_folder = rescaled_path
+        else:
+            channel_folder = fov_path
+        
+        # Get list of TIFF files in the channel folder
+        tiff_files = glob.glob(os.path.join(channel_folder, '*.tiff'))
+        tiff_files += glob.glob(os.path.join(channel_folder, '*.tif'))
+        
+        return bool(tiff_files)
     
     def after_all_plugins_loaded(self):
         # loop through all the attributes of self.SidePlots, call the `after_all_plugins_loaded`` method
