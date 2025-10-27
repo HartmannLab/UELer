@@ -77,7 +77,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### v0.2.0-rc1
-The second release candidate delivers automatic scale bars across the viewer and batch export workflows while retaining the Batch Export UI, overlay plumbing, and job runner improvements from earlier `v0.2.0` milestones.
+The first release candidate delivers automatic scale bars across the viewer and batch export workflows while retaining the Batch Export UI, overlay plumbing, and job runner improvements from earlier `v0.2.0` milestones.
 
 **Phase 4b cell export fixes**
 - Marker profiles now fall back to the viewer's active channel selection when stored marker sets lack entries, preventing blank single-cell exports and enforcing per-channel render settings before jobs run.
