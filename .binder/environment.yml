@@ -8,9 +8,7 @@ dependencies:
   - scikit-image=0.19
   - dask
   - dask-image
-  - ipydatagrid
   - py-opencv
-  - panel
   - bqplot
   - pip:
     - ark-analysis==0.7.0
@@ -19,3 +17,4 @@ dependencies:
     - opencv-python
     - watchfiles
     - jupyter-scatter[all]
+
