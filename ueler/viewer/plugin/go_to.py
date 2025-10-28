@@ -29,6 +29,7 @@ from ueler.viewer.decorators import update_status_bar
 from ueler.viewer.observable import Observable
 
 from .plugin_base import PluginBase
+from ..layout_utils import column_block_layout, flex_fill_layout
 
 
 class goTo(PluginBase):  # NOSONAR - legacy class name kept for backwards compatibility
@@ -42,9 +43,9 @@ class goTo(PluginBase):  # NOSONAR - legacy class name kept for backwards compat
 
         self.ui_component = UiComponent()
 
-        narrow_layout = Layout(width="150px")
+        narrow_layout = Layout(width="150px", flex="0 0 auto")
 
-        self.plot_output = Output(layout=Layout(max_height="300px", overflow_y="auto"))
+        self.plot_output = Output(layout=column_block_layout(max_height="300px", overflow_y="auto"))
 
         self.ui_component.fov_dropdown = Dropdown(
             options=self.main_viewer.ui_component.image_selector.options,
@@ -69,6 +70,7 @@ class goTo(PluginBase):  # NOSONAR - legacy class name kept for backwards compat
             description="Width (pixel):",
             continuous_update=False,
             style={"description_width": "auto"},
+            layout=flex_fill_layout(),
         )
 
         self.ui_component.go_to_button = Button(
@@ -122,12 +124,14 @@ class goTo(PluginBase):  # NOSONAR - legacy class name kept for backwards compat
                         self.ui_component.zoom_width,
                         self.ui_component.fov_dropdown,
                         self.ui_component.cell_ID_text,
-                    ]
+                    ],
+                    layout=Layout(gap="8px", width="100%", flex_flow="row wrap", align_items="center"),
                 ),
                 HBox([self.ui_component.go_to_button]),
-            ]
+            ],
+            layout=column_block_layout(gap="8px"),
         )
-        ui = VBox([controls, VBox([self.plot_output], layout=Layout(max_height="400px"))])
+        ui = VBox([controls, VBox([self.plot_output], layout=column_block_layout(max_height="400px"))])
         self.ui = ui
 
 

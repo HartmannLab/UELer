@@ -19,6 +19,7 @@ from ipywidgets import (
 )
 
 from .plugin_base import PluginBase
+from ..layout_utils import column_block_layout, flex_fill_layout
 
 
 class ROIManagerPlugin(PluginBase):
@@ -60,7 +61,7 @@ class ROIManagerPlugin(PluginBase):
     # UI construction
     # ------------------------------------------------------------------
     def _build_widgets(self) -> None:
-        full_width = Layout(width="100%")
+        full_width = column_block_layout
         button_layout = Layout(width="auto", flex="1 1 auto")
         style_auto = {"description_width": "auto"}
 
@@ -68,7 +69,7 @@ class ROIManagerPlugin(PluginBase):
             options=[("—", None)],
             value=None,
             description="Saved ROI:",
-            layout=full_width,
+            layout=flex_fill_layout(),
             style=style_auto,
         )
 
@@ -109,7 +110,7 @@ class ROIManagerPlugin(PluginBase):
             options=[("Current set", self.CURRENT_MARKER_VALUE), ("None", "")],
             value=self.CURRENT_MARKER_VALUE,
             description="Marker set:",
-            layout=full_width,
+            layout=full_width(),
             style=style_auto,
         )
 
@@ -119,7 +120,7 @@ class ROIManagerPlugin(PluginBase):
             placeholder="Type or select a tag",
             ensure_option=False,
             description="Add tag:",
-            layout=full_width,
+            layout=full_width(),
             style=style_auto,
         )
         if hasattr(self.ui_component.tag_entry, "continuous_update"):
@@ -134,7 +135,7 @@ class ROIManagerPlugin(PluginBase):
             description="Tags:",
             allow_duplicates=False,
             allow_new=True,
-            layout=full_width,
+            layout=full_width(),
         )
         if hasattr(self.ui_component.tags, "allow_new"):
             try:
@@ -153,7 +154,7 @@ class ROIManagerPlugin(PluginBase):
             value="",
             placeholder="Add a comment",
             description="Comment:",
-            layout=full_width,
+            layout=full_width(),
             style=style_auto,
         )
 
@@ -164,7 +165,7 @@ class ROIManagerPlugin(PluginBase):
         self.ui_component.path = Text(
             value=default_path,
             description="File path:",
-            layout=full_width,
+            layout=flex_fill_layout(),
             style=style_auto,
         )
 
@@ -184,12 +185,12 @@ class ROIManagerPlugin(PluginBase):
                 self.ui_component.update_button,
                 self.ui_component.center_button,
             ],
-            layout=Layout(gap="6px"),
+            layout=Layout(gap="6px", flex_flow="row wrap"),
         )
 
         actions_secondary = HBox(
             [self.ui_component.export_button, self.ui_component.import_button],
-            layout=Layout(gap="6px"),
+            layout=Layout(gap="6px", flex_flow="row wrap"),
         )
 
         metadata_box = VBox(
@@ -199,12 +200,12 @@ class ROIManagerPlugin(PluginBase):
                 self.ui_component.tags,
                 self.ui_component.comment,
             ],
-            layout=Layout(gap="6px"),
+            layout=column_block_layout(gap="6px"),
         )
 
         file_box = VBox(
             [self.ui_component.path, actions_secondary],
-            layout=Layout(gap="6px"),
+            layout=column_block_layout(gap="6px"),
         )
 
         header = HTML("<strong>ROI manager</strong>")
@@ -214,21 +215,21 @@ class ROIManagerPlugin(PluginBase):
                 header,
                 HBox(
                     [self.ui_component.roi_table, self.ui_component.limit_to_fov_checkbox],
-                    layout=Layout(align_items="center", gap="8px"),
+                    layout=Layout(align_items="center", gap="8px", width="100%", flex_flow="row nowrap"),
                 ),
                 actions_primary,
                 metadata_box,
                 file_box,
                 self.ui_component.status,
             ],
-            layout=Layout(gap="10px"),
+            layout=column_block_layout(gap="10px"),
         )
 
         self.panel = Accordion(
             children=[content],
             titles=("ROI manager",),
             selected_index=None,
-            layout=Layout(width="100%"),
+            layout=column_block_layout(),
         )
         self.ui = content
 

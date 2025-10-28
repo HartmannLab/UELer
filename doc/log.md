@@ -5,6 +5,12 @@
 - Added comprehensive unit tests in `tests/test_fov_detection.py` covering positive cases (directories with TIFF files), negative cases (empty directories, nonexistent directories), and edge cases (rescaled subdirectories) to guard against regressions.
 - Ran `python -m unittest tests.test_fov_detection` to validate the filtering logic and ensure no existing functionality is broken.
 
+**Plugin layout refinements**
+- Added `ueler.viewer.layout_utils` with reusable layout helpers keeping child widths within parent bounds to eliminate shallow horizontal scrollbars in tight containers (fixes [#39](https://github.com/HartmannLab/UELer/issues/39)).
+- Updated ROI Manager, Batch Export, and Go To plugins to adopt the shared layouts so button rows wrap, selectors flex, and status content fits without triggering unnecessary horizontal scrolling.
+- Verified the affected notebooks manually; unit suite not rerun because changes are widget-only.
+- Follow-up: corrected the Batch Export plugin's widget builder to pass the new layout helpers explicitly, fixing the NameError raised when instantiating the plugin after the refactor.
+
 ### v0.2.0-rc1
 **Wide plugin layout**
 - Increased the control panel width in `uiler.viewer.ui_components.split_control_content` from 360px to 6in so wide plugins have more room for complex controls without horizontal scrolling.

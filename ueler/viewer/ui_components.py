@@ -28,22 +28,42 @@ from .plugin.cell_gallery import CellGalleryDisplay  # type: ignore[import-error
 from .plugin.heatmap import HeatmapDisplay  # type: ignore[import-error]
 from .plugin.plugin_base import PluginBase  # type: ignore[import-error]
 from .annotation_display import AnnotationDisplay  # type: ignore[import-error]
+from .layout_utils import (
+    constrained_column,
+    flex_item,
+    flex_row,
+    fixed_panel,
+    scroll_column,
+)
+
+
+SECTION_PADDING = "4px 0"
 
 
 def build_wide_plugin_pane(control=None, content=None):
     """Compose the standard left/right layout used in the footer tabs."""
     if control is None and content is None:
-        return VBox(children=(), layout=Layout(width='100%'))
+        return VBox(children=(), layout=Layout(width='100%', max_width='100%'))
 
     if control is None:
-        return VBox(children=(content,), layout=Layout(width='100%', overflow_y='auto'))
+        return VBox(children=(content,), layout=scroll_column())
 
     if content is None:
-        return VBox(children=(control,), layout=Layout(width='100%', overflow_y='auto'))
+        return VBox(children=(control,), layout=scroll_column())
 
-    control_box = VBox(children=(control,), layout=Layout(width='6in', flex='0 0 6in', overflow_y='auto', gap='8px'))
-    content_box = VBox(children=(content,), layout=Layout(flex='1 1 auto', overflow='auto', min_height='360px'))
-    return HBox(children=(control_box, content_box), layout=Layout(width='100%', gap='12px', align_items='stretch'))
+    control_box = VBox(children=(control,), layout=fixed_panel())
+    content_box = VBox(
+        children=(content,),
+        layout=Layout(
+            flex='1 1 0px',
+            width='100%',
+            max_width='100%',
+            overflow='auto',
+            min_height='360px',
+            box_sizing='border-box'
+        )
+    )
+    return HBox(children=(control_box, content_box), layout=flex_row(gap='12px', align='stretch'))
 
 
 def collect_wide_plugin_entries(viewer):
@@ -218,7 +238,7 @@ def display_ui(viewer):
             VBox([viewer.ui_component.update_marker_set_button, viewer.ui_component.delete_marker_set_button])
         ]),
         viewer.ui_component.delete_confirmation_checkbox
-    ])
+    ], layout=scroll_column(gap='6px', padding='0'))
     # Add a new output widget for charts
     viewer.BottomPlots = BottomPlots()
     if viewer.cell_table is not None:
@@ -241,15 +261,16 @@ def display_ui(viewer):
                     )
                 )
 
-        viewer.side_plot = VBox(accordion_children)
+        viewer.side_plot = VBox(accordion_children, layout=fixed_panel(max_width='380px', gap='10px'))
     else:
-        viewer.side_plot = Output()
+        viewer.side_plot = Output(layout=Layout(flex='0 0 auto', min_width='0'))
 
     viewer.wide_plugin_tab = Tab(children=[], layout=Layout(width='100%'))
     viewer.wide_plugin_panel = VBox(
         [viewer.wide_plugin_tab],
         layout=Layout(
             width='100%',
+            max_width='100%',
             margin='12px 0 0 0',
             border='1px solid var(--jp-border-color2, #cccccc)',
             padding='8px',
@@ -261,7 +282,7 @@ def display_ui(viewer):
     control_panel_stack = VBox([
         viewer.ui_component.control_sections,
         viewer.ui_component.annotation_editor_host
-    ], layout=Layout(gap='8px'))
+    ], layout=scroll_column(gap='8px', padding='0', max_width='98%'))
 
     top_part_widgets = VBox([
         viewer.ui_component.cache_size_input,
@@ -271,7 +292,7 @@ def display_ui(viewer):
         marker_set_widgets,
         control_panel_stack,
         VBox([viewer.ui_component.advanced_settings_accordion])
-    ])
+    ], layout=constrained_column(max_width='100%', gap='8px'))
 
     left_panel_children = [top_part_widgets]
     left_panel_children.append(
@@ -280,16 +301,18 @@ def display_ui(viewer):
 
     left_panel = VBox(
         left_panel_children,
-        layout=Layout(width='350px', overflow_y='auto', gap='10px')
+        layout=fixed_panel(max_width='360px')
     )
+
+    viewer.image_output.layout = Layout(flex='1 1 auto', min_width='0', width='auto')
 
     ui = HBox([
         left_panel,
         viewer.image_output,
         viewer.side_plot  # Add the chart output widget to the right
-    ])
+    ], layout=flex_row(gap='16px', align='stretch'))
 
-    root = VBox([ui, viewer.wide_plugin_panel], layout=Layout(width='100%'))
+    root = VBox([ui, viewer.wide_plugin_panel], layout=Layout(width='100%', max_width='100%', gap='12px'))
 
     if hasattr(viewer, 'refresh_bottom_panel'):
         viewer.refresh_bottom_panel()
@@ -298,11 +321,13 @@ def display_ui(viewer):
 
 class SidePlots:
     def __init__(self):
+        # Plugins populate this namespace dynamically after instantiation.
         pass
 
 
 class BottomPlots:
     def __init__(self):
+        # Footer plugins attach themselves to this namespace on demand.
         pass
 
 class uicomponents:
@@ -338,22 +363,8 @@ class uicomponents:
         self.channel_selector.observe(viewer.on_channel_selection_change, names='value')
 
         # Containers for channel, mask, and annotation controls
-        self.channel_controls_box = VBox(
-            layout=Layout(
-                width='100%',
-                overflow_y='auto',
-                gap='6px',
-                padding='4px 0'
-            )
-        )
-        self.mask_controls_box = VBox(
-            layout=Layout(
-                width='100%',
-                overflow_y='auto',
-                gap='6px',
-                padding='4px 0'
-            )
-        )
+        self.channel_controls_box = VBox(layout=scroll_column(padding=SECTION_PADDING))
+        self.mask_controls_box = VBox(layout=scroll_column(padding=SECTION_PADDING))
 
         self.mask_outline_thickness_slider = IntSlider(
             value=1,
@@ -373,12 +384,12 @@ class uicomponents:
 
         self.control_sections = Accordion(
             children=(self.channel_controls_box,),
-            layout=Layout(width='100%', max_height='640px')
+            layout=Layout(width='100%', max_width='100%', max_height='640px', overflow_x='hidden')
         )
         self.control_sections.set_title(0, 'Channels')
 
         self.annotation_editor_host = VBox(
-            layout=Layout(width='100%', padding='8px 0 0 0')
+            layout=Layout(width='100%', max_width='100%', padding='8px 0 0 0')
         )
 
         # Initialize markerset widgets
@@ -526,14 +537,7 @@ class uicomponents:
 
         # Annotation controls (initially disabled until annotations are detected)
         self.annotation_controls_header = HTML(value='<b>Annotations</b>')
-        self.annotation_controls_box = VBox(
-            layout=Layout(
-                width='100%',
-                overflow_y='auto',
-                gap='6px',
-                padding='4px 0'
-            )
-        )
+        self.annotation_controls_box = VBox(layout=scroll_column(padding=SECTION_PADDING))
 
         self.annotation_display_checkbox = Checkbox(
             value=False,

@@ -131,6 +131,10 @@ The first release candidate delivers automatic scale bars across the viewer and 
 - Enhanced FOV detection to only recognize directories containing .tif or .tiff files as valid FOVs, preventing misclassification of folders like '.ueler' that lack image data.
 - Added comprehensive unit tests to validate the filtering logic and ensure no regressions in existing functionality.
 
+**Plugin layout refinements**
+- Introduced shared layout helpers for ipywidgets containers and applied them to the ROI Manager, Batch Export, and Go To plugins so control rows wrap cleanly without producing horizontal scrollbars.
+- Tightened button groups and selectors to flex within their parents, eliminating the ~5 % overflow scroll bars called out in issue #39.
+
 **Verification**
 - `python -m unittest tests.test_scale_bar_helper tests.test_export_fovs_batch`
 - `python -m unittest tests.test_export_fovs_batch`

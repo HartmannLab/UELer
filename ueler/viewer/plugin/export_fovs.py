@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 from IPython import get_ipython
@@ -53,6 +53,7 @@ from ..scale_bar import (
     effective_pixel_size_nm,
 )
 from .plugin_base import PluginBase
+from ..layout_utils import column_block_layout, flex_fill_layout
 
 PLACEHOLDER_MESSAGE = "Batch export UI is now available."
 
@@ -127,14 +128,15 @@ class BatchExportPlugin(PluginBase):
     # UI construction
     # ------------------------------------------------------------------
     def _build_widgets(self) -> None:
-        layout_full = Layout(width="100%")
+        full_width = column_block_layout
+        flex_fill = flex_fill_layout
         style_auto = {"description_width": "auto"}
 
         self.ui_component.mode_selector = ToggleButtons(
             options=[(label, key) for key, label in self._MODE_LABELS.items()],
             value=self.MODE_FULL_FOV,
             description="Mode:",
-            layout=Layout(width="100%"),
+            layout=full_width(),
             style=style_auto,
             button_style="",
         )
@@ -142,7 +144,7 @@ class BatchExportPlugin(PluginBase):
         self.ui_component.marker_set_dropdown = Dropdown(
             options=[],
             description="Marker set:",
-            layout=layout_full,
+            layout=full_width(),
             style=style_auto,
         )
 
@@ -150,7 +152,7 @@ class BatchExportPlugin(PluginBase):
         self.ui_component.output_path = Text(
             value=default_output,
             description="Output folder:",
-            layout=layout_full,
+            layout=flex_fill(),
             style=style_auto,
             placeholder="/path/to/exports",
         )
@@ -164,7 +166,7 @@ class BatchExportPlugin(PluginBase):
             options=[(fmt.upper(), fmt) for fmt in self._FILE_FORMATS],
             value="png",
             description="Format:",
-            layout=layout_full,
+            layout=full_width(),
             style=style_auto,
         )
 
@@ -194,7 +196,7 @@ class BatchExportPlugin(PluginBase):
             max=10.0,
             step=0.5,
             description="Scale bar % width:",
-            layout=Layout(width="100%"),
+            layout=full_width(),
             style=style_auto,
         )
 
@@ -216,11 +218,11 @@ class BatchExportPlugin(PluginBase):
             max=10,
             step=1,
             description="Mask outline px:",
-            layout=Layout(width="100%"),
+            layout=full_width(),
             style=style_auto,
             continuous_update=False,
         )
-        self.ui_component.overlay_hint = HTML(value="", layout=Layout(width="100%"))
+        self.ui_component.overlay_hint = HTML(value="", layout=full_width())
 
         self.ui_component.start_button = Button(
             description="Start",
@@ -242,17 +244,17 @@ class BatchExportPlugin(PluginBase):
             max=1,
             description="Progress",
             bar_style="info",
-            layout=Layout(width="100%"),
+            layout=full_width(),
         )
         self.ui_component.progress_summary = HTML(value="")
         self.ui_component.output_link = HTML(value="")
         self.ui_component.status_message = HTML(value="")
-        self.ui_component.log_output = Output(layout=Layout(width="100%", border="1px solid #ddd"))
+        self.ui_component.log_output = Output(layout=column_block_layout(border="1px solid #ddd"))
 
         # Mode specific containers -------------------------------------------------
-        self._build_full_fov_widgets(layout_full, style_auto)
-        self._build_single_cell_widgets(layout_full, style_auto)
-        self._build_roi_widgets(layout_full, style_auto)
+        self._build_full_fov_widgets(full_width, style_auto)
+        self._build_single_cell_widgets(full_width, flex_fill, style_auto)
+        self._build_roi_widgets(full_width, style_auto)
 
         self.ui_component.mode_tabs = Tab(
             children=[
@@ -260,16 +262,20 @@ class BatchExportPlugin(PluginBase):
                 self.ui_component.single_cell_box,
                 self.ui_component.roi_box,
             ],
-            layout=Layout(width="100%"),
+            layout=full_width(),
         )
         for idx, mode in enumerate((self.MODE_FULL_FOV, self.MODE_SINGLE_CELLS, self.MODE_ROIS)):
             self.ui_component.mode_tabs.set_title(idx, self._MODE_LABELS[mode])
 
-    def _build_full_fov_widgets(self, layout_full: Layout, style_auto: Mapping[str, str]) -> None:
+    def _build_full_fov_widgets(
+        self,
+        full_width_layout: Callable[..., Layout],
+        style_auto: Mapping[str, str],
+    ) -> None:
         selector = SelectMultiple(
             options=[],
             description="FOVs:",
-            layout=layout_full,
+            layout=full_width_layout(),
             style=style_auto,
         )
         self.ui_component.full_fov_selector = selector
@@ -300,17 +306,22 @@ class BatchExportPlugin(PluginBase):
             [
                 self.ui_component.full_fov_use_all,
                 selector,
-                HBox([figure_width, figure_height], layout=Layout(gap="12px")),
+                HBox([figure_width, figure_height], layout=Layout(gap="12px", flex_flow="row wrap")),
             ],
-            layout=Layout(gap="6px", width="100%"),
+            layout=column_block_layout(gap="6px"),
         )
 
-    def _build_single_cell_widgets(self, layout_full: Layout, style_auto: Mapping[str, str]) -> None:
+    def _build_single_cell_widgets(
+        self,
+        full_width_layout: Callable[..., Layout],
+        flex_fill_layout_fn: Callable[..., Layout],
+        style_auto: Mapping[str, str],
+    ) -> None:
         self.ui_component.cell_filter = Text(
             value="",
             description="Filter (query):",
             placeholder="marker > 0",
-            layout=layout_full,
+            layout=flex_fill_layout_fn(),
             style=style_auto,
         )
         self.ui_component.cell_apply_filter = Button(
@@ -321,7 +332,7 @@ class BatchExportPlugin(PluginBase):
         self.ui_component.cell_selection = SelectMultiple(
             options=[],
             description="Cells:",
-            layout=layout_full,
+            layout=full_width_layout(),
             style=style_auto,
         )
         self.ui_component.cell_crop_size = IntText(
@@ -335,11 +346,11 @@ class BatchExportPlugin(PluginBase):
             icon="eye",
             layout=Layout(width="120px"),
         )
-        self.ui_component.cell_preview_output = Output(layout=Layout(width="100%", border="1px solid #ddd", padding="6px"))
+        self.ui_component.cell_preview_output = Output(layout=column_block_layout(border="1px solid #ddd", padding="6px"))
 
         filter_row = HBox(
             [self.ui_component.cell_filter, self.ui_component.cell_apply_filter],
-            layout=Layout(gap="10px", align_items="center"),
+            layout=Layout(gap="10px", align_items="center", width="100%", flex_flow="row nowrap"),
         )
 
         self.ui_component.single_cell_box = VBox(
@@ -348,14 +359,18 @@ class BatchExportPlugin(PluginBase):
                 self.ui_component.cell_selection,
                 HBox(
                     [self.ui_component.cell_crop_size, self.ui_component.cell_preview_button],
-                    layout=Layout(gap="12px"),
+                    layout=Layout(gap="12px", flex_flow="row wrap"),
                 ),
                 self.ui_component.cell_preview_output,
             ],
-            layout=Layout(gap="8px", width="100%"),
+            layout=column_block_layout(gap="8px"),
         )
 
-    def _build_roi_widgets(self, layout_full: Layout, style_auto: Mapping[str, str]) -> None:
+    def _build_roi_widgets(
+        self,
+        full_width_layout: Callable[..., Layout],
+        style_auto: Mapping[str, str],
+    ) -> None:
         self.ui_component.roi_limit_to_fov = Checkbox(
             value=False,
             description="Current FOV only",
@@ -365,13 +380,13 @@ class BatchExportPlugin(PluginBase):
         self.ui_component.roi_selection = SelectMultiple(
             options=[],
             description="ROIs:",
-            layout=layout_full,
+            layout=full_width_layout(),
             style=style_auto,
         )
 
         self.ui_component.roi_box = VBox(
             [self.ui_component.roi_limit_to_fov, self.ui_component.roi_selection],
-            layout=Layout(gap="6px", width="100%"),
+            layout=column_block_layout(gap="6px"),
         )
 
     def _build_layout(self) -> None:
@@ -379,7 +394,7 @@ class BatchExportPlugin(PluginBase):
 
         output_row = HBox(
             [self.ui_component.output_path, self.ui_component.browse_button],
-            layout=Layout(gap="10px", align_items="center"),
+            layout=Layout(gap="10px", align_items="center", width="100%", flex_flow="row nowrap"),
         )
 
         controls = VBox(
@@ -391,20 +406,20 @@ class BatchExportPlugin(PluginBase):
                 self.ui_component.file_format_dropdown,
                 HBox(
                     [self.ui_component.downsample_input, self.ui_component.dpi_input],
-                    layout=Layout(gap="12px"),
+                    layout=Layout(gap="12px", flex_flow="row wrap"),
                 ),
                 self.ui_component.include_scale_bar,
                 self.ui_component.scale_bar_ratio,
                 HBox(
                     [self.ui_component.include_annotations, self.ui_component.include_masks],
-                    layout=Layout(gap="16px", align_items="center"),
+                    layout=Layout(gap="16px", align_items="center", flex_flow="row wrap"),
                 ),
                 self.ui_component.mask_outline_thickness,
                 self.ui_component.overlay_hint,
                 self.ui_component.mode_tabs,
                 HBox(
                     [self.ui_component.start_button, self.ui_component.cancel_button],
-                    layout=Layout(gap="10px"),
+                    layout=Layout(gap="10px", flex_flow="row wrap"),
                 ),
                 self.ui_component.progress_bar,
                 self.ui_component.progress_summary,
@@ -412,7 +427,7 @@ class BatchExportPlugin(PluginBase):
                 self.ui_component.status_message,
                 self.ui_component.log_output,
             ],
-            layout=Layout(gap="10px", width="100%"),
+            layout=column_block_layout(gap="10px"),
         )
 
         self.ui = controls
