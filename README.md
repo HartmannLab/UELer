@@ -70,8 +70,9 @@ git pull
 3. Select the kernel for an ark-analysis compatible conda/micromamba env.
 4. Change the lines according to the instructions in the notebook: when configuring the `/script/run_ueler.ipynb`, ensure that you specify the following directory paths:
   - **`base_folder`**: The directory containing the FOV (Field of View) folders with image data (e.g., `.../image_data`).
-  - **`masks_folder`**: The directory containing the segmentation `.tif` files for cell segmentation (e.g., `.../segmentation/cellpose_output`).
-  - **`cell_table_path`**: The path to the file containing the cell table data (e.g., `.../segmentation/cell_table/cell_table_size_normalized.csv`).
+  - **`masks_folder`** (optional): The directory containing the segmentation `.tif` files for cell segmentation (e.g., `.../segmentation/cellpose_output`).
+  - **`annotations_folder`** (optional): The directory containing annotation files for marking regions of interest (e.g., `.../annotations`).
+  - **`cell_table_path`** (optional): The path to the file containing the cell table data (e.g., `.../segmentation/cell_table/cell_table_size_normalized.csv`).
 Make sure these paths are correctly set in the notebook for the viewer to access the data correctly.
 
 5. Run the code and you will see the viewer displayed.
