@@ -990,7 +990,7 @@ class ImageMaskViewer:
 
         if not section_children:
             section_children = (
-                VBox([self.ui_component.empty_controls_placeholder], layout=Layout(width="100%")),
+                VBox([self.ui_component.empty_controls_placeholder], layout=Layout(width="98%")),
             )
             section_titles = ["Controls"]
 
