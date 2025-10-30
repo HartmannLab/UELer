@@ -389,7 +389,8 @@ class uicomponents:
                 width='100%',
                 overflow_y='auto',
                 gap='6px',
-                padding='4px 0'
+                padding='4px 0',
+                max_height='320px'
             )
         )
         self.mask_controls_box = VBox(
@@ -531,7 +532,7 @@ class uicomponents:
 
         self.control_sections = Accordion(
             children=(self.channel_section_panel,),
-            layout=Layout(width='98%', max_height='640px')
+            layout=Layout(width='98%', overflow_y='hidden')
         )
         self.control_sections.set_title(0, 'Channels')
 

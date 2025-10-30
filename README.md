@@ -138,6 +138,7 @@ The first release candidate delivers automatic scale bars across the viewer and 
 **Channels accordion consolidation**
 - Moved the channel tag chips plus marker-set dropdown, name entry, and action buttons into the Channels accordion pane so channel selection, presets, and per-channel sliders stay in one cohesive space.
 - Rebuilt the pane with nested containers that maintain spacing and focus order, removing duplicate widgets from the header while keeping keyboard navigation unchanged.
+- Let the accordion body stay static while the slider list gains its own scroll region, preventing double scrollbars and keeping long channel lists usable.
 
 **Verification**
 - `python -m unittest tests.test_scale_bar_helper tests.test_export_fovs_batch`
