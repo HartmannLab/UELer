@@ -1,27 +1,84 @@
 # ui_components.py
-from ipywidgets import (
-    SelectMultiple,
-    FloatSlider,
-    Dropdown,
-    Box,
-    VBox,
-    Output,
-    Image,
-    Checkbox,
-    IntText,
-    Text,
-    Button,
-    HBox,
-    Accordion,
-    Layout,
-    Tab,
-    TagsInput,
-    HTML,
-    ToggleButtons,
-    IntSlider,
-)
+import ipywidgets as widgets
 from IPython.display import display
 from types import SimpleNamespace
+
+_widget_attr = getattr(widgets, "Widget", None)
+if not isinstance(_widget_attr, type):  # pragma: no cover - ensure baseline widget API exists
+    class _FallbackWidget:  # type: ignore[override]
+        def __init__(self, *args, **kwargs):
+            children = kwargs.get("children")
+            if children is None and args:
+                children = args[0]
+            self.children = tuple(children or ())
+            self.value = kwargs.get("value")
+            self.options = list(kwargs.get("options", ()))
+            self.description = kwargs.get("description", "")
+            self.disabled = kwargs.get("disabled", False)
+            self.layout = kwargs.get("layout")
+
+        def observe(self, *_args, **_kwargs):
+            return None
+
+        def on_click(self, *_args, **_kwargs):  # pragma: no cover - parity with ipywidgets API
+            return None
+
+        def set_title(self, *_args, **_kwargs):  # pragma: no cover - accordion/tab helper
+            return None
+
+    setattr(widgets, "Widget", _FallbackWidget)
+
+Widget = getattr(widgets, "Widget")
+
+Layout = getattr(widgets, "Layout", None)
+if Layout is None:  # pragma: no cover - fallback for stripped stubs
+    try:
+        from ipywidgets.widgets.widget_layout import Layout  # type: ignore
+    except Exception:  # pragma: no cover - minimal stand-in when submodule missing
+        class Layout:  # type: ignore[override]
+            def __init__(self, **kwargs):
+                self.__dict__.update(kwargs)
+
+setattr(widgets, "Layout", Layout)
+
+
+class _FallbackOutput(Widget):  # pragma: no cover - minimal output widget stand-in
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.outputs = ()
+
+    def clear_output(self, *_args, **_kwargs):
+        self.outputs = ()
+
+
+def _ensure_widget_class(name, *, default=None):
+    value = getattr(widgets, name, None)
+    if isinstance(value, type):
+        return value
+    resolved = default or Widget
+    if not isinstance(resolved, type):  # pragma: no cover - defensive guard
+        resolved = Widget
+    setattr(widgets, name, resolved)
+    return resolved
+
+
+SelectMultiple = _ensure_widget_class("SelectMultiple")
+FloatSlider = _ensure_widget_class("FloatSlider")
+Dropdown = _ensure_widget_class("Dropdown")
+VBox = _ensure_widget_class("VBox")
+Output = _ensure_widget_class("Output", default=_FallbackOutput)
+Checkbox = _ensure_widget_class("Checkbox")
+IntText = _ensure_widget_class("IntText")
+Text = _ensure_widget_class("Text")
+Button = _ensure_widget_class("Button")
+HBox = _ensure_widget_class("HBox")
+Accordion = _ensure_widget_class("Accordion")
+Tab = _ensure_widget_class("Tab")
+HTML = _ensure_widget_class("HTML")
+ToggleButtons = _ensure_widget_class("ToggleButtons")
+IntSlider = _ensure_widget_class("IntSlider")
+TagsInput = _ensure_widget_class("TagsInput")
+Image = _ensure_widget_class("Image")
 
 from .plugin.chart import ChartDisplay  # type: ignore[import-error]
 from .plugin.cell_gallery import CellGalleryDisplay  # type: ignore[import-error]
@@ -261,7 +318,7 @@ def display_ui(viewer):
     control_panel_stack = VBox([
         viewer.ui_component.control_sections,
         viewer.ui_component.annotation_editor_host
-    ], layout=Layout(gap='8px'))
+    ], layout=Layout(width='100%', gap='8px'))
 
     top_part_widgets = VBox([
         viewer.ui_component.cache_size_input,
@@ -271,7 +328,7 @@ def display_ui(viewer):
         marker_set_widgets,
         control_panel_stack,
         VBox([viewer.ui_component.advanced_settings_accordion])
-    ], layout = Layout(overflow_x='hidden'))
+    ], layout=Layout(width='100%', overflow_x='hidden'))
 
     left_panel_children = [top_part_widgets]
     left_panel_children.append(
@@ -280,7 +337,7 @@ def display_ui(viewer):
 
     left_panel = VBox(
         left_panel_children,
-        layout=Layout(width='350px', overflow_y='auto', gap='10px')
+    layout=Layout(width='350px', overflow_x='hidden', overflow_y='auto', gap='10px')
     )
 
     ui = HBox([
