@@ -271,7 +271,7 @@ def display_ui(viewer):
         marker_set_widgets,
         control_panel_stack,
         VBox([viewer.ui_component.advanced_settings_accordion])
-    ])
+    ], layout = Layout(overflow_x='hidden'))
 
     left_panel_children = [top_part_widgets]
     left_panel_children.append(
