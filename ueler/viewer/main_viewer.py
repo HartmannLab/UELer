@@ -945,7 +945,6 @@ class ImageMaskViewer:
                 self.ui_component.annotation_controls_header,
                 self.ui_component.annotation_display_checkbox,
                 self.ui_component.annotation_selector,
-                self.ui_component.annotation_overlay_mode,
                 self.ui_component.annotation_alpha_slider,
                 self.ui_component.annotation_label_mode,
                 self.ui_component.annotation_edit_button,
@@ -968,14 +967,6 @@ class ImageMaskViewer:
         section_children = [self.ui_component.channel_section_panel]
         section_titles = ["Channels"]
 
-        if self.annotations_available:
-            if not annotation_widgets:
-                self.ui_component.annotation_controls_box.children = (
-                    self.ui_component.no_annotations_label,
-                )
-            section_children.append(self.ui_component.annotation_controls_box)
-            section_titles.append("Annotations")
-
         if self.masks_available:
             if not mask_widgets:
                 self.ui_component.mask_controls_box.children = (
@@ -983,6 +974,14 @@ class ImageMaskViewer:
                 )
             section_children.append(self.ui_component.mask_controls_box)
             section_titles.append("Masks")
+
+        if self.annotations_available:
+            if not annotation_widgets:
+                self.ui_component.annotation_controls_box.children = (
+                    self.ui_component.no_annotations_label,
+                )
+            section_children.append(self.ui_component.annotation_controls_box)
+            section_titles.append("Pixel annotations")
 
         if not section_children:
             section_children = (

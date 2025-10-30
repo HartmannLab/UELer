@@ -11,6 +11,11 @@
 - Verified the affected notebooks manually; unit suite not rerun because changes are widget-only.
 - Follow-up: corrected the Batch Export plugin's widget builder to pass the new layout helpers explicitly, fixing the NameError raised when instantiating the plugin after the refactor.
 
+**Annotation control separation**
+- Removed the Overlay mode toggle from the pixel annotation controls so mask visibility remains governed by mask checkboxes even when annotations are hidden, delivering the separation requested in [#41](https://github.com/HartmannLab/UELer/issues/41).
+- Renamed the accordion entry to `Pixel annotations` and enforced the order `Channels`, `Masks`, `Pixel annotations` so mask controls precede annotation options while keeping the palette editor accessible.
+- Updated `tests/test_annotation_palettes.py` to reflect the new accordion order and the pared-down control list ahead of regression runs.
+
 **Channels accordion consolidation**
 - Relocated the channel tag chips plus marker set dropdown, name field, and action buttons into the Channels accordion pane so selection presets sit next to their per-channel sliders (addresses [#40](https://github.com/HartmannLab/UELer/issues/40)).
 - Rebuilt the accordion entry with dedicated containers for the selector, marker set controls, and dynamic sliders, preserving spacing and keyboard focus while removing duplicate widgets from the left panel header.

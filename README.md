@@ -135,6 +135,10 @@ The first release candidate delivers automatic scale bars across the viewer and 
 - Introduced shared layout helpers for ipywidgets containers and applied them to the ROI Manager, Batch Export, and Go To plugins so control rows wrap cleanly without producing horizontal scrollbars.
 - Tightened button groups and selectors to flex within their parents, eliminating the ~5 % overflow scroll bars called out in issue #39.
 
+**Pixel annotation clarity**
+- Removed the Overlay mode toggle from the Pixel annotations pane so mask visibility is governed solely by the mask section; mask checkboxes now always apply even when pixel annotations are hidden (addresses [#41](https://github.com/HartmannLab/UELer/issues/41)).
+- Renamed the accordion tab to `Pixel annotations` and reordered the controls to `Channels`, `Masks`, `Pixel annotations`, keeping mask toggles front-and-centre while separating pixel overlays from mask visibility.
+
 **Channels accordion consolidation**
 - Moved the channel tag chips plus marker-set dropdown, name entry, and action buttons into the Channels accordion pane so channel selection, presets, and per-channel sliders stay in one cohesive space.
 - Rebuilt the pane with nested containers that maintain spacing and focus order, removing duplicate widgets from the header while keeping keyboard navigation unchanged.

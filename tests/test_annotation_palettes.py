@@ -391,7 +391,6 @@ class AnnotationControlStateTests(unittest.TestCase):
 
         selector = self._DummyWidget()
         display_checkbox = self._DummyWidget(value=True)
-        overlay_mode = self._DummyWidget(value="combined")
         alpha_slider = self._DummyWidget(value=0.5)
         label_mode = self._DummyWidget(value="id")
         edit_button = self._DummyWidget()
@@ -400,7 +399,6 @@ class AnnotationControlStateTests(unittest.TestCase):
         viewer.ui_component = types.SimpleNamespace(
             annotation_selector=selector,
             annotation_display_checkbox=display_checkbox,
-            annotation_overlay_mode=overlay_mode,
             annotation_alpha_slider=alpha_slider,
             annotation_label_mode=label_mode,
             annotation_edit_button=edit_button,
@@ -465,10 +463,6 @@ class AnnotationLayoutTests(unittest.TestCase):
             options=[("Simple Segmentation", "Simple Segmentation")],
             value="Simple Segmentation"
         )
-        viewer.ui_component.annotation_overlay_mode = widgets.ToggleButtons(
-            options=[("Mask outlines", "mask"), ("Fill", "annotation"), ("Both", "combined")],
-            value="combined"
-        )
         viewer.ui_component.annotation_alpha_slider = widgets.FloatSlider(value=0.5)
         viewer.ui_component.annotation_label_mode = widgets.Dropdown(
             options=[("Class IDs", "id"), ("Labels", "label")],
@@ -492,7 +486,7 @@ class AnnotationLayoutTests(unittest.TestCase):
 
         return viewer
 
-    def test_annotations_section_precedes_masks(self):
+    def test_masks_section_precedes_annotations(self):
         viewer = self._make_viewer()
 
         viewer.update_controls(None)
@@ -500,8 +494,8 @@ class AnnotationLayoutTests(unittest.TestCase):
         sections = viewer.ui_component.control_sections.children
         self.assertEqual(len(sections), 3)
         self.assertIs(sections[0], viewer.ui_component.channel_controls_box)
-        self.assertIs(sections[1], viewer.ui_component.annotation_controls_box)
-        self.assertIs(sections[2], viewer.ui_component.mask_controls_box)
+        self.assertIs(sections[1], viewer.ui_component.mask_controls_box)
+        self.assertIs(sections[2], viewer.ui_component.annotation_controls_box)
 
 
 class AnnotationMetadataTests(unittest.TestCase):

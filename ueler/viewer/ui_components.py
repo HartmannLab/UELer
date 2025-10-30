@@ -628,7 +628,7 @@ class uicomponents:
         self.mask_display_controls = {}
 
         # Annotation controls (initially disabled until annotations are detected)
-        self.annotation_controls_header = HTML(value='<b>Annotations</b>')
+        self.annotation_controls_header = HTML(value='<b>Pixel annotations</b>')
         self.annotation_controls_box = VBox(
             layout=Layout(
                 width='100%',
@@ -656,20 +656,6 @@ class uicomponents:
             style={'description_width': 'auto'}
         )
         self.annotation_selector.observe(viewer.on_annotation_selection_change, names='value')
-
-        self.annotation_overlay_mode = ToggleButtons(
-            options=[
-                ('Mask outlines', 'mask'),
-                ('Annotation fill', 'annotation'),
-                ('Fill + mask edges', 'combined')
-            ],
-            value='combined',
-            description='Overlay mode:',
-            disabled=True,
-            layout=Layout(width='100%'),
-            style={'description_width': 'auto'}
-        )
-        self.annotation_overlay_mode.observe(viewer.on_annotation_overlay_mode_change, names='value')
 
         self.annotation_alpha_slider = FloatSlider(
             value=0.5,
