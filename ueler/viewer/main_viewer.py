@@ -965,12 +965,8 @@ class ImageMaskViewer:
         ):
             previous_title = self._control_section_titles[previous_index]
 
-        section_children = []
-        section_titles = []
-
-        if self.ui_component.channel_controls_box.children:
-            section_children.append(self.ui_component.channel_controls_box)
-            section_titles.append("Channels")
+        section_children = [self.ui_component.channel_section_panel]
+        section_titles = ["Channels"]
 
         if self.annotations_available:
             if not annotation_widgets:

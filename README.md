@@ -135,6 +135,10 @@ The first release candidate delivers automatic scale bars across the viewer and 
 - Introduced shared layout helpers for ipywidgets containers and applied them to the ROI Manager, Batch Export, and Go To plugins so control rows wrap cleanly without producing horizontal scrollbars.
 - Tightened button groups and selectors to flex within their parents, eliminating the ~5 % overflow scroll bars called out in issue #39.
 
+**Channels accordion consolidation**
+- Moved the channel tag chips plus marker-set dropdown, name entry, and action buttons into the Channels accordion pane so channel selection, presets, and per-channel sliders stay in one cohesive space.
+- Rebuilt the pane with nested containers that maintain spacing and focus order, removing duplicate widgets from the header while keeping keyboard navigation unchanged.
+
 **Verification**
 - `python -m unittest tests.test_scale_bar_helper tests.test_export_fovs_batch`
 - `python -m unittest tests.test_export_fovs_batch`

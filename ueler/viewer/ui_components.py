@@ -268,14 +268,6 @@ def create_widgets(viewer):
 
 def display_ui(viewer):
     """Display the main UI."""
-    marker_set_widgets = VBox([
-        VBox([viewer.ui_component.marker_set_dropdown, viewer.ui_component.marker_set_name_input]),
-        HBox([
-            VBox([viewer.ui_component.load_marker_set_button, viewer.ui_component.save_marker_set_button]),
-            VBox([viewer.ui_component.update_marker_set_button, viewer.ui_component.delete_marker_set_button])
-        ]),
-        viewer.ui_component.delete_confirmation_checkbox
-    ])
     # Add a new output widget for charts
     viewer.BottomPlots = BottomPlots()
     if viewer.cell_table is not None:
@@ -323,9 +315,6 @@ def display_ui(viewer):
     top_part_widgets = VBox([
         viewer.ui_component.cache_size_input,
         viewer.ui_component.image_selector,
-        viewer.ui_component.channel_selector_text,
-        viewer.ui_component.channel_selector,
-        marker_set_widgets,
         control_panel_stack,
         VBox([viewer.ui_component.advanced_settings_accordion])
     ], layout=Layout(width='100%', overflow_x='hidden'))
@@ -428,15 +417,6 @@ class uicomponents:
         self.no_annotations_label = HTML(value='<i>No annotations detected.</i>')
         self.empty_controls_placeholder = HTML(value='<i>No viewer controls are available.</i>')
 
-        self.control_sections = Accordion(
-            children=(self.channel_controls_box,),
-            layout=Layout(width='98%', max_height='640px')
-        )
-        self.control_sections.set_title(0, 'Channels')
-
-        self.annotation_editor_host = VBox(
-            layout=Layout(width='100%', padding='8px 0 0 0')
-        )
 
         # Initialize markerset widgets
         self.marker_set_dropdown = Dropdown(
@@ -492,6 +472,71 @@ class uicomponents:
             value=False,
             description='Confirm Deletion',
             disabled=False
+        )
+
+        channel_selector_layout = Layout(width='100%', gap='4px')
+        self.channel_selection_panel = VBox(
+            children=(
+                self.channel_selector_text,
+                self.channel_selector,
+            ),
+            layout=channel_selector_layout,
+        )
+
+        marker_set_pickers = VBox(
+            children=(
+                self.marker_set_dropdown,
+                self.marker_set_name_input,
+            ),
+            layout=Layout(width='100%', gap='4px')
+        )
+
+        marker_set_buttons = HBox(
+            children=(
+                VBox(
+                    children=(
+                        self.load_marker_set_button,
+                        self.save_marker_set_button,
+                    ),
+                    layout=Layout(width='100%', gap='4px')
+                ),
+                VBox(
+                    children=(
+                        self.update_marker_set_button,
+                        self.delete_marker_set_button,
+                    ),
+                    layout=Layout(width='100%', gap='4px')
+                ),
+            ),
+            layout=Layout(width='100%', gap='8px')
+        )
+
+        self.marker_set_controls_panel = VBox(
+            children=(
+                marker_set_pickers,
+                marker_set_buttons,
+                self.delete_confirmation_checkbox,
+            ),
+            layout=Layout(width='100%', gap='6px')
+        )
+
+        self.channel_section_panel = VBox(
+            children=(
+                self.channel_selection_panel,
+                self.marker_set_controls_panel,
+                self.channel_controls_box,
+            ),
+            layout=Layout(width='100%', gap='10px')
+        )
+
+        self.control_sections = Accordion(
+            children=(self.channel_section_panel,),
+            layout=Layout(width='98%', max_height='640px')
+        )
+        self.control_sections.set_title(0, 'Channels')
+
+        self.annotation_editor_host = VBox(
+            layout=Layout(width='100%', padding='8px 0 0 0')
         )
         # Initialize enable downsample checkbox
         self.pixel_size_inttext = IntText(
