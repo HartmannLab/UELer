@@ -1,4 +1,7 @@
 ### v0.2.0-rc2
+**Cell gallery tile padding**
+- Updated `_compose_canvas` to size gallery slots by the largest rendered tile and center narrower crops so mixed-width images no longer raise broadcasting errors when assembling the grid (fixes [#43](https://github.com/HartmannLab/UELer/issues/43)).
+- Added `tests/test_cell_gallery.py` to exercise the padding logic and ran `python -m unittest tests.test_cell_gallery` to confirm the regression stays fixed.
 **Cell gallery rendering unification**
 - Reimplemented `ueler.viewer.plugin.cell_gallery` against the shared `ueler.rendering` engine, wiring cutout sizing, downsampling, and mask-outline controls through overlay snapshots so gallery tiles match the main viewer and batch export outputs (addresses [#43](https://github.com/HartmannLab/UELer/issues/43)).
 - Restored legacy helpers (`find_boundaries`, `_label_boundaries`, `_binary_dilation_4`) via `ueler.viewer.rendering` to keep downstream consumers and renderer tests operational, and reran `python -m unittest tests.test_rendering tests.test_export_fovs_batch` to validate the refactor.

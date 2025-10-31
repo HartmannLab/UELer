@@ -103,6 +103,10 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 ### v0.2.0-rc2
 The first release candidate delivers automatic scale bars across the viewer and batch export workflows while retaining the Batch Export UI, overlay plumbing, and job runner improvements from earlier `v0.2.0` milestones.
 
+**Cell gallery tile padding**
+- Gallery slots now expand to the widest rendered tile and center narrower crops so selecting multiple cells never triggers NumPy broadcasting errors when their cutouts differ slightly in width.
+- Added a `tests/test_cell_gallery.py` regression to lock in the padding behaviour and keep the gallery, batch export, and main viewer selections in sync.
+
 **Gallery rendering unification**
 - Rebuilt the cell gallery plugin on top of the shared `ueler.rendering` engine, funnelling overlay snapshots, mask outline tinting, and downsampling controls through the same pipeline used by the main viewer and batch export so per-cell previews stay visually consistent.
 - Restored legacy rendering helpers (`find_boundaries`, `_label_boundaries`, `_binary_dilation_4`) via `ueler.viewer.rendering` to keep historical imports and renderer tests green while the new engine powers gallery tiles.

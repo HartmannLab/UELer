@@ -477,19 +477,49 @@ def _compose_canvas(images: Sequence[np.ndarray], columns: int, spacing: int) ->
     if not images:
         return np.zeros((0, 0, 3), dtype=np.float32), 0, 0
 
+    heights = [img.shape[0] for img in images]
+    widths = [img.shape[1] for img in images]
+    channels = [img.shape[2] if img.ndim == 3 else 1 for img in images]
+
+    if len(set(channels)) != 1:
+        raise ValueError("All images must have the same number of channels to compose a gallery.")
+
+    max_height = max(heights)
+    max_width = max(widths)
+    num_channels = channels[0]
+
     rows = (len(images) + columns - 1) // columns
-    img_height, img_width, num_channels = images[0].shape
-    canvas_height = rows * img_height + max(rows - 1, 0) * spacing
-    canvas_width = columns * img_width + max(columns - 1, 0) * spacing
+    canvas_height = rows * max_height + max(rows - 1, 0) * spacing
+    canvas_width = columns * max_width + max(columns - 1, 0) * spacing
 
     canvas = np.zeros((canvas_height, canvas_width, num_channels), dtype=np.float32)
 
     for index, img in enumerate(images):
+        if img.ndim == 2:
+            img_to_place = img[:, :, np.newaxis]
+        else:
+            img_to_place = img
+
+        img_height, img_width = img_to_place.shape[:2]
+
         row = index // columns
         col = index % columns
-        start_row = row * (img_height + spacing)
-        start_col = col * (img_width + spacing)
-        canvas[start_row:start_row + img_height, start_col:start_col + img_width, :] = img
+
+        slot_row = row * (max_height + spacing)
+        slot_col = col * (max_width + spacing)
+
+        # Center the tile within its slot when the rendered size is smaller than the grid slot.
+        row_offset = slot_row + max((max_height - img_height) // 2, 0)
+        col_offset = slot_col + max((max_width - img_width) // 2, 0)
+
+        if img_to_place.shape[2] != num_channels:
+            raise ValueError("Gallery tiles must share the same channel depth.")
+
+        canvas[
+            row_offset : row_offset + img_height,
+            col_offset : col_offset + img_width,
+            : img_to_place.shape[2],
+        ] = img_to_place
 
     return canvas, rows, columns
 
