@@ -28,6 +28,7 @@ ROI_COLUMNS = [
     "tags",
     "annotation_palette",
     "mask_color_set",
+    "mask_visibility",
     "comment",
     "created_at",
     "updated_at",
@@ -45,12 +46,13 @@ def _ensure_dataframe(df: pd.DataFrame) -> pd.DataFrame:
                 "tags",
                 "annotation_palette",
                 "mask_color_set",
+                "mask_visibility",
                 "comment",
             }
             else 0.0
         )
     df = df[ROI_COLUMNS]
-    for col in ["marker_set", "tags", "annotation_palette", "mask_color_set", "comment"]:
+    for col in ["marker_set", "tags", "annotation_palette", "mask_color_set", "mask_visibility", "comment"]:
         if col in df.columns:
             df[col] = (
                 df[col]
@@ -122,6 +124,7 @@ class ROIManager:
             "tags": "",
             "annotation_palette": "",
             "mask_color_set": "",
+            "mask_visibility": "",
             "comment": "",
             "created_at": ts,
             "updated_at": ts,

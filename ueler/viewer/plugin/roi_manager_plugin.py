@@ -1,3 +1,4 @@
+import json
 import math
 import os
 from dataclasses import dataclass
@@ -22,6 +23,7 @@ from ipywidgets import (
     TagsInput,
     Text,
     Textarea,
+    ToggleButtons,
     VBox,
 )
 from matplotlib.colors import to_rgb
@@ -52,7 +54,8 @@ class ROIManagerPlugin(PluginBase):
     }
 
     BROWSER_COLUMNS = 3
-    BROWSER_MAX_TILES = 12
+    BROWSER_INITIAL_TILES = 8
+    BROWSER_PAGE_SIZE = 4
 
     def __init__(self, main_viewer, width: int = 6, height: int = 3) -> None:
         super().__init__(main_viewer, width, height)
@@ -66,6 +69,8 @@ class ROIManagerPlugin(PluginBase):
         self._browser_axis_to_roi: Dict[object, str] = {}
         self._browser_click_cid: Optional[int] = None
         self._browser_figure = None
+        self._browser_visible_limit = self.BROWSER_INITIAL_TILES
+        self._browser_last_signature = None
 
         self._build_widgets()
         self._build_layout()
@@ -287,6 +292,13 @@ class ROIManagerPlugin(PluginBase):
             except Exception:  # pragma: no cover
                 pass
 
+        self.ui_component.browser_tag_logic = ToggleButtons(
+            options=(("All tags (AND)", "and"), ("Any tag (OR)", "or")),
+            value="and",
+            description="Tag logic",
+            layout=Layout(width="auto"),
+        )
+
         self.ui_component.browser_fov_filter = SelectMultiple(
             options=[],
             value=(),
@@ -308,14 +320,37 @@ class ROIManagerPlugin(PluginBase):
             layout=Layout(width="auto"),
         )
 
-        self.ui_component.browser_output = Output(layout=Layout(min_height="320px"))
+        self.ui_component.browser_use_saved_preset = Checkbox(
+            value=True,
+            description="Apply saved preset on click",
+            indent=False,
+            layout=Layout(width="auto"),
+        )
+
+        self.ui_component.browser_output = Output(
+            layout=Layout(
+                min_height="320px",
+                max_height="500px",
+                width="98%",
+                align_self="center",
+                overflow_y="auto",
+                border="1px solid var(--jp-border-color2, #ccc)",
+            )
+        )
         self.ui_component.browser_status = HTML("<em>No ROI captured yet.</em>")
+        self.ui_component.browser_show_more_button = Button(
+            description="Show 4 more",
+            icon="angle-double-down",
+            button_style="",
+            layout=Layout(width="auto", display="none"),
+        )
 
         controls = VBox(
             [
                 HBox(
                     [
                         self.ui_component.browser_tags_filter,
+                        self.ui_component.browser_tag_logic,
                         self.ui_component.browser_fov_filter,
                     ],
                     layout=Layout(gap="10px", flex_flow="row wrap"),
@@ -323,6 +358,7 @@ class ROIManagerPlugin(PluginBase):
                 HBox(
                     [
                         self.ui_component.browser_limit_to_current,
+                        self.ui_component.browser_use_saved_preset,
                         self.ui_component.browser_refresh_button,
                     ],
                     layout=Layout(gap="10px", align_items="center"),
@@ -332,7 +368,15 @@ class ROIManagerPlugin(PluginBase):
         )
 
         self.ui_component.browser_root = VBox(
-            [controls, self.ui_component.browser_output, self.ui_component.browser_status],
+            [
+                controls,
+                self.ui_component.browser_output,
+                HBox(
+                    [self.ui_component.browser_show_more_button],
+                    layout=Layout(justify_content="center"),
+                ),
+                self.ui_component.browser_status,
+            ],
             layout=column_block_layout(gap="8px"),
         )
 
@@ -376,13 +420,17 @@ class ROIManagerPlugin(PluginBase):
         self.ui_component.browser_tags_filter.observe(
             self._on_browser_filter_change, names="value"
         )
+        self.ui_component.browser_tag_logic.observe(
+            self._on_browser_filter_change, names="value"
+        )
         self.ui_component.browser_fov_filter.observe(
             self._on_browser_filter_change, names="value"
         )
         self.ui_component.browser_limit_to_current.observe(
             self._on_browser_filter_change, names="value"
         )
-        self.ui_component.browser_refresh_button.on_click(lambda _btn: self._refresh_browser_gallery())
+        self.ui_component.browser_refresh_button.on_click(self._on_browser_refresh_clicked)
+        self.ui_component.browser_show_more_button.on_click(self._on_browser_show_more_clicked)
 
     # ------------------------------------------------------------------
     # Event handlers and helpers
@@ -482,6 +530,8 @@ class ROIManagerPlugin(PluginBase):
             self._suspend_ui_events = False
 
         self._selected_roi_id = selection
+        self._browser_visible_limit = self.BROWSER_INITIAL_TILES
+        self._browser_last_signature = None
         self._refresh_browser_gallery()
 
         scope = (
@@ -542,7 +592,17 @@ class ROIManagerPlugin(PluginBase):
 
         selected_tags = set(getattr(self.ui_component.browser_tags_filter, "value", ()))
         if selected_tags:
-            df = df[df["tags"].apply(lambda raw: selected_tags.issubset({tag.strip() for tag in str(raw).split(',') if tag.strip()}))]
+            tag_logic = getattr(self.ui_component.browser_tag_logic, "value", "and")
+
+            def _tags_match(raw_value: object) -> bool:
+                row_tags = {tag.strip() for tag in str(raw_value).split(',') if tag.strip()}
+                if not row_tags:
+                    return False
+                if tag_logic == "or":
+                    return any(tag in row_tags for tag in selected_tags)
+                return selected_tags.issubset(row_tags)
+
+            df = df[df["tags"].apply(_tags_match)]
 
         if "created_at" in df.columns:
             df = df.sort_values("created_at", ascending=False)
@@ -552,7 +612,8 @@ class ROIManagerPlugin(PluginBase):
     def _refresh_browser_gallery(self) -> None:
         output = getattr(self.ui_component, "browser_output", None)
         status = getattr(self.ui_component, "browser_status", None)
-        if output is None or status is None:
+        show_more = getattr(self.ui_component, "browser_show_more_button", None)
+        if output is None or status is None or show_more is None:
             return
 
         if self._suspend_browser_events:
@@ -561,20 +622,46 @@ class ROIManagerPlugin(PluginBase):
         df = self._filtered_browser_dataframe()
         records = df.to_dict("records") if not df.empty else []
         total = len(records)
-        limited_records = records[: self.BROWSER_MAX_TILES]
+
+        if total == 0:
+            self._disconnect_browser_events()
+            self._browser_axis_to_roi.clear()
+            self._browser_last_signature = ("empty",)
+            with output:
+                output.clear_output(wait=True)
+            self._update_browser_summary(0, 0)
+            self._update_show_more_button(0, 0)
+            return
+
+        limit = max(self.BROWSER_INITIAL_TILES, int(self._browser_visible_limit or self.BROWSER_INITIAL_TILES))
+        limit = min(limit, total)
+        limited_records = records[:limit]
+
+        signature = (
+            tuple(record.get("roi_id") for record in limited_records),
+            tuple(sorted(str(tag) for tag in getattr(self.ui_component.browser_tags_filter, "value", ()))),
+            tuple(sorted(str(fov) for fov in getattr(self.ui_component.browser_fov_filter, "value", ()))),
+            bool(getattr(self.ui_component.browser_limit_to_current, "value", False)),
+            getattr(self.ui_component.browser_tag_logic, "value", "and"),
+            limit,
+            total,
+        )
+
+        if self._browser_last_signature == signature:
+            rendered_count = len(limited_records)
+            self._update_browser_summary(rendered_count, total)
+            self._update_show_more_button(rendered_count, total)
+            return
 
         self._disconnect_browser_events()
         self._browser_axis_to_roi.clear()
 
         with output:
             output.clear_output(wait=True)
-            if not limited_records:
-                status.value = "<em>No ROI matches current filters.</em>"
-                return
-
             columns = min(self.BROWSER_COLUMNS, max(1, len(limited_records)))
             rows = math.ceil(len(limited_records) / columns)
-            fig, axes = plt.subplots(rows, columns, figsize=(columns * 3.0, rows * 3.0))
+            fig, axes = plt.subplots(rows, columns, figsize=(columns * 3.2, rows * 3.2))
+            fig.subplots_adjust(left=0.01, right=0.99, top=0.99, bottom=0.01)
             axes_array = np.atleast_1d(np.array(axes)).ravel()
 
             rendered = 0
@@ -583,9 +670,9 @@ class ROIManagerPlugin(PluginBase):
 
             for axis, record in zip(axes_array, limited_records):
                 marker_profile = self._build_marker_profile(record)
+                message_text = None
                 if marker_profile is None or not marker_profile.selected_channels:
-                    axis.text(0.5, 0.5, "No channels", ha="center", va="center", fontsize=9)
-                    continue
+                    message_text = "No channels"
 
                 downsample = record.get("zoom", self.main_viewer.current_downsample_factor)
                 try:
@@ -593,13 +680,15 @@ class ROIManagerPlugin(PluginBase):
                 except Exception:  # pragma: no cover - defensive
                     downsample_int = max(1, int(self.main_viewer.current_downsample_factor))
 
-                tile = self._render_roi_tile(record, marker_profile, downsample_int)
+                tile = None if message_text else self._render_roi_tile(record, marker_profile, downsample_int)
                 if tile is None or tile.size == 0:
-                    axis.text(0.5, 0.5, "Preview unavailable", ha="center", va="center", fontsize=9)
-                    continue
+                    message_text = message_text or "Preview unavailable"
 
-                axis.imshow(tile)
-                axis.set_title(self._format_browser_title(record, marker_profile), fontsize=9)
+                if message_text:
+                    axis.text(0.5, 0.5, message_text, ha="center", va="center", fontsize=9)
+                else:
+                    axis.imshow(tile)
+
                 axis.axis("off")
                 self._browser_axis_to_roi[axis] = record.get("roi_id")
                 rendered += 1
@@ -607,7 +696,6 @@ class ROIManagerPlugin(PluginBase):
             for axis in axes_array[len(limited_records) :]:
                 axis.remove()
 
-            fig.tight_layout()
             plt.show(fig)
 
         self._browser_figure = fig
@@ -616,10 +704,10 @@ class ROIManagerPlugin(PluginBase):
         except Exception:  # pragma: no cover - matplotlib backend quirks
             self._browser_click_cid = None
 
-        summary = f"Displaying {rendered} of {total} ROI(s)."
-        if total > len(limited_records):
-            summary += " Showing most recent entries."
-        status.value = summary
+        self._browser_last_signature = signature
+        rendered_count = rendered
+        self._update_browser_summary(rendered_count, total)
+        self._update_show_more_button(rendered_count, total)
 
     def _disconnect_browser_events(self) -> None:
         if self._browser_figure is not None and self._browser_click_cid is not None:
@@ -630,10 +718,36 @@ class ROIManagerPlugin(PluginBase):
         self._browser_click_cid = None
         self._browser_figure = None
 
-    def _format_browser_title(self, record: Mapping[str, object], profile: _MarkerProfile) -> str:
-        fov = record.get("fov") or "—"
-        marker = profile.name or (record.get("marker_set") or "—")
-        return f"{fov} · {marker}"
+    def _update_browser_summary(self, rendered: int, total: int) -> None:
+        status = getattr(self.ui_component, "browser_status", None)
+        if status is None:
+            return
+        if total <= 0 or rendered <= 0:
+            status.value = "<em>No ROI matches current filters.</em>"
+            return
+
+        message = f"Displaying {rendered} of {total} ROI(s)."
+        remaining = max(0, total - rendered)
+        if remaining:
+            next_batch = min(self.BROWSER_PAGE_SIZE, remaining)
+            message += f" Scroll down and click 'Show {next_batch} more' to load additional ROIs."
+        status.value = message
+
+    def _update_show_more_button(self, rendered: int, total: int) -> None:
+        button = getattr(self.ui_component, "browser_show_more_button", None)
+        if button is None:
+            return
+        remaining = max(0, total - rendered)
+        if remaining <= 0:
+            button.layout.display = "none"
+            button.disabled = True
+            return
+
+        button.layout.display = "inline-flex"
+        button.disabled = False
+        next_batch = min(self.BROWSER_PAGE_SIZE, remaining)
+        button.description = f"Show {next_batch} more"
+        button.tooltip = "Scroll to the bottom and click to load additional ROIs."
 
     def _render_roi_tile(
         self,
@@ -751,6 +865,22 @@ class ROIManagerPlugin(PluginBase):
     def _on_browser_filter_change(self, change) -> None:
         if self._suspend_browser_events or change.get("name") != "value":
             return
+        self._browser_visible_limit = self.BROWSER_INITIAL_TILES
+        self._browser_last_signature = None
+        self._refresh_browser_gallery()
+
+    def _on_browser_refresh_clicked(self, _button) -> None:
+        self._browser_visible_limit = self.BROWSER_INITIAL_TILES
+        self._browser_last_signature = None
+        self._refresh_browser_gallery()
+
+    def _on_browser_show_more_clicked(self, _button) -> None:
+        df = self._filtered_browser_dataframe()
+        total = len(df.index) if hasattr(df, "index") else len(df)
+        if total <= self._browser_visible_limit:
+            return
+        self._browser_visible_limit = min(total, self._browser_visible_limit + self.BROWSER_PAGE_SIZE)
+        self._browser_last_signature = None
         self._refresh_browser_gallery()
 
     def _on_browser_click(self, event) -> None:  # pragma: no cover - UI callback
@@ -771,7 +901,12 @@ class ROIManagerPlugin(PluginBase):
 
         self._selected_roi_id = roi_id
         self.main_viewer.center_on_roi(record)
-        success, missing = self._apply_roi_presets(record)
+        use_saved_toggle = getattr(self.ui_component, "browser_use_saved_preset", None)
+        apply_presets = bool(getattr(use_saved_toggle, "value", True)) if use_saved_toggle is not None else True
+        success = True
+        missing: List[str] = []
+        if apply_presets:
+            success, missing = self._apply_roi_presets(record)
 
         self._suspend_ui_events = True
         try:
@@ -781,10 +916,12 @@ class ROIManagerPlugin(PluginBase):
 
         self._populate_fields(record)
 
-        if success:
+        if not apply_presets:
+            self.set_status("Centered on ROI without applying the saved preset.", level="info")
+        elif success:
             self.set_status("Centered on ROI via browser.", level="success")
         else:
-            missing_text = ", ".join(missing)
+            missing_text = ", ".join(missing) if missing else "unknown"
             self.set_status(
                 f"Centered on ROI; missing preset(s): {missing_text}.",
                 level="warning",
@@ -807,6 +944,11 @@ class ROIManagerPlugin(PluginBase):
         if mask_name:
             if not self._apply_mask_color_set(mask_name):
                 missing.append("mask color set")
+
+        mask_visibility_payload = str(record.get("mask_visibility") or "").strip()
+        if mask_visibility_payload:
+            if not self._apply_mask_visibility(mask_visibility_payload):
+                missing.append("mask visibility")
 
         return not missing, missing
 
@@ -908,6 +1050,38 @@ class ROIManagerPlugin(PluginBase):
                 return str(value)
         return ""
 
+    def _get_mask_visibility_payload(self) -> str:
+        getter = getattr(self.main_viewer, "get_mask_visibility_state", None)
+        if not callable(getter):
+            return ""
+        try:
+            state = getter()
+        except Exception:  # pragma: no cover - defensive
+            return ""
+        if not state:
+            return ""
+        try:
+            return json.dumps(state, sort_keys=True)
+        except Exception:  # pragma: no cover - serialization errors
+            return ""
+
+    def _apply_mask_visibility(self, payload: str) -> bool:
+        if not payload:
+            return True
+        applier = getattr(self.main_viewer, "apply_mask_visibility_state", None)
+        if not callable(applier):
+            return False
+        try:
+            state = json.loads(payload)
+        except Exception:  # pragma: no cover - invalid payload
+            return False
+        if not isinstance(state, dict):
+            return False
+        try:
+            return bool(applier(state))
+        except Exception:  # pragma: no cover - downstream errors
+            return False
+
     def _capture_current_view(self, _):
         viewport = self.main_viewer.capture_viewport_bounds()
         if viewport is None:
@@ -922,6 +1096,7 @@ class ROIManagerPlugin(PluginBase):
             "comment": self.ui_component.comment.value.strip(),
             "annotation_palette": self._get_active_annotation_palette(),
             "mask_color_set": self._get_active_mask_color_set(),
+            "mask_visibility": self._get_mask_visibility_payload(),
         }
 
         result = self.main_viewer.roi_manager.add_roi(record)
@@ -947,6 +1122,7 @@ class ROIManagerPlugin(PluginBase):
             "comment": self.ui_component.comment.value.strip(),
             "annotation_palette": self._get_active_annotation_palette(),
             "mask_color_set": self._get_active_mask_color_set(),
+            "mask_visibility": self._get_mask_visibility_payload(),
         }
 
         updated = self.main_viewer.roi_manager.update_roi(self._selected_roi_id, updates)
@@ -1179,6 +1355,7 @@ class ROIManagerPlugin(PluginBase):
             self._update_metadata_summaries(
                 str(record.get("annotation_palette") or ""),
                 str(record.get("mask_color_set") or ""),
+                str(record.get("mask_visibility") or ""),
             )
         finally:
             self._suspend_ui_events = False
@@ -1189,13 +1366,24 @@ class ROIManagerPlugin(PluginBase):
             self.ui_component.marker_dropdown.value = self.CURRENT_MARKER_VALUE
             self.ui_component.tags.value = ()
             self.ui_component.comment.value = ""
-            self._update_metadata_summaries("", "")
+            self._update_metadata_summaries("", "", "")
         finally:
             self._suspend_ui_events = False
 
-    def _update_metadata_summaries(self, annotation_name: str, mask_name: str) -> None:
+    def _update_metadata_summaries(self, annotation_name: str, mask_name: str, mask_visibility: str) -> None:
         annotation_text = annotation_name or "—"
         mask_text = mask_name or "—"
+        if mask_visibility:
+            try:
+                state = json.loads(mask_visibility)
+                if isinstance(state, dict) and state:
+                    total_masks = len(state)
+                    enabled = sum(1 for value in state.values() if bool(value))
+                    mask_text += f" (visible: {enabled}/{total_masks})"
+                else:
+                    mask_text += " (state saved)"
+            except Exception:  # pragma: no cover - defensive decoding
+                mask_text += " (state saved)"
         self.ui_component.annotation_summary.value = f"<em>Annotation palette: {annotation_text}</em>"
         self.ui_component.mask_summary.value = f"<em>Mask color set: {mask_text}</em>"
 

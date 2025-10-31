@@ -4,7 +4,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Mapping, Optional
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -1313,6 +1313,50 @@ class ImageMaskViewer:
             except Exception:
                 pass
         return True
+
+    def get_mask_visibility_state(self) -> Dict[str, bool]:
+        controls = getattr(self.ui_component, "mask_display_controls", {})
+        if not isinstance(controls, dict):
+            return {}
+        state: Dict[str, bool] = {}
+        for name, checkbox in controls.items():
+            try:
+                state[name] = bool(getattr(checkbox, "value", False))
+            except Exception:  # pragma: no cover - widget access guard
+                continue
+        return state
+
+    def apply_mask_visibility_state(self, state: Mapping[str, object]) -> bool:
+        if not state:
+            return False
+
+        controls = getattr(self.ui_component, "mask_display_controls", {})
+        if not isinstance(controls, dict) or not controls:
+            return False
+
+        matched_any = False
+        updated = False
+        for name, desired in state.items():
+            checkbox = controls.get(name)
+            if checkbox is None:
+                continue
+            matched_any = True
+            desired_value = bool(desired)
+            try:
+                current_value = bool(getattr(checkbox, "value", False))
+            except Exception:  # pragma: no cover - widget guard
+                current_value = False
+            if current_value != desired_value:
+                checkbox.value = desired_value
+                updated = True
+
+        if updated:
+            try:
+                self.update_display(self.current_downsample_factor)
+            except Exception:  # pragma: no cover - downstream update guard
+                pass
+
+        return matched_any or updated
 
     def _get_annotation_palette_load_path(self) -> Optional[Path]:
         picker = getattr(self.ui_component, "annotation_palette_load_picker", None)

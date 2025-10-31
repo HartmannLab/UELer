@@ -147,6 +147,7 @@ class MaskPainterDisplay(PluginBase):
         self.selected_classes: List[str] = []
         self.hidden_color_cache: Dict[str, str] = {}
         self.registry_records: Dict[str, Dict[str, str]] = {}
+        self.active_color_set_name = ""
 
         storage_folder = self._determine_storage_folder()
         if storage_folder is None:
@@ -399,6 +400,7 @@ class MaskPainterDisplay(PluginBase):
             write_color_set_file(target_path, payload)
             self._update_registry(folder, name, target_path, identifier, timestamp)
             self._log(f"Saved color set '{name}' to {target_path}", clear=True)
+            self._set_active_color_set_name(name, force=True)
         except Exception as err:  # pylint: disable=broad-except
             self._log(f"Failed to save color set: {err}", error=True, clear=True)
 
@@ -421,6 +423,7 @@ class MaskPainterDisplay(PluginBase):
             if identifier:
                 self._ensure_identifier_available(identifier)
             self._load_color_set(path)
+            self._set_active_color_set_name(self.ui_component.saved_sets_dropdown.value)
         except Exception as err:  # pylint: disable=broad-except
             self._log(f"Failed to apply saved color set: {err}", error=True, clear=True)
 
@@ -459,6 +462,7 @@ class MaskPainterDisplay(PluginBase):
             write_color_set_file(path, payload)
             self._update_registry(folder, name, path, identifier, timestamp)
             self._log(f"Overwrote color set '{name}'.", clear=True)
+            self._set_active_color_set_name(name, force=True)
         except Exception as err:  # pylint: disable=broad-except
             self._log(f"Failed to overwrite color set: {err}", error=True, clear=True)
 
@@ -478,6 +482,8 @@ class MaskPainterDisplay(PluginBase):
             if folder.resolve() == self.registry_folder.resolve():
                 self.registry_records = records
                 self._refresh_saved_sets_dropdown()
+            if self.active_color_set_name == name:
+                self._set_active_color_set_name(None)
             self._log(f"Deleted color set '{name}'.", clear=True)
         except Exception as err:  # pylint: disable=broad-except
             self._log(f"Failed to delete color set: {err}", error=True, clear=True)
@@ -508,6 +514,43 @@ class MaskPainterDisplay(PluginBase):
         if folder.resolve() == self.registry_folder.resolve():
             self.registry_records = records
             self._refresh_saved_sets_dropdown()
+
+    def _set_active_color_set_name(self, name: Optional[str], *, force: bool = False) -> None:
+        candidate = (str(name).strip() if name else "")
+        if not candidate:
+            self.active_color_set_name = ""
+            return
+        if force or candidate in self.registry_records:
+            self.active_color_set_name = candidate
+        else:
+            self.active_color_set_name = ""
+
+    def get_active_color_set_name(self) -> str:
+        return self.active_color_set_name or ""
+
+    def apply_color_set_by_name(self, name: str) -> bool:
+        candidate = (name or "").strip()
+        if not candidate:
+            return False
+        record = self.registry_records.get(candidate)
+        if record is None:
+            return False
+
+        path = Path(record.get("path", ""))
+        try:
+            path = path.expanduser()
+        except AttributeError:  # pragma: no cover - defensive
+            path = Path(record.get("path", ""))
+        if not path.exists():
+            return False
+
+        try:
+            self._load_color_set(path)
+        except Exception:  # pragma: no cover - downstream errors
+            return False
+
+        self._set_active_color_set_name(candidate)
+        return True
 
     def _load_color_set(self, path: Path) -> None:
         if not path.exists():
@@ -819,6 +862,7 @@ class MaskPainterDisplay(PluginBase):
         if not self.registry_records:
             self.ui_component.saved_sets_dropdown.options = [("No saved sets", "")]
             self.ui_component.saved_sets_dropdown.value = ""
+            self._set_active_color_set_name(None)
             return
 
         option_entries = []
@@ -829,6 +873,8 @@ class MaskPainterDisplay(PluginBase):
             option_entries.append((label, name))
         self.ui_component.saved_sets_dropdown.options = [("Select a set", "")] + option_entries
         self.ui_component.saved_sets_dropdown.value = ""
+        if self.active_color_set_name and self.active_color_set_name not in self.registry_records:
+            self._set_active_color_set_name(None)
 
 
 class UiComponent:
