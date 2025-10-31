@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from ueler.viewer.rendering import (
+from ueler.rendering import (
     AnnotationRenderSettings,
     ChannelRenderSettings,
     MaskRenderSettings,

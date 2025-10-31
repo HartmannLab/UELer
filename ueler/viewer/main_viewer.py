@@ -49,7 +49,7 @@ from ueler.viewer.color_palettes import (
     merge_palette_updates,
     normalize_hex_color,
 )
-from ueler.viewer.rendering import (
+from ueler.rendering import (
     AnnotationOverlaySnapshot,
     AnnotationRenderSettings,
     ChannelRenderSettings,

@@ -36,7 +36,7 @@ from ipywidgets import (
 from matplotlib import pyplot as plt
 from matplotlib.colors import to_rgb
 
-from ..rendering import (
+from ueler.rendering import (
     AnnotationRenderSettings,
     ChannelRenderSettings,
     MaskOverlaySnapshot,

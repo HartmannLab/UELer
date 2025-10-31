@@ -103,6 +103,10 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 ### v0.2.0-rc2
 The first release candidate delivers automatic scale bars across the viewer and batch export workflows while retaining the Batch Export UI, overlay plumbing, and job runner improvements from earlier `v0.2.0` milestones.
 
+**Gallery rendering unification**
+- Rebuilt the cell gallery plugin on top of the shared `ueler.rendering` engine, funnelling overlay snapshots, mask outline tinting, and downsampling controls through the same pipeline used by the main viewer and batch export so per-cell previews stay visually consistent.
+- Restored legacy rendering helpers (`find_boundaries`, `_label_boundaries`, `_binary_dilation_4`) via `ueler.viewer.rendering` to keep historical imports and renderer tests green while the new engine powers gallery tiles.
+
 **Phase 4b cell export fixes**
 - Marker profiles now fall back to the viewer's active channel selection when stored marker sets lack entries, preventing blank single-cell exports and enforcing per-channel render settings before jobs run.
 - The single-cell preview reuses captured overlays, passes keyword arguments into `_finalise_array`, and draws optional scale bars so the UI preview mirrors batch outputs without triggering the earlier signature error.
@@ -149,6 +153,7 @@ The first release candidate delivers automatic scale bars across the viewer and 
 - Let the accordion body stay static while the slider list gains its own scroll region, preventing double scrollbars and keeping long channel lists usable.
 
 **Verification**
+- `python -m unittest tests.test_rendering tests.test_export_fovs_batch`
 - `python -m unittest tests.test_scale_bar_helper tests.test_export_fovs_batch`
 - `python -m unittest tests.test_export_fovs_batch`
 - `python -m unittest tests.test_fov_detection`
