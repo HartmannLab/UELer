@@ -139,6 +139,10 @@ The first release candidate delivers automatic scale bars across the viewer and 
 - Removed the Overlay mode toggle from the Pixel annotations pane so mask visibility is governed solely by the mask section; mask checkboxes now always apply even when pixel annotations are hidden (addresses [#41](https://github.com/HartmannLab/UELer/issues/41)).
 - Renamed the accordion tab to `Pixel annotations` and reordered the controls to `Channels`, `Masks`, `Pixel annotations`, keeping mask toggles front-and-centre while separating pixel overlays from mask visibility.
 
+**Pixel annotation palette management**
+- The Pixel annotations accordion now mirrors the mask painter workflow with Save/Load/Manage tabs, optional `ipyfilechooser` dialogs, and shared registry handling so class palettes can be saved and restored consistently (addresses [#42](https://github.com/HartmannLab/UELer/issues/42)).
+- Introduced `ueler.viewer.palette_store` for common palette persistence helpers and aligned the mask painter plugin plus new unit tests (`tests/test_annotation_palettes.py`) on the shared format.
+
 **Channels accordion consolidation**
 - Moved the channel tag chips plus marker-set dropdown, name entry, and action buttons into the Channels accordion pane so channel selection, presets, and per-channel sliders stay in one cohesive space.
 - Rebuilt the pane with nested containers that maintain spacing and focus order, removing duplicate widgets from the header while keeping keyboard navigation unchanged.

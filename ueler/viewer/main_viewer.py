@@ -2,8 +2,11 @@
 
 import logging
 import os
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, List, Optional
+
 import numpy as np
-from typing import Optional
 import matplotlib.pyplot as plt
 from matplotlib.colors import to_rgb
 from matplotlib.text import Annotation
@@ -44,6 +47,7 @@ from ueler.viewer.color_palettes import (
     apply_color_defaults,
     build_discrete_colormap,
     merge_palette_updates,
+    normalize_hex_color,
 )
 from ueler.viewer.rendering import (
     AnnotationOverlaySnapshot,
@@ -56,6 +60,15 @@ from ueler.viewer.rendering import (
 )
 from ueler.export.job import Job, JobItem
 # viewer/main_viewer.py
+
+from ueler.viewer.palette_store import (
+    PaletteStoreError,
+    load_registry as load_palette_registry,
+    read_palette_file,
+    resolve_palette_path,
+    save_registry as save_palette_registry,
+    write_palette_file,
+)
 
 from weakref import WeakKeyDictionary
 
@@ -74,6 +87,12 @@ __all__ = ["ImageMaskViewer"]
 
 
 logger = logging.getLogger(__name__)
+
+
+ANNOTATION_PALETTE_FILE_SUFFIX = ".pixelannotations.json"
+ANNOTATION_PALETTE_VERSION = "1.0.0"
+ANNOTATION_REGISTRY_FILENAME = "pixel_annotation_sets_index.json"
+ANNOTATION_PALETTE_FOLDER_NAME = "pixel_annotation_palettes"
 
 
 def _unique_annotation_values(array):
@@ -149,6 +168,8 @@ class ImageMaskViewer:
         self.annotation_palettes = {}
         self.annotation_class_labels = {}
         self.annotation_class_ids = {}
+        self.annotation_palette_folder: Optional[Path] = None
+        self.annotation_palette_registry_records: Dict[str, Dict[str, str]] = {}
         self.annotation_display_enabled = False
         self.active_annotation_name: Optional[str] = None
         self.annotation_overlay_mode = "combined"
@@ -228,6 +249,7 @@ class ImageMaskViewer:
         )
         self.ui_component.annotation_editor_host.children = (self.annotation_palette_editor,)
         self.ui_component.annotation_editor_host.layout.display = ""
+        self._initialize_annotation_palette_manager()
         self._refresh_annotation_control_states()
 
         # Setup widget observers
@@ -948,9 +970,13 @@ class ImageMaskViewer:
                 self.ui_component.annotation_alpha_slider,
                 self.ui_component.annotation_label_mode,
                 self.ui_component.annotation_edit_button,
+                self.ui_component.annotation_palette_tab,
+                self.ui_component.annotation_palette_feedback,
             ]
+            self.ui_component.annotation_palette_tab.layout.display = ""
             self.ui_component.annotation_controls_box.children = tuple(annotation_widgets)
         else:
+            self.ui_component.annotation_palette_tab.layout.display = "none"
             self.ui_component.annotation_controls_box.children = (
                 self.ui_component.no_annotations_label,
             )
@@ -1085,6 +1111,376 @@ class ImageMaskViewer:
 
         if edit_button is not None:
             edit_button.disabled = current_selection is None
+
+    # ------------------------------------------------------------------
+    # Annotation palette persistence
+    # ------------------------------------------------------------------
+    def _initialize_annotation_palette_manager(self) -> None:
+        ui = getattr(self, "ui_component", None)
+        if ui is None:
+            return
+
+        ui.annotation_palette_save_button.on_click(self.save_active_annotation_palette)
+        ui.annotation_palette_load_button.on_click(self.load_annotation_palette_from_ui)
+        ui.annotation_palette_change_folder_button.on_click(self._on_annotation_palette_change_folder_clicked)
+        ui.annotation_palette_manual_apply.on_click(self._apply_annotation_palette_manual_folder)
+        ui.annotation_palette_manual_cancel.on_click(self._cancel_annotation_palette_manual_folder)
+        ui.annotation_palette_apply_saved_button.on_click(self.apply_saved_annotation_palette)
+        ui.annotation_palette_overwrite_button.on_click(self.overwrite_saved_annotation_palette)
+        ui.annotation_palette_delete_button.on_click(self.delete_saved_annotation_palette)
+
+        folder = self._determine_annotation_palette_folder()
+        if folder is None:
+            folder = Path.cwd()
+            ui.annotation_palette_manual_box.layout.display = "block"
+            self._log_annotation_palette(
+                "Pixel annotation palette directory unavailable; enter a custom location.",
+                error=True,
+                clear=True,
+            )
+        else:
+            ui.annotation_palette_manual_box.layout.display = "none"
+
+        self.annotation_palette_folder = folder.resolve()
+        ui.annotation_palette_folder_display.value = str(self.annotation_palette_folder)
+        self._load_annotation_palette_registry(self.annotation_palette_folder)
+
+    def _determine_annotation_palette_folder(self) -> Optional[Path]:
+        base_folder = getattr(self, "base_folder", None)
+        if not base_folder:
+            return None
+        base_path = Path(base_folder).expanduser()
+        target = base_path / ".UELer" / ANNOTATION_PALETTE_FOLDER_NAME
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+        except Exception:  # pragma: no cover - fallback for restricted environments
+            return None
+        return target
+
+    def _load_annotation_palette_registry(self, folder: Path) -> None:
+        folder = folder.expanduser().resolve()
+        self.annotation_palette_folder = folder
+        ui = self.ui_component
+        ui.annotation_palette_folder_display.value = str(folder)
+        try:
+            records = load_palette_registry(folder, ANNOTATION_REGISTRY_FILENAME)
+        except PaletteStoreError as err:
+            self._log_annotation_palette(f"Failed to load palette registry: {err}", error=True, clear=True)
+            records = {}
+        self.annotation_palette_registry_records = records
+        for record in self.annotation_palette_registry_records.values():
+            record.setdefault("folder", str(folder))
+        self._refresh_annotation_palette_dropdown()
+        load_picker = getattr(ui, "annotation_palette_load_picker", None)
+        if load_picker is not None:
+            try:
+                load_picker.reset(path=str(folder))
+            except Exception:  # pragma: no cover - FileChooser may not expose reset
+                pass
+
+    def _refresh_annotation_palette_dropdown(self) -> None:
+        dropdown = self.ui_component.annotation_palette_saved_sets_dropdown
+        if not self.annotation_palette_registry_records:
+            dropdown.options = [("No saved sets", "")]
+            dropdown.value = ""
+            return
+
+        entries = []
+        for name in sorted(self.annotation_palette_registry_records.keys()):
+            record = self.annotation_palette_registry_records.get(name, {})
+            annotation = (record.get("annotation") or "").strip()
+            label = f"{name} ({annotation})" if annotation else name
+            entries.append((label, name))
+        dropdown.options = [("Select a set", "")] + entries
+        dropdown.value = ""
+
+    def _log_annotation_palette(self, message: str, *, error: bool = False, clear: bool = False) -> None:
+        output = getattr(self.ui_component, "annotation_palette_feedback", None)
+        if output is None:
+            return
+        with output:
+            if clear:
+                output.clear_output(wait=True)
+            prefix = "⚠️ " if error else ""
+            print(f"{prefix}{message}")
+
+    def save_active_annotation_palette(self, _button) -> None:
+        try:
+            ui = self.ui_component
+            name = ui.annotation_palette_name_input.value.strip()
+            if not name:
+                raise PaletteStoreError("Please provide a name for the palette.")
+            if self.annotation_palette_folder is None:
+                raise PaletteStoreError("Select a palette folder before saving.")
+            annotation = (self.active_annotation_name or '').strip()
+            if not annotation:
+                raise PaletteStoreError("Select an annotation before saving a palette.")
+
+            self._ensure_annotation_metadata(annotation)
+            class_ids = list(self.annotation_class_ids.get(annotation, []))
+            if not class_ids:
+                raise PaletteStoreError(f"No classes detected for annotation '{annotation}'.")
+
+            palette = apply_color_defaults(class_ids, self.annotation_palettes.get(annotation, {}))
+            labels = dict(self.annotation_class_labels.get(annotation, {}))
+            timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+            payload = {
+                "name": name,
+                "version": ANNOTATION_PALETTE_VERSION,
+                "annotation": annotation,
+                "class_ids": list(class_ids),
+                "default_color": DEFAULT_COLOR,
+                "colors": dict(palette),
+                "labels": labels,
+                "label_mode": self.annotation_label_display_mode,
+                "saved_at": timestamp,
+            }
+
+            folder = self.annotation_palette_folder
+            path = resolve_palette_path(
+                folder,
+                name,
+                ANNOTATION_PALETTE_FILE_SUFFIX,
+                default_slug="pixel-annotations",
+            )
+            write_palette_file(path, payload)
+            self._update_annotation_palette_registry(folder, name, path, annotation, timestamp)
+            self._log_annotation_palette(
+                f"Saved palette '{name}' for annotation '{annotation}'.",
+                clear=True,
+            )
+        except Exception as err:  # pylint: disable=broad-except
+            self._log_annotation_palette(f"Failed to save palette: {err}", error=True, clear=True)
+
+    def _update_annotation_palette_registry(
+        self,
+        folder: Path,
+        name: str,
+        path: Path,
+        annotation: str,
+        timestamp: str,
+    ) -> None:
+        try:
+            records = load_palette_registry(folder, ANNOTATION_REGISTRY_FILENAME)
+        except PaletteStoreError:
+            records = {}
+        records[name] = {
+            "path": str(path.resolve()),
+            "annotation": annotation,
+            "last_modified": timestamp,
+            "folder": str(folder.resolve()),
+        }
+        save_palette_registry(folder, ANNOTATION_REGISTRY_FILENAME, records)
+        if (
+            self.annotation_palette_folder is not None
+            and folder.resolve() == self.annotation_palette_folder.resolve()
+        ):
+            self.annotation_palette_registry_records = records
+            self._refresh_annotation_palette_dropdown()
+
+    def _get_annotation_palette_load_path(self) -> Optional[Path]:
+        picker = getattr(self.ui_component, "annotation_palette_load_picker", None)
+        if picker is not None:
+            selected = getattr(picker, "selected", None)
+            if selected:
+                return Path(selected).expanduser()
+        path_input = getattr(self.ui_component, "annotation_palette_load_path_input", None)
+        if path_input is not None:
+            value = path_input.value.strip()
+            if value:
+                return Path(value).expanduser()
+        return None
+
+    def load_annotation_palette_from_ui(self, _button) -> None:
+        try:
+            path = self._get_annotation_palette_load_path()
+            if path is None:
+                raise PaletteStoreError("Select a palette file to load.")
+            self._load_annotation_palette(path)
+        except Exception as err:  # pylint: disable=broad-except
+            self._log_annotation_palette(f"Failed to load palette: {err}", error=True, clear=True)
+
+    def _load_annotation_palette(self, path: Path) -> None:
+        if not path.exists():
+            raise PaletteStoreError(f"Palette file '{path}' was not found.")
+
+        payload = read_palette_file(path)
+        annotation = str(payload.get("annotation") or "").strip()
+        if not annotation:
+            raise PaletteStoreError("Palette file does not specify an annotation name.")
+
+        if annotation not in self.annotation_names_set:
+            raise PaletteStoreError(
+                f"Annotation '{annotation}' is not available in the current dataset."
+            )
+
+        class_ids_payload = payload.get("class_ids", [])
+        class_ids: List[int] = []
+        for item in class_ids_payload:
+            try:
+                class_ids.append(int(item))
+            except (TypeError, ValueError) as err:
+                raise PaletteStoreError("Palette file contains invalid class identifiers.") from err
+
+        colors_payload = payload.get("colors", {})
+        if not isinstance(colors_payload, dict):
+            raise PaletteStoreError("Palette file stores colors in an unexpected format.")
+        normalized_colors = {
+            str(key): normalize_hex_color(value) or DEFAULT_COLOR
+            for key, value in colors_payload.items()
+        }
+
+        if not class_ids:
+            inferred_ids = []
+            for key in normalized_colors.keys():
+                try:
+                    inferred_ids.append(int(key))
+                except (TypeError, ValueError):
+                    continue
+            class_ids = sorted(set(inferred_ids))
+
+        if not class_ids:
+            raise PaletteStoreError("Palette file does not declare any class identifiers.")
+
+        palette = apply_color_defaults(class_ids, normalized_colors)
+        labels_payload = payload.get("labels", {})
+        labels = {str(key): str(value) for key, value in labels_payload.items()} if isinstance(labels_payload, dict) else {}
+
+        label_mode = payload.get("label_mode")
+        if isinstance(label_mode, str) and label_mode in {"id", "label"}:
+            self.annotation_label_display_mode = label_mode
+
+        self.annotation_class_ids[annotation] = list(class_ids)
+        self.annotation_palettes[annotation] = dict(palette)
+        if labels:
+            self.annotation_class_labels[annotation] = labels
+
+        selector = self.ui_component.annotation_selector
+        selector.value = annotation
+        self.active_annotation_name = annotation
+
+        self._refresh_annotation_control_states()
+        if self.annotation_display_enabled:
+            self.update_display(self.current_downsample_factor)
+
+        self._log_annotation_palette(
+            f"Loaded palette '{payload.get('name', path.stem)}' for annotation '{annotation}'.",
+            clear=True,
+        )
+
+    def _get_selected_annotation_palette_record(self) -> Optional[Dict[str, str]]:
+        dropdown = self.ui_component.annotation_palette_saved_sets_dropdown
+        name = dropdown.value
+        if not name:
+            return None
+        return self.annotation_palette_registry_records.get(name)
+
+    def apply_saved_annotation_palette(self, _button) -> None:
+        try:
+            record = self._get_selected_annotation_palette_record()
+            if record is None:
+                raise PaletteStoreError("Select a saved palette to apply.")
+            path = Path(record.get("path", "")).expanduser()
+            if not path.exists():
+                raise PaletteStoreError(f"Palette file '{path}' was not found.")
+            self._load_annotation_palette(path)
+        except Exception as err:  # pylint: disable=broad-except
+            self._log_annotation_palette(f"Failed to apply palette: {err}", error=True, clear=True)
+
+    def overwrite_saved_annotation_palette(self, _button) -> None:
+        try:
+            record = self._get_selected_annotation_palette_record()
+            if record is None:
+                raise PaletteStoreError("Select a saved palette to overwrite.")
+            annotation = (self.active_annotation_name or '').strip()
+            if not annotation:
+                raise PaletteStoreError("Select an annotation before overwriting a palette.")
+
+            self._ensure_annotation_metadata(annotation)
+            class_ids = list(self.annotation_class_ids.get(annotation, []))
+            if not class_ids:
+                raise PaletteStoreError(f"No classes detected for annotation '{annotation}'.")
+
+            palette = apply_color_defaults(class_ids, self.annotation_palettes.get(annotation, {}))
+            labels = dict(self.annotation_class_labels.get(annotation, {}))
+            timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+            path = Path(record.get("path", "")).expanduser()
+            if not str(path):
+                raise PaletteStoreError("Saved palette path is missing.")
+
+            payload = {
+                "name": self.ui_component.annotation_palette_saved_sets_dropdown.value,
+                "version": ANNOTATION_PALETTE_VERSION,
+                "annotation": annotation,
+                "class_ids": list(class_ids),
+                "default_color": DEFAULT_COLOR,
+                "colors": dict(palette),
+                "labels": labels,
+                "label_mode": self.annotation_label_display_mode,
+                "saved_at": timestamp,
+            }
+
+            write_palette_file(path, payload)
+            folder = Path(record.get("folder", path.parent)).expanduser()
+            name = self.ui_component.annotation_palette_saved_sets_dropdown.value
+            self._update_annotation_palette_registry(folder, name, path, annotation, timestamp)
+            self._log_annotation_palette("Palette overwritten successfully.", clear=True)
+        except Exception as err:  # pylint: disable=broad-except
+            self._log_annotation_palette(f"Failed to overwrite palette: {err}", error=True, clear=True)
+
+    def delete_saved_annotation_palette(self, _button) -> None:
+        try:
+            record = self._get_selected_annotation_palette_record()
+            if record is None:
+                raise PaletteStoreError("Select a saved palette to delete.")
+
+            path = Path(record.get("path", "")).expanduser()
+            if path.exists():
+                path.unlink()
+
+            folder = Path(record.get("folder", self.annotation_palette_folder or path.parent)).expanduser()
+            records = load_palette_registry(folder, ANNOTATION_REGISTRY_FILENAME)
+            name = self.ui_component.annotation_palette_saved_sets_dropdown.value
+            records.pop(name, None)
+            save_palette_registry(folder, ANNOTATION_REGISTRY_FILENAME, records)
+
+            if (
+                self.annotation_palette_folder is not None
+                and folder.resolve() == self.annotation_palette_folder.resolve()
+            ):
+                self.annotation_palette_registry_records = records
+                self._refresh_annotation_palette_dropdown()
+
+            self._log_annotation_palette("Deleted saved palette.", clear=True)
+        except Exception as err:  # pylint: disable=broad-except
+            self._log_annotation_palette(f"Failed to delete palette: {err}", error=True, clear=True)
+
+    def _on_annotation_palette_change_folder_clicked(self, _button) -> None:
+        self.ui_component.annotation_palette_manual_box.layout.display = "block"
+
+    def _apply_annotation_palette_manual_folder(self, _button) -> None:
+        raw_value = self.ui_component.annotation_palette_manual_input.value.strip()
+        if not raw_value:
+            self._log_annotation_palette("Enter a folder path to use for palettes.", error=True, clear=True)
+            return
+
+        folder = Path(raw_value).expanduser()
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except Exception as err:  # pylint: disable=broad-except
+            self._log_annotation_palette(f"Could not use folder '{folder}': {err}", error=True, clear=True)
+            return
+
+        self.ui_component.annotation_palette_manual_input.value = ""
+        self.ui_component.annotation_palette_manual_box.layout.display = "none"
+        self._load_annotation_palette_registry(folder)
+        self._log_annotation_palette(f"Using custom palette directory {folder}", clear=True)
+
+    def _cancel_annotation_palette_manual_folder(self, _button) -> None:
+        self.ui_component.annotation_palette_manual_input.value = ""
+        self.ui_component.annotation_palette_manual_box.layout.display = "none"
 
     def on_annotation_toggle(self, change):
         self.annotation_display_enabled = bool(change.get("new"))

@@ -1,4 +1,9 @@
 ### v0.2.0-rc2
+**Pixel annotation palette management**
+- Introduced `ueler.viewer.palette_store` with shared slugging, registry, and JSON helpers reused by the mask painter and pixel annotation workflows, and migrated the mask painter plugin to the shared implementation.
+- Expanded the Pixel annotations accordion with Save/Load/Manage tabs, optional `ipyfilechooser` pickers, and registry handling that mirrors the mask painter experience so class colour sets can be persisted and restored consistently (addresses [#42](https://github.com/HartmannLab/UELer/issues/42)).
+- Added persistence-focused coverage to `tests/test_annotation_palettes.py`, exercising palette save/load round-trips and refreshing layout stubs to accommodate the new controls.
+
 **FOV detection filtering**
 - Added `_has_tiff_files()` method to `ueler.viewer.main_viewer.ImageMaskViewer` that checks for .tif/.tiff files in the FOV directory or its 'rescaled' subdirectory, mirroring the logic from `load_channel_struct_fov()` to ensure only directories containing TIFF images are recognized as valid FOVs.
 - Updated `available_fovs` initialization to filter out directories without TIFF files, preventing misclassification of folders like '.ueler' as FOVs (fixes [#29](https://github.com/HartmannLab/UELer/issues/29)).

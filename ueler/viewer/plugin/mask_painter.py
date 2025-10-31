@@ -1,8 +1,7 @@
 # viewer/plugin/mask_painter.py
 from __future__ import annotations
 
-import json
-import re
+import importlib
 import shutil
 from collections import OrderedDict
 from datetime import datetime
@@ -24,26 +23,36 @@ from ipywidgets import (
     VBox,
 )
 
+_FileChooserModule = None
 try:  # pragma: no cover - optional dependency
-    from ipyfilechooser import FileChooser
-except ImportError:  # pragma: no cover - executed when ipyfilechooser is absent
-    FileChooser = None
+    _FileChooserModule = importlib.import_module("ipyfilechooser")
+except Exception:  # pragma: no cover - executed when ipyfilechooser is absent
+    _FileChooserModule = None
+
+FileChooser = getattr(_FileChooserModule, "FileChooser", None)
 
 from ueler.viewer.plugin.plugin_base import PluginBase
 from ueler.viewer.color_palettes import DEFAULT_COLOR, colors_match, normalize_hex_color
+from ueler.viewer.palette_store import (
+    PaletteStoreError,
+    load_registry as load_palette_registry,
+    read_palette_file,
+    resolve_palette_path,
+    save_registry as save_palette_registry,
+    slugify_name as shared_slugify_name,
+    write_palette_file,
+)
 COLOR_SET_FILE_SUFFIX = ".maskcolors.json"
 REGISTRY_FILENAME = "mask_color_sets_index.json"
 COLOR_SET_VERSION = "1.0.0"
 
 
-class ColorSetError(Exception):
+class ColorSetError(PaletteStoreError):
     """Raised when saving or loading a color set fails."""
 
 
 def slugify_name(name: str) -> str:
-    slug = re.sub(r"[^a-zA-Z0-9-_]+", "-", name.strip().lower())
-    slug = re.sub(r"-+", "-", slug).strip("-")
-    return slug or "mask-colors"
+    return shared_slugify_name(name, default_slug="mask-colors")
 
 
 def serialize_class_color_controls(
@@ -95,32 +104,19 @@ def split_default_classes(
 
 
 def write_color_set_file(path: Path, payload: Mapping[str, object]) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as stream:
-        json.dump(payload, stream, indent=2, ensure_ascii=False)
-    return path
+    return write_palette_file(path, payload)
 
 
 def read_color_set_file(path: Path) -> Dict[str, object]:
-    with path.open("r", encoding="utf-8") as stream:
-        return json.load(stream)
+    return read_palette_file(path)
 
 
 def load_registry(folder: Path) -> Dict[str, Dict[str, str]]:
-    index_path = folder / REGISTRY_FILENAME
-    if not index_path.exists():
-        return {}
-    with index_path.open("r", encoding="utf-8") as stream:
-        data = json.load(stream)
-    return {name: record for name, record in data.items() if isinstance(record, dict)}
+    return load_palette_registry(folder, REGISTRY_FILENAME)
 
 
 def save_registry(folder: Path, records: Mapping[str, Mapping[str, str]]) -> Path:
-    folder.mkdir(parents=True, exist_ok=True)
-    index_path = folder / REGISTRY_FILENAME
-    with index_path.open("w", encoding="utf-8") as stream:
-        json.dump(records, stream, indent=2, ensure_ascii=False)
-    return index_path
+    return save_palette_registry(folder, REGISTRY_FILENAME, records)
 
 
 def apply_color_map_to_controls(
@@ -487,9 +483,12 @@ class MaskPainterDisplay(PluginBase):
             self._log(f"Failed to delete color set: {err}", error=True, clear=True)
 
     def _resolve_color_set_path(self, folder: Path, name: str) -> Path:
-        slug = slugify_name(name)
-        base = folder / f"{slug}{COLOR_SET_FILE_SUFFIX}"
-        return base.resolve()
+        return resolve_palette_path(
+            folder,
+            name,
+            COLOR_SET_FILE_SUFFIX,
+            default_slug="mask-colors",
+        )
 
     def _get_full_class_order(self) -> List[str]:
         if self.current_classes:

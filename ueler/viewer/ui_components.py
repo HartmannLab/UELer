@@ -1,7 +1,18 @@
 # ui_components.py
 import ipywidgets as widgets
+import importlib
+from pathlib import Path
+
 from IPython.display import display
 from types import SimpleNamespace
+
+_FileChooserModule = None
+try:  # pragma: no cover - optional dependency for richer load dialogs
+    _FileChooserModule = importlib.import_module("ipyfilechooser")
+except Exception:  # pragma: no cover - executed when ipyfilechooser is unavailable
+    _FileChooserModule = None
+
+FileChooser = getattr(_FileChooserModule, "FileChooser", None)
 
 _widget_attr = getattr(widgets, "Widget", None)
 if not isinstance(_widget_attr, type):  # pragma: no cover - ensure baseline widget API exists
@@ -688,3 +699,105 @@ class uicomponents:
             layout=Layout(width='auto')
         )
         self.annotation_edit_button.on_click(viewer.on_edit_annotation_palette)
+
+        self.annotation_palette_name_input = Text(description='Name:', placeholder='My palette')
+        self.annotation_palette_save_button = Button(description='Save palette', icon='save')
+
+        self.annotation_palette_folder_display = Text(
+            description='Folder:',
+            value='',
+            disabled=True,
+            layout=Layout(width='70%'),
+            style={'description_width': 'auto'}
+        )
+        self.annotation_palette_change_folder_button = Button(description='Change location', icon='folder-open')
+        annotation_folder_header = HBox([
+            self.annotation_palette_folder_display,
+            self.annotation_palette_change_folder_button,
+        ])
+
+        self.annotation_palette_manual_input = Text(description='Override:', placeholder='path/to/folder')
+        self.annotation_palette_manual_apply = Button(description='Use override', button_style='info')
+        self.annotation_palette_manual_cancel = Button(description='Cancel', button_style='warning')
+        self.annotation_palette_manual_box = VBox(
+            [
+                self.annotation_palette_manual_input,
+                HBox([
+                    self.annotation_palette_manual_apply,
+                    self.annotation_palette_manual_cancel,
+                ], layout=Layout(gap='6px')),
+            ],
+            layout=Layout(display='none', padding='0.5rem 0 0 0', gap='6px'),
+        )
+
+        annotation_save_children = [
+            annotation_folder_header,
+            self.annotation_palette_manual_box,
+            self.annotation_palette_name_input,
+            self.annotation_palette_save_button,
+        ]
+        self.annotation_palette_save_box = VBox(annotation_save_children, layout=Layout(gap='6px'))
+
+        default_palette_folder = str(Path.cwd())
+        if FileChooser is not None:
+            self.annotation_palette_load_picker = FileChooser(default_palette_folder)
+            self.annotation_palette_load_picker.filter_pattern = '*.pixelannotations.json'
+            self.annotation_palette_load_path_input = None
+        else:
+            self.annotation_palette_load_picker = None
+            self.annotation_palette_load_path_input = Text(
+                description='File:',
+                placeholder='path/to/file.pixelannotations.json',
+                layout=Layout(width='100%'),
+                style={'description_width': 'auto'}
+            )
+        self.annotation_palette_load_button = Button(description='Load file', icon='upload')
+
+        annotation_load_children = []
+        if self.annotation_palette_load_picker is not None:
+            annotation_load_children.append(self.annotation_palette_load_picker)
+        if self.annotation_palette_load_path_input is not None:
+            annotation_load_children.append(self.annotation_palette_load_path_input)
+        annotation_load_children.append(self.annotation_palette_load_button)
+        self.annotation_palette_load_box = VBox(annotation_load_children, layout=Layout(gap='6px'))
+
+        self.annotation_palette_saved_sets_dropdown = Dropdown(
+            description='Saved sets:',
+            options=[('No saved sets', '')],
+            layout=Layout(width='100%'),
+            style={'description_width': 'auto'}
+        )
+        self.annotation_palette_apply_saved_button = Button(description='Apply set')
+        self.annotation_palette_overwrite_button = Button(description='Overwrite')
+        self.annotation_palette_delete_button = Button(description='Delete', button_style='danger')
+
+        annotation_manage_row = HBox(
+            [
+                self.annotation_palette_apply_saved_button,
+                self.annotation_palette_overwrite_button,
+                self.annotation_palette_delete_button,
+            ],
+            layout=Layout(gap='6px')
+        )
+        self.annotation_palette_manage_box = VBox(
+            [
+                self.annotation_palette_saved_sets_dropdown,
+                annotation_manage_row,
+            ],
+            layout=Layout(gap='6px')
+        )
+
+        self.annotation_palette_tab = Tab(
+            children=[
+                self.annotation_palette_save_box,
+                self.annotation_palette_load_box,
+                self.annotation_palette_manage_box,
+            ]
+        )
+        self.annotation_palette_tab.set_title(0, 'Save')
+        self.annotation_palette_tab.set_title(1, 'Load')
+        self.annotation_palette_tab.set_title(2, 'Manage')
+
+        self.annotation_palette_feedback = Output(
+            layout=Layout(max_height='120px', overflow_y='auto')
+        )
