@@ -150,7 +150,8 @@ The first release candidate delivers automatic scale bars across the viewer and 
 **ROI browser presets**
 - The ROI Manager now opens with `ROI browser` and `ROI editor` tabs: browse ROIs via a Matplotlib gallery with tag/FOV filters, click to centre in the main viewer, or centre with preset to apply the ROI's stored rendering state.
 - ROI captures now persist the active annotation palette and mask colour set alongside marker presets; the viewer exposes helpers so plugins can record the active palette and replay saved presets when restoring ROIs.
-- Added an "Apply saved preset" toggle in the browser, AND/OR tag filtering, mask visibility persistence, and a scrollable gallery capped at 500 px that loads four more ROIs on demand while keeping tiles scaled to 98 % of the container.
+- The browser adds a boolean expression builder for tag filtering (`() & | !` with quoted tags), eager validation with inline error hints, HUD-free Matplotlib tiles sized to 98 % of the scroll container, and a repaired lazy-loading script that fetches four more previews whenever you scroll near the end.
+- Tests cover both the parser (`tests/test_tag_expression.py`) and plugin wiring (`tests/test_roi_manager_tags.py`) so future tweaks keep validation and preset restoration intact.
 
 **Pixel annotation palette management**
 - The Pixel annotations accordion now mirrors the mask painter workflow with Save/Load/Manage tabs, optional `ipyfilechooser` dialogs, and shared registry handling so class palettes can be saved and restored consistently (addresses [#42](https://github.com/HartmannLab/UELer/issues/42)).

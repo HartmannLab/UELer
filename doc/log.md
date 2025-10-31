@@ -32,6 +32,11 @@
 - Extended ROI persistence to store annotation palette and mask colour set identifiers and taught `ImageMaskViewer` to report/apply the active palette name so plugins can capture and restore presets reliably.
 - Refined the browser with AND/OR tag filtering, a saved-preset toggle, 500 px scroll container with 98 % width tiles, incremental "show 4 more" pagination, and mask visibility restoration alongside existing preset metadata.
 
+**ROI browser expression filtering**
+- Added `ueler.viewer.tag_expression.compile_tag_expression` with tokenization, shunting-yard parsing, and eager validation so ROI tag filters accept boolean expressions using `()`, `&`, `|`, and `!` syntax (addresses [#44](https://github.com/HartmannLab/UELer/issues/44)).
+- Expanded the browser UI with operator/tag shortcut buttons, inline error feedback, HUD-free Matplotlib canvases sized to 98 % of the scroll container, and a fixed lazy-loading listener that requests four more previews when the scroller nears the end.
+- Updated `tests/test_roi_manager_tags.py` and added `tests/test_tag_expression.py` to cover parser behaviour and plugin wiring; ran `python -m unittest tests.test_tag_expression tests.test_roi_manager_tags` to confirm the changes.
+
 **Channels accordion consolidation**
 - Relocated the channel tag chips plus marker set dropdown, name field, and action buttons into the Channels accordion pane so selection presets sit next to their per-channel sliders (addresses [#40](https://github.com/HartmannLab/UELer/issues/40)).
 - Rebuilt the accordion entry with dedicated containers for the selector, marker set controls, and dynamic sliders, preserving spacing and keyboard focus while removing duplicate widgets from the left panel header.

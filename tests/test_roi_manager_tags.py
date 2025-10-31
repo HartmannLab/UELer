@@ -16,6 +16,60 @@ if "pandas" not in sys.modules:
     pandas_stub.isna = lambda value: value is None
     sys.modules["pandas"] = pandas_stub
 
+if "matplotlib" not in sys.modules:
+    matplotlib_stub = types.ModuleType("matplotlib")
+    sys.modules["matplotlib"] = matplotlib_stub
+
+if "matplotlib.colors" not in sys.modules:
+    colors_stub = types.ModuleType("matplotlib.colors")
+    colors_stub.to_rgb = lambda value: (1.0, 1.0, 1.0)
+    sys.modules["matplotlib.colors"] = colors_stub
+
+if "matplotlib.pyplot" not in sys.modules:
+    pyplot_stub = types.ModuleType("matplotlib.pyplot")
+
+    class _Canvas:
+        def __init__(self):
+            self.toolbar_visible = False
+            self.header_visible = False
+            self.footer_visible = False
+
+        def mpl_connect(self, *_):
+            return 1
+
+    class _Figure:
+        def __init__(self):
+            self.canvas = _Canvas()
+
+        def subplots_adjust(self, **_):
+            return None
+
+    class _Axis:
+        def axis(self, *_):
+            return None
+
+        def text(self, *_args, **_kwargs):
+            return None
+
+        def imshow(self, *_args, **_kwargs):
+            return None
+
+        def remove(self):
+            return None
+
+    def _build_axes(rows, cols):
+        axes = [[_Axis() for _ in range(cols)] for _ in range(rows)]
+        return axes if rows > 1 else axes[0][0]
+
+    def subplots(rows, cols, **_):
+        fig = _Figure()
+        axes = _build_axes(rows, cols)
+        return fig, axes
+
+    pyplot_stub.subplots = subplots
+    pyplot_stub.show = lambda *_: None
+    sys.modules["matplotlib.pyplot"] = pyplot_stub
+
 if "ipywidgets" not in sys.modules:
     widgets = types.ModuleType("ipywidgets")
 
@@ -25,7 +79,7 @@ if "ipywidgets" not in sys.modules:
 
     class _Widget:
         def __init__(self, *_, **kwargs):
-            self.children = kwargs.get("children", tuple())
+            self.children = kwargs.get("children", ())
             self.value = kwargs.get("value")
             self.allowed_tags = kwargs.get("allowed_tags", [])
             self.allow_duplicates = kwargs.get("allow_duplicates", False)
@@ -93,8 +147,8 @@ class RestrictiveTagsWidget:
     """Widget stub that enforces membership in allowed_tags when applying values."""
 
     def __init__(self):
-        self._value = tuple()
-        self._allowed_tags: list[str] = []
+        self._value = ()
+        self._allowed_tags = []
         self.allow_new = True
         self.allow_duplicates = False
         self.layout = None
@@ -155,7 +209,7 @@ class DummyMainViewer:
         self.ui_component = SimpleNamespace(
             image_selector=SimpleNamespace(value="FOV1"),
             marker_set_dropdown=SimpleNamespace(value=None),
-            channel_selector=SimpleNamespace(value=tuple()),
+            channel_selector=SimpleNamespace(value=()),
         )
 
     def capture_viewport_bounds(self):
@@ -187,6 +241,10 @@ def make_plugin():
     plugin.initialized = False
     plugin.STATUS_COLORS = ROIManagerPlugin.STATUS_COLORS
     plugin.CURRENT_MARKER_VALUE = ROIManagerPlugin.CURRENT_MARKER_VALUE
+    plugin._browser_expression_cache = None
+    plugin._browser_expression_error = None
+    plugin._browser_tag_buttons = {}
+    plugin._browser_scroll_bound = False
 
     plugin._build_widgets()
     return plugin
@@ -258,6 +316,18 @@ class ROIManagerTagsTests(unittest.TestCase):
         self.assertIsNotNone(recorded)
         self.assertIn("tags", recorded)
         self.assertIn("novel-tag", recorded["tags"])
+
+    def test_browser_expression_compilation(self):
+        plugin = make_plugin()
+        predicate = plugin._compile_browser_expression("alpha & !beta")
+        self.assertIsNotNone(predicate)
+        self.assertTrue(predicate(["alpha"]))
+        self.assertFalse(predicate(["alpha", "beta"]))
+        self.assertIsNone(plugin._browser_expression_error)
+
+        invalid = plugin._compile_browser_expression("alpha & | beta")
+        self.assertIsNone(invalid)
+        self.assertIsNotNone(plugin._browser_expression_error)
 
 
 if __name__ == "__main__":  # pragma: no cover

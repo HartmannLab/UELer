@@ -1,9 +1,10 @@
+import html
 import json
 import math
 import os
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -27,11 +28,13 @@ from ipywidgets import (
     VBox,
 )
 from matplotlib.colors import to_rgb
+from IPython.display import HTML as IPythonHTML, display
 
 from ueler.rendering import ChannelRenderSettings, render_roi_to_array
 
 from .plugin_base import PluginBase
 from ..layout_utils import column_block_layout, flex_fill_layout
+from ..tag_expression import TagExpressionError, compile_tag_expression
 
 
 @dataclass
@@ -71,6 +74,10 @@ class ROIManagerPlugin(PluginBase):
         self._browser_figure = None
         self._browser_visible_limit = self.BROWSER_INITIAL_TILES
         self._browser_last_signature = None
+        self._browser_expression_cache = None
+        self._browser_expression_error = None
+        self._browser_tag_buttons = {}
+        self._browser_scroll_bound = False
 
         self._build_widgets()
         self._build_layout()
@@ -327,6 +334,37 @@ class ROIManagerPlugin(PluginBase):
             layout=Layout(width="auto"),
         )
 
+        self.ui_component.browser_expression_input = Text(
+            value="",
+            description="Expression:",
+            placeholder="(good & figure1) & !excluded",
+            layout=flex_fill_layout(),
+            style={"description_width": "auto"},
+        )
+
+        operator_buttons: List[Button] = []
+        for symbol in ("(", ")", "&", "|", "!"):
+            operator_button = Button(
+                description=symbol,
+                tooltip=f"Insert '{symbol}'",
+                layout=Layout(width="32px"),
+            )
+            operator_button.on_click(lambda _btn, token=symbol: self._append_to_browser_expression(token))
+            operator_buttons.append(operator_button)
+        self.ui_component.browser_expression_operator_box = HBox(
+            operator_buttons,
+            layout=Layout(gap="4px", flex_flow="row wrap"),
+        )
+
+        self.ui_component.browser_expression_tag_box = HBox(
+            [],
+            layout=Layout(gap="4px", flex_flow="row wrap"),
+        )
+
+        self.ui_component.browser_expression_feedback = HTML(
+            "<em>Combine tags with () &amp; | !. Leave blank to use the simple tag filter.</em>"
+        )
+
         self.ui_component.browser_output = Output(
             layout=Layout(
                 min_height="320px",
@@ -362,6 +400,15 @@ class ROIManagerPlugin(PluginBase):
                         self.ui_component.browser_refresh_button,
                     ],
                     layout=Layout(gap="10px", align_items="center"),
+                ),
+                VBox(
+                    [
+                        self.ui_component.browser_expression_input,
+                        self.ui_component.browser_expression_operator_box,
+                        self.ui_component.browser_expression_tag_box,
+                        self.ui_component.browser_expression_feedback,
+                    ],
+                    layout=column_block_layout(gap="4px"),
                 ),
             ],
             layout=column_block_layout(gap="6px"),
@@ -429,8 +476,15 @@ class ROIManagerPlugin(PluginBase):
         self.ui_component.browser_limit_to_current.observe(
             self._on_browser_filter_change, names="value"
         )
+        self.ui_component.browser_expression_input.observe(
+            self._on_browser_expression_change, names="value"
+        )
         self.ui_component.browser_refresh_button.on_click(self._on_browser_refresh_clicked)
         self.ui_component.browser_show_more_button.on_click(self._on_browser_show_more_clicked)
+        try:
+            self.ui_component.browser_output.on_msg(self._on_browser_output_msg)
+        except Exception:  # pragma: no cover - ipywidgets versions prior to on_msg support
+            pass
 
     # ------------------------------------------------------------------
     # Event handlers and helpers
@@ -493,6 +547,8 @@ class ROIManagerPlugin(PluginBase):
                     filter_widget.value = current_filter
             finally:
                 self._suspend_browser_events = False
+
+        self._refresh_expression_tag_buttons(allowed)
 
     def refresh_roi_table(self, df: Optional[pd.DataFrame] = None) -> None:
         source_table = self.main_viewer.roi_manager.table
@@ -590,19 +646,35 @@ class ROIManagerPlugin(PluginBase):
         if selected_fovs:
             df = df[df["fov"].astype(str).isin(selected_fovs)]
 
-        selected_tags = set(getattr(self.ui_component.browser_tags_filter, "value", ()))
-        if selected_tags:
-            tag_logic = getattr(self.ui_component.browser_tag_logic, "value", "and")
+        expression_widget = getattr(self.ui_component, "browser_expression_input", None)
+        expression_text = str(getattr(expression_widget, "value", "") or "").strip()
+        predicate = None
+        if expression_text:
+            predicate = self._compile_browser_expression(expression_text)
+            if predicate is None:
+                return pd.DataFrame()
 
-            def _tags_match(raw_value: object) -> bool:
+        if predicate is not None:
+
+            def _expression_match(raw_value: object) -> bool:
                 row_tags = {tag.strip() for tag in str(raw_value).split(',') if tag.strip()}
-                if not row_tags:
-                    return False
-                if tag_logic == "or":
-                    return any(tag in row_tags for tag in selected_tags)
-                return selected_tags.issubset(row_tags)
+                return predicate(row_tags)
 
-            df = df[df["tags"].apply(_tags_match)]
+            df = df[df["tags"].apply(_expression_match)]
+        else:
+            selected_tags = set(getattr(self.ui_component.browser_tags_filter, "value", ()))
+            if selected_tags:
+                tag_logic = getattr(self.ui_component.browser_tag_logic, "value", "and")
+
+                def _tags_match(raw_value: object) -> bool:
+                    row_tags = {tag.strip() for tag in str(raw_value).split(',') if tag.strip()}
+                    if not row_tags:
+                        return False
+                    if tag_logic == "or":
+                        return any(tag in row_tags for tag in selected_tags)
+                    return selected_tags.issubset(row_tags)
+
+                df = df[df["tags"].apply(_tags_match)]
 
         if "created_at" in df.columns:
             df = df.sort_values("created_at", ascending=False)
@@ -631,11 +703,14 @@ class ROIManagerPlugin(PluginBase):
                 output.clear_output(wait=True)
             self._update_browser_summary(0, 0)
             self._update_show_more_button(0, 0)
+            self._browser_scroll_bound = False
             return
 
         limit = max(self.BROWSER_INITIAL_TILES, int(self._browser_visible_limit or self.BROWSER_INITIAL_TILES))
         limit = min(limit, total)
         limited_records = records[:limit]
+
+        expression_text = str(getattr(self.ui_component.browser_expression_input, "value", "") or "").strip()
 
         signature = (
             tuple(record.get("roi_id") for record in limited_records),
@@ -643,6 +718,8 @@ class ROIManagerPlugin(PluginBase):
             tuple(sorted(str(fov) for fov in getattr(self.ui_component.browser_fov_filter, "value", ()))),
             bool(getattr(self.ui_component.browser_limit_to_current, "value", False)),
             getattr(self.ui_component.browser_tag_logic, "value", "and"),
+            expression_text,
+            self._browser_expression_error,
             limit,
             total,
         )
@@ -656,12 +733,15 @@ class ROIManagerPlugin(PluginBase):
         self._disconnect_browser_events()
         self._browser_axis_to_roi.clear()
 
+        model_id = getattr(output, "_model_id", "")
+        self._browser_scroll_bound = False
+
         with output:
             output.clear_output(wait=True)
             columns = min(self.BROWSER_COLUMNS, max(1, len(limited_records)))
             rows = math.ceil(len(limited_records) / columns)
             fig, axes = plt.subplots(rows, columns, figsize=(columns * 3.2, rows * 3.2))
-            fig.subplots_adjust(left=0.01, right=0.99, top=0.99, bottom=0.01)
+            fig.subplots_adjust(left=0.01, right=0.99, top=0.99, bottom=0.01, wspace=0.02, hspace=0.02)
             axes_array = np.atleast_1d(np.array(axes)).ravel()
 
             rendered = 0
@@ -698,6 +778,23 @@ class ROIManagerPlugin(PluginBase):
 
             plt.show(fig)
 
+            try:
+                canvas = getattr(fig, "canvas", None)
+                if canvas is not None:
+                    if hasattr(canvas, "toolbar_visible"):
+                        canvas.toolbar_visible = False
+                    if hasattr(canvas, "header_visible"):
+                        canvas.header_visible = False
+                    if hasattr(canvas, "footer_visible"):
+                        canvas.footer_visible = False
+            except Exception:  # pragma: no cover - backend differences
+                pass
+
+            script = self._browser_scroll_script(model_id)
+            if script:
+                display(IPythonHTML(script))
+                self._browser_scroll_bound = True
+
         self._browser_figure = fig
         try:
             self._browser_click_cid = fig.canvas.mpl_connect("button_press_event", self._on_browser_click)
@@ -730,7 +827,9 @@ class ROIManagerPlugin(PluginBase):
         remaining = max(0, total - rendered)
         if remaining:
             next_batch = min(self.BROWSER_PAGE_SIZE, remaining)
-            message += f" Scroll down and click 'Show {next_batch} more' to load additional ROIs."
+            message += (
+                f" Scroll to the bottom (or click 'Show {next_batch} more') to load additional ROIs."
+            )
         status.value = message
 
     def _update_show_more_button(self, rendered: int, total: int) -> None:
@@ -748,6 +847,225 @@ class ROIManagerPlugin(PluginBase):
         next_batch = min(self.BROWSER_PAGE_SIZE, remaining)
         button.description = f"Show {next_batch} more"
         button.tooltip = "Scroll to the bottom and click to load additional ROIs."
+
+    def _append_to_browser_expression(self, snippet: str) -> None:
+        widget = getattr(self.ui_component, "browser_expression_input", None)
+        if widget is None:
+            return
+
+        current = str(getattr(widget, "value", "") or "")
+        base = current.rstrip()
+        if snippet == ")":
+            new_value = f"{base})"
+        elif snippet == "!":
+            if base and not base.endswith(" "):
+                base += " "
+            new_value = f"{base}!"
+        else:
+            if base and not base.endswith(" "):
+                base += " "
+            new_value = f"{base}{snippet} "
+
+        self._suspend_browser_events = True
+        try:
+            widget.value = new_value.strip()
+        finally:
+            self._suspend_browser_events = False
+
+        self._on_browser_expression_change({"name": "value", "new": widget.value})
+
+    def _refresh_expression_tag_buttons(self, tags: Sequence[str]) -> None:
+        container = getattr(self.ui_component, "browser_expression_tag_box", None)
+        if container is None:
+            return
+
+        if list(self._browser_tag_buttons.keys()) == list(tags):
+            return
+
+        self._browser_tag_buttons = {}
+        buttons: List[Button] = []
+        for tag in tags:
+            button = Button(
+                description=tag,
+                tooltip=f"Insert '{tag}'",
+                layout=Layout(width="auto"),
+            )
+            button.on_click(lambda _btn, token=tag: self._append_to_browser_expression(token))
+            self._browser_tag_buttons[tag] = button
+            buttons.append(button)
+
+        container.children = tuple(buttons)
+
+    def _on_browser_expression_change(self, change) -> None:
+        if self._suspend_browser_events or change.get("name") != "value":
+            return
+
+        expression = str(change.get("new") or "")
+        self._browser_expression_cache = None
+        self._compile_browser_expression(expression)
+        self._browser_visible_limit = self.BROWSER_INITIAL_TILES
+        self._browser_last_signature = None
+        self._refresh_browser_gallery()
+
+    def _compile_browser_expression(self, expression: str) -> Optional[Callable[[Iterable[str]], bool]]:
+        text = expression.strip()
+        if not text:
+            self._browser_expression_cache = None
+            self._set_browser_expression_error(None, expression="")
+            return None
+
+        if self._browser_expression_cache and self._browser_expression_cache[0] == text:
+            self._set_browser_expression_error(None, expression=text)
+            return self._browser_expression_cache[1]
+
+        try:
+            predicate = compile_tag_expression(text)
+        except TagExpressionError as exc:
+            self._browser_expression_cache = None
+            self._set_browser_expression_error(str(exc), expression=text)
+            return None
+
+        self._browser_expression_cache = (text, predicate)
+        self._set_browser_expression_error(None, expression=text)
+        return predicate
+
+    def _set_browser_expression_error(self, message: Optional[str], expression: str) -> None:
+        self._browser_expression_error = message
+        feedback = getattr(self.ui_component, "browser_expression_feedback", None)
+        if feedback is None:
+            return
+
+        if message:
+            escaped = html.escape(message)
+            color = self.STATUS_COLORS.get("error", "#c62828")
+            feedback.value = f"<span style='color:{color}'>Expression error: {escaped}</span>"
+            return
+
+        if expression.strip():
+            feedback.value = "<em>Expression active.</em>"
+        else:
+            feedback.value = "<em>Combine tags with () &amp; | !. Leave blank to use the simple tag filter.</em>"
+
+    def _browser_scroll_script(self, model_id: str) -> str:
+        if not model_id:
+            return ""
+
+        encoded_id = json.dumps(model_id)
+        return f"""
+<script type=\"text/javascript\">
+(function() {{
+    const widgetId = {encoded_id};
+    const selectors = [`[data-widget-id="${{widgetId}}"]`, `[data-widgetid="${{widgetId}}"]`];
+    let attempts = 0;
+
+    function locateHost() {{
+        for (const selector of selectors) {{
+            const element = document.querySelector(selector);
+            if (element) {{
+                return element;
+            }}
+        }}
+        return null;
+    }}
+
+    function sendEvent() {{
+        const payload = {{event: 'scroll-bottom'}};
+        const sendWithManager = manager => {{
+            if (!manager || typeof manager.get_model !== 'function') {{
+                return;
+            }}
+            try {{
+                manager.get_model(widgetId).then(model => {{
+                    if (!model) {{
+                        return;
+                    }}
+                    model.send(payload);
+                }}).catch(() => {{}});
+            }} catch (err) {{
+                console.debug('UELer ROI browser scroll dispatch failed', err);
+            }}
+        }};
+
+        const candidates = [];
+        if (window.__widget_manager__) {{
+            candidates.push(window.__widget_manager__);
+        }}
+        if (window.jupyterWidgetManagers && window.jupyterWidgetManagers.length) {{
+            candidates.push(window.jupyterWidgetManagers[0]);
+        }}
+        if (window.manager && typeof window.manager.get_model === 'function') {{
+            candidates.push(window.manager);
+        }}
+
+        let handled = false;
+        for (const candidate of candidates) {{
+            if (!candidate) {{
+                continue;
+            }}
+            handled = true;
+            sendWithManager(candidate);
+        }}
+
+        if (!handled && typeof window.require === 'function') {{
+            window.require(['@jupyter-widgets/base'], function(base) {{
+                const managers = (base.ManagerBase && base.ManagerBase._managers) || [];
+                if (managers.length) {{
+                    sendWithManager(managers[0]);
+                }}
+            }});
+        }}
+    }}
+
+    function attach() {{
+        const host = locateHost();
+        if (!host) {{
+            if (attempts++ < 40) {{
+                requestAnimationFrame(attach);
+            }}
+            return;
+        }}
+
+        const scrollContainer = host.querySelector('.jupyter-widgets-output-area') || host;
+        if (!scrollContainer) {{
+            if (attempts++ < 40) {{
+                requestAnimationFrame(attach);
+            }}
+            return;
+        }}
+
+        if (scrollContainer.__ueler_scroll_listener_attached) {{
+            return;
+        }}
+
+        scrollContainer.__ueler_scroll_listener_attached = true;
+        let throttled = false;
+        scrollContainer.addEventListener('scroll', () => {{
+            if (throttled) {{
+                return;
+            }}
+            const nearBottom = scrollContainer.scrollTop + scrollContainer.clientHeight >= scrollContainer.scrollHeight - 8;
+            if (!nearBottom) {{
+                return;
+            }}
+            throttled = true;
+            sendEvent();
+            setTimeout(() => {{
+                throttled = false;
+            }}, 300);
+        }});
+    }}
+
+    attach();
+}})();
+</script>
+"""
+
+    def _on_browser_output_msg(self, _, content, __):  # pragma: no cover - UI callback
+        if not isinstance(content, dict):
+            return
+        if content.get("event") != "scroll-bottom":
+            return
+        self._on_browser_show_more_clicked(None)
 
     def _render_roi_tile(
         self,

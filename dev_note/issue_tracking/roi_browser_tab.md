@@ -52,16 +52,15 @@
 - ✅ Implement a "scroll down and show more" affordance that loads the next four ROI previews on demand.
 
 ## Current Action Plan (Cycle starting 2025-10-31)
-1. ✅ **Mask state persistence**
-   - ROI schema, capture/update flows, and preset restore now record mask visibility alongside palettes.
-2. ✅ **Preset restore UX controls**
-   - Browser checkbox toggles saved-vs-current preset usage; metadata summaries highlight palette and mask visibility context.
-3. ✅ **Gallery rendering polish**
-   - Gallery tiles scale within a 500 px scroll box, hide titles, and offer incremental loading in batches of four.
-4. ✅ **Interaction throttling & filtering**
-   - Signature caching avoids redraws on clicks, and tag logic toggles between AND/OR semantics.
-5. 🔄 **Testing & documentation**
-   - Add targeted unit tests (ROI CSV round trips, tag filter logic, pagination) and finalize README/release log updates.
+1. 🚧 **Tag expression parsing & UI assist**
+   - Replace the simple AND/OR toggle with a boolean expression parser that understands `()`, `&`, `|`, and `!` operators, with graceful error messaging for invalid syntax.
+   - Add a lightweight expression builder widget (operator shortcuts and tag buttons) so users can compose filters without typing every symbol manually.
+2. 🚧 **Gallery layout & HUD cleanup**
+   - Tweak Matplotlib figure generation so individual tiles render at ~98% of the container width without extra padding, and suppress figure numbers/coordinate HUD overlays in the ROI browser.
+3. 🚧 **Lazy loading behaviour**
+   - Restore the “scroll down to load next four ROI previews” affordance by wiring the scroll container to request additional tiles automatically once users reach the bottom.
+4. 🔄 **Testing & documentation**
+   - Extend unit coverage for the tag expression parser and gallery pagination logic, then fold the latest changes into README, log, and issue summaries.
 
 ## Validation Plan
 - Run the ROI-related pytest modules (`tests/test_roi_manager_tags.py`, `tests/test_export_job.py`, plus any new tests).
