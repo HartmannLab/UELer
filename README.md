@@ -147,6 +147,10 @@ The first release candidate delivers automatic scale bars across the viewer and 
 - Removed the Overlay mode toggle from the Pixel annotations pane so mask visibility is governed solely by the mask section; mask checkboxes now always apply even when pixel annotations are hidden (addresses [#41](https://github.com/HartmannLab/UELer/issues/41)).
 - Renamed the accordion tab to `Pixel annotations` and reordered the controls to `Channels`, `Masks`, `Pixel annotations`, keeping mask toggles front-and-centre while separating pixel overlays from mask visibility.
 
+**ROI browser presets**
+- The ROI Manager now opens with `ROI browser` and `ROI editor` tabs: browse ROIs via a Matplotlib gallery with tag/FOV filters, click to centre in the main viewer, or centre with preset to apply the ROI's stored rendering state.
+- ROI captures now persist the active annotation palette and mask colour set alongside marker presets; the viewer exposes helpers so plugins can record the active palette and replay saved presets when restoring ROIs.
+
 **Pixel annotation palette management**
 - The Pixel annotations accordion now mirrors the mask painter workflow with Save/Load/Manage tabs, optional `ipyfilechooser` dialogs, and shared registry handling so class palettes can be saved and restored consistently (addresses [#42](https://github.com/HartmannLab/UELer/issues/42)).
 - Introduced `ueler.viewer.palette_store` for common palette persistence helpers and aligned the mask painter plugin plus new unit tests (`tests/test_annotation_palettes.py`) on the shared format.

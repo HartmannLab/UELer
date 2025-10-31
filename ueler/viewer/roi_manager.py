@@ -26,6 +26,8 @@ ROI_COLUMNS = [
     "y_max",
     "marker_set",
     "tags",
+    "annotation_palette",
+    "mask_color_set",
     "comment",
     "created_at",
     "updated_at",
@@ -35,9 +37,20 @@ ROI_COLUMNS = [
 def _ensure_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     missing = [col for col in ROI_COLUMNS if col not in df.columns]
     for col in missing:
-        df[col] = "" if col in {"marker_set", "tags", "comment"} else 0.0
+        df[col] = (
+            ""
+            if col
+            in {
+                "marker_set",
+                "tags",
+                "annotation_palette",
+                "mask_color_set",
+                "comment",
+            }
+            else 0.0
+        )
     df = df[ROI_COLUMNS]
-    for col in ["marker_set", "tags", "comment"]:
+    for col in ["marker_set", "tags", "annotation_palette", "mask_color_set", "comment"]:
         if col in df.columns:
             df[col] = (
                 df[col]
@@ -107,6 +120,8 @@ class ROIManager:
             "y_max": 0.0,
             "marker_set": "",
             "tags": "",
+            "annotation_palette": "",
+            "mask_color_set": "",
             "comment": "",
             "created_at": ts,
             "updated_at": ts,

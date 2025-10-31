@@ -1,7 +1,11 @@
+import math
 import os
+from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Optional
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 from ipywidgets import (
     Accordion,
@@ -12,14 +16,27 @@ from ipywidgets import (
     HBox,
     HTML,
     Layout,
+    Output,
+    SelectMultiple,
+    Tab,
     TagsInput,
     Text,
     Textarea,
     VBox,
 )
+from matplotlib.colors import to_rgb
+
+from ueler.rendering import ChannelRenderSettings, render_roi_to_array
 
 from .plugin_base import PluginBase
 from ..layout_utils import column_block_layout, flex_fill_layout
+
+
+@dataclass
+class _MarkerProfile:
+    name: str
+    selected_channels: Tuple[str, ...]
+    channel_settings: Dict[str, ChannelRenderSettings]
 
 
 class ROIManagerPlugin(PluginBase):
@@ -34,6 +51,9 @@ class ROIManagerPlugin(PluginBase):
         "error": "#c62828",
     }
 
+    BROWSER_COLUMNS = 3
+    BROWSER_MAX_TILES = 12
+
     def __init__(self, main_viewer, width: int = 6, height: int = 3) -> None:
         super().__init__(main_viewer, width, height)
         self.displayed_name = "ROI manager"
@@ -42,6 +62,10 @@ class ROIManagerPlugin(PluginBase):
         self.ui_component = SimpleNamespace()
         self._selected_roi_id: Optional[str] = None
         self._suspend_ui_events = False
+        self._suspend_browser_events = False
+        self._browser_axis_to_roi: Dict[object, str] = {}
+        self._browser_click_cid: Optional[int] = None
+        self._browser_figure = None
 
         self._build_widgets()
         self._build_layout()
@@ -61,6 +85,10 @@ class ROIManagerPlugin(PluginBase):
     # UI construction
     # ------------------------------------------------------------------
     def _build_widgets(self) -> None:
+        self._build_editor_widgets()
+        self._build_browser_widgets()
+
+    def _build_editor_widgets(self) -> None:
         full_width = column_block_layout
         button_layout = Layout(width="auto", flex="1 1 auto")
         style_auto = {"description_width": "auto"}
@@ -102,6 +130,12 @@ class ROIManagerPlugin(PluginBase):
         self.ui_component.center_button = Button(
             description="Center",
             icon="crosshairs",
+            button_style="",
+            layout=button_layout,
+        )
+        self.ui_component.center_with_preset_button = Button(
+            description="Center with preset",
+            icon="bullseye",
             button_style="",
             layout=button_layout,
         )
@@ -158,6 +192,9 @@ class ROIManagerPlugin(PluginBase):
             style=style_auto,
         )
 
+        self.ui_component.annotation_summary = HTML("<em>Annotation palette: —</em>")
+        self.ui_component.mask_summary = HTML("<em>Mask color set: —</em>")
+
         default_path = os.path.relpath(
             self.main_viewer.roi_manager.storage_path, self.main_viewer.base_folder
         )
@@ -178,18 +215,22 @@ class ROIManagerPlugin(PluginBase):
 
         self.ui_component.status = HTML(value="")
 
-    def _build_layout(self) -> None:
         actions_primary = HBox(
             [
                 self.ui_component.capture_button,
                 self.ui_component.update_button,
                 self.ui_component.center_button,
+                self.ui_component.center_with_preset_button,
             ],
             layout=Layout(gap="6px", flex_flow="row wrap"),
         )
 
         actions_secondary = HBox(
-            [self.ui_component.export_button, self.ui_component.import_button],
+            [
+                self.ui_component.delete_button,
+                self.ui_component.export_button,
+                self.ui_component.import_button,
+            ],
             layout=Layout(gap="6px", flex_flow="row wrap"),
         )
 
@@ -199,6 +240,10 @@ class ROIManagerPlugin(PluginBase):
                 self.ui_component.tag_entry,
                 self.ui_component.tags,
                 self.ui_component.comment,
+                VBox(
+                    [self.ui_component.annotation_summary, self.ui_component.mask_summary],
+                    layout=column_block_layout(gap="2px"),
+                ),
             ],
             layout=column_block_layout(gap="6px"),
         )
@@ -208,14 +253,16 @@ class ROIManagerPlugin(PluginBase):
             layout=column_block_layout(gap="6px"),
         )
 
-        header = HTML("<strong>ROI manager</strong>")
-
-        content = VBox(
+        self.ui_component.editor_root = VBox(
             [
-                header,
                 HBox(
                     [self.ui_component.roi_table, self.ui_component.limit_to_fov_checkbox],
-                    layout=Layout(align_items="center", gap="8px", width="100%", flex_flow="row nowrap"),
+                    layout=Layout(
+                        align_items="center",
+                        gap="8px",
+                        width="100%",
+                        flex_flow="row nowrap",
+                    ),
                 ),
                 actions_primary,
                 metadata_box,
@@ -225,13 +272,91 @@ class ROIManagerPlugin(PluginBase):
             layout=column_block_layout(gap="10px"),
         )
 
+    def _build_browser_widgets(self) -> None:
+        self.ui_component.browser_tags_filter = TagsInput(
+            value=(),
+            allowed_tags=[],
+            description="Tags:",
+            allow_duplicates=False,
+            allow_new=False,
+            layout=Layout(width="100%"),
+        )
+        if hasattr(self.ui_component.browser_tags_filter, "restrict_to_allowed_tags"):
+            try:
+                self.ui_component.browser_tags_filter.restrict_to_allowed_tags = False
+            except Exception:  # pragma: no cover
+                pass
+
+        self.ui_component.browser_fov_filter = SelectMultiple(
+            options=[],
+            value=(),
+            description="FOVs:",
+            layout=Layout(width="100%"),
+        )
+
+        self.ui_component.browser_limit_to_current = Checkbox(
+            value=False,
+            description="Only current FOV",
+            indent=False,
+            layout=Layout(width="auto"),
+        )
+
+        self.ui_component.browser_refresh_button = Button(
+            description="Refresh",
+            icon="refresh",
+            button_style="",
+            layout=Layout(width="auto"),
+        )
+
+        self.ui_component.browser_output = Output(layout=Layout(min_height="320px"))
+        self.ui_component.browser_status = HTML("<em>No ROI captured yet.</em>")
+
+        controls = VBox(
+            [
+                HBox(
+                    [
+                        self.ui_component.browser_tags_filter,
+                        self.ui_component.browser_fov_filter,
+                    ],
+                    layout=Layout(gap="10px", flex_flow="row wrap"),
+                ),
+                HBox(
+                    [
+                        self.ui_component.browser_limit_to_current,
+                        self.ui_component.browser_refresh_button,
+                    ],
+                    layout=Layout(gap="10px", align_items="center"),
+                ),
+            ],
+            layout=column_block_layout(gap="6px"),
+        )
+
+        self.ui_component.browser_root = VBox(
+            [controls, self.ui_component.browser_output, self.ui_component.browser_status],
+            layout=column_block_layout(gap="8px"),
+        )
+
+    def _build_layout(self) -> None:
+        header = HTML("<strong>ROI manager</strong>")
+        self.ui_component.tabs = Tab(
+            children=[self.ui_component.browser_root, self.ui_component.editor_root],
+            layout=column_block_layout(gap="10px"),
+        )
+        self.ui_component.tabs.set_title(0, "ROI browser")
+        self.ui_component.tabs.set_title(1, "ROI editor")
+
+        content = VBox(
+            [header, self.ui_component.tabs],
+            layout=column_block_layout(gap="10px"),
+        )
+
         self.panel = Accordion(
             children=[content],
             titles=("ROI manager",),
             selected_index=None,
             layout=column_block_layout(),
         )
-        self.ui = content
+        self.ui = self.ui_component.tabs
 
     def _connect_events(self) -> None:
         self.ui_component.roi_table.observe(self._on_selection_change, names="value")
@@ -244,8 +369,20 @@ class ROIManagerPlugin(PluginBase):
         self.ui_component.export_button.on_click(self._export_rois)
         self.ui_component.import_button.on_click(self._import_rois)
         self.ui_component.center_button.on_click(self._center_on_selected_roi)
+        self.ui_component.center_with_preset_button.on_click(self._center_with_preset)
         self.ui_component.tags.observe(self._on_tags_value_change, names="value")
         self.ui_component.tag_entry.observe(self._on_tag_entry_change, names="value")
+
+        self.ui_component.browser_tags_filter.observe(
+            self._on_browser_filter_change, names="value"
+        )
+        self.ui_component.browser_fov_filter.observe(
+            self._on_browser_filter_change, names="value"
+        )
+        self.ui_component.browser_limit_to_current.observe(
+            self._on_browser_filter_change, names="value"
+        )
+        self.ui_component.browser_refresh_button.on_click(lambda _btn: self._refresh_browser_gallery())
 
     # ------------------------------------------------------------------
     # Event handlers and helpers
@@ -297,9 +434,22 @@ class ROIManagerPlugin(PluginBase):
             self.ui_component.tags.allowed_tags = allowed
             self._sync_tag_entry_options()
 
+        filter_widget = getattr(self.ui_component, "browser_tags_filter", None)
+        if filter_widget is not None:
+            current_filter = tuple(tag for tag in getattr(filter_widget, "value", ()) if tag in allowed)
+            self._suspend_browser_events = True
+            try:
+                if list(getattr(filter_widget, "allowed_tags", [])) != allowed:
+                    filter_widget.allowed_tags = allowed
+                if getattr(filter_widget, "value", ()) != current_filter:
+                    filter_widget.value = current_filter
+            finally:
+                self._suspend_browser_events = False
+
     def refresh_roi_table(self, df: Optional[pd.DataFrame] = None) -> None:
         source_table = self.main_viewer.roi_manager.table
         self._update_available_tags(source_table)
+        self._refresh_browser_filters()
 
         df = df.copy() if df is not None else source_table
         if df is None:
@@ -332,6 +482,7 @@ class ROIManagerPlugin(PluginBase):
             self._suspend_ui_events = False
 
         self._selected_roi_id = selection
+        self._refresh_browser_gallery()
 
         scope = (
             getattr(self.main_viewer.ui_component.image_selector, "value", "all FOVs")
@@ -353,6 +504,373 @@ class ROIManagerPlugin(PluginBase):
         )
         return f"{record.get('fov', '—')} · {marker}{tag_display} · {coords[0]}:{coords[1]} → {coords[2]}:{coords[3]}"
 
+    def _refresh_browser_filters(self) -> None:
+        widget = getattr(self.ui_component, "browser_fov_filter", None)
+        if widget is None:
+            return
+
+        table = self.main_viewer.roi_manager.table
+        if table is None or table.empty or "fov" not in table.columns:
+            options: List[str] = []
+        else:
+            options = sorted({str(value) for value in table["fov"].dropna().astype(str)})
+
+        current_value = tuple(value for value in getattr(widget, "value", ()) if value in options)
+        self._suspend_browser_events = True
+        try:
+            widget.options = options
+            if getattr(widget, "value", ()) != current_value:
+                widget.value = current_value
+        finally:
+            self._suspend_browser_events = False
+
+    def _filtered_browser_dataframe(self) -> pd.DataFrame:
+        table = self.main_viewer.roi_manager.table
+        if table is None or table.empty:
+            return pd.DataFrame()
+
+        df = table.copy()
+
+        if self.ui_component.browser_limit_to_current.value:
+            current_fov = getattr(self.main_viewer.ui_component.image_selector, "value", None)
+            if current_fov:
+                df = df[df["fov"] == current_fov]
+
+        selected_fovs = tuple(getattr(self.ui_component.browser_fov_filter, "value", ()))
+        if selected_fovs:
+            df = df[df["fov"].astype(str).isin(selected_fovs)]
+
+        selected_tags = set(getattr(self.ui_component.browser_tags_filter, "value", ()))
+        if selected_tags:
+            df = df[df["tags"].apply(lambda raw: selected_tags.issubset({tag.strip() for tag in str(raw).split(',') if tag.strip()}))]
+
+        if "created_at" in df.columns:
+            df = df.sort_values("created_at", ascending=False)
+
+        return df.reset_index(drop=True)
+
+    def _refresh_browser_gallery(self) -> None:
+        output = getattr(self.ui_component, "browser_output", None)
+        status = getattr(self.ui_component, "browser_status", None)
+        if output is None or status is None:
+            return
+
+        if self._suspend_browser_events:
+            return
+
+        df = self._filtered_browser_dataframe()
+        records = df.to_dict("records") if not df.empty else []
+        total = len(records)
+        limited_records = records[: self.BROWSER_MAX_TILES]
+
+        self._disconnect_browser_events()
+        self._browser_axis_to_roi.clear()
+
+        with output:
+            output.clear_output(wait=True)
+            if not limited_records:
+                status.value = "<em>No ROI matches current filters.</em>"
+                return
+
+            columns = min(self.BROWSER_COLUMNS, max(1, len(limited_records)))
+            rows = math.ceil(len(limited_records) / columns)
+            fig, axes = plt.subplots(rows, columns, figsize=(columns * 3.0, rows * 3.0))
+            axes_array = np.atleast_1d(np.array(axes)).ravel()
+
+            rendered = 0
+            for axis in axes_array:
+                axis.axis("off")
+
+            for axis, record in zip(axes_array, limited_records):
+                marker_profile = self._build_marker_profile(record)
+                if marker_profile is None or not marker_profile.selected_channels:
+                    axis.text(0.5, 0.5, "No channels", ha="center", va="center", fontsize=9)
+                    continue
+
+                downsample = record.get("zoom", self.main_viewer.current_downsample_factor)
+                try:
+                    downsample_int = max(1, int(round(float(downsample))))
+                except Exception:  # pragma: no cover - defensive
+                    downsample_int = max(1, int(self.main_viewer.current_downsample_factor))
+
+                tile = self._render_roi_tile(record, marker_profile, downsample_int)
+                if tile is None or tile.size == 0:
+                    axis.text(0.5, 0.5, "Preview unavailable", ha="center", va="center", fontsize=9)
+                    continue
+
+                axis.imshow(tile)
+                axis.set_title(self._format_browser_title(record, marker_profile), fontsize=9)
+                axis.axis("off")
+                self._browser_axis_to_roi[axis] = record.get("roi_id")
+                rendered += 1
+
+            for axis in axes_array[len(limited_records) :]:
+                axis.remove()
+
+            fig.tight_layout()
+            plt.show(fig)
+
+        self._browser_figure = fig
+        try:
+            self._browser_click_cid = fig.canvas.mpl_connect("button_press_event", self._on_browser_click)
+        except Exception:  # pragma: no cover - matplotlib backend quirks
+            self._browser_click_cid = None
+
+        summary = f"Displaying {rendered} of {total} ROI(s)."
+        if total > len(limited_records):
+            summary += " Showing most recent entries."
+        status.value = summary
+
+    def _disconnect_browser_events(self) -> None:
+        if self._browser_figure is not None and self._browser_click_cid is not None:
+            try:
+                self._browser_figure.canvas.mpl_disconnect(self._browser_click_cid)
+            except Exception:  # pragma: no cover - defensive cleanup
+                pass
+        self._browser_click_cid = None
+        self._browser_figure = None
+
+    def _format_browser_title(self, record: Mapping[str, object], profile: _MarkerProfile) -> str:
+        fov = record.get("fov") or "—"
+        marker = profile.name or (record.get("marker_set") or "—")
+        return f"{fov} · {marker}"
+
+    def _render_roi_tile(
+        self,
+        record: Mapping[str, object],
+        marker_profile: _MarkerProfile,
+        downsample_factor: int,
+    ) -> Optional[np.ndarray]:
+        fov_name = record.get("fov")
+        if not fov_name:
+            return None
+
+        try:
+            self.main_viewer.load_fov(fov_name, marker_profile.selected_channels)
+        except Exception:  # pragma: no cover - cache loading failures
+            return None
+
+        channel_arrays = self.main_viewer.image_cache.get(fov_name)
+        if channel_arrays is None:
+            return None
+
+        try:
+            array = render_roi_to_array(
+                fov_name,
+                channel_arrays,
+                marker_profile.selected_channels,
+                marker_profile.channel_settings,
+                roi_definition=record,
+                downsample_factor=downsample_factor,
+            )
+        except Exception:  # pragma: no cover - rendering failures
+            return None
+
+        return np.clip(array, 0.0, 1.0)
+
+    def _build_marker_profile(self, record: Mapping[str, object]) -> Optional[_MarkerProfile]:
+        marker_ref = str(record.get("marker_set") or "").strip()
+
+        if marker_ref and marker_ref in self.main_viewer.marker_sets:
+            data = self.main_viewer.marker_sets.get(marker_ref, {})
+            selected = tuple(data.get("selected_channels", ()))
+            channel_settings = self._build_channel_settings_from_saved(data, selected)
+            return _MarkerProfile(name=marker_ref, selected_channels=selected, channel_settings=channel_settings)
+
+        if marker_ref.startswith("current:"):
+            channels = tuple(
+                ch.strip() for ch in marker_ref.split(":", 1)[1].split(",") if ch.strip()
+            )
+            channel_settings = self._snapshot_channel_controls(channels)
+            return _MarkerProfile(name="current", selected_channels=channels, channel_settings=channel_settings)
+
+        fallback_channels = self._current_selected_channels()
+        channel_settings = self._snapshot_channel_controls(fallback_channels)
+        return _MarkerProfile(name="current", selected_channels=fallback_channels, channel_settings=channel_settings)
+
+    def _build_channel_settings_from_saved(
+        self,
+        payload: Mapping[str, object],
+        channels: Sequence[str],
+    ) -> Dict[str, ChannelRenderSettings]:
+        result: Dict[str, ChannelRenderSettings] = {}
+        raw_settings = payload.get("channel_settings", {}) if isinstance(payload, dict) else {}
+        for channel in channels:
+            entry = raw_settings.get(channel, {}) if isinstance(raw_settings, dict) else {}
+            color_key = entry.get("color") if isinstance(entry, dict) else None
+            color_value = self.main_viewer.predefined_colors.get(color_key, color_key) if color_key else color_key
+            if color_value is None:
+                color_value = "#FFFFFF"
+            contrast_min = float(entry.get("contrast_min", 0.0)) if isinstance(entry, dict) else 0.0
+            contrast_max = float(entry.get("contrast_max", 1.0)) if isinstance(entry, dict) else 1.0
+            result[channel] = ChannelRenderSettings(
+                color=to_rgb(color_value),
+                contrast_min=contrast_min,
+                contrast_max=contrast_max,
+            )
+        return result
+
+    def _current_selected_channels(self) -> Tuple[str, ...]:
+        selector = getattr(self.main_viewer.ui_component, "channel_selector", None)
+        value = getattr(selector, "value", ())
+        if isinstance(value, (list, tuple)):
+            return tuple(str(v) for v in value)
+        if value:
+            return (str(value),)
+        return ()
+
+    def _snapshot_channel_controls(self, channels: Sequence[str]) -> Dict[str, ChannelRenderSettings]:
+        ui = getattr(self.main_viewer, "ui_component", None)
+        if ui is None:
+            return {}
+        color_controls = getattr(ui, "color_controls", {}) or {}
+        contrast_min_controls = getattr(ui, "contrast_min_controls", {}) or {}
+        contrast_max_controls = getattr(ui, "contrast_max_controls", {}) or {}
+        result: Dict[str, ChannelRenderSettings] = {}
+        for channel in channels:
+            color_widget = color_controls.get(channel)
+            color_key = getattr(color_widget, "value", "#FFFFFF")
+            color_value = self.main_viewer.predefined_colors.get(color_key, color_key)
+            min_widget = contrast_min_controls.get(channel)
+            max_widget = contrast_max_controls.get(channel)
+            try:
+                contrast_min = float(getattr(min_widget, "value", 0.0))
+            except Exception:  # pragma: no cover - widget value errors
+                contrast_min = 0.0
+            try:
+                contrast_max = float(getattr(max_widget, "value", 1.0))
+            except Exception:  # pragma: no cover - widget value errors
+                contrast_max = 1.0
+            result[channel] = ChannelRenderSettings(
+                color=to_rgb(color_value),
+                contrast_min=contrast_min,
+                contrast_max=contrast_max,
+            )
+        return result
+
+    def _on_browser_filter_change(self, change) -> None:
+        if self._suspend_browser_events or change.get("name") != "value":
+            return
+        self._refresh_browser_gallery()
+
+    def _on_browser_click(self, event) -> None:  # pragma: no cover - UI callback
+        axis = getattr(event, "inaxes", None)
+        if axis is None:
+            return
+        roi_id = self._browser_axis_to_roi.get(axis)
+        if not roi_id:
+            return
+        self._activate_roi_from_browser(str(roi_id))
+
+    def _activate_roi_from_browser(self, roi_id: str) -> None:
+        record = self.main_viewer.roi_manager.get_roi(roi_id)
+        if not record:
+            self.set_status("Selected ROI no longer exists.", level="error")
+            self.refresh_roi_table()
+            return
+
+        self._selected_roi_id = roi_id
+        self.main_viewer.center_on_roi(record)
+        success, missing = self._apply_roi_presets(record)
+
+        self._suspend_ui_events = True
+        try:
+            self.ui_component.roi_table.value = roi_id
+        finally:
+            self._suspend_ui_events = False
+
+        self._populate_fields(record)
+
+        if success:
+            self.set_status("Centered on ROI via browser.", level="success")
+        else:
+            missing_text = ", ".join(missing)
+            self.set_status(
+                f"Centered on ROI; missing preset(s): {missing_text}.",
+                level="warning",
+            )
+
+    def _apply_roi_presets(self, record: Mapping[str, object]) -> Tuple[bool, List[str]]:
+        missing: List[str] = []
+
+        marker_ref = str(record.get("marker_set") or "").strip()
+        if marker_ref:
+            if not self._apply_marker_preset(marker_ref):
+                missing.append("marker set")
+
+        annotation_name = str(record.get("annotation_palette") or "").strip()
+        if annotation_name:
+            if not self._apply_annotation_palette(annotation_name):
+                missing.append("annotation palette")
+
+        mask_name = str(record.get("mask_color_set") or "").strip()
+        if mask_name:
+            if not self._apply_mask_color_set(mask_name):
+                missing.append("mask color set")
+
+        return not missing, missing
+
+    def _apply_marker_preset(self, marker_ref: str) -> bool:
+        marker_ref = marker_ref.strip()
+        if not marker_ref:
+            return True
+
+        if marker_ref.startswith("current:"):
+            channels = tuple(
+                ch.strip() for ch in marker_ref.split(":", 1)[1].split(",") if ch.strip()
+            )
+            selector = getattr(self.main_viewer.ui_component, "channel_selector", None)
+            if selector is None:
+                return False
+            self._suspend_ui_events = True
+            try:
+                selector.value = channels
+            finally:
+                self._suspend_ui_events = False
+            try:
+                self.main_viewer.update_controls(None)
+                self.main_viewer.update_display(self.main_viewer.current_downsample_factor)
+            except Exception:  # pragma: no cover - safety around UI refresh
+                return False
+            return True
+
+        applier = getattr(self.main_viewer, "apply_marker_set_by_name", None)
+        if callable(applier):
+            try:
+                return bool(applier(marker_ref))
+            except Exception:  # pragma: no cover - downstream errors
+                return False
+        return False
+
+    def _apply_annotation_palette(self, name: str) -> bool:
+        name = name.strip()
+        if not name:
+            return True
+        applier = getattr(self.main_viewer, "apply_annotation_palette_set", None)
+        if callable(applier):
+            try:
+                return bool(applier(name))
+            except Exception:  # pragma: no cover - downstream errors
+                return False
+        return False
+
+    def _apply_mask_color_set(self, name: str) -> bool:
+        name = name.strip()
+        if not name:
+            return True
+
+        mask_plugin = getattr(self.main_viewer, "mask_painter_plugin", None)
+        if mask_plugin is None:
+            return False
+
+        applier = getattr(mask_plugin, "apply_color_set_by_name", None)
+        if callable(applier):
+            try:
+                return bool(applier(name))
+            except Exception:  # pragma: no cover - downstream errors
+                return False
+        return False
+
     def _resolve_marker_set_choice(self) -> str:
         choice = self.ui_component.marker_dropdown.value
         if choice == self.CURRENT_MARKER_VALUE:
@@ -364,6 +882,31 @@ class ROIManagerPlugin(PluginBase):
                 return "current:" + ",".join(channels)
             return ""
         return choice or ""
+
+    def _get_active_annotation_palette(self) -> str:
+        getter = getattr(self.main_viewer, "get_active_annotation_palette_set", None)
+        if callable(getter):
+            try:
+                value = getter()
+            except Exception:  # pragma: no cover - downstream errors
+                return ""
+            if value:
+                return str(value)
+        return ""
+
+    def _get_active_mask_color_set(self) -> str:
+        mask_plugin = getattr(self.main_viewer, "mask_painter_plugin", None)
+        if mask_plugin is None:
+            return ""
+        getter = getattr(mask_plugin, "get_active_color_set_name", None)
+        if callable(getter):
+            try:
+                value = getter()
+            except Exception:  # pragma: no cover
+                return ""
+            if value:
+                return str(value)
+        return ""
 
     def _capture_current_view(self, _):
         viewport = self.main_viewer.capture_viewport_bounds()
@@ -377,6 +920,8 @@ class ROIManagerPlugin(PluginBase):
             "marker_set": self._resolve_marker_set_choice(),
             "tags": list(self.ui_component.tags.value),
             "comment": self.ui_component.comment.value.strip(),
+            "annotation_palette": self._get_active_annotation_palette(),
+            "mask_color_set": self._get_active_mask_color_set(),
         }
 
         result = self.main_viewer.roi_manager.add_roi(record)
@@ -400,6 +945,8 @@ class ROIManagerPlugin(PluginBase):
             "marker_set": self._resolve_marker_set_choice(),
             "tags": list(self.ui_component.tags.value),
             "comment": self.ui_component.comment.value.strip(),
+            "annotation_palette": self._get_active_annotation_palette(),
+            "mask_color_set": self._get_active_mask_color_set(),
         }
 
         updated = self.main_viewer.roi_manager.update_roi(self._selected_roi_id, updates)
@@ -453,6 +1000,29 @@ class ROIManagerPlugin(PluginBase):
             return
         self.main_viewer.center_on_roi(record)
         self.set_status("Centered on ROI.", level="success")
+
+    def _center_with_preset(self, _):
+        if not self._selected_roi_id:
+            self.set_status("Select an ROI to center on.", level="warning")
+            return
+
+        record = self.main_viewer.roi_manager.get_roi(self._selected_roi_id)
+        if not record:
+            self.set_status("Selected ROI no longer exists.", level="error")
+            self.refresh_roi_table()
+            return
+
+        self.main_viewer.center_on_roi(record)
+        success, missing = self._apply_roi_presets(record)
+
+        if success:
+            self.set_status("Centered on ROI with preset.", level="success")
+        else:
+            missing_text = ", ".join(missing)
+            self.set_status(
+                f"Centered on ROI; missing preset(s): {missing_text}.",
+                level="warning",
+            )
 
     def _on_tags_value_change(self, change) -> None:
         if self._suspend_ui_events or change.get("name") != "value":
@@ -606,6 +1176,10 @@ class ROIManagerPlugin(PluginBase):
             else:
                 comment_value = str(comment_value)
             self.ui_component.comment.value = comment_value
+            self._update_metadata_summaries(
+                str(record.get("annotation_palette") or ""),
+                str(record.get("mask_color_set") or ""),
+            )
         finally:
             self._suspend_ui_events = False
 
@@ -615,8 +1189,15 @@ class ROIManagerPlugin(PluginBase):
             self.ui_component.marker_dropdown.value = self.CURRENT_MARKER_VALUE
             self.ui_component.tags.value = ()
             self.ui_component.comment.value = ""
+            self._update_metadata_summaries("", "")
         finally:
             self._suspend_ui_events = False
+
+    def _update_metadata_summaries(self, annotation_name: str, mask_name: str) -> None:
+        annotation_text = annotation_name or "—"
+        mask_text = mask_name or "—"
+        self.ui_component.annotation_summary.value = f"<em>Annotation palette: {annotation_text}</em>"
+        self.ui_component.mask_summary.value = f"<em>Mask color set: {mask_text}</em>"
 
     def set_status(self, message: str, level: str = "info") -> None:
         color = self.STATUS_COLORS.get(level, self.STATUS_COLORS["info"])

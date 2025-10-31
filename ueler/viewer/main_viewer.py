@@ -170,6 +170,7 @@ class ImageMaskViewer:
         self.annotation_class_ids = {}
         self.annotation_palette_folder: Optional[Path] = None
         self.annotation_palette_registry_records: Dict[str, Dict[str, str]] = {}
+        self.active_annotation_palette_set_name: Optional[str] = None
         self.annotation_display_enabled = False
         self.active_annotation_name: Optional[str] = None
         self.annotation_overlay_mode = "combined"
@@ -191,6 +192,7 @@ class ImageMaskViewer:
         # ROI management
         self.roi_manager = ROIManager(self.base_folder)
         self.roi_plugin: Optional[ROIManagerPlugin] = None
+        self.active_marker_set_name: Optional[str] = None
 
         # Initialize marker sets
         self.marker_sets = {}
@@ -1246,6 +1248,7 @@ class ImageMaskViewer:
             )
             write_palette_file(path, payload)
             self._update_annotation_palette_registry(folder, name, path, annotation, timestamp)
+            self.active_annotation_palette_set_name = name
             self._log_annotation_palette(
                 f"Saved palette '{name}' for annotation '{annotation}'.",
                 clear=True,
@@ -1266,6 +1269,7 @@ class ImageMaskViewer:
         except PaletteStoreError:
             records = {}
         records[name] = {
+            "name": name,
             "path": str(path.resolve()),
             "annotation": annotation,
             "last_modified": timestamp,
@@ -1278,6 +1282,37 @@ class ImageMaskViewer:
         ):
             self.annotation_palette_registry_records = records
             self._refresh_annotation_palette_dropdown()
+
+    def get_active_annotation_palette_set(self) -> str:
+        return self.active_annotation_palette_set_name or ""
+
+    def apply_annotation_palette_set(self, name: str) -> bool:
+        if not name:
+            return False
+
+        record = self.annotation_palette_registry_records.get(name)
+        if record is None:
+            return False
+
+        path = Path(record.get("path", "")).expanduser()
+        if not path.exists():
+            return False
+
+        try:
+            self._load_annotation_palette(path)
+        except Exception:  # pragma: no cover - delegated error reporting
+            return False
+
+        self.active_annotation_palette_set_name = name
+        dropdown = getattr(self.ui_component, "annotation_palette_saved_sets_dropdown", None)
+        if dropdown is not None:
+            try:
+                option_values = [value if isinstance(value, str) else value[1] for value in getattr(dropdown, "options", [])]
+                if name in option_values:
+                    dropdown.value = name
+            except Exception:
+                pass
+        return True
 
     def _get_annotation_palette_load_path(self) -> Optional[Path]:
         picker = getattr(self.ui_component, "annotation_palette_load_picker", None)
@@ -1364,6 +1399,9 @@ class ImageMaskViewer:
         if self.annotation_display_enabled:
             self.update_display(self.current_downsample_factor)
 
+        palette_name = str(payload.get("name", path.stem))
+        self.active_annotation_palette_set_name = palette_name
+
         self._log_annotation_palette(
             f"Loaded palette '{payload.get('name', path.stem)}' for annotation '{annotation}'.",
             clear=True,
@@ -1385,6 +1423,11 @@ class ImageMaskViewer:
             if not path.exists():
                 raise PaletteStoreError(f"Palette file '{path}' was not found.")
             self._load_annotation_palette(path)
+            dropdown = self.ui_component.annotation_palette_saved_sets_dropdown
+            selected_name = dropdown.value or ""
+            if not selected_name:
+                selected_name = record.get("annotation") or path.stem
+            self.active_annotation_palette_set_name = selected_name
         except Exception as err:  # pylint: disable=broad-except
             self._log_annotation_palette(f"Failed to apply palette: {err}", error=True, clear=True)
 
@@ -2108,55 +2151,84 @@ class ImageMaskViewer:
         self.ui_component.delete_confirmation_checkbox.value = False  # Reset the checkbox
         print(f"Marker set '{set_name}' deleted.")
 
+    def _apply_marker_set(self, set_name: str, *, silent: bool = False) -> bool:
+        if not set_name:
+            if not silent:
+                print("Please provide a valid marker set name.")
+            return False
+
+        marker_set = self.marker_sets.get(set_name)
+        if marker_set is None:
+            if not silent:
+                print(f"Marker set '{set_name}' not found.")
+            return False
+
+        selected_channels = tuple(marker_set.get('selected_channels', ()))
+        if not selected_channels:
+            if not silent:
+                print(f"Marker set '{set_name}' has no channels saved.")
+            return False
+
+        channel_settings = marker_set.get('channel_settings', {}) or {}
+
+        for ch in selected_channels:
+            settings = channel_settings.get(ch, {}) if isinstance(channel_settings, dict) else {}
+            saved_max = settings.get('contrast_max') if isinstance(settings, dict) else None
+            if saved_max is not None:
+                self._merge_channel_max(ch, saved_max, sync=False)
+
+        selector = getattr(self.ui_component, 'channel_selector', None)
+        if selector is None:
+            if not silent:
+                print("Channel selector widget unavailable; cannot load marker set.")
+            return False
+
+        selector.value = selected_channels
+        self.update_controls(None)
+
+        color_controls = getattr(self.ui_component, 'color_controls', {}) or {}
+        min_controls = getattr(self.ui_component, 'contrast_min_controls', {}) or {}
+        max_controls = getattr(self.ui_component, 'contrast_max_controls', {}) or {}
+
+        for ch in selected_channels:
+            settings = channel_settings.get(ch, {}) if isinstance(channel_settings, dict) else {}
+
+            self._sync_channel_controls(ch)
+
+            color_control = color_controls.get(ch)
+            min_control = min_controls.get(ch)
+            max_control = max_controls.get(ch)
+
+            if color_control is not None and isinstance(settings, dict) and 'color' in settings:
+                color_control.value = settings['color']
+            if min_control is not None and isinstance(settings, dict) and 'contrast_min' in settings:
+                min_control.value = settings['contrast_min']
+            if max_control is not None and isinstance(settings, dict) and 'contrast_max' in settings:
+                max_control.value = settings['contrast_max']
+
+            if isinstance(settings, dict) and 'contrast_max' in settings:
+                self._merge_channel_max(ch, settings['contrast_max'])
+
+        try:
+            self.update_display(self.current_downsample_factor)
+        except Exception:  # pragma: no cover - rendering safeguards
+            if not silent:
+                print("Marker set applied, but display refresh failed.")
+
+        self.active_marker_set_name = set_name
+        if not silent:
+            print(f"Marker set '{set_name}' loaded.")
+        return True
+
     def load_marker_set(self, button):
         set_name = self.ui_component.marker_set_dropdown.value
         if not set_name:
             print("No marker set selected to load.")
             return
-        if set_name not in self.marker_sets:
-            print(f"Marker set '{set_name}' not found.")
-            return
+        self._apply_marker_set(set_name, silent=False)
 
-        marker_set = self.marker_sets[set_name]
-        selected_channels = marker_set['selected_channels']
-        channel_settings = marker_set['channel_settings']
-
-        # Ensure cached maxima accommodate saved settings before controls refresh
-        for ch in selected_channels:
-            settings = channel_settings.get(ch, {})
-            saved_max = settings.get('contrast_max')
-            if saved_max is not None:
-                self._merge_channel_max(ch, saved_max, sync=False)
-
-        # Update channel selector
-        self.ui_component.channel_selector.value = tuple(selected_channels)
-
-        # Update controls
-        self.update_controls(None)
-
-        for ch in selected_channels:
-            settings = channel_settings.get(ch, {})
-
-            # Ensure slider ranges expand to cover any stored maxima
-            self._sync_channel_controls(ch)
-
-            color_control = self.ui_component.color_controls.get(ch) if hasattr(self.ui_component, 'color_controls') else None
-            min_control = self.ui_component.contrast_min_controls.get(ch) if hasattr(self.ui_component, 'contrast_min_controls') else None
-            max_control = self.ui_component.contrast_max_controls.get(ch) if hasattr(self.ui_component, 'contrast_max_controls') else None
-
-            if color_control is not None and 'color' in settings:
-                color_control.value = settings['color']
-            if min_control is not None and 'contrast_min' in settings:
-                min_control.value = settings['contrast_min']
-            if max_control is not None and 'contrast_max' in settings:
-                max_control.value = settings['contrast_max']
-
-            if 'contrast_max' in settings:
-                self._merge_channel_max(ch, settings['contrast_max'])
-
-        # Update display
-        self.update_display(self.current_downsample_factor)
-        print(f"Marker set '{set_name}' loaded.")
+    def apply_marker_set_by_name(self, set_name: str) -> bool:
+        return self._apply_marker_set(set_name, silent=True)
 
     def update_marker_set_dropdown(self):
         if self.marker_sets:

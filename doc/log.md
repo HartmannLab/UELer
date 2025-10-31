@@ -27,6 +27,10 @@
 - Renamed the accordion entry to `Pixel annotations` and enforced the order `Channels`, `Masks`, `Pixel annotations` so mask controls precede annotation options while keeping the palette editor accessible.
 - Updated `tests/test_annotation_palettes.py` to reflect the new accordion order and the pared-down control list ahead of regression runs.
 
+**ROI browser presets**
+- Rebuilt the ROI Manager plugin to expose `ROI browser` and `ROI editor` tabs, adding a Matplotlib-backed gallery with tag/FOV filters plus a centre-with-preset action that replays saved rendering metadata (addresses [#44](https://github.com/HartmannLab/UELer/issues/44)).
+- Extended ROI persistence to store annotation palette and mask colour set identifiers and taught `ImageMaskViewer` to report/apply the active palette name so plugins can capture and restore presets reliably.
+
 **Channels accordion consolidation**
 - Relocated the channel tag chips plus marker set dropdown, name field, and action buttons into the Channels accordion pane so selection presets sit next to their per-channel sliders (addresses [#40](https://github.com/HartmannLab/UELer/issues/40)).
 - Rebuilt the accordion entry with dedicated containers for the selector, marker set controls, and dynamic sliders, preserving spacing and keyboard focus while removing duplicate widgets from the left panel header.
