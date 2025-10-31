@@ -11,40 +11,46 @@
 - Ensure ROI records capture enough state (marker, annotation palette reference, mask painter set) to faithfully restore the saved view.
 - Deliver regression-safe changes with automated coverage where practical.
 
-## Proposed Approach
+## Progress & Next Steps
 1. **Data model updates**
-   - Extend `ROI_COLUMNS` and related helpers to store optional `annotation_palette` and `mask_color_set` identifiers alongside the existing marker set; both map to globally unique names managed under `.UELer`.
-   - Update capture/update flows to record the currently active annotation palette & mask color set (collect from viewer + mask painter plugin).
-   - Propagate new fields through CSV import/export; default to empty strings for backward compatibility.
+   - *Done:* `ROI_COLUMNS` now captures `annotation_palette` and `mask_color_set` identifiers and defaults them to empty strings for legacy CSV compatibility.
+   - *Pending:* Persist the mask visibility state (per-mask on/off) with each ROI and thread it through capture/update/export.
 
 2. **Viewer integration hooks**
-   - Expose helper methods on the main viewer to (a) resolve the active annotation palette selection and (b) apply a saved palette by registry name without mutating UI state unexpectedly; palette persistence will always use the shared `.UELer` path.
-   - Add a similar programmatic entry point to the mask painter plugin to apply a saved color set by name and report whether it succeeded; color sets are likewise stored at the fixed `.UELer` location.
-   - Define safe fallbacks when requested presets are missing (log status + proceed with centering only).
+   - *Done:* `ImageMaskViewer` exposes `get_active_annotation_palette_set` and `apply_annotation_palette_set`, updating active palette names when palettes are loaded or applied.
+   - *Pending:* Mask painter still needs `get_active_color_set_name`/`apply_color_set_by_name` helpers; ROI preset restore should call into them once available.
+   - *Pending:* Add explicit fallbacks/logging when preset application fails so centering continues gracefully.
 
 3. **ROI editor tab rework**
-   - Wrap existing ROI manager content in a `Tab` widget with two pages: `ROI browser` (new) and `ROI editor` (modernized existing layout).
-   - Insert a `Center with preset` button that triggers centering plus preset/palette/mask application.
-   - Surface saved palette/mask identifiers inside the editor (read-only badges or dropdown sync) for transparency.
+   - *Done:* Plugin now renders `ROI browser` and `ROI editor` tabs, moves legacy controls under the editor tab, and adds `Center with preset` wiring for stored presets.
+   - *Pending:* Surface palette/mask identifiers in the editor UI (badges or labels) to show what will be applied.
 
 4. **ROI browser implementation**
-   - Build filter controls (e.g., multi-select TagsInput for tags, dropdown/multi-select for FOVs, optional text search).
-   - Render ROI previews via Matplotlib subplots using the same downsampling mechanics as the main viewer, leveraging stored marker set plus palette/mask info where available; gracefully degrade when data is incomplete.
-   - Handle selection clicks by focusing the main viewer on the ROI and ensuring rendering presets mirror the gallery tile.
-   - Keep gallery responsive to ROI table changes and filter tweaks; rely on `ueler.rendering` for lazy data fetching and add UI-level debouncing if needed.
+   - *Done:* Browser tab builds tag and FOV filters, renders a Matplotlib gallery, and centers ROIs with presets on selection.
+   - *Pending:* Implement throttling so the gallery does not rebuild on every click; honor user choice to use current preset vs saved preset; support AND/OR tag logic; paginate gallery (load next 4 on scroll request); cap gallery container height with scroll; scale figures to 98% width and remove figure/subplot titles.
 
 5. **Testing & validation**
-   - Add unit tests covering ROI manager data serialization with new columns and the preset application helpers.
-   - Where feasible, add widget-level tests (e.g., verifying filter logic, preset application stub interactions) using existing pytest infrastructure.
-   - Manually verify gallery rendering in a notebook due to UI dependencies.
+   - *Pending:* Add unit coverage for ROI serialization with new fields, palette apply helpers, tag filter logic, and pagination throttles.
+   - *Pending:* Schedule manual notebook verification once remaining UI behaviours land.
 
 6. **Documentation & release notes**
-   - Update `README.md`, `doc/log.md`, and `dev_note/github_issues.md` summaries after implementation to reflect the new UX and persistence behaviour.
+   - *Done:* README, log, and issue summary updated to describe the ROI browser/editor split and preset persistence.
+   - *Pending:* Revise release notes once mask state persistence and browser UX refinements are complete.
 
 ## Open Questions / Follow-ups
 - *Resolved:* Palette and mask sets use globally unique names and always persist under `.UELer`, so no per-project paths are stored.
-- *Resolved:* Gallery tiles use Matplotlib subplots with the viewer's downsampling presets; no additional size controls planned initially.
+- *Updated:* Gallery tiles will adopt dynamic sizing (98% parent width) per new request; confirm Matplotlib layout can accommodate without distorting axes.
 - *Resolved:* Lazy rendering relies on the shared `ueler.rendering` engine, keeping the browser layer lightweight.
+
+## New Requests (2025-10-31)
+- Scale gallery subplots so each figure occupies 98% of the parent container width (no outer padding-induced shrinkage).
+- Suppress figure-level titles and subplot titles in the gallery view.
+- Add a checkbox that lets users choose between applying the ROI's saved preset or retaining the viewer's current preset when clicking a gallery tile.
+- Avoid triggering a full browser refresh on every ROI click; updates should respond to filter or data changes only.
+- Persist the full mask visibility state with each ROI record and restore it during preset application.
+- Provide AND/OR logic for tag filtering to toggle between intersection and union semantics.
+- Constrain the gallery container to a 500px max height with automatic vertical scrolling.
+- Implement a "scroll down and show more" affordance that loads the next four ROI previews on demand.
 
 ## Validation Plan
 - Run the ROI-related pytest modules (`tests/test_roi_manager_tags.py`, `tests/test_export_job.py`, plus any new tests).
