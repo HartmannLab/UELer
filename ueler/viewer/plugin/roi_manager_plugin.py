@@ -57,8 +57,8 @@ class ROIManagerPlugin(PluginBase):
     }
 
     BROWSER_COLUMNS = 3
-    BROWSER_INITIAL_TILES = 8
-    BROWSER_PAGE_SIZE = 4
+    BROWSER_ROWS = 4
+    BROWSER_PAGE_SIZE = BROWSER_COLUMNS * BROWSER_ROWS
 
     def __init__(self, main_viewer, width: int = 6, height: int = 3) -> None:
         super().__init__(main_viewer, width, height)
@@ -72,12 +72,15 @@ class ROIManagerPlugin(PluginBase):
         self._browser_axis_to_roi: Dict[object, str] = {}
         self._browser_click_cid: Optional[int] = None
         self._browser_figure = None
-        self._browser_visible_limit = self.BROWSER_INITIAL_TILES
+        self._browser_current_page = 1
+        self._browser_total_pages = 1
         self._browser_last_signature = None
         self._browser_expression_cache = None
         self._browser_expression_error = None
         self._browser_tag_buttons = {}
-        self._browser_scroll_bound = False
+        self._browser_expression_selection: Tuple[int, int] = (0, 0)
+        self._browser_expression_focused = False
+        self._browser_expression_widget_bound = False
 
         self._build_widgets()
         self._build_layout()
@@ -349,7 +352,9 @@ class ROIManagerPlugin(PluginBase):
                 tooltip=f"Insert '{symbol}'",
                 layout=Layout(width="32px"),
             )
-            operator_button.on_click(lambda _btn, token=symbol: self._append_to_browser_expression(token))
+            operator_button.on_click(
+                lambda _btn, token=symbol: self._insert_browser_expression_snippet(token)
+            )
             operator_buttons.append(operator_button)
         self.ui_component.browser_expression_operator_box = HBox(
             operator_buttons,
@@ -365,22 +370,39 @@ class ROIManagerPlugin(PluginBase):
             "<em>Combine tags with () &amp; | !. Leave blank to use the simple tag filter.</em>"
         )
 
+        # Allow the output widget to size to its content. Some frontends may
+        # ignore 'height' or 'overflow' props; adjust if needed for your target.
         self.ui_component.browser_output = Output(
             layout=Layout(
-                min_height="320px",
-                max_height="500px",
+                height="auto",
                 width="98%",
                 align_self="center",
-                overflow_y="auto",
+                overflow_y="visible",
                 border="1px solid var(--jp-border-color2, #ccc)",
             )
         )
+
         self.ui_component.browser_status = HTML("<em>No ROI captured yet.</em>")
-        self.ui_component.browser_show_more_button = Button(
-            description="Show 4 more",
-            icon="angle-double-down",
+        self.ui_component.browser_page_label = HTML("<em>Page 1 of 1</em>")
+        self.ui_component.browser_prev_button = Button(
+            description="Previous page",
+            icon="angle-left",
             button_style="",
-            layout=Layout(width="auto", display="none"),
+            layout=Layout(width="auto"),
+        )
+        self.ui_component.browser_next_button = Button(
+            description="Next page",
+            icon="angle-right",
+            button_style="",
+            layout=Layout(width="auto"),
+        )
+        self.ui_component.browser_pagination = HBox(
+            [
+                self.ui_component.browser_prev_button,
+                self.ui_component.browser_page_label,
+                self.ui_component.browser_next_button,
+            ],
+            layout=Layout(gap="8px", justify_content="center", align_items="center", flex_flow="row wrap"),
         )
 
         controls = VBox(
@@ -418,14 +440,12 @@ class ROIManagerPlugin(PluginBase):
             [
                 controls,
                 self.ui_component.browser_output,
-                HBox(
-                    [self.ui_component.browser_show_more_button],
-                    layout=Layout(justify_content="center"),
-                ),
+                self.ui_component.browser_pagination,
                 self.ui_component.browser_status,
             ],
             layout=column_block_layout(gap="8px"),
         )
+        self._ensure_expression_cursor_binding()
 
     def _build_layout(self) -> None:
         header = HTML("<strong>ROI manager</strong>")
@@ -480,11 +500,8 @@ class ROIManagerPlugin(PluginBase):
             self._on_browser_expression_change, names="value"
         )
         self.ui_component.browser_refresh_button.on_click(self._on_browser_refresh_clicked)
-        self.ui_component.browser_show_more_button.on_click(self._on_browser_show_more_clicked)
-        try:
-            self.ui_component.browser_output.on_msg(self._on_browser_output_msg)
-        except Exception:  # pragma: no cover - ipywidgets versions prior to on_msg support
-            pass
+        self.ui_component.browser_prev_button.on_click(self._on_browser_prev_clicked)
+        self.ui_component.browser_next_button.on_click(self._on_browser_next_clicked)
 
     # ------------------------------------------------------------------
     # Event handlers and helpers
@@ -586,7 +603,7 @@ class ROIManagerPlugin(PluginBase):
             self._suspend_ui_events = False
 
         self._selected_roi_id = selection
-        self._browser_visible_limit = self.BROWSER_INITIAL_TILES
+        self._browser_current_page = 1
         self._browser_last_signature = None
         self._refresh_browser_gallery()
 
@@ -684,8 +701,7 @@ class ROIManagerPlugin(PluginBase):
     def _refresh_browser_gallery(self) -> None:
         output = getattr(self.ui_component, "browser_output", None)
         status = getattr(self.ui_component, "browser_status", None)
-        show_more = getattr(self.ui_component, "browser_show_more_button", None)
-        if output is None or status is None or show_more is None:
+        if output is None or status is None:
             return
 
         if self._suspend_browser_events:
@@ -699,16 +715,22 @@ class ROIManagerPlugin(PluginBase):
             self._disconnect_browser_events()
             self._browser_axis_to_roi.clear()
             self._browser_last_signature = ("empty",)
+            self._browser_total_pages = 0
             with output:
                 output.clear_output(wait=True)
             self._update_browser_summary(0, 0)
-            self._update_show_more_button(0, 0)
-            self._browser_scroll_bound = False
+            self._update_pagination_controls(0, 0, 0)
             return
 
-        limit = max(self.BROWSER_INITIAL_TILES, int(self._browser_visible_limit or self.BROWSER_INITIAL_TILES))
-        limit = min(limit, total)
-        limited_records = records[:limit]
+        page_size = max(1, int(self.BROWSER_PAGE_SIZE))
+        total_pages = max(1, math.ceil(total / page_size))
+        self._browser_total_pages = total_pages
+        current_page = max(1, min(self._browser_current_page, total_pages))
+        self._browser_current_page = current_page
+
+        start_index = (current_page - 1) * page_size
+        end_index = min(start_index + page_size, total)
+        limited_records = records[start_index:end_index]
 
         expression_text = str(getattr(self.ui_component.browser_expression_input, "value", "") or "").strip()
 
@@ -720,27 +742,31 @@ class ROIManagerPlugin(PluginBase):
             getattr(self.ui_component.browser_tag_logic, "value", "and"),
             expression_text,
             self._browser_expression_error,
-            limit,
+            current_page,
+            total_pages,
             total,
         )
 
         if self._browser_last_signature == signature:
             rendered_count = len(limited_records)
             self._update_browser_summary(rendered_count, total)
-            self._update_show_more_button(rendered_count, total)
+            self._update_pagination_controls(current_page, total_pages, total)
             return
 
         self._disconnect_browser_events()
         self._browser_axis_to_roi.clear()
 
-        model_id = getattr(output, "_model_id", "")
-        self._browser_scroll_bound = False
-
         with output:
             output.clear_output(wait=True)
-            columns = min(self.BROWSER_COLUMNS, max(1, len(limited_records)))
-            rows = math.ceil(len(limited_records) / columns)
-            fig, axes = plt.subplots(rows, columns, figsize=(columns * 3.2, rows * 3.2))
+            if limited_records:
+                columns = min(self.BROWSER_COLUMNS, max(1, len(limited_records)))
+                rows = max(1, math.ceil(len(limited_records) / columns))
+            else:
+                columns = self.BROWSER_COLUMNS
+                rows = max(1, self.BROWSER_ROWS)
+
+            tile_inch = 2.4
+            fig, axes = plt.subplots(rows, columns, figsize=(columns * tile_inch, rows * tile_inch))
             fig.subplots_adjust(left=0.01, right=0.99, top=0.99, bottom=0.01, wspace=0.02, hspace=0.02)
             axes_array = np.atleast_1d(np.array(axes)).ravel()
 
@@ -790,11 +816,6 @@ class ROIManagerPlugin(PluginBase):
             except Exception:  # pragma: no cover - backend differences
                 pass
 
-            script = self._browser_scroll_script(model_id)
-            if script:
-                display(IPythonHTML(script))
-                self._browser_scroll_bound = True
-
         self._browser_figure = fig
         try:
             self._browser_click_cid = fig.canvas.mpl_connect("button_press_event", self._on_browser_click)
@@ -804,7 +825,7 @@ class ROIManagerPlugin(PluginBase):
         self._browser_last_signature = signature
         rendered_count = rendered
         self._update_browser_summary(rendered_count, total)
-        self._update_show_more_button(rendered_count, total)
+        self._update_pagination_controls(current_page, total_pages, total)
 
     def _disconnect_browser_events(self) -> None:
         if self._browser_figure is not None and self._browser_click_cid is not None:
@@ -823,56 +844,108 @@ class ROIManagerPlugin(PluginBase):
             status.value = "<em>No ROI matches current filters.</em>"
             return
 
-        message = f"Displaying {rendered} of {total} ROI(s)."
-        remaining = max(0, total - rendered)
-        if remaining:
-            next_batch = min(self.BROWSER_PAGE_SIZE, remaining)
-            message += (
-                f" Scroll to the bottom (or click 'Show {next_batch} more') to load additional ROIs."
-            )
-        status.value = message
+        current_page = max(1, int(getattr(self, "_browser_current_page", 1)))
+        total_pages = max(1, int(getattr(self, "_browser_total_pages", 1)))
+        status.value = (
+            f"Displaying {rendered} ROI(s) — page {current_page} of {total_pages} (total {total})."
+        )
 
-    def _update_show_more_button(self, rendered: int, total: int) -> None:
-        button = getattr(self.ui_component, "browser_show_more_button", None)
-        if button is None:
-            return
-        remaining = max(0, total - rendered)
-        if remaining <= 0:
-            button.layout.display = "none"
-            button.disabled = True
-            return
+    def _update_pagination_controls(self, current_page: int, total_pages: int, total: int) -> None:
+        prev_button = getattr(self.ui_component, "browser_prev_button", None)
+        next_button = getattr(self.ui_component, "browser_next_button", None)
+        page_label = getattr(self.ui_component, "browser_page_label", None)
 
-        button.layout.display = "inline-flex"
-        button.disabled = False
-        next_batch = min(self.BROWSER_PAGE_SIZE, remaining)
-        button.description = f"Show {next_batch} more"
-        button.tooltip = "Scroll to the bottom and click to load additional ROIs."
+        if page_label is not None:
+            if total_pages <= 0:
+                page_label.value = "<em>No pages</em>"
+            else:
+                page_label.value = (
+                    f"<em>Page {max(1, current_page)} of {max(1, total_pages)} ({total} total)</em>"
+                )
 
-    def _append_to_browser_expression(self, snippet: str) -> None:
+        if prev_button is not None:
+            prev_button.disabled = current_page <= 1 or total_pages <= 0
+
+        if next_button is not None:
+            next_button.disabled = current_page >= total_pages or total_pages <= 0
+
+    def _insert_browser_expression_snippet(self, snippet: str) -> None:
+        self._ensure_expression_cursor_binding()
         widget = getattr(self.ui_component, "browser_expression_input", None)
         if widget is None:
             return
 
         current = str(getattr(widget, "value", "") or "")
-        base = current.rstrip()
-        if snippet == ")":
-            new_value = f"{base})"
-        elif snippet == "!":
-            if base and not base.endswith(" "):
-                base += " "
-            new_value = f"{base}!"
-        else:
-            if base and not base.endswith(" "):
-                base += " "
-            new_value = f"{base}{snippet} "
+        start, end = self._browser_expression_selection
+        text_length = len(current)
+        if not isinstance(start, int) or start < 0 or start > text_length:
+            start = text_length
+        if not isinstance(end, int) or end < start or end > text_length:
+            end = start
+
+        before = current[:start]
+        after = current[end:]
+        insert, cursor_offset = self._format_expression_insertion(before, after, snippet)
+
+        new_value = before + insert + after
 
         self._suspend_browser_events = True
         try:
-            widget.value = new_value.strip()
+            widget.value = new_value
         finally:
             self._suspend_browser_events = False
 
+        new_cursor = start + cursor_offset
+        self._browser_expression_selection = (new_cursor, new_cursor)
+        self._send_browser_expression_cursor(new_cursor, new_cursor, focus=True)
         self._on_browser_expression_change({"name": "value", "new": widget.value})
+
+    def _format_expression_insertion(self, before: str, after: str, snippet: str) -> Tuple[str, int]:
+        before_char = before[-1] if before else ""
+        after_char = after[0] if after else ""
+        boundary_left = {"", " ", "	", "(", "&", "|", "!"}
+        boundary_right = {"", " ", "	", ")", "&", "|"}
+
+        needs_leading = bool(before) and before_char not in boundary_left
+
+        if snippet == "!":
+            insert = (" " if needs_leading else "") + "!"
+            return insert, len(insert)
+
+        if snippet == ")":
+            insert = ")"
+            if needs_leading and before_char not in {" ", "("}:
+                insert = " " + insert
+            return insert, len(insert)
+
+        leading = " " if needs_leading else ""
+        after_boundary = after_char in boundary_right
+
+        if snippet == "(":
+            needs_trailing = not after_boundary and after_char != ")"
+        else:
+            needs_trailing = not after_boundary
+
+        trailing = " " if needs_trailing else ""
+        insert = f"{leading}{snippet}{trailing}"
+        cursor_offset = len(insert) if trailing else len(leading + snippet)
+        return insert, cursor_offset
+
+    def _send_browser_expression_cursor(self, start: int, end: int, focus: bool = False) -> None:
+        widget = getattr(self.ui_component, "browser_expression_input", None)
+        if widget is None:
+            return
+        payload = {
+            "event": "set-selection",
+            "start": max(0, int(start)),
+            "end": max(0, int(end)),
+        }
+        if focus:
+            payload["focus"] = True
+        try:
+            widget.send(payload)
+        except Exception:  # pragma: no cover - widget may not support send
+            pass
 
     def _refresh_expression_tag_buttons(self, tags: Sequence[str]) -> None:
         container = getattr(self.ui_component, "browser_expression_tag_box", None)
@@ -890,7 +963,9 @@ class ROIManagerPlugin(PluginBase):
                 tooltip=f"Insert '{tag}'",
                 layout=Layout(width="auto"),
             )
-            button.on_click(lambda _btn, token=tag: self._append_to_browser_expression(token))
+            button.on_click(
+                lambda _btn, token=tag: self._insert_browser_expression_snippet(token)
+            )
             self._browser_tag_buttons[tag] = button
             buttons.append(button)
 
@@ -903,7 +978,7 @@ class ROIManagerPlugin(PluginBase):
         expression = str(change.get("new") or "")
         self._browser_expression_cache = None
         self._compile_browser_expression(expression)
-        self._browser_visible_limit = self.BROWSER_INITIAL_TILES
+        self._browser_current_page = 1
         self._browser_last_signature = None
         self._refresh_browser_gallery()
 
@@ -946,32 +1021,27 @@ class ROIManagerPlugin(PluginBase):
         else:
             feedback.value = "<em>Combine tags with () &amp; | !. Leave blank to use the simple tag filter.</em>"
 
-    def _browser_scroll_script(self, model_id: str) -> str:
+    def _expression_cursor_script(self, model_id: str) -> str:
         if not model_id:
             return ""
 
         encoded_id = json.dumps(model_id)
         return f"""
-<script type=\"text/javascript\">
+<script type="text/javascript">
 (function() {{
     const widgetId = {encoded_id};
     const selectors = [`[data-widget-id="${{widgetId}}"]`, `[data-widgetid="${{widgetId}}"]`];
     let attempts = 0;
+    let cachedModel = null;
 
-    function locateHost() {{
-        for (const selector of selectors) {{
-            const element = document.querySelector(selector);
-            if (element) {{
-                return element;
-            }}
+    function resolveModel(callback) {{
+        if (cachedModel) {{
+            callback(cachedModel);
+            return;
         }}
-        return null;
-    }}
 
-    function sendEvent() {{
-        const payload = {{event: 'scroll-bottom'}};
         const sendWithManager = manager => {{
-            if (!manager || typeof manager.get_model !== 'function') {{
+            if (!manager || typeof manager.get_model !== "function") {{
                 return;
             }}
             try {{
@@ -979,10 +1049,11 @@ class ROIManagerPlugin(PluginBase):
                     if (!model) {{
                         return;
                     }}
-                    model.send(payload);
+                    cachedModel = model;
+                    callback(model);
                 }}).catch(() => {{}});
             }} catch (err) {{
-                console.debug('UELer ROI browser scroll dispatch failed', err);
+                console.debug('UELer ROI expression manager lookup failed', err);
             }}
         }};
 
@@ -993,7 +1064,7 @@ class ROIManagerPlugin(PluginBase):
         if (window.jupyterWidgetManagers && window.jupyterWidgetManagers.length) {{
             candidates.push(window.jupyterWidgetManagers[0]);
         }}
-        if (window.manager && typeof window.manager.get_model === 'function') {{
+        if (window.manager && typeof window.manager.get_model === "function") {{
             candidates.push(window.manager);
         }}
 
@@ -1006,7 +1077,7 @@ class ROIManagerPlugin(PluginBase):
             sendWithManager(candidate);
         }}
 
-        if (!handled && typeof window.require === 'function') {{
+        if (!handled && typeof window.require === "function") {{
             window.require(['@jupyter-widgets/base'], function(base) {{
                 const managers = (base.ManagerBase && base.ManagerBase._managers) || [];
                 if (managers.length) {{
@@ -1014,6 +1085,35 @@ class ROIManagerPlugin(PluginBase):
                 }}
             }});
         }}
+    }}
+
+    function sendSelection(input) {{
+        resolveModel(model => {{
+            if (!model) {{
+                return;
+            }}
+            const payload = {{
+                event: 'selection-change',
+                start: input.selectionStart == null ? input.value.length : input.selectionStart,
+                end: input.selectionEnd == null ? input.value.length : input.selectionEnd,
+                focused: document.activeElement === input
+            }};
+            try {{
+                model.send(payload);
+            }} catch (err) {{
+                console.debug('UELer ROI expression selection dispatch failed', err);
+            }}
+        }});
+    }}
+
+    function locateHost() {{
+        for (const selector of selectors) {{
+            const element = document.querySelector(selector);
+            if (element) {{
+                return element;
+            }}
+        }}
+        return null;
     }}
 
     function attach() {{
@@ -1025,34 +1125,54 @@ class ROIManagerPlugin(PluginBase):
             return;
         }}
 
-        const scrollContainer = host.querySelector('.jupyter-widgets-output-area') || host;
-        if (!scrollContainer) {{
+        const input = host.querySelector('input');
+        if (!input) {{
             if (attempts++ < 40) {{
                 requestAnimationFrame(attach);
             }}
             return;
         }}
 
-        if (scrollContainer.__ueler_scroll_listener_attached) {{
+        if (input.__ueler_expression_listener_attached) {{
             return;
         }}
+        input.__ueler_expression_listener_attached = true;
 
-        scrollContainer.__ueler_scroll_listener_attached = true;
-        let throttled = false;
-        scrollContainer.addEventListener('scroll', () => {{
-            if (throttled) {{
+        const handler = () => sendSelection(input);
+        for (const eventName of ['keyup', 'mouseup', 'select', 'focus', 'blur', 'input']) {{
+            input.addEventListener(eventName, handler);
+        }}
+
+        resolveModel(model => {{
+            if (!model) {{
                 return;
             }}
-            const nearBottom = scrollContainer.scrollTop + scrollContainer.clientHeight >= scrollContainer.scrollHeight - 8;
-            if (!nearBottom) {{
+            if (model.__ueler_expression_listener_bound) {{
                 return;
             }}
-            throttled = true;
-            sendEvent();
-            setTimeout(() => {{
-                throttled = false;
-            }}, 300);
+            model.__ueler_expression_listener_bound = true;
+            model.on('msg:custom', msg => {{
+                if (!msg || typeof msg !== 'object') {{
+                    return;
+                }}
+                if (msg.event === 'set-selection') {{
+                    const start = Number.isFinite(msg.start) ? msg.start : (input.selectionStart || 0);
+                    const end = Number.isFinite(msg.end) ? msg.end : start;
+                    try {{
+                        if (msg.focus) {{
+                            input.focus();
+                        }}
+                        if (typeof input.setSelectionRange === 'function') {{
+                            input.setSelectionRange(start, end);
+                        }}
+                    }} catch (err) {{
+                        console.debug('UELer ROI expression selection apply failed', err);
+                    }}
+                }}
+            }});
         }});
+
+        handler();
     }}
 
     attach();
@@ -1060,12 +1180,55 @@ class ROIManagerPlugin(PluginBase):
 </script>
 """
 
-    def _on_browser_output_msg(self, _, content, __):  # pragma: no cover - UI callback
+    def _on_browser_expression_msg(self, _, content, __):  # pragma: no cover - UI callback
         if not isinstance(content, dict):
             return
-        if content.get("event") != "scroll-bottom":
+        if content.get("event") != "selection-change":
             return
-        self._on_browser_show_more_clicked(None)
+
+        start = content.get("start")
+        end = content.get("end")
+        if not isinstance(start, (int, float)):
+            start = 0
+        if not isinstance(end, (int, float)):
+            end = start
+
+        start = max(0, int(start))
+        end = max(start, int(end))
+        self._browser_expression_selection = (start, end)
+        self._browser_expression_focused = bool(content.get("focused"))
+
+    def _ensure_expression_cursor_binding(self) -> None:
+        if getattr(self, "_browser_expression_widget_bound", False):
+            return
+
+        widget = getattr(self.ui_component, "browser_expression_input", None)
+        if widget is None:
+            return
+
+        model_id = getattr(widget, "model_id", None) or getattr(widget, "_model_id", None)
+        if not model_id:
+            return
+
+        script = self._expression_cursor_script(model_id)
+        if script:
+            try:
+                display(IPythonHTML(script))
+            except Exception:  # pragma: no cover - display may fail in headless mode
+                pass
+
+        try:
+            widget.on_msg(self._on_browser_expression_msg)
+        except Exception:  # pragma: no cover - widget may not support custom messages
+            return
+
+        value = str(getattr(widget, "value", "") or "")
+        length = len(value)
+        self._browser_expression_selection = (length, length)
+        self._browser_expression_widget_bound = True
+
+        if hasattr(widget, "value"):
+            self._send_browser_expression_cursor(length, length, focus=False)
 
     def _render_roi_tile(
         self,
@@ -1183,21 +1346,27 @@ class ROIManagerPlugin(PluginBase):
     def _on_browser_filter_change(self, change) -> None:
         if self._suspend_browser_events or change.get("name") != "value":
             return
-        self._browser_visible_limit = self.BROWSER_INITIAL_TILES
+        self._browser_current_page = 1
         self._browser_last_signature = None
         self._refresh_browser_gallery()
 
     def _on_browser_refresh_clicked(self, _button) -> None:
-        self._browser_visible_limit = self.BROWSER_INITIAL_TILES
+        self._browser_current_page = 1
         self._browser_last_signature = None
         self._refresh_browser_gallery()
 
-    def _on_browser_show_more_clicked(self, _button) -> None:
-        df = self._filtered_browser_dataframe()
-        total = len(df.index) if hasattr(df, "index") else len(df)
-        if total <= self._browser_visible_limit:
+    def _on_browser_prev_clicked(self, _button) -> None:
+        if self._browser_current_page <= 1:
             return
-        self._browser_visible_limit = min(total, self._browser_visible_limit + self.BROWSER_PAGE_SIZE)
+        self._browser_current_page = max(1, self._browser_current_page - 1)
+        self._browser_last_signature = None
+        self._refresh_browser_gallery()
+
+    def _on_browser_next_clicked(self, _button) -> None:
+        total_pages = max(1, int(getattr(self, "_browser_total_pages", 1)))
+        if self._browser_current_page >= total_pages:
+            return
+        self._browser_current_page = min(total_pages, self._browser_current_page + 1)
         self._browser_last_signature = None
         self._refresh_browser_gallery()
 

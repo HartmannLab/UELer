@@ -1,4 +1,15 @@
 ### v0.2.0-rc2
+**ROI browser pagination**
+- Replaced the scroll-triggered lazy loader with explicit Previous/Next page buttons and a live page indicator, rendering 3x4 tiles per step so navigation stays deterministic (addresses [#44](https://github.com/HartmannLab/UELer/issues/44)).
+- Reset pagination whenever filters or expressions change and surfaced per-page summaries plus disabled states for boundary pages to keep the gallery responsive.
+
+**Expression helper cursor awareness**
+- Injected a custom widget bridge that tracks selection and focus inside the expression field and reuses it when inserting operator/tag snippets, keeping helpers splice-at-caret instead of appending blindly.
+- Updated ROI manager helpers and unit scaffolding (`tests/test_roi_manager_tags.py`) to match the cursor-aware workflow while dropping the deprecated scroll listener plumbing.
+
+**Tests**
+- ⚠ Pending (`tests/test_roi_manager_tags.py` will be exercised once pagination-bound stubs land in the widget test harness).
+
 **Cell gallery tile padding**
 - Updated `_compose_canvas` to size gallery slots by the largest rendered tile and center narrower crops so mixed-width images no longer raise broadcasting errors when assembling the grid (fixes [#43](https://github.com/HartmannLab/UELer/issues/43)).
 - Added `tests/test_cell_gallery.py` to exercise the padding logic and ran `python -m unittest tests.test_cell_gallery` to confirm the regression stays fixed.
@@ -30,7 +41,7 @@
 **ROI browser presets**
 - Rebuilt the ROI Manager plugin to expose `ROI browser` and `ROI editor` tabs, adding a Matplotlib-backed gallery with tag/FOV filters plus a centre-with-preset action that replays saved rendering metadata (addresses [#44](https://github.com/HartmannLab/UELer/issues/44)).
 - Extended ROI persistence to store annotation palette and mask colour set identifiers and taught `ImageMaskViewer` to report/apply the active palette name so plugins can capture and restore presets reliably.
-- Refined the browser with AND/OR tag filtering, a saved-preset toggle, 500 px scroll container with 98 % width tiles, incremental "show 4 more" pagination, and mask visibility restoration alongside existing preset metadata.
+- Refined the browser with AND/OR tag filtering, a saved-preset toggle, 500px scroll container with 98 % width tiles, incremental "show 4 more" pagination, and mask visibility restoration alongside existing preset metadata.
 
 **ROI browser expression filtering**
 - Added `ueler.viewer.tag_expression.compile_tag_expression` with tokenization, shunting-yard parsing, and eager validation so ROI tag filters accept boolean expressions using `()`, `&`, `|`, and `!` syntax (addresses [#44](https://github.com/HartmannLab/UELer/issues/44)).

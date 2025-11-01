@@ -103,6 +103,10 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 ### v0.2.0-rc2
 The first release candidate delivers automatic scale bars across the viewer and batch export workflows while retaining the Batch Export UI, overlay plumbing, and job runner improvements from earlier `v0.2.0` milestones.
 
+**ROI browser pagination**
+- Replaced the lazy scroll loader with Previous/Next buttons, a page indicator, and deterministic 3x4 slices so gallery navigation stays predictable even as filters or expressions change (addresses [#44](https://github.com/HartmannLab/UELer/issues/44)).
+- Added a cursor-aware expression helper that tracks the selection/focus inside the filter field, letting operator/tag buttons splice tokens at the caret and keep the widget focused for rapid edits.
+
 **Cell gallery tile padding**
 - Gallery slots now expand to the widest rendered tile and center narrower crops so selecting multiple cells never triggers NumPy broadcasting errors when their cutouts differ slightly in width.
 - Added a `tests/test_cell_gallery.py` regression to lock in the padding behaviour and keep the gallery, batch export, and main viewer selections in sync.

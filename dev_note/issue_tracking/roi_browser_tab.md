@@ -26,7 +26,7 @@
 
 4. **ROI browser implementation**
    - *Done:* Browser tab builds filters, throttles redraws via signature caching, offers OR/AND tag logic, and respects a new “Apply saved preset” checkbox.
-   - *Done:* Gallery tiles render inside a 500 px scroll box at 98% width, hide titles, and expose a “Show more” control that loads four additional ROIs per request.
+   - *Done:* Gallery tiles render inside a 500px scroll box at 98% width, hide titles, and page through 3x4 slices via Previous/Next controls instead of the old show-more loader.
 
 5. **Testing & validation**
    - *Pending:* Add unit coverage for ROI serialization with new fields, palette apply helpers, tag filter logic, and pagination throttles.
@@ -34,7 +34,7 @@
 
 6. **Documentation & release notes**
    - *Done:* README, log, and issue summary updated to describe the ROI browser/editor split and preset persistence.
-   - *Pending:* Revise release notes once mask state persistence and browser UX refinements are complete.
+   - *Done:* Release notes now cover pagination and cursor-aware expression helpers alongside earlier preset persistence notes.
 
 ## Open Questions / Follow-ups
 - *Resolved:* Palette and mask sets use globally unique names and always persist under `.UELer`, so no per-project paths are stored.
@@ -49,18 +49,15 @@
 - ✅ Persist the full mask visibility state with each ROI record and restore it during preset application.
 - ✅ Provide AND/OR logic for tag filtering to toggle between intersection and union semantics.
 - ✅ Constrain the gallery container to a 500px max height with automatic vertical scrolling.
-- ✅ Implement a "scroll down and show more" affordance that loads the next four ROI previews on demand.
+- ✅ Replaced the "scroll down and show more" affordance with explicit pagination that still surfaces four ROI previews per step.
 
-## Current Action Plan (Cycle starting 2025-10-31)
-1. 🚧 **Tag expression parsing & UI assist**
-   - Replace the simple AND/OR toggle with a boolean expression parser that understands `()`, `&`, `|`, and `!` operators, with graceful error messaging for invalid syntax.
-   - Add a lightweight expression builder widget (operator shortcuts and tag buttons) so users can compose filters without typing every symbol manually.
-2. 🚧 **Gallery layout & HUD cleanup**
-   - Tweak Matplotlib figure generation so individual tiles render at ~98% of the container width without extra padding, and suppress figure numbers/coordinate HUD overlays in the ROI browser.
-3. 🚧 **Lazy loading behaviour**
-   - Restore the “scroll down to load next four ROI previews” affordance by wiring the scroll container to request additional tiles automatically once users reach the bottom.
-4. 🔄 **Testing & documentation**
-   - Extend unit coverage for the tag expression parser and gallery pagination logic, then fold the latest changes into README, log, and issue summaries.
+## Current Action Plan (Cycle starting 2025-11-01)
+1. ✅ **Expression builder cursor placement**
+   - Completed: Added a JS-backed selection bridge and caret-aware insertion helpers so operator/tag shortcuts splice at the cursor and refocus the field.
+2. ✅ **ROI gallery pagination controls**
+   - Completed: Replaced the scroll-triggered loader with Previous/Next navigation, a page label, and automatic page resets when filters or expressions change.
+3. 🚧 **Testing & documentation**
+   - Next: Extend unit coverage for pagination/cursor helpers, run the ROI widget suites once the harness catches up, and capture screenshots if we add walkthroughs.
 
 ## Validation Plan
 - Run the ROI-related pytest modules (`tests/test_roi_manager_tags.py`, `tests/test_export_job.py`, plus any new tests).

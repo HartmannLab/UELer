@@ -241,10 +241,19 @@ def make_plugin():
     plugin.initialized = False
     plugin.STATUS_COLORS = ROIManagerPlugin.STATUS_COLORS
     plugin.CURRENT_MARKER_VALUE = ROIManagerPlugin.CURRENT_MARKER_VALUE
+    plugin._suspend_browser_events = False
+    plugin._browser_axis_to_roi = {}
+    plugin._browser_click_cid = None
+    plugin._browser_figure = None
+    plugin._browser_current_page = 1
+    plugin._browser_total_pages = 1
+    plugin._browser_last_signature = None
     plugin._browser_expression_cache = None
     plugin._browser_expression_error = None
     plugin._browser_tag_buttons = {}
-    plugin._browser_scroll_bound = False
+    plugin._browser_expression_selection = (0, 0)
+    plugin._browser_expression_focused = False
+    plugin._browser_expression_widget_bound = False
 
     plugin._build_widgets()
     return plugin
