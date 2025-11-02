@@ -9,7 +9,6 @@ from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from importlib import import_module
 from ipywidgets import (
     Accordion,
     Button,
@@ -31,40 +30,6 @@ from ipywidgets import (
 from matplotlib.colors import to_rgb
 from IPython.display import Javascript as IPythonJS, display
 
-def _local_calculate_downsample_factor(width: float, height: float, ignore_zoom: bool = False, max_dimension: int = 512) -> int:
-    if ignore_zoom:
-        return 1
-
-    try:
-        width_f = float(width)
-    except (TypeError, ValueError):
-        width_f = 0.0
-
-    try:
-        height_f = float(height)
-    except (TypeError, ValueError):
-        height_f = 0.0
-
-    largest_dimension = max(width_f, height_f)
-    factor = 1
-    while factor > 0 and (largest_dimension / factor) > max_dimension:
-        factor *= 2
-    return max(1, int(factor))
-
-
-def _resolve_downsample_calculator():
-    for module_name in ("ueler.image_utils", "image_utils"):
-        try:  # pragma: no cover - optional dependency on skimage may break import
-            module = import_module(module_name)
-            candidate = getattr(module, "calculate_downsample_factor", None)
-            if callable(candidate):
-                return candidate
-        except (ModuleNotFoundError, ImportError):
-            continue
-    return _local_calculate_downsample_factor
-
-
-calculate_downsample_factor = _resolve_downsample_calculator()
 from ueler.rendering import ChannelRenderSettings, render_roi_to_array
 
 from .plugin_base import PluginBase
@@ -94,8 +59,6 @@ class ROIManagerPlugin(PluginBase):
     BROWSER_COLUMNS = 3
     BROWSER_ROWS = 4
     BROWSER_PAGE_SIZE = BROWSER_COLUMNS * BROWSER_ROWS
-    BROWSER_TILE_INCH = 2.4
-    BROWSER_TILE_BASE_PX = 240
 
     def __init__(self, main_viewer, width: int = 6, height: int = 3) -> None:
         super().__init__(main_viewer, width, height)
@@ -417,10 +380,9 @@ class ROIManagerPlugin(PluginBase):
         self.ui_component.browser_output = Output(
             layout=Layout(
                 height="auto",
-                width="auto",
-                align_self="stretch",
+                width="98%",
+                align_self="center",
                 overflow_y="visible",
-                overflow_x="auto",
                 border="1px solid var(--jp-border-color2, #ccc)",
             )
         )
@@ -742,67 +704,6 @@ class ROIManagerPlugin(PluginBase):
 
         return df.reset_index(drop=True)
 
-    def _update_browser_output_dimensions(self, columns: int) -> None:
-        output = getattr(self.ui_component, "browser_output", None)
-        if output is None:
-            return
-        layout = getattr(output, "layout", None)
-        if layout is None:
-            return
-
-        try:
-            column_count = max(1, int(columns))
-        except Exception:
-            column_count = 1
-
-        base_px = getattr(self, "BROWSER_TILE_BASE_PX", 240)
-        target_width = max(base_px, column_count * base_px)
-        width_value = f"{int(target_width)}px"
-
-        layout.width = width_value
-        layout.min_width = width_value
-        layout.max_width = width_value
-        layout.align_self = "flex-start"
-        layout.overflow_x = "auto"
-
-    def _determine_browser_downsample(self, record: Mapping[str, object]) -> int:
-        def _as_float(value: object) -> float:
-            try:
-                return float(value)
-            except (TypeError, ValueError):
-                return float("nan")
-
-        def _dimension(lower: float, upper: float) -> float:
-            if not (math.isfinite(lower) and math.isfinite(upper)):
-                return float("nan")
-            return abs(upper - lower)
-
-        width = _as_float(record.get("width"))
-        height = _as_float(record.get("height"))
-        x_min = _as_float(record.get("x_min"))
-        x_max = _as_float(record.get("x_max"))
-        y_min = _as_float(record.get("y_min"))
-        y_max = _as_float(record.get("y_max"))
-
-        if not (math.isfinite(width) and width > 0.0):
-            width = _dimension(x_min, x_max)
-
-        if not (math.isfinite(height) and height > 0.0):
-            height = _dimension(y_min, y_max)
-
-        if not (math.isfinite(width) and width > 0.0):
-            width = 1.0
-
-        if not (math.isfinite(height) and height > 0.0):
-            height = 1.0
-
-        try:
-            factor = int(calculate_downsample_factor(width, height, ignore_zoom=False))
-        except Exception:  # pragma: no cover - defensive guard for legacy helpers
-            factor = 1
-
-        return max(1, factor)
-
     def _refresh_browser_gallery(self) -> None:
         output = getattr(self.ui_component, "browser_output", None)
         status = getattr(self.ui_component, "browser_status", None)
@@ -815,8 +716,6 @@ class ROIManagerPlugin(PluginBase):
         df = self._filtered_browser_dataframe()
         records = df.to_dict("records") if not df.empty else []
         total = len(records)
-        configured_columns = max(1, int(getattr(self, "BROWSER_COLUMNS", 1)))
-        configured_rows = max(1, int(getattr(self, "BROWSER_ROWS", 1)))
 
         if total == 0:
             self._disconnect_browser_events()
@@ -825,7 +724,6 @@ class ROIManagerPlugin(PluginBase):
             self._browser_total_pages = 0
             with output:
                 output.clear_output(wait=True)
-                self._update_browser_output_dimensions(configured_columns)
             self._update_browser_summary(0, 0)
             self._update_pagination_controls(0, 0, 0)
             return
@@ -867,15 +765,13 @@ class ROIManagerPlugin(PluginBase):
         with output:
             output.clear_output(wait=True)
             if limited_records:
-                columns = min(configured_columns, max(1, len(limited_records)))
+                columns = min(self.BROWSER_COLUMNS, max(1, len(limited_records)))
                 rows = max(1, math.ceil(len(limited_records) / columns))
             else:
-                columns = configured_columns
-                rows = max(1, configured_rows)
+                columns = self.BROWSER_COLUMNS
+                rows = max(1, self.BROWSER_ROWS)
 
-            self._update_browser_output_dimensions(columns)
-
-            tile_inch = float(getattr(self, "BROWSER_TILE_INCH", 2.4))
+            tile_inch = 2.4
             fig, axes = plt.subplots(rows, columns, figsize=(columns * tile_inch, rows * tile_inch))
             fig.subplots_adjust(left=0.01, right=0.99, top=0.99, bottom=0.01, wspace=0.02, hspace=0.02)
             axes_array = np.atleast_1d(np.array(axes)).ravel()
@@ -890,7 +786,11 @@ class ROIManagerPlugin(PluginBase):
                 if marker_profile is None or not marker_profile.selected_channels:
                     message_text = "No channels"
 
-                downsample_int = self._determine_browser_downsample(record)
+                downsample = record.get("zoom", self.main_viewer.current_downsample_factor)
+                try:
+                    downsample_int = max(1, int(round(float(downsample))))
+                except Exception:  # pragma: no cover - defensive
+                    downsample_int = max(1, int(self.main_viewer.current_downsample_factor))
 
                 tile = None if message_text else self._render_roi_tile(record, marker_profile, downsample_int)
                 if tile is None or tile.size == 0:
