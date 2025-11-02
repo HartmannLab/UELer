@@ -78,9 +78,10 @@ class ROIManagerPlugin(PluginBase):
         self._browser_expression_cache = None
         self._browser_expression_error = None
         self._browser_tag_buttons = {}
-        self._browser_expression_selection: Tuple[int, int] = (0, 0)
+        self._browser_expression_selection = None  # type: Optional[Tuple[int, int]]
         self._browser_expression_focused = False
         self._browser_expression_widget_bound = False
+        self._browser_expression_skip_reset = False
 
         self._build_widgets()
         self._build_layout()
@@ -870,35 +871,47 @@ class ROIManagerPlugin(PluginBase):
             next_button.disabled = current_page >= total_pages or total_pages <= 0
 
     def _insert_browser_expression_snippet(self, snippet: str) -> None:
-        self._ensure_expression_cursor_binding()
-        widget = getattr(self.ui_component, "browser_expression_input", None)
-        if widget is None:
-            return
-
-        current = str(getattr(widget, "value", "") or "")
-        start, end = self._browser_expression_selection
-        text_length = len(current)
-        if not isinstance(start, int) or start < 0 or start > text_length:
-            start = text_length
-        if not isinstance(end, int) or end < start or end > text_length:
-            end = start
-
-        before = current[:start]
-        after = current[end:]
-        insert, cursor_offset = self._format_expression_insertion(before, after, snippet)
-
-        new_value = before + insert + after
-
-        self._suspend_browser_events = True
         try:
-            widget.value = new_value
-        finally:
-            self._suspend_browser_events = False
+            self._ensure_expression_cursor_binding()
+            widget = getattr(self.ui_component, "browser_expression_input", None)
+            if widget is None:
+                # Surface this as a visible status so you know immediately
+                self.set_status("Expression input widget not found.", level="error")
+                return
 
-        new_cursor = start + cursor_offset
-        self._browser_expression_selection = (new_cursor, new_cursor)
-        self._send_browser_expression_cursor(new_cursor, new_cursor, focus=True)
-        self._on_browser_expression_change({"name": "value", "new": widget.value})
+            # Re-focus at last known caret (ok if this no-ops)
+            sel = self._browser_expression_selection or (len(widget.value or ""),) * 2
+            self._send_browser_expression_cursor(sel[0], sel[1], focus=True)
+
+            current = str(widget.value or "")
+            start, end = self._resolve_browser_expression_selection(len(current))
+            before, after = current[:start], current[end:]
+            insert, cursor_offset = self._format_expression_insertion(before, after, snippet)
+
+            new_value = before + insert + after
+
+            self._suspend_browser_events = True
+            try:
+                widget.value = new_value   # ← even if JS caret binding failed, this will change the text
+            finally:
+                self._suspend_browser_events = False
+
+            new_cursor = start + cursor_offset
+            self._browser_expression_selection = (new_cursor, new_cursor)
+            self._send_browser_expression_cursor(new_cursor, new_cursor, focus=True)
+
+            self._browser_expression_skip_reset = True
+            try:
+                self._on_browser_expression_change({"name": "value", "new": widget.value})
+            finally:
+                self._browser_expression_skip_reset = False
+
+        except Exception as exc:
+            # Make failures obvious in the UI
+            self.set_status(f"Insert failed: {exc}", level="error")
+            raise
+
+
 
     def _format_expression_insertion(self, before: str, after: str, snippet: str) -> Tuple[str, int]:
         before_char = before[-1] if before else ""
@@ -909,14 +922,16 @@ class ROIManagerPlugin(PluginBase):
         needs_leading = bool(before) and before_char not in boundary_left
 
         if snippet == "!":
-            insert = (" " if needs_leading else "") + "!"
-            return insert, len(insert)
+            leading = " " if needs_leading else ""
+            insert = leading + "!"
+            return insert, len(leading) + 1
 
         if snippet == ")":
-            insert = ")"
+            leading = ""
             if needs_leading and before_char not in {" ", "("}:
-                insert = " " + insert
-            return insert, len(insert)
+                leading = " "
+            insert = leading + ")"
+            return insert, len(leading) + 1
 
         leading = " " if needs_leading else ""
         after_boundary = after_char in boundary_right
@@ -928,7 +943,7 @@ class ROIManagerPlugin(PluginBase):
 
         trailing = " " if needs_trailing else ""
         insert = f"{leading}{snippet}{trailing}"
-        cursor_offset = len(insert) if trailing else len(leading + snippet)
+        cursor_offset = len(leading) + len(snippet)
         return insert, cursor_offset
 
     def _send_browser_expression_cursor(self, start: int, end: int, focus: bool = False) -> None:
@@ -976,6 +991,10 @@ class ROIManagerPlugin(PluginBase):
             return
 
         expression = str(change.get("new") or "")
+        if not self._browser_expression_skip_reset and not self._browser_expression_focused:
+            length = len(expression)
+            self._browser_expression_selection = (length, length)
+            self._send_browser_expression_cursor(length, length, focus=False)
         self._browser_expression_cache = None
         self._compile_browser_expression(expression)
         self._browser_current_page = 1
@@ -1024,179 +1043,104 @@ class ROIManagerPlugin(PluginBase):
     def _expression_cursor_script(self, model_id: str) -> str:
         if not model_id:
             return ""
+        encoded_id = json.dumps(model_id)  # JSON string literal
 
-        encoded_id = json.dumps(model_id)
-        return f"""
-<script type="text/javascript">
-(function() {{
-    const widgetId = {encoded_id};
-    const selectors = [`[data-widget-id="${{widgetId}}"]`, `[data-widgetid="${{widgetId}}"]`];
-    let attempts = 0;
+        js = r"""
+    <script type="text/javascript">
+    (function() {
+    const widgetId = __WIDGET_ID__;
+    let tries = 0, maxTries = 2000; // ~ 30-60s of rAFs in practice
+
     let cachedModel = null;
+    function resolveModel(cb){
+        if (cachedModel) { cb(cachedModel); return; }
+        function tryGet(m){ if (!m || !m.get_model) return;
+        try { m.get_model(widgetId).then(mod => { if (mod){ cachedModel = mod; cb(mod); } }); } catch(e){}
+        }
+        if (window.__widget_manager__) tryGet(window.__widget_manager__);
+        if (Array.isArray(window.jupyterWidgetManagers) && window.jupyterWidgetManagers.length) tryGet(window.jupyterWidgetManagers[0]);
+        if (window.manager) tryGet(window.manager);
+        if (!cachedModel && typeof window.require === 'function'){
+        window.require(['@jupyter-widgets/base'], function(base){
+            const ms = (base.ManagerBase && base.ManagerBase._managers) || [];
+            if (ms.length) tryGet(ms[0]);
+        });
+        }
+    }
 
-    function resolveModel(callback) {{
-        if (cachedModel) {{
-            callback(cachedModel);
-            return;
-        }}
+    function locate() {
+        const container = document.getElementById('widget-' + widgetId)
+        || document.querySelector('[data-widget-id="'+widgetId+'"]')
+        || document.querySelector('[data-widgetid="'+widgetId+'"]')
+        || document.getElementById(widgetId);
+        if (container) {
+        const el = container.querySelector('input, textarea');
+        if (el) return el;
+        }
+        return document.querySelector('input[data-widget-id="'+widgetId+'"],textarea[data-widget-id="'+widgetId+'"]');
+    }
 
-        const sendWithManager = manager => {{
-            if (!manager || typeof manager.get_model !== "function") {{
-                return;
-            }}
-            try {{
-                manager.get_model(widgetId).then(model => {{
-                    if (!model) {{
-                        return;
-                    }}
-                    cachedModel = model;
-                    callback(model);
-                }}).catch(() => {{}});
-            }} catch (err) {{
-                console.debug('UELer ROI expression manager lookup failed', err);
-            }}
-        }};
+    function sendSelection(el){
+        resolveModel(model => { if (!model) return;
+        const msg = {
+            event: 'selection-change',
+            start: (el.selectionStart == null ? el.value.length : el.selectionStart),
+            end:   (el.selectionEnd   == null ? el.value.length : el.selectionEnd),
+            focused: document.activeElement === el
+        };
+        try { model.send(msg); } catch(e){}
+        });
+    }
 
-        const candidates = [];
-        if (window.__widget_manager__) {{
-            candidates.push(window.__widget_manager__);
-        }}
-        if (window.jupyterWidgetManagers && window.jupyterWidgetManagers.length) {{
-            candidates.push(window.jupyterWidgetManagers[0]);
-        }}
-        if (window.manager && typeof window.manager.get_model === "function") {{
-            candidates.push(window.manager);
-        }}
+    function bind(){
+        const el = locate();
+        if (!el){
+        if (tries++ < maxTries) return requestAnimationFrame(bind);
+        return;
+        }
+        if (el.__roi_expr_bound) return;
+        el.__roi_expr_bound = true;
 
-        let handled = false;
-        for (const candidate of candidates) {{
-            if (!candidate) {{
-                continue;
-            }}
-            handled = true;
-            sendWithManager(candidate);
-        }}
+        const handler = () => sendSelection(el);
+        ['keyup','mouseup','select','focus','blur','input'].forEach(ev => el.addEventListener(ev, handler));
 
-        if (!handled && typeof window.require === "function") {{
-            window.require(['@jupyter-widgets/base'], function(base) {{
-                const managers = (base.ManagerBase && base.ManagerBase._managers) || [];
-                if (managers.length) {{
-                    sendWithManager(managers[0]);
-                }}
-            }});
-        }}
-    }}
+        resolveModel(model => {
+        if (!model || model.__roi_expr_msg_bound) return;
+        model.__roi_expr_msg_bound = true;
+        model.on('msg:custom', msg => {
+            if (!msg || msg.event !== 'set-selection') return;
+            const start = Number.isFinite(msg.start) ? msg.start : (el.selectionStart || 0);
+            const end   = Number.isFinite(msg.end)   ? msg.end   : start;
+            try {
+            if (msg.focus) el.focus();
+            if (el.setSelectionRange) el.setSelectionRange(start, end);
+            } catch(e){}
+        });
+        });
 
-    function sendSelection(input) {{
-        resolveModel(model => {{
-            if (!model) {{
-                return;
-            }}
-            const payload = {{
-                event: 'selection-change',
-                start: input.selectionStart == null ? input.value.length : input.selectionStart,
-                end: input.selectionEnd == null ? input.value.length : input.selectionEnd,
-                focused: document.activeElement === input
-            }};
-            try {{
-                model.send(payload);
-            }} catch (err) {{
-                console.debug('UELer ROI expression selection dispatch failed', err);
-            }}
-        }});
-    }}
+        handler(); // initial caret
+    }
 
-    function locateHost() {{
-        for (const selector of selectors) {{
-            const element = document.querySelector(selector);
-            if (element) {{
-                return element;
-            }}
-        }}
-        return null;
-    }}
+    requestAnimationFrame(bind);
+    })();
+    </script>
+    """
+        return js.replace("__WIDGET_ID__", encoded_id)
 
-    function attach() {{
-        const host = locateHost();
-        if (!host) {{
-            if (attempts++ < 40) {{
-                requestAnimationFrame(attach);
-            }}
-            return;
-        }}
 
-        const input = host.querySelector('input');
-        if (!input) {{
-            if (attempts++ < 40) {{
-                requestAnimationFrame(attach);
-            }}
-            return;
-        }}
 
-        if (input.__ueler_expression_listener_attached) {{
-            return;
-        }}
-        input.__ueler_expression_listener_attached = true;
-
-        const handler = () => sendSelection(input);
-        for (const eventName of ['keyup', 'mouseup', 'select', 'focus', 'blur', 'input']) {{
-            input.addEventListener(eventName, handler);
-        }}
-
-        resolveModel(model => {{
-            if (!model) {{
-                return;
-            }}
-            if (model.__ueler_expression_listener_bound) {{
-                return;
-            }}
-            model.__ueler_expression_listener_bound = true;
-            model.on('msg:custom', msg => {{
-                if (!msg || typeof msg !== 'object') {{
-                    return;
-                }}
-                if (msg.event === 'set-selection') {{
-                    const start = Number.isFinite(msg.start) ? msg.start : (input.selectionStart || 0);
-                    const end = Number.isFinite(msg.end) ? msg.end : start;
-                    try {{
-                        if (msg.focus) {{
-                            input.focus();
-                        }}
-                        if (typeof input.setSelectionRange === 'function') {{
-                            input.setSelectionRange(start, end);
-                        }}
-                    }} catch (err) {{
-                        console.debug('UELer ROI expression selection apply failed', err);
-                    }}
-                }}
-            }});
-        }});
-
-        handler();
-    }}
-
-    attach();
-}})();
-</script>
-"""
-
-    def _on_browser_expression_msg(self, _, content, __):  # pragma: no cover - UI callback
-        if not isinstance(content, dict):
+    def _on_browser_expression_msg(self, _, content, __):
+        if not isinstance(content, dict) or content.get("event") != "selection-change":
             return
-        if content.get("event") != "selection-change":
-            return
-
-        start = content.get("start")
-        end = content.get("end")
-        if not isinstance(start, (int, float)):
-            start = 0
-        if not isinstance(end, (int, float)):
-            end = start
-
-        start = max(0, int(start))
-        end = max(start, int(end))
+        try:
+            start = max(0, int(content.get("start", 0)))
+            end = max(start, int(content.get("end", start)))
+        except Exception:
+            start = end = 0
         self._browser_expression_selection = (start, end)
         self._browser_expression_focused = bool(content.get("focused"))
+
+
 
     def _ensure_expression_cursor_binding(self) -> None:
         if getattr(self, "_browser_expression_widget_bound", False):
@@ -1891,3 +1835,5 @@ class ROIManagerPlugin(PluginBase):
         super().after_all_plugins_loaded()
         self.refresh_marker_options()
         self.refresh_roi_table()
+        # Bind (again) now that the view is likely attached to the DOM
+        self._ensure_expression_cursor_binding()

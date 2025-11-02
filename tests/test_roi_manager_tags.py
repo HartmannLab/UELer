@@ -251,9 +251,10 @@ def make_plugin():
     plugin._browser_expression_cache = None
     plugin._browser_expression_error = None
     plugin._browser_tag_buttons = {}
-    plugin._browser_expression_selection = (0, 0)
+    plugin._browser_expression_selection = None
     plugin._browser_expression_focused = False
     plugin._browser_expression_widget_bound = False
+    plugin._browser_expression_skip_reset = False
 
     plugin._build_widgets()
     return plugin
@@ -337,6 +338,81 @@ class ROIManagerTagsTests(unittest.TestCase):
         invalid = plugin._compile_browser_expression("alpha & | beta")
         self.assertIsNone(invalid)
         self.assertIsNotNone(plugin._browser_expression_error)
+
+    def test_expression_cursor_preserves_last_focused_selection(self):
+        plugin = make_plugin()
+        widget = plugin.ui_component.browser_expression_input
+
+        # Simulate the user placing the caret at index 4 while the field is focused.
+        plugin._on_browser_expression_msg(widget, {
+            "event": "selection-change",
+            "start": 4,
+            "end": 4,
+            "focused": True,
+        }, None)
+        self.assertEqual(plugin._browser_expression_selection, (4, 4))
+
+        # Blur events should not reset the saved caret location back to zero.
+        plugin._on_browser_expression_msg(widget, {
+            "event": "selection-change",
+            "start": 0,
+            "end": 0,
+            "focused": False,
+        }, None)
+        self.assertEqual(plugin._browser_expression_selection, (4, 4))
+
+    def test_expression_restores_tail_selection_for_backend_updates(self):
+        plugin = make_plugin()
+        widget = plugin.ui_component.browser_expression_input
+
+        # Avoid DataFrame-dependent paths for this focused caret test.
+        plugin._refresh_browser_gallery = lambda: None
+
+        expression = "(good&hi)|~bad"
+        widget.value = expression
+
+        # Simulate a backend-driven value restore while the widget is unfocused.
+        plugin._browser_expression_focused = False
+        plugin._on_browser_expression_change({
+            "name": "value",
+            "new": expression,
+        })
+
+        expected_tail = (len(expression), len(expression))
+        self.assertEqual(plugin._browser_expression_selection, expected_tail)
+
+        # Inserting an operator should now append at the tail rather than prefixing.
+        plugin._insert_browser_expression_snippet("&")
+        updated_value = plugin.ui_component.browser_expression_input.value
+        self.assertTrue(updated_value.endswith("&"))
+
+    def test_expression_insertion_respects_cached_selection(self):
+        plugin = make_plugin()
+        widget = plugin.ui_component.browser_expression_input
+
+        plugin._refresh_browser_gallery = lambda: None
+
+        widget.value = "alpha beta"
+        plugin._browser_expression_selection = (5, 5)
+
+        plugin._insert_browser_expression_snippet("&")
+
+        self.assertEqual(widget.value, "alpha & beta")
+        self.assertEqual(plugin._browser_expression_selection, (7, 7))
+
+    def test_expression_insertion_replaces_highlighted_range(self):
+        plugin = make_plugin()
+        widget = plugin.ui_component.browser_expression_input
+
+        plugin._refresh_browser_gallery = lambda: None
+
+        widget.value = "alpha beta"
+        plugin._browser_expression_selection = (6, 10)
+
+        plugin._insert_browser_expression_snippet("gamma")
+
+        self.assertEqual(widget.value, "alpha gamma")
+        self.assertEqual(plugin._browser_expression_selection, (11, 11))
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -6,9 +6,14 @@
 **Expression helper cursor awareness**
 - Injected a custom widget bridge that tracks selection and focus inside the expression field and reuses it when inserting operator/tag snippets, keeping helpers splice-at-caret instead of appending blindly.
 - Updated ROI manager helpers and unit scaffolding (`tests/test_roi_manager_tags.py`) to match the cursor-aware workflow while dropping the deprecated scroll listener plumbing.
+- Preserved the last focused caret snapshot when helper buttons momentarily steal focus so blur events no longer shove insertions back to index 0, and added a regression test covering the selection hand-off.
+- Hardened the DOM selector logic so the JavaScript bridge finds the Text widget reliably in JupyterLab 4, classic Notebook, and Voila frontends, restoring caret telemetry on stacks where the prior `[data-widget-id]` hooks failed.
+- Reset the stored caret to the end of restored expressions whenever the widget reloads unfocused, ensuring the very first helper insertion appends instead of prefixing text resurrected from notebook state.
+- Reworked `_insert_browser_expression_snippet` to slice around the cached start/end indices so helpers replace highlighted ranges or append at the caret, advancing the stored selection to trail the inserted snippet for chained clicks.
+- Expanded `tests/test_roi_manager_tags.py` with insertion coverage at the head, middle, tail, and with highlighted replacements to guard the new behaviour.
 
-**Tests**
-- ⚠ Pending (`tests/test_roi_manager_tags.py` will be exercised once pagination-bound stubs land in the widget test harness).
+- ✅ Ran `python -m unittest tests.test_roi_manager_tags` to exercise the caret retention regression and the new insertion index coverage.
+- ⚠ Additional widget-harness coverage for the pagination helpers remains pending until the revamped stubs land.
 
 **Cell gallery tile padding**
 - Updated `_compose_canvas` to size gallery slots by the largest rendered tile and center narrower crops so mixed-width images no longer raise broadcasting errors when assembling the grid (fixes [#43](https://github.com/HartmannLab/UELer/issues/43)).

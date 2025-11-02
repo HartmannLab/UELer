@@ -105,7 +105,10 @@ The first release candidate delivers automatic scale bars across the viewer and 
 
 **ROI browser pagination**
 - Replaced the lazy scroll loader with Previous/Next buttons, a page indicator, and deterministic 3x4 slices so gallery navigation stays predictable even as filters or expressions change (addresses [#44](https://github.com/HartmannLab/UELer/issues/44)).
-- Added a cursor-aware expression helper that tracks the selection/focus inside the filter field, letting operator/tag buttons splice tokens at the caret and keep the widget focused for rapid edits.
+- Added a cursor-aware expression helper that tracks the selection/focus inside the filter field, letting operator/tag buttons splice tokens at the caret, keep the widget focused, and preserve the caret location even after helper buttons momentarily steal focus.
+- Hardened the JavaScript bridge that reports caret updates so it finds the Text widget across modern JupyterLab builds as well as classic Notebook/Voila layouts, fixing stacks where the previous selectors missed the input.
+- When expressions reload from notebook state while the field is unfocused, the caret now defaults to the tail so the next helper insertion appends instead of jumping to the front.
+- Refined the helper insertion routine to honour the cached start/end indices (including highlighted ranges), so repeated button presses keep chaining at the cursor instead of resetting to index 0.
 
 **Cell gallery tile padding**
 - Gallery slots now expand to the widest rendered tile and center narrower crops so selecting multiple cells never triggers NumPy broadcasting errors when their cutouts differ slightly in width.
@@ -171,6 +174,7 @@ The first release candidate delivers automatic scale bars across the viewer and 
 - `python -m unittest tests.test_scale_bar_helper tests.test_export_fovs_batch`
 - `python -m unittest tests.test_export_fovs_batch`
 - `python -m unittest tests.test_fov_detection`
+- `python -m unittest tests.test_roi_manager_tags`
 
 ## Earlier Updates  
 

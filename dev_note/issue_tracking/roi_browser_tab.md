@@ -58,6 +58,11 @@
    - Completed: Replaced the scroll-triggered loader with Previous/Next navigation, a page label, and automatic page resets when filters or expressions change.
 3. 🚧 **Testing & documentation**
    - Next: Extend unit coverage for pagination/cursor helpers, run the ROI widget suites once the harness catches up, and capture screenshots if we add walkthroughs.
+4. ✅ **Caret alignment regression fix**
+   - Investigated blur-triggered selection resets that pushed helper insertions back to index 0.
+   - Patched the Python-side message handler to ignore unfocused updates while preserving the last focused caret.
+   - Added unit coverage simulating focus/blur cycles to lock the behaviour down, hardened the DOM selectors so the caret bridge attaches in modern JupyterLab builds alongside classic Notebook/Voila, and reset the default caret to the expression tail after backend restores.
+   - Reworked the insertion helper to honour the cached start/end indices (including highlighted ranges) and advanced the stored caret so repeated helper clicks keep chaining from the user’s cursor.
 
 ## Validation Plan
 - Run the ROI-related pytest modules (`tests/test_roi_manager_tags.py`, `tests/test_export_job.py`, plus any new tests).
