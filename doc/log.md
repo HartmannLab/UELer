@@ -55,12 +55,8 @@
 
 **ROI browser expression filtering**
 - Added `ueler.viewer.tag_expression.compile_tag_expression` with tokenization, shunting-yard parsing, and eager validation so ROI tag filters accept boolean expressions using `()`, `&`, `|`, and `!` syntax (addresses [#44](https://github.com/HartmannLab/UELer/issues/44)).
-- Expanded the browser UI with operator/tag shortcut buttons, inline error feedback, HUD-free Matplotlib tiles sized to 98 % of the scroll container, and a fixed lazy-loading listener that requests four more previews when the scroller nears the end.
+- Expanded the browser UI with operator/tag shortcut buttons, inline error feedback, HUD-free Matplotlib canvases sized to 98 % of the scroll container, and a fixed lazy-loading listener that requests four more previews when the scroller nears the end.
 - Updated `tests/test_roi_manager_tags.py` and added `tests/test_tag_expression.py` to cover parser behaviour and plugin wiring; ran `python -m unittest tests.test_tag_expression tests.test_roi_manager_tags` to confirm the changes.
-
-**ROI browser thumbnail scaling**
-- Forced ROI browser thumbnails to reuse the viewer’s `calculate_downsample_factor` helper so preview generation stays efficient even when saved ROI zoom metadata points at full-resolution crops (addresses [#44](https://github.com/HartmannLab/UELer/issues/44)).
-- Resized the gallery output from the configured column count and enabled horizontal scrolling to keep wide grids visible without clipping tiles, and covered the behaviour with `tests/test_roi_browser_thumbnails.py` alongside the existing ROI manager suite.
 
 **Channels accordion consolidation**
 - Relocated the channel tag chips plus marker set dropdown, name field, and action buttons into the Channels accordion pane so selection presets sit next to their per-channel sliders (addresses [#40](https://github.com/HartmannLab/UELer/issues/40)).
