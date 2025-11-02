@@ -109,6 +109,8 @@ The first release candidate delivers automatic scale bars across the viewer and 
 - Hardened the JavaScript bridge that reports caret updates so it finds the Text widget across modern JupyterLab builds as well as classic Notebook/Voila layouts, fixing stacks where the previous selectors missed the input.
 - When expressions reload from notebook state while the field is unfocused, the caret now defaults to the tail so the next helper insertion appends instead of jumping to the front.
 - Refined the helper insertion routine to honour the cached start/end indices (including highlighted ranges), so repeated button presses keep chaining at the cursor instead of resetting to index 0.
+- Restored the selection resolver and focus-aware caching after a regression so helper buttons keep updating the field even when caret telemetry drops blur events.
+- Shifted snippet insertion to happen entirely in the browser: helper buttons now send an `insert-snippet` event that updates the field client-side before syncing back to Python, eliminating focus-race edge cases.
 
 **Cell gallery tile padding**
 - Gallery slots now expand to the widest rendered tile and center narrower crops so selecting multiple cells never triggers NumPy broadcasting errors when their cutouts differ slightly in width.

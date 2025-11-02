@@ -354,7 +354,7 @@ class ROIManagerPlugin(PluginBase):
                 layout=Layout(width="32px"),
             )
             operator_button.on_click(
-                lambda _btn, token=symbol: self._insert_browser_expression_snippet(token)
+                lambda _btn, token=symbol: self._request_browser_expression_insertion(token)
             )
             operator_buttons.append(operator_button)
         self.ui_component.browser_expression_operator_box = HBox(
@@ -912,6 +912,38 @@ class ROIManagerPlugin(PluginBase):
             raise
 
 
+    def _request_browser_expression_insertion(self, snippet: str, backend_fallback: bool = True) -> bool:
+        self._ensure_expression_cursor_binding()
+        widget = getattr(self.ui_component, "browser_expression_input", None)
+        if widget is None:
+            return False
+
+        payload = {"event": "insert-snippet", "snippet": snippet}
+        try:
+            widget.send(payload)
+            return True
+        except Exception:
+            if backend_fallback:
+                self._insert_browser_expression_snippet(snippet)
+            return False
+
+
+    def _resolve_browser_expression_selection(self, text_length: int) -> Tuple[int, int]:
+        selection = getattr(self, "_browser_expression_selection", None)
+        if not (isinstance(selection, tuple) and len(selection) == 2):
+            return text_length, text_length
+
+        start, end = selection
+        if not isinstance(start, int):
+            start = text_length
+        if not isinstance(end, int):
+            end = start
+
+        start = max(0, min(start, text_length))
+        end = max(start, min(end, text_length))
+        return start, end
+
+
 
     def _format_expression_insertion(self, before: str, after: str, snippet: str) -> Tuple[str, int]:
         before_char = before[-1] if before else ""
@@ -979,7 +1011,7 @@ class ROIManagerPlugin(PluginBase):
                 layout=Layout(width="auto"),
             )
             button.on_click(
-                lambda _btn, token=tag: self._insert_browser_expression_snippet(token)
+                lambda _btn, token=tag: self._request_browser_expression_insertion(token)
             )
             self._browser_tag_buttons[tag] = button
             buttons.append(button)
@@ -1052,6 +1084,9 @@ class ROIManagerPlugin(PluginBase):
     let tries = 0, maxTries = 2000; // ~ 30-60s of rAFs in practice
 
     let cachedModel = null;
+    let cachedStart = null;
+    let cachedEnd = null;
+
     function resolveModel(cb){
         if (cachedModel) { cb(cachedModel); return; }
         function tryGet(m){ if (!m || !m.get_model) return;
@@ -1080,16 +1115,55 @@ class ROIManagerPlugin(PluginBase):
         return document.querySelector('input[data-widget-id="'+widgetId+'"],textarea[data-widget-id="'+widgetId+'"]');
     }
 
+    function snapshotSelection(el){
+        const start = (el.selectionStart == null ? el.value.length : el.selectionStart);
+        const end = (el.selectionEnd == null ? el.value.length : el.selectionEnd);
+        cachedStart = start;
+        cachedEnd = end;
+        return { start, end };
+    }
+
     function sendSelection(el){
+        const { start, end } = snapshotSelection(el);
         resolveModel(model => { if (!model) return;
-        const msg = {
-            event: 'selection-change',
-            start: (el.selectionStart == null ? el.value.length : el.selectionStart),
-            end:   (el.selectionEnd   == null ? el.value.length : el.selectionEnd),
-            focused: document.activeElement === el
-        };
-        try { model.send(msg); } catch(e){}
+            const msg = {
+                event: 'selection-change',
+                start,
+                end,
+                focused: (document.activeElement === el) || (typeof el.matches === 'function' && el.matches(':focus'))
+            };
+            try { model.send(msg); } catch(e){}
         });
+    }
+
+    function formatInsertion(before, after, snippet){
+        const beforeChar = before ? before.slice(-1) : '';
+        const afterChar = after ? after.slice(0, 1) : '';
+        const boundaryLeft = new Set(['', ' ', '\t', '(', '&', '|', '!']);
+        const boundaryRight = new Set(['', ' ', '\t', ')', '&', '|']);
+
+        const needsLeading = before.length > 0 && !boundaryLeft.has(beforeChar);
+
+        if (snippet === '!'){
+            const leading = needsLeading ? ' ' : '';
+            return { text: leading + '!', cursorOffset: leading.length + 1 };
+        }
+
+        if (snippet === ')'){
+            const leading = needsLeading && ![' ', '('].includes(beforeChar) ? ' ' : '';
+            return { text: leading + ')', cursorOffset: leading.length + 1 };
+        }
+
+        const leading = needsLeading ? ' ' : '';
+        const afterBoundary = boundaryRight.has(afterChar);
+        let needsTrailing;
+        if (snippet === '('){
+            needsTrailing = !(afterBoundary || afterChar === ')');
+        } else {
+            needsTrailing = !afterBoundary;
+        }
+        const trailing = needsTrailing ? ' ' : '';
+        return { text: leading + snippet + trailing, cursorOffset: leading.length + snippet.length };
     }
 
     function bind(){
@@ -1105,17 +1179,58 @@ class ROIManagerPlugin(PluginBase):
         ['keyup','mouseup','select','focus','blur','input'].forEach(ev => el.addEventListener(ev, handler));
 
         resolveModel(model => {
-        if (!model || model.__roi_expr_msg_bound) return;
-        model.__roi_expr_msg_bound = true;
-        model.on('msg:custom', msg => {
-            if (!msg || msg.event !== 'set-selection') return;
-            const start = Number.isFinite(msg.start) ? msg.start : (el.selectionStart || 0);
-            const end   = Number.isFinite(msg.end)   ? msg.end   : start;
-            try {
-            if (msg.focus) el.focus();
-            if (el.setSelectionRange) el.setSelectionRange(start, end);
-            } catch(e){}
-        });
+            if (!model || model.__roi_expr_msg_bound) return;
+            model.__roi_expr_msg_bound = true;
+            model.on('msg:custom', msg => {
+                if (!msg || typeof msg !== 'object') return;
+                if (msg.event === 'set-selection'){
+                    const start = Number.isFinite(msg.start) ? msg.start : (el.selectionStart || 0);
+                    const end   = Number.isFinite(msg.end)   ? msg.end   : start;
+                    try {
+                        if (msg.focus && el.focus) el.focus();
+                        if (el.setSelectionRange) el.setSelectionRange(start, end);
+                        cachedStart = start;
+                        cachedEnd = end;
+                    } catch(e){}
+                    return;
+                }
+
+                if (msg.event === 'insert-snippet' && typeof msg.snippet === 'string'){
+                    const value = el.value || '';
+                    let start = (cachedStart == null ? value.length : cachedStart);
+                    let end = (cachedEnd == null ? start : cachedEnd);
+                    if (!Number.isFinite(start) || !Number.isFinite(end)){
+                        const snap = snapshotSelection(el);
+                        start = snap.start;
+                        end = snap.end;
+                    }
+
+                    const before = value.slice(0, start);
+                    const after = value.slice(end);
+                    const insertion = formatInsertion(before, after, msg.snippet);
+                    const newValue = before + insertion.text + after;
+
+                    if (newValue !== value){
+                        el.value = newValue;
+                        try {
+                            if (model.get('value') !== newValue) {
+                                model.set('value', newValue);
+                                model.save_changes();
+                            }
+                        } catch(e){}
+                        const inputEvent = new Event('input', { bubbles: true, cancelable: true });
+                        el.dispatchEvent(inputEvent);
+                    }
+
+                    const newCursor = start + insertion.cursorOffset;
+                    cachedStart = cachedEnd = newCursor;
+                    try {
+                        if (el.setSelectionRange) el.setSelectionRange(newCursor, newCursor);
+                    } catch(e){}
+                    if (el.focus) el.focus();
+                    sendSelection(el);
+                }
+            });
         });
 
         handler(); // initial caret
@@ -1137,8 +1252,20 @@ class ROIManagerPlugin(PluginBase):
             end = max(start, int(content.get("end", start)))
         except Exception:
             start = end = 0
-        self._browser_expression_selection = (start, end)
-        self._browser_expression_focused = bool(content.get("focused"))
+
+        focused = bool(content.get("focused"))
+        new_selection = (start, end)
+
+        if focused or self._browser_expression_selection is None:
+            self._browser_expression_selection = new_selection
+        elif new_selection != self._browser_expression_selection:
+            # Ignore blur-driven resets to (0, 0) so helper clicks keep the last caret.
+            if not focused and new_selection == (0, 0) and self._browser_expression_selection:
+                pass
+            else:
+                self._browser_expression_selection = new_selection
+
+        self._browser_expression_focused = focused
 
 
 

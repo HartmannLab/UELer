@@ -63,6 +63,8 @@
    - Patched the Python-side message handler to ignore unfocused updates while preserving the last focused caret.
    - Added unit coverage simulating focus/blur cycles to lock the behaviour down, hardened the DOM selectors so the caret bridge attaches in modern JupyterLab builds alongside classic Notebook/Voila, and reset the default caret to the expression tail after backend restores.
    - Reworked the insertion helper to honour the cached start/end indices (including highlighted ranges) and advanced the stored caret so repeated helper clicks keep chaining from the user’s cursor.
+   - Restored the selection resolver and focus-aware caching after a regression so helper buttons continue updating the expression field even when blur events fire mid-click.
+   - Moved snippet insertion into the browser via custom widget messages so the front end edits the value and caret before the update syncs back to Python, removing backend/front-end caret races.
 
 ## Validation Plan
 - Run the ROI-related pytest modules (`tests/test_roi_manager_tags.py`, `tests/test_export_job.py`, plus any new tests).
