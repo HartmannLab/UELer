@@ -13,6 +13,9 @@
 - Expanded `tests/test_roi_manager_tags.py` with insertion coverage at the head, middle, tail, and with highlighted replacements to guard the new behaviour.
 - Restored the selection resolver and focus-aware caching after a regression so helper buttons continue to update the field even if caret telemetry drops temporary blur events.
 - Moved helper insertion entirely into the browser via custom `insert-snippet` messages so the front end updates the field and caret before syncing changes back to Python, avoiding race conditions with focus churn.
+- Added a readiness check that falls back to the Python insertion path until the browser bridge confirms a caret snapshot, preventing helper buttons from no-oping while the widget script attaches.
+- Swapped the HTML `<script>` injection for `IPython.display.Javascript` so the caret bridge executes even in sanitized JupyterLab outputs, keeping selection telemetry alive across lab builds.
+- Simplified the caret bridge to the DOM-binding pattern proven in the standalone ipywidgets demo so it locates the text input through stable selectors, executes the helper script via a shared `ipywidgets.Output` in the same frame, performs the splice entirely client-side, and then reconciles value/caret state back to Python across Jupyter front-ends.
 
 - ✅ Ran `python -m unittest tests.test_roi_manager_tags` to exercise the caret retention regression, insertion index coverage, and the front-end insertion bridge.
 - ⚠ Additional widget-harness coverage for the pagination helpers remains pending until the revamped stubs land.

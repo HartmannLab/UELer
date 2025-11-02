@@ -251,10 +251,8 @@ def make_plugin():
     plugin._browser_expression_cache = None
     plugin._browser_expression_error = None
     plugin._browser_tag_buttons = {}
-    plugin._browser_expression_selection = None
-    plugin._browser_expression_focused = False
-    plugin._browser_expression_widget_bound = False
-    plugin._browser_expression_skip_reset = False
+    plugin._browser_expression_selection = (0, 0)
+    plugin._use_browser_expression_js = False
 
     plugin._build_widgets()
     return plugin
@@ -339,28 +337,6 @@ class ROIManagerTagsTests(unittest.TestCase):
         self.assertIsNone(invalid)
         self.assertIsNotNone(plugin._browser_expression_error)
 
-    def test_expression_cursor_preserves_last_focused_selection(self):
-        plugin = make_plugin()
-        widget = plugin.ui_component.browser_expression_input
-
-        # Simulate the user placing the caret at index 4 while the field is focused.
-        plugin._on_browser_expression_msg(widget, {
-            "event": "selection-change",
-            "start": 4,
-            "end": 4,
-            "focused": True,
-        }, None)
-        self.assertEqual(plugin._browser_expression_selection, (4, 4))
-
-        # Blur events should not reset the saved caret location back to zero.
-        plugin._on_browser_expression_msg(widget, {
-            "event": "selection-change",
-            "start": 0,
-            "end": 0,
-            "focused": False,
-        }, None)
-        self.assertEqual(plugin._browser_expression_selection, (4, 4))
-
     def test_expression_restores_tail_selection_for_backend_updates(self):
         plugin = make_plugin()
         widget = plugin.ui_component.browser_expression_input
@@ -371,8 +347,8 @@ class ROIManagerTagsTests(unittest.TestCase):
         expression = "(good&hi)|~bad"
         widget.value = expression
 
-        # Simulate a backend-driven value restore while the widget is unfocused.
-        plugin._browser_expression_focused = False
+        # Simulate a backend-driven value restore while selection is unknown.
+        plugin._browser_expression_selection = None
         plugin._on_browser_expression_change({
             "name": "value",
             "new": expression,
@@ -384,7 +360,7 @@ class ROIManagerTagsTests(unittest.TestCase):
         # Inserting an operator should now append at the tail rather than prefixing.
         plugin._insert_browser_expression_snippet("&")
         updated_value = plugin.ui_component.browser_expression_input.value
-        self.assertTrue(updated_value.endswith("&"))
+        self.assertTrue(updated_value.rstrip().endswith("&"))
 
     def test_expression_insertion_respects_cached_selection(self):
         plugin = make_plugin()

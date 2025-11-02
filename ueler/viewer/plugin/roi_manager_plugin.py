@@ -28,7 +28,7 @@ from ipywidgets import (
     VBox,
 )
 from matplotlib.colors import to_rgb
-from IPython.display import HTML as IPythonHTML, display
+from IPython.display import Javascript as IPythonJS, display
 
 from ueler.rendering import ChannelRenderSettings, render_roi_to_array
 
@@ -79,9 +79,7 @@ class ROIManagerPlugin(PluginBase):
         self._browser_expression_error = None
         self._browser_tag_buttons = {}
         self._browser_expression_selection = None  # type: Optional[Tuple[int, int]]
-        self._browser_expression_focused = False
-        self._browser_expression_widget_bound = False
-        self._browser_expression_skip_reset = False
+        self._use_browser_expression_js = True
 
         self._build_widgets()
         self._build_layout()
@@ -345,6 +343,14 @@ class ROIManagerPlugin(PluginBase):
             layout=flex_fill_layout(),
             style={"description_width": "auto"},
         )
+        try:
+            self.ui_component.browser_expression_input.add_class("roi-expression-input")
+        except Exception:  # pragma: no cover - add_class may not exist on older widgets
+            pass
+
+        self.ui_component.browser_expression_js_output = Output(
+            layout=Layout(width="0px", height="0px", border="0", padding="0", margin="0", display="none"),
+        )
 
         operator_buttons: List[Button] = []
         for symbol in ("(", ")", "&", "|", "!"):
@@ -353,9 +359,7 @@ class ROIManagerPlugin(PluginBase):
                 tooltip=f"Insert '{symbol}'",
                 layout=Layout(width="32px"),
             )
-            operator_button.on_click(
-                lambda _btn, token=symbol: self._request_browser_expression_insertion(token)
-            )
+            operator_button.on_click(lambda _btn, token=symbol: self._insert_browser_expression_snippet(token))
             operator_buttons.append(operator_button)
         self.ui_component.browser_expression_operator_box = HBox(
             operator_buttons,
@@ -430,6 +434,7 @@ class ROIManagerPlugin(PluginBase):
                         self.ui_component.browser_expression_operator_box,
                         self.ui_component.browser_expression_tag_box,
                         self.ui_component.browser_expression_feedback,
+                        self.ui_component.browser_expression_js_output,
                     ],
                     layout=column_block_layout(gap="4px"),
                 ),
@@ -446,7 +451,7 @@ class ROIManagerPlugin(PluginBase):
             ],
             layout=column_block_layout(gap="8px"),
         )
-        self._ensure_expression_cursor_binding()
+        self._browser_expression_selection = (0, 0)
 
     def _build_layout(self) -> None:
         header = HTML("<strong>ROI manager</strong>")
@@ -871,63 +876,93 @@ class ROIManagerPlugin(PluginBase):
             next_button.disabled = current_page >= total_pages or total_pages <= 0
 
     def _insert_browser_expression_snippet(self, snippet: str) -> None:
-        try:
-            self._ensure_expression_cursor_binding()
-            widget = getattr(self.ui_component, "browser_expression_input", None)
-            if widget is None:
-                # Surface this as a visible status so you know immediately
-                self.set_status("Expression input widget not found.", level="error")
-                return
+        if not snippet:
+            return
 
-            # Re-focus at last known caret (ok if this no-ops)
-            sel = self._browser_expression_selection or (len(widget.value or ""),) * 2
-            self._send_browser_expression_cursor(sel[0], sel[1], focus=True)
+        js_enabled = getattr(self, "_use_browser_expression_js", True)
+        inserted = False
+        if js_enabled:
+            inserted = self._insert_browser_expression_snippet_js(snippet)
 
-            current = str(widget.value or "")
-            start, end = self._resolve_browser_expression_selection(len(current))
-            before, after = current[:start], current[end:]
-            insert, cursor_offset = self._format_expression_insertion(before, after, snippet)
-
-            new_value = before + insert + after
-
-            self._suspend_browser_events = True
-            try:
-                widget.value = new_value   # ← even if JS caret binding failed, this will change the text
-            finally:
-                self._suspend_browser_events = False
-
-            new_cursor = start + cursor_offset
-            self._browser_expression_selection = (new_cursor, new_cursor)
-            self._send_browser_expression_cursor(new_cursor, new_cursor, focus=True)
-
-            self._browser_expression_skip_reset = True
-            try:
-                self._on_browser_expression_change({"name": "value", "new": widget.value})
-            finally:
-                self._browser_expression_skip_reset = False
-
-        except Exception as exc:
-            # Make failures obvious in the UI
-            self.set_status(f"Insert failed: {exc}", level="error")
-            raise
+        if not inserted:
+            self._insert_browser_expression_snippet_backend(snippet)
 
 
-    def _request_browser_expression_insertion(self, snippet: str, backend_fallback: bool = True) -> bool:
-        self._ensure_expression_cursor_binding()
+    def _insert_browser_expression_snippet_js(self, snippet: str) -> bool:
         widget = getattr(self.ui_component, "browser_expression_input", None)
-        if widget is None:
+        output = getattr(self.ui_component, "browser_expression_js_output", None)
+        if widget is None or output is None:
             return False
 
-        payload = {"event": "insert-snippet", "snippet": snippet}
+        snippet_literal = json.dumps(str(snippet))
+        js = (
+            "(function() {\n"
+            "  const field = document.querySelector('.roi-expression-input input, .roi-expression-input textarea');\n"
+            "  if (!field) { console.warn('[roi] expression field not found'); return; }\n"
+            "  field.focus();\n"
+            "  const value = field.value || '';\n"
+            "  const start = field.selectionStart == null ? value.length : field.selectionStart;\n"
+            "  const end = field.selectionEnd == null ? start : field.selectionEnd;\n"
+            "  const before = value.slice(0, start);\n"
+            "  const after = value.slice(end);\n"
+            "  const insertion = formatInsertion(before, after, String(" + snippet_literal + "));\n"
+            "  const newValue = before + insertion.text + after;\n"
+            "  if (newValue !== value) {\n"
+            "    field.value = newValue;\n"
+            "    field.dispatchEvent(new Event('input', { bubbles: true }));\n"
+            "  }\n"
+            "  const newPos = start + insertion.cursorOffset;\n"
+            "  if (field.setSelectionRange) {\n"
+            "    field.setSelectionRange(newPos, newPos);\n"
+            "  }\n"
+            "  function formatInsertion(before, after, snippet) {\n"
+            "    const beforeChar = before ? before.slice(-1) : '';\n"
+            "    const afterChar = after ? after.slice(0, 1) : '';\n"
+            "    const boundaryLeft = new Set(['', ' ', '\\t', '(', '&', '|', '!']);\n"
+            "    const boundaryRight = new Set(['', ' ', '\\t', ')', '&', '|']);\n"
+            "    const needsLeading = before.length > 0 && !boundaryLeft.has(beforeChar);\n"
+            "    if (snippet === '!') {\n"
+            "      const leading = needsLeading ? ' ' : '';\n"
+            "      return { text: leading + '!', cursorOffset: leading.length + 1 };\n"
+            "    }\n"
+            "    if (snippet === ')') {\n"
+            "      const leading = (needsLeading && ![' ', '('].includes(beforeChar)) ? ' ' : '';\n"
+            "      return { text: leading + ')', cursorOffset: leading.length + 1 };\n"
+            "    }\n"
+            "    const leading = needsLeading ? ' ' : '';\n"
+            "    const afterBoundary = boundaryRight.has(afterChar);\n"
+            "    const needsTrailing = snippet === '(' ? !(afterBoundary || afterChar === ')') : !afterBoundary;\n"
+            "    const trailing = needsTrailing ? ' ' : '';\n"
+            "    return { text: leading + snippet + trailing, cursorOffset: leading.length + snippet.length };\n"
+            "  }\n"
+            "})();"
+        )
+
         try:
-            widget.send(payload)
+            with output:
+                output.clear_output(wait=True)
+                display(IPythonJS(js))
             return True
         except Exception:
-            if backend_fallback:
-                self._insert_browser_expression_snippet(snippet)
             return False
 
 
+    def _insert_browser_expression_snippet_backend(self, snippet: str) -> None:
+        widget = getattr(self.ui_component, "browser_expression_input", None)
+        if widget is None:
+            return
+
+        current = str(getattr(widget, "value", "") or "")
+        start, end = self._resolve_browser_expression_selection(len(current))
+        before, after = current[:start], current[end:]
+        insertion, cursor_offset = self._format_expression_insertion(before, after, str(snippet))
+        new_value = before + insertion + after
+        if new_value == current:
+            return
+
+        self._browser_expression_selection = (start + cursor_offset, start + cursor_offset)
+        setattr(widget, "value", new_value)
+        self._on_browser_expression_change({"name": "value", "new": new_value})
     def _resolve_browser_expression_selection(self, text_length: int) -> Tuple[int, int]:
         selection = getattr(self, "_browser_expression_selection", None)
         if not (isinstance(selection, tuple) and len(selection) == 2):
@@ -978,22 +1013,6 @@ class ROIManagerPlugin(PluginBase):
         cursor_offset = len(leading) + len(snippet)
         return insert, cursor_offset
 
-    def _send_browser_expression_cursor(self, start: int, end: int, focus: bool = False) -> None:
-        widget = getattr(self.ui_component, "browser_expression_input", None)
-        if widget is None:
-            return
-        payload = {
-            "event": "set-selection",
-            "start": max(0, int(start)),
-            "end": max(0, int(end)),
-        }
-        if focus:
-            payload["focus"] = True
-        try:
-            widget.send(payload)
-        except Exception:  # pragma: no cover - widget may not support send
-            pass
-
     def _refresh_expression_tag_buttons(self, tags: Sequence[str]) -> None:
         container = getattr(self.ui_component, "browser_expression_tag_box", None)
         if container is None:
@@ -1010,9 +1029,7 @@ class ROIManagerPlugin(PluginBase):
                 tooltip=f"Insert '{tag}'",
                 layout=Layout(width="auto"),
             )
-            button.on_click(
-                lambda _btn, token=tag: self._request_browser_expression_insertion(token)
-            )
+            button.on_click(lambda _btn, token=tag: self._insert_browser_expression_snippet(token))
             self._browser_tag_buttons[tag] = button
             buttons.append(button)
 
@@ -1023,10 +1040,9 @@ class ROIManagerPlugin(PluginBase):
             return
 
         expression = str(change.get("new") or "")
-        if not self._browser_expression_skip_reset and not self._browser_expression_focused:
+        if self._browser_expression_selection is None:
             length = len(expression)
             self._browser_expression_selection = (length, length)
-            self._send_browser_expression_cursor(length, length, focus=False)
         self._browser_expression_cache = None
         self._compile_browser_expression(expression)
         self._browser_current_page = 1
@@ -1072,234 +1088,9 @@ class ROIManagerPlugin(PluginBase):
         else:
             feedback.value = "<em>Combine tags with () &amp; | !. Leave blank to use the simple tag filter.</em>"
 
-    def _expression_cursor_script(self, model_id: str) -> str:
-        if not model_id:
-            return ""
-        encoded_id = json.dumps(model_id)  # JSON string literal
-
-        js = r"""
-    <script type="text/javascript">
-    (function() {
-    const widgetId = __WIDGET_ID__;
-    let tries = 0, maxTries = 2000; // ~ 30-60s of rAFs in practice
-
-    let cachedModel = null;
-    let cachedStart = null;
-    let cachedEnd = null;
-
-    function resolveModel(cb){
-        if (cachedModel) { cb(cachedModel); return; }
-        function tryGet(m){ if (!m || !m.get_model) return;
-        try { m.get_model(widgetId).then(mod => { if (mod){ cachedModel = mod; cb(mod); } }); } catch(e){}
-        }
-        if (window.__widget_manager__) tryGet(window.__widget_manager__);
-        if (Array.isArray(window.jupyterWidgetManagers) && window.jupyterWidgetManagers.length) tryGet(window.jupyterWidgetManagers[0]);
-        if (window.manager) tryGet(window.manager);
-        if (!cachedModel && typeof window.require === 'function'){
-        window.require(['@jupyter-widgets/base'], function(base){
-            const ms = (base.ManagerBase && base.ManagerBase._managers) || [];
-            if (ms.length) tryGet(ms[0]);
-        });
-        }
-    }
-
-    function locate() {
-        const container = document.getElementById('widget-' + widgetId)
-        || document.querySelector('[data-widget-id="'+widgetId+'"]')
-        || document.querySelector('[data-widgetid="'+widgetId+'"]')
-        || document.getElementById(widgetId);
-        if (container) {
-        const el = container.querySelector('input, textarea');
-        if (el) return el;
-        }
-        return document.querySelector('input[data-widget-id="'+widgetId+'"],textarea[data-widget-id="'+widgetId+'"]');
-    }
-
-    function snapshotSelection(el){
-        const start = (el.selectionStart == null ? el.value.length : el.selectionStart);
-        const end = (el.selectionEnd == null ? el.value.length : el.selectionEnd);
-        cachedStart = start;
-        cachedEnd = end;
-        return { start, end };
-    }
-
-    function sendSelection(el){
-        const { start, end } = snapshotSelection(el);
-        resolveModel(model => { if (!model) return;
-            const msg = {
-                event: 'selection-change',
-                start,
-                end,
-                focused: (document.activeElement === el) || (typeof el.matches === 'function' && el.matches(':focus'))
-            };
-            try { model.send(msg); } catch(e){}
-        });
-    }
-
-    function formatInsertion(before, after, snippet){
-        const beforeChar = before ? before.slice(-1) : '';
-        const afterChar = after ? after.slice(0, 1) : '';
-        const boundaryLeft = new Set(['', ' ', '\t', '(', '&', '|', '!']);
-        const boundaryRight = new Set(['', ' ', '\t', ')', '&', '|']);
-
-        const needsLeading = before.length > 0 && !boundaryLeft.has(beforeChar);
-
-        if (snippet === '!'){
-            const leading = needsLeading ? ' ' : '';
-            return { text: leading + '!', cursorOffset: leading.length + 1 };
-        }
-
-        if (snippet === ')'){
-            const leading = needsLeading && ![' ', '('].includes(beforeChar) ? ' ' : '';
-            return { text: leading + ')', cursorOffset: leading.length + 1 };
-        }
-
-        const leading = needsLeading ? ' ' : '';
-        const afterBoundary = boundaryRight.has(afterChar);
-        let needsTrailing;
-        if (snippet === '('){
-            needsTrailing = !(afterBoundary || afterChar === ')');
-        } else {
-            needsTrailing = !afterBoundary;
-        }
-        const trailing = needsTrailing ? ' ' : '';
-        return { text: leading + snippet + trailing, cursorOffset: leading.length + snippet.length };
-    }
-
-    function bind(){
-        const el = locate();
-        if (!el){
-        if (tries++ < maxTries) return requestAnimationFrame(bind);
-        return;
-        }
-        if (el.__roi_expr_bound) return;
-        el.__roi_expr_bound = true;
-
-        const handler = () => sendSelection(el);
-        ['keyup','mouseup','select','focus','blur','input'].forEach(ev => el.addEventListener(ev, handler));
-
-        resolveModel(model => {
-            if (!model || model.__roi_expr_msg_bound) return;
-            model.__roi_expr_msg_bound = true;
-            model.on('msg:custom', msg => {
-                if (!msg || typeof msg !== 'object') return;
-                if (msg.event === 'set-selection'){
-                    const start = Number.isFinite(msg.start) ? msg.start : (el.selectionStart || 0);
-                    const end   = Number.isFinite(msg.end)   ? msg.end   : start;
-                    try {
-                        if (msg.focus && el.focus) el.focus();
-                        if (el.setSelectionRange) el.setSelectionRange(start, end);
-                        cachedStart = start;
-                        cachedEnd = end;
-                    } catch(e){}
-                    return;
-                }
-
-                if (msg.event === 'insert-snippet' && typeof msg.snippet === 'string'){
-                    const value = el.value || '';
-                    let start = (cachedStart == null ? value.length : cachedStart);
-                    let end = (cachedEnd == null ? start : cachedEnd);
-                    if (!Number.isFinite(start) || !Number.isFinite(end)){
-                        const snap = snapshotSelection(el);
-                        start = snap.start;
-                        end = snap.end;
-                    }
-
-                    const before = value.slice(0, start);
-                    const after = value.slice(end);
-                    const insertion = formatInsertion(before, after, msg.snippet);
-                    const newValue = before + insertion.text + after;
-
-                    if (newValue !== value){
-                        el.value = newValue;
-                        try {
-                            if (model.get('value') !== newValue) {
-                                model.set('value', newValue);
-                                model.save_changes();
-                            }
-                        } catch(e){}
-                        const inputEvent = new Event('input', { bubbles: true, cancelable: true });
-                        el.dispatchEvent(inputEvent);
-                    }
-
-                    const newCursor = start + insertion.cursorOffset;
-                    cachedStart = cachedEnd = newCursor;
-                    try {
-                        if (el.setSelectionRange) el.setSelectionRange(newCursor, newCursor);
-                    } catch(e){}
-                    if (el.focus) el.focus();
-                    sendSelection(el);
-                }
-            });
-        });
-
-        handler(); // initial caret
-    }
-
-    requestAnimationFrame(bind);
-    })();
-    </script>
-    """
-        return js.replace("__WIDGET_ID__", encoded_id)
 
 
 
-    def _on_browser_expression_msg(self, _, content, __):
-        if not isinstance(content, dict) or content.get("event") != "selection-change":
-            return
-        try:
-            start = max(0, int(content.get("start", 0)))
-            end = max(start, int(content.get("end", start)))
-        except Exception:
-            start = end = 0
-
-        focused = bool(content.get("focused"))
-        new_selection = (start, end)
-
-        if focused or self._browser_expression_selection is None:
-            self._browser_expression_selection = new_selection
-        elif new_selection != self._browser_expression_selection:
-            # Ignore blur-driven resets to (0, 0) so helper clicks keep the last caret.
-            if not focused and new_selection == (0, 0) and self._browser_expression_selection:
-                pass
-            else:
-                self._browser_expression_selection = new_selection
-
-        self._browser_expression_focused = focused
-
-
-
-    def _ensure_expression_cursor_binding(self) -> None:
-        if getattr(self, "_browser_expression_widget_bound", False):
-            return
-
-        widget = getattr(self.ui_component, "browser_expression_input", None)
-        if widget is None:
-            return
-
-        model_id = getattr(widget, "model_id", None) or getattr(widget, "_model_id", None)
-        if not model_id:
-            return
-
-        script = self._expression_cursor_script(model_id)
-        if script:
-            try:
-                display(IPythonHTML(script))
-            except Exception:  # pragma: no cover - display may fail in headless mode
-                pass
-
-        try:
-            widget.on_msg(self._on_browser_expression_msg)
-        except Exception:  # pragma: no cover - widget may not support custom messages
-            return
-
-        value = str(getattr(widget, "value", "") or "")
-        length = len(value)
-        self._browser_expression_selection = (length, length)
-        self._browser_expression_widget_bound = True
-
-        if hasattr(widget, "value"):
-            self._send_browser_expression_cursor(length, length, focus=False)
 
     def _render_roi_tile(
         self,
@@ -1962,5 +1753,3 @@ class ROIManagerPlugin(PluginBase):
         super().after_all_plugins_loaded()
         self.refresh_marker_options()
         self.refresh_roi_table()
-        # Bind (again) now that the view is likely attached to the DOM
-        self._ensure_expression_cursor_binding()

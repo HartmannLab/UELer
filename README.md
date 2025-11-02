@@ -111,6 +111,9 @@ The first release candidate delivers automatic scale bars across the viewer and 
 - Refined the helper insertion routine to honour the cached start/end indices (including highlighted ranges), so repeated button presses keep chaining at the cursor instead of resetting to index 0.
 - Restored the selection resolver and focus-aware caching after a regression so helper buttons keep updating the field even when caret telemetry drops blur events.
 - Shifted snippet insertion to happen entirely in the browser: helper buttons now send an `insert-snippet` event that updates the field client-side before syncing back to Python, eliminating focus-race edge cases.
+- Added a readiness check that temporarily falls back to the Python insertion path until the browser bridge reports a live caret snapshot, keeping helper buttons responsive immediately after load.
+- Replaced the inline `<script>` injection with `IPython.display.Javascript` so the caret bridge runs under JupyterLab’s sanitized output policy and keeps reporting selection updates reliably.
+- Simplified the caret bridge to mirror the standalone ipywidgets DOM-binding demo: it now resolves the widget input via stable selectors, runs the helper JavaScript through a shared `ipywidgets.Output` in the same frame, performs the splice entirely in the browser, and then syncs the new value/caret back to Python across Notebook, Voila, and JupyterLab 4 hosts.
 
 **Cell gallery tile padding**
 - Gallery slots now expand to the widest rendered tile and center narrower crops so selecting multiple cells never triggers NumPy broadcasting errors when their cutouts differ slightly in width.
