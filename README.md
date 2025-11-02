@@ -165,6 +165,10 @@ The first release candidate delivers automatic scale bars across the viewer and 
 - The browser adds a boolean expression builder for tag filtering (`() & | !` with quoted tags), eager validation with inline error hints, HUD-free Matplotlib tiles sized to 98 % of the scroll container, and a repaired lazy-loading script that fetches four more previews whenever you scroll near the end.
 - Tests cover both the parser (`tests/test_tag_expression.py`) and plugin wiring (`tests/test_roi_manager_tags.py`) so future tweaks keep validation and preset restoration intact.
 
+**ROI browser thumbnail scaling**
+- Browser thumbnails now reuse the viewer’s adaptive downsampling helper rather than the saved ROI zoom field, keeping preview generation fast even when the main viewport renders at full resolution (addresses [#44](https://github.com/HartmannLab/UELer/issues/44)).
+- The Matplotlib gallery output now sizes itself from the configured column count and enables horizontal scrolling when necessary so wide grids remain visible instead of clipping tiles beneath notebook layout constraints (addresses [#44](https://github.com/HartmannLab/UELer/issues/44)).
+
 **Pixel annotation palette management**
 - The Pixel annotations accordion now mirrors the mask painter workflow with Save/Load/Manage tabs, optional `ipyfilechooser` dialogs, and shared registry handling so class palettes can be saved and restored consistently (addresses [#42](https://github.com/HartmannLab/UELer/issues/42)).
 - Introduced `ueler.viewer.palette_store` for common palette persistence helpers and aligned the mask painter plugin plus new unit tests (`tests/test_annotation_palettes.py`) on the shared format.
