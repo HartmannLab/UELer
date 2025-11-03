@@ -28,7 +28,7 @@ from ipywidgets import (
     VBox,
 )
 from matplotlib.colors import to_rgb
-from IPython.display import Javascript as IPythonJS, display
+from IPython.display import HTML as IPythonHTML, Javascript as IPythonJS, display
 
 from ueler.rendering import ChannelRenderSettings, render_roi_to_array
 
@@ -62,6 +62,7 @@ class ROIManagerPlugin(PluginBase):
     THUMBNAIL_MAX_EDGE = 256
     GALLERY_WIDTH_RATIO = 0.98
     BROWSER_SCROLL_HEIGHT = "400px"
+    _browser_css_injected = False
 
     def __init__(self, main_viewer, width: int = 6, height: int = 3) -> None:
         super().__init__(main_viewer, width, height)
@@ -386,12 +387,19 @@ class ROIManagerPlugin(PluginBase):
                 height=self.BROWSER_SCROLL_HEIGHT,
                 max_height=self.BROWSER_SCROLL_HEIGHT,
                 width="100%",
+                min_width="0",
+                flex="1 1 auto",
                 align_self="stretch",
                 overflow_y="auto",
                 overflow_x="hidden",
                 border="1px solid var(--jp-border-color2, #ccc)",
             )
         )
+        try:
+            self.ui_component.browser_output.add_class("roi-browser-output")
+        except Exception:  # pragma: no cover - add_class may be unavailable on older widgets
+            pass
+        self._ensure_browser_css()
 
         self.ui_component.browser_status = HTML("<em>No ROI captured yet.</em>")
         self.ui_component.browser_page_label = HTML("<em>Page 1 of 1</em>")
@@ -445,7 +453,7 @@ class ROIManagerPlugin(PluginBase):
                     layout=column_block_layout(gap="4px"),
                 ),
             ],
-            layout=column_block_layout(gap="6px"),
+            layout=column_block_layout(gap="6px", min_width="0"),
         )
 
         self.ui_component.browser_root = VBox(
@@ -455,7 +463,7 @@ class ROIManagerPlugin(PluginBase):
                 self.ui_component.browser_pagination,
                 self.ui_component.browser_status,
             ],
-            layout=column_block_layout(gap="8px"),
+            layout=column_block_layout(gap="8px", min_width="0"),
         )
         self._browser_expression_selection = (0, 0)
 
@@ -799,6 +807,11 @@ class ROIManagerPlugin(PluginBase):
             output.clear_output(wait=True)
             columns, rows, fig_width, fig_height = self._determine_gallery_layout(len(limited_records))
             fig, axes = plt.subplots(rows, columns, figsize=(fig_width, fig_height))
+            dpi_value = self._resolve_browser_dpi()
+            try:
+                fig.set_dpi(dpi_value)
+            except Exception:  # pragma: no cover - matplotlib backends without set_dpi
+                pass
             fig.subplots_adjust(left=0.01, right=0.99, top=0.99, bottom=0.01, wspace=0.02, hspace=0.02)
             axes_array = np.atleast_1d(np.array(axes)).ravel()
 
@@ -897,6 +910,12 @@ class ROIManagerPlugin(PluginBase):
 
         if next_button is not None:
             next_button.disabled = current_page >= total_pages or total_pages <= 0
+
+        root_layout = getattr(self.ui_component, "browser_root", None)
+        if root_layout is not None:
+            layout_obj = getattr(root_layout, "layout", None)
+            if layout_obj is not None:
+                setattr(layout_obj, "min_width", "0")
 
     def _insert_browser_expression_snippet(self, snippet: str) -> None:
         if not snippet:
@@ -1035,6 +1054,32 @@ class ROIManagerPlugin(PluginBase):
         insert = f"{leading}{snippet}{trailing}"
         cursor_offset = len(leading) + len(snippet)
         return insert, cursor_offset
+
+    @classmethod
+    def _ensure_browser_css(cls) -> None:
+        if getattr(cls, "_browser_css_injected", False):
+            return
+        try:
+            display(
+                IPythonHTML(
+                    """
+<style>
+.roi-browser-output img {
+    max-width: 100% !important;
+    height: auto !important;
+}
+</style>
+"""
+                )
+            )
+        except Exception:  # pragma: no cover - fallback for headless environments
+            pass
+        cls._browser_css_injected = True
+
+    @staticmethod
+    def _resolve_browser_dpi() -> float:
+        base_dpi = 72.0
+        return max(36.0, min(120.0, base_dpi))
 
     def _refresh_expression_tag_buttons(self, tags: Sequence[str]) -> None:
         container = getattr(self.ui_component, "browser_expression_tag_box", None)

@@ -358,6 +358,15 @@ class ROIManagerTagsTests(unittest.TestCase):
         self.assertEqual(getattr(layout, "max_height", None), ROIManagerPlugin.BROWSER_SCROLL_HEIGHT)
         self.assertEqual(getattr(layout, "overflow_y", None), "auto")
         self.assertEqual(getattr(layout, "overflow_x", None), "hidden")
+        self.assertEqual(getattr(layout, "min_width", None), "0")
+        self.assertEqual(getattr(layout, "flex", None), "1 1 auto")
+
+    def test_browser_root_layout_can_shrink(self):
+        plugin = make_plugin()
+        layout = plugin.ui_component.browser_root.layout
+        self.assertEqual(getattr(layout, "min_width", None), "0")
+        self.assertEqual(plugin.ui_component.browser_root.children[2], plugin.ui_component.browser_pagination)
+        self.assertTrue(getattr(ROIManagerPlugin, "_browser_css_injected", False))
 
     def test_gallery_layout_respects_width_ratio_and_columns(self):
         plugin = make_plugin()

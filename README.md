@@ -116,6 +116,7 @@ The first release candidate delivers automatic scale bars across the viewer and 
 - Simplified the caret bridge to mirror the standalone ipywidgets DOM-binding demo: it now resolves the widget input via stable selectors, runs the helper JavaScript through a shared `ipywidgets.Output` in the same frame, performs the splice entirely in the browser, and then syncs the new value/caret back to Python across Notebook, Voila, and JupyterLab 4 hosts.
 - Constrained the ROI browser output panel to a 400px viewport with internal scrolling so the sidebar stays compact while the tile gallery grows (reply 7 to [#44](https://github.com/HartmannLab/UELer/issues/44)).
 - The Matplotlib gallery now fixes its three-column grid, pads empty slots, and clamps figure width to 98% of the plugin pane so thumbnails stay fully visible without horizontal clipping.
+- Follow-up: forcing the output container (and parent flex boxes) to `min_width=0` with `flex=1 1 auto` plus a scoped CSS rule keeps rendered figures within the box, letting the scrollbar apply solely to thumbnails and keeping pagination buttons unobscured (reply 8 to [#44](https://github.com/HartmannLab/UELer/issues/44)).
 
 **Cell gallery tile padding**
 - Gallery slots now expand to the widest rendered tile and center narrower crops so selecting multiple cells never triggers NumPy broadcasting errors when their cutouts differ slightly in width.

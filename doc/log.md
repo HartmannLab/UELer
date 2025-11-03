@@ -7,6 +7,11 @@
 - Rebuilt the Matplotlib gallery sizing to keep a fixed three-column grid, pad empty slots, and clamp the figure width to 98% of the plugin width for consistently visible tiles.
 - Ran `python -m unittest tests.test_roi_manager_tags` to cover the new layout helper and scroll container assertions.
 
+**ROI browser layout follow-up**
+- Allowed the thumbnail output container and parent flex boxes to shrink (`min_width=0`, `flex=1 1 auto`) so the scrollbar scopes to the gallery instead of the entire plugin.
+- Injected a scoped CSS rule (`.roi-browser-output img`) plus DPI tuning to keep Matplotlib renders within the widget bounds and leave pagination buttons unobscured.
+- Repeated `python -m unittest tests.test_roi_manager_tags` to exercise the new layout expectations and confirm the CSS helper is applied once.
+
 **ROI browser thumbnails**
 - Reused the new `select_downsample_factor` helper to downsample ROI previews automatically, capping the longest edge at 256 px and ignoring stale zoom metadata for smoother scrolling.
 - Follow-up: thumbnails now compute their factor from each ROI viewport (`factor = 2^ceil(log2(ceil(longest/256)))`) and `_derive_downsampled_region` applies ceiling division so non-divisible dimensions still render complete tiles.
