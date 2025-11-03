@@ -155,8 +155,13 @@ if "ipywidgets" not in sys.modules:
             self.__dict__.update(kwargs)
 
     class _Widget:
-        def __init__(self, *_, **kwargs):
-            self.children = kwargs.get("children", ())
+        def __init__(self, *args, **kwargs):
+            children = kwargs.get("children")
+            if children is None and args:
+                children = args[0]
+            if children is None:
+                children = ()
+            self.children = tuple(children)
             self.value = kwargs.get("value")
             self.allowed_tags = kwargs.get("allowed_tags", [])
             self.allow_duplicates = kwargs.get("allow_duplicates", False)
@@ -367,15 +372,24 @@ class ROIManagerTagsTests(unittest.TestCase):
         canvas = SimpleNamespace(layout=layout)
         fig = SimpleNamespace(canvas=canvas)
 
-        result = plugin._configure_browser_canvas(fig)
+        pixel_height = 640.0
+        result = plugin._configure_browser_canvas(fig, pixel_height)
 
-        self.assertTrue(result)
+        self.assertIsNotNone(result)
         configured_layout = canvas.layout
         self.assertIsNotNone(configured_layout)
-        self.assertEqual(getattr(configured_layout, "height", None), plugin.BROWSER_SCROLL_HEIGHT)
-        self.assertEqual(getattr(configured_layout, "width", None), "100%")
-        self.assertEqual(getattr(configured_layout, "overflow_y", None), "auto")
+        self.assertEqual(getattr(configured_layout, "height", None), f"{int(pixel_height)}px")
+        self.assertEqual(getattr(configured_layout, "max_height", None), f"{int(pixel_height)}px")
+        self.assertEqual(getattr(configured_layout, "width", None), "99%")
+        self.assertEqual(getattr(configured_layout, "overflow_y", None), "visible")
         self.assertEqual(getattr(configured_layout, "overflow_x", None), "hidden")
+
+        container_layout = getattr(result, "layout", None)
+        self.assertIsNotNone(container_layout)
+        self.assertEqual(getattr(container_layout, "height", None), plugin.BROWSER_SCROLL_HEIGHT)
+        self.assertEqual(getattr(container_layout, "max_height", None), plugin.BROWSER_SCROLL_HEIGHT)
+        self.assertEqual(getattr(container_layout, "overflow_y", None), "auto")
+        self.assertEqual(getattr(container_layout, "overflow_x", None), "hidden")
 
     def test_browser_root_layout_can_shrink(self):
         plugin = make_plugin()
@@ -390,7 +404,8 @@ class ROIManagerTagsTests(unittest.TestCase):
         self.assertEqual(columns, plugin.BROWSER_COLUMNS)
         self.assertEqual(rows, 1)
         expected_width = plugin.width * plugin.GALLERY_WIDTH_RATIO
-        self.assertAlmostEqual(fig_width, expected_width)
+        adjusted_expected = max(1.0, expected_width - 0.4)
+        self.assertAlmostEqual(fig_width, adjusted_expected)
         self.assertAlmostEqual(fig_height, fig_width / columns)
 
     def test_new_tags_extend_allowed_pool(self):

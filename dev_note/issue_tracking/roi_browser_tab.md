@@ -86,3 +86,9 @@
 ### Next Steps
 - Implemented option (1) by assigning a constrained `ipywidgets.Layout` to `fig.canvas` and displaying the canvas widget directly when ipympl is active; confirm in notebooks that the canvas now respects the 400px viewport. If the overflow persists, pivot to option (2) since it keeps dependency light and is easiest to test.
 - Update screenshots and add regression captures once the preferred approach is verified across notebook front-ends (Lab, classic, Voila).
+
+## 2025-11-05 Canvas wrapper implementation
+
+- Reworked `_configure_browser_canvas` to accept an explicit pixel height, assign the layout to `fig.canvas`, and return a fixed-height `VBox` wrapper that enforces the 400px viewport while hiding horizontal overflow.
+- Updated the unit harness to assert both canvas and wrapper constraints, teaching the ipywidgets stub to record positional `children` so pagination placement remains under test.
+- Verified the change with `python -m unittest tests.test_roi_manager_tags`; manual notebook validation still pending once the latest build is deployed to the shared environment.

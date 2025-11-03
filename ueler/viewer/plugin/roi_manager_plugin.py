@@ -731,16 +731,22 @@ class ROIManagerPlugin(PluginBase):
         if plugin_width <= 0:
             plugin_width = 6.0
 
+        safe_cols = max(columns, 1)
+        horizontal_padding = 0.4  # inches reserved for borders/margins
+        effective_width_ratio = self.GALLERY_WIDTH_RATIO
+        if effective_width_ratio >= 1.0:
+            effective_width_ratio = 0.98
+
         raw_ratio = getattr(self, "GALLERY_WIDTH_RATIO", 0.98)
         try:
             width_ratio = float(raw_ratio)
         except (TypeError, ValueError):
             width_ratio = 0.98
-        width_ratio = min(max(width_ratio, 0.1), 1.0)
+        width_ratio = min(max(width_ratio, 0.1), effective_width_ratio)
 
         fig_width = plugin_width * width_ratio
-        fig_width = max(min(fig_width, plugin_width), 1.0)
-        tile_inch = fig_width / columns
+        fig_width = max(1.0, min(fig_width - horizontal_padding, plugin_width - horizontal_padding))
+        tile_inch = fig_width / safe_cols
         fig_height = max(tile_inch * rows, tile_inch)
         return columns, rows, fig_width, fig_height
 
@@ -844,10 +850,10 @@ class ROIManagerPlugin(PluginBase):
                 self._browser_axis_to_roi[axis] = record.get("roi_id")
                 rendered += 1
 
-            configured_canvas = self._configure_browser_canvas(fig)
+            configured_widget = self._configure_browser_canvas(fig, fig_height * dpi_value)
 
-            if configured_canvas:
-                display(getattr(fig, "canvas", fig))
+            if configured_widget is not None:
+                display(configured_widget)
             else:
                 plt.show(fig)
 
@@ -874,16 +880,26 @@ class ROIManagerPlugin(PluginBase):
         self._update_browser_summary(rendered_count, total)
         self._update_pagination_controls(current_page, total_pages, total)
 
-    def _configure_browser_canvas(self, fig) -> bool:
+    def _configure_browser_canvas(self, fig, pixel_height: float) -> Optional[VBox]:
         canvas = getattr(fig, "canvas", None)
         if canvas is None:
-            return False
+            return None
 
-        layout_kwargs = {
+        canvas_height_px = max(1, int(math.ceil(pixel_height)))
+        canvas_layout_kwargs = {
+            "height": f"{canvas_height_px}px",
+            "max_height": f"{canvas_height_px}px",
+            "width": "99%",
+            "max_width": "100%",
+            "min_width": "0",
+            "overflow_y": "visible",
+            "overflow_x": "hidden",
+            "display": "block",
+        }
+        container_layout_kwargs = {
             "height": self.BROWSER_SCROLL_HEIGHT,
             "max_height": self.BROWSER_SCROLL_HEIGHT,
             "width": "100%",
-            "min_height": "0",
             "min_width": "0",
             "overflow_y": "auto",
             "overflow_x": "hidden",
@@ -891,21 +907,19 @@ class ROIManagerPlugin(PluginBase):
         }
 
         try:
-            canvas.layout = Layout(**layout_kwargs)
-            return True
+            canvas.layout = Layout(**canvas_layout_kwargs)
         except Exception:  # pragma: no cover - ipympl may reuse existing layout instance
             existing_layout = getattr(canvas, "layout", None)
-            if existing_layout is None:
-                return False
-            updated = False
-            for key, value in layout_kwargs.items():
-                if hasattr(existing_layout, key):
-                    try:
-                        setattr(existing_layout, key, value)
-                        updated = True
-                    except Exception:  # pragma: no cover - traitlets validation
-                        pass
-            return updated
+            if existing_layout is not None:
+                for key, value in canvas_layout_kwargs.items():
+                    if hasattr(existing_layout, key):
+                        try:
+                            setattr(existing_layout, key, value)
+                        except Exception:  # pragma: no cover - traitlets validation
+                            pass
+
+        scroll_container = VBox([canvas], layout=Layout(**container_layout_kwargs))
+        return scroll_container
 
     def _disconnect_browser_events(self) -> None:
         if self._browser_figure is not None and self._browser_click_cid is not None:

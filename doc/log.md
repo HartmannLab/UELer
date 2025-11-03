@@ -13,6 +13,11 @@
 - Added an ipympl-aware canvas layout helper that forces `fig.canvas` to honour the 400px viewport; fall back to `plt.show` when the widget backend is unavailable.
 - Repeated `python -m unittest tests.test_roi_manager_tags` to exercise the new layout expectations and confirm the CSS helper is applied once.
 
+**ROI browser canvas containment**
+- Swapped the direct `plt.show` usage for a fixed-height `VBox` that wraps the Matplotlib canvas, applying a pixel-specific `Layout` so the gallery honours the 400px viewport while clipping horizontal overflow.
+- Updated `_configure_browser_canvas` and its unit tests to accept an explicit pixel height, confirm both the canvas and wrapper sizing, and guarantee the scroll container engages when figures exceed the viewport.
+- Ran `python -m unittest tests.test_roi_manager_tags` to validate the wrapper behaviour and refreshed ipywidgets stubs for positional children support.
+
 **ROI browser thumbnails**
 - Reused the new `select_downsample_factor` helper to downsample ROI previews automatically, capping the longest edge at 256 px and ignoring stale zoom metadata for smoother scrolling.
 - Follow-up: thumbnails now compute their factor from each ROI viewport (`factor = 2^ceil(log2(ceil(longest/256)))`) and `_derive_downsampled_region` applies ceiling division so non-divisible dimensions still render complete tiles.
