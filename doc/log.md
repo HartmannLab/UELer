@@ -10,6 +10,7 @@
 **ROI browser layout follow-up**
 - Allowed the thumbnail output container and parent flex boxes to shrink (`min_width=0`, `flex=1 1 auto`) so the scrollbar scopes to the gallery instead of the entire plugin.
 - Injected a scoped CSS rule (`.roi-browser-output img`) plus DPI tuning to keep Matplotlib renders within the widget bounds and leave pagination buttons unobscured.
+- Added an ipympl-aware canvas layout helper that forces `fig.canvas` to honour the 400px viewport; fall back to `plt.show` when the widget backend is unavailable.
 - Repeated `python -m unittest tests.test_roi_manager_tags` to exercise the new layout expectations and confirm the CSS helper is applied once.
 
 **ROI browser thumbnails**

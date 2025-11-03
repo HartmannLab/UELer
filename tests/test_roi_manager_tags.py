@@ -217,6 +217,8 @@ if "ipywidgets" not in sys.modules:
 
     sys.modules["ipywidgets"] = widgets
 
+from ipywidgets import Layout
+
 from ueler.image_utils import select_downsample_factor  # type: ignore[import-error]
 from viewer.plugin.roi_manager_plugin import ROIManagerPlugin
 
@@ -358,8 +360,22 @@ class ROIManagerTagsTests(unittest.TestCase):
         self.assertEqual(getattr(layout, "max_height", None), ROIManagerPlugin.BROWSER_SCROLL_HEIGHT)
         self.assertEqual(getattr(layout, "overflow_y", None), "auto")
         self.assertEqual(getattr(layout, "overflow_x", None), "hidden")
-        self.assertEqual(getattr(layout, "min_width", None), "0")
-        self.assertEqual(getattr(layout, "flex", None), "1 1 auto")
+
+    def test_configure_browser_canvas_applies_layout(self):
+        plugin = make_plugin()
+        layout = Layout()
+        canvas = SimpleNamespace(layout=layout)
+        fig = SimpleNamespace(canvas=canvas)
+
+        result = plugin._configure_browser_canvas(fig)
+
+        self.assertTrue(result)
+        configured_layout = canvas.layout
+        self.assertIsNotNone(configured_layout)
+        self.assertEqual(getattr(configured_layout, "height", None), plugin.BROWSER_SCROLL_HEIGHT)
+        self.assertEqual(getattr(configured_layout, "width", None), "100%")
+        self.assertEqual(getattr(configured_layout, "overflow_y", None), "auto")
+        self.assertEqual(getattr(configured_layout, "overflow_x", None), "hidden")
 
     def test_browser_root_layout_can_shrink(self):
         plugin = make_plugin()

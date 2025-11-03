@@ -70,3 +70,19 @@
 - Run the ROI-related pytest modules (`tests/test_roi_manager_tags.py`, `tests/test_export_job.py`, plus any new tests).
 - Exercise the plugin manually within `run_viewer.ipynb`, checking both tabs, filtering, and preset applications.
 - Verify CSV import/export retains new metadata across sessions.
+
+## 2025-11-03 Scroll Containment Follow-up
+
+- **Observation:**  After landing the Reply 8 layout tweak, the ROI gallery still renders past the 400px viewport in live notebooks. The Matplotlib canvas pushes below the pagination bar and the outer accordion picks up the scrollbar instead of the intended thumbnail pane (see screenshot attached in the issue thread).
+- **Root cause hypothesis:**  The `ipywidgets.Output` height/overflow styles are applied to the outer `div.widget-output`, but Matplotlib’s nbagg canvas injects an inner `<div class="jp-OutputArea-output">` with `overflow: visible`. Because we call `plt.show(fig)` (which hands ownership to nbagg), the generated widget uses its own sizing and ignores the outer scroll constraints, so the browser_output container simply stretches.
+- **Additional factors:**  The calculated figure height is ~560px (3 columns × 4 rows at ~1.96 in per tile × 72 dpi). With nbagg still in control, the canvas also sets `style="height: 560px; width: 420px;"`, so the browser box never receives a scroll height shorter than the content.
+
+### Potential Fixes
+1. **Drive sizing through `fig.canvas.layout`:** Switch to `fig.canvas.layout = Layout(height=self.BROWSER_SCROLL_HEIGHT, width="100%", overflow="hidden")` before calling `plt.show`. When using the nbagg backend the canvas itself is a widget, so overriding its layout may let the outer `Output` respect the 400px cap. We will need to guard this for non-widget backends (tests use stubs) with `hasattr(fig, "canvas")` checks.
+2. **Render to an explicit widget image:** Replace `plt.show` with a manual PNG render (`fig.canvas.print_png(BytesIO())`) and feed the bytes into `ipywidgets.Image(layout=Layout(width="100%", max_height=self.BROWSER_SCROLL_HEIGHT, overflow="auto"))`. This makes the gallery a standard widget tree that honours the parent layout at the cost of losing interactive zoom.
+3. **Wrap the figure inside a fixed-size container:** Create a `VBox` with `Layout(height=self.BROWSER_SCROLL_HEIGHT, overflow_y="auto")` and place the canvas inside using `container.children = (canvas,)`. This avoids the Output widget entirely for the gallery surface and gives us full control over scrollbars.
+4. **CSS override:** As a stop-gap, inject a stylesheet targeting `.roi-browser-output .jp-OutputArea-output` to force `max-height: 400px; overflow-y: auto;`. This keeps nbagg but may rely on Lab-specific class names, so we should treat it as a fallback once we confirm the DOM contract across Notebook and Voila.
+
+### Next Steps
+- Implemented option (1) by assigning a constrained `ipywidgets.Layout` to `fig.canvas` and displaying the canvas widget directly when ipympl is active; confirm in notebooks that the canvas now respects the 400px viewport. If the overflow persists, pivot to option (2) since it keeps dependency light and is easiest to test.
+- Update screenshots and add regression captures once the preferred approach is verified across notebook front-ends (Lab, classic, Voila).

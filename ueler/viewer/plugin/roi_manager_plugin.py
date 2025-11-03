@@ -844,7 +844,12 @@ class ROIManagerPlugin(PluginBase):
                 self._browser_axis_to_roi[axis] = record.get("roi_id")
                 rendered += 1
 
-            plt.show(fig)
+            configured_canvas = self._configure_browser_canvas(fig)
+
+            if configured_canvas:
+                display(getattr(fig, "canvas", fig))
+            else:
+                plt.show(fig)
 
             try:
                 canvas = getattr(fig, "canvas", None)
@@ -868,6 +873,39 @@ class ROIManagerPlugin(PluginBase):
         rendered_count = rendered
         self._update_browser_summary(rendered_count, total)
         self._update_pagination_controls(current_page, total_pages, total)
+
+    def _configure_browser_canvas(self, fig) -> bool:
+        canvas = getattr(fig, "canvas", None)
+        if canvas is None:
+            return False
+
+        layout_kwargs = {
+            "height": self.BROWSER_SCROLL_HEIGHT,
+            "max_height": self.BROWSER_SCROLL_HEIGHT,
+            "width": "100%",
+            "min_height": "0",
+            "min_width": "0",
+            "overflow_y": "auto",
+            "overflow_x": "hidden",
+            "display": "block",
+        }
+
+        try:
+            canvas.layout = Layout(**layout_kwargs)
+            return True
+        except Exception:  # pragma: no cover - ipympl may reuse existing layout instance
+            existing_layout = getattr(canvas, "layout", None)
+            if existing_layout is None:
+                return False
+            updated = False
+            for key, value in layout_kwargs.items():
+                if hasattr(existing_layout, key):
+                    try:
+                        setattr(existing_layout, key, value)
+                        updated = True
+                    except Exception:  # pragma: no cover - traitlets validation
+                        pass
+            return updated
 
     def _disconnect_browser_events(self) -> None:
         if self._browser_figure is not None and self._browser_click_cid is not None:
