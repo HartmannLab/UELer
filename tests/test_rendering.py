@@ -209,6 +209,84 @@ class RenderingHelpersTests(unittest.TestCase):
                 downsample_factor=1,
             )
 
+    def test_render_roi_to_array_rounds_up_region_bounds(self) -> None:
+        channels = {"A": np.ones((10, 10), dtype=np.float32)}
+        settings = {
+            "A": ChannelRenderSettings(color=(1.0, 0.0, 0.0), contrast_min=0.0, contrast_max=1.0)
+        }
+        roi_definition = {"x_min": 0, "x_max": 7, "y_min": 0, "y_max": 5}
+
+        result = render_roi_to_array(
+            "FOV",
+            channels,
+            ("A",),
+            settings,
+            roi_definition=roi_definition,
+            downsample_factor=4,
+        )
+
+        self.assertEqual(result.shape, (2, 2, 3))
+
+    def test_render_roi_to_array_accepts_string_coordinates(self) -> None:
+        channels = {"A": np.arange(64, dtype=np.float32).reshape(8, 8)}
+        settings = {
+            "A": ChannelRenderSettings(color=(1.0, 0.0, 0.0), contrast_min=0.0, contrast_max=1.0)
+        }
+        roi_definition = {"x_min": "1.5", "x_max": "6.5", "y_min": "2.25", "y_max": "5.75"}
+
+        result = render_roi_to_array(
+            "FOV",
+            channels,
+            ("A",),
+            settings,
+            roi_definition=roi_definition,
+            downsample_factor=2,
+        )
+
+        self.assertEqual(result.ndim, 3)
+        self.assertGreater(result.shape[0], 0)
+        self.assertGreater(result.shape[1], 0)
+        self.assertEqual(result.shape[2], 3)
+
+    def test_render_roi_to_array_accepts_center_width_strings(self) -> None:
+        channels = {"A": np.arange(64, dtype=np.float32).reshape(8, 8)}
+        settings = {
+            "A": ChannelRenderSettings(color=(0.0, 1.0, 0.0), contrast_min=0.0, contrast_max=1.0)
+        }
+        roi_definition = {"x": "4", "y": "4", "width": "4.0", "height": "6.0"}
+
+        result = render_roi_to_array(
+            "FOV",
+            channels,
+            ("A",),
+            settings,
+            roi_definition=roi_definition,
+            downsample_factor=2,
+        )
+
+        self.assertEqual(result.ndim, 3)
+        self.assertGreater(result.shape[0], 0)
+        self.assertGreater(result.shape[1], 0)
+        self.assertEqual(result.shape[2], 3)
+
+    def test_render_roi_to_array_falls_back_when_bounds_invalid(self) -> None:
+        channels = {"A": np.ones((8, 8), dtype=np.float32)}
+        settings = {
+            "A": ChannelRenderSettings(color=(1.0, 0.0, 0.0), contrast_min=0.0, contrast_max=1.0)
+        }
+        roi_definition = {"x_min": float("nan"), "x_max": float("nan"), "y_min": float("nan"), "y_max": float("nan")}
+
+        result = render_roi_to_array(
+            "FOV",
+            channels,
+            ("A",),
+            settings,
+            roi_definition=roi_definition,
+            downsample_factor=2,
+        )
+
+        self.assertEqual(result.shape, (4, 4, 3))
+
 
 if __name__ == "__main__":
     unittest.main()

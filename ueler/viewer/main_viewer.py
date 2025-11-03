@@ -30,6 +30,7 @@ from ueler.image_utils import (
     calculate_downsample_factor,
     generate_edges,
     get_axis_limits_with_padding,
+    select_downsample_factor,
 )
 from ueler.viewer.images import load_asset_bytes
 from ueler.viewer.scale_bar import compute_scale_bar_spec, effective_pixel_size_nm
@@ -211,15 +212,12 @@ class ImageMaskViewer:
         self.height, self.width = first_channel_image.shape
 
         # Calculate the downsample factor based on image size
-        self.current_downsample_factor = calculate_downsample_factor(self.width, self.height)
-
-        # Ensure the downsample factor is one of the allowed factors
-        if self.current_downsample_factor not in self.downsample_factors:
-            # Choose the closest allowed downsample factor
-            self.current_downsample_factor = max(
-                [factor for factor in self.downsample_factors if factor <= self.current_downsample_factor],
-                default=1
-            )
+        self.current_downsample_factor = select_downsample_factor(
+            self.width,
+            self.height,
+            max_dimension=512,
+            allowed_factors=self.downsample_factors,
+        )
 
         # Initialize image output and image display
         self.image_output = Output()

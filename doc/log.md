@@ -1,4 +1,15 @@
 ### v0.2.0-rc2
+**Main viewer downsampling docs**
+- Summarized the automatic FOV downsampling flow in `dev_note/main_viewer.md`, covering factor selection, caching strategy, zoom toggles, and scale bar corrections so notebook users understand how large scenes stay responsive.
+
+**ROI browser thumbnails**
+- Reused the new `select_downsample_factor` helper to downsample ROI previews automatically, capping the longest edge at 256 px and ignoring stale zoom metadata for smoother scrolling.
+- Follow-up: thumbnails now compute their factor from each ROI viewport (`factor = 2^ceil(log2(ceil(longest/256)))`) and `_derive_downsampled_region` applies ceiling division so non-divisible dimensions still render complete tiles.
+
+**ROI preview reliability**
+- Normalised ROI coordinate parsing (strings/NaNs) and synced downsampled bounds with the sampled pixel grid so cropped ROIs render alongside full-FOV entries instead of showing “preview unavailable” (Reply 6 to [#44](https://github.com/HartmannLab/UELer/issues/44)).
+- Added regression coverage for string-based ROI metadata in `tests/test_rendering.py` and reran `python -m unittest tests.test_rendering tests.test_roi_manager_tags` to confirm the fix.
+
 **ROI browser pagination**
 - Replaced the scroll-triggered lazy loader with explicit Previous/Next page buttons and a live page indicator, rendering 3x4 tiles per step so navigation stays deterministic (addresses [#44](https://github.com/HartmannLab/UELer/issues/44)).
 - Reset pagination whenever filters or expressions change and surfaced per-page summaries plus disabled states for boundary pages to keep the gallery responsive.

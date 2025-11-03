@@ -169,6 +169,17 @@ The first release candidate delivers automatic scale bars across the viewer and 
 - The Pixel annotations accordion now mirrors the mask painter workflow with Save/Load/Manage tabs, optional `ipyfilechooser` dialogs, and shared registry handling so class palettes can be saved and restored consistently (addresses [#42](https://github.com/HartmannLab/UELer/issues/42)).
 - Introduced `ueler.viewer.palette_store` for common palette persistence helpers and aligned the mask painter plugin plus new unit tests (`tests/test_annotation_palettes.py`) on the shared format.
 
+**Documentation updates**
+- Documented the viewer's automatic FOV downsampling flow in `dev_note/main_viewer.md`, covering factor selection, caching, and scale bar adjustments for large scenes.
+
+**ROI browser thumbnails**
+- Unified thumbnail downsampling with the main viewer helper so ROI previews auto-scale the longest edge to 256 px regardless of saved zoom metadata, improving navigation performance on oversized FOVs.
+- Follow-up: thumbnails now measure each ROI viewport, apply `factor = 2^ceil(log2(ceil(longest/256)))`, and rely on ceiling division when deriving downsampled bounds so non-divisible widths/heights still render complete tiles.
+
+**ROI preview reliability**
+- Normalised ROI metadata parsing so cropped entries with string or NaN viewport bounds still render, falling back to safe defaults when coordinates are missing and eliminating the “preview unavailable” tiles called out in Reply 6 to [#44](https://github.com/HartmannLab/UELer/issues/44).
+- Aligned downsampled region math with the sampled pixel grid and added regression coverage for string-based ROI coordinates, keeping thumbnails consistent across full-FOV and cropped selections.
+
 **Channels accordion consolidation**
 - Moved the channel tag chips plus marker-set dropdown, name entry, and action buttons into the Channels accordion pane so channel selection, presets, and per-channel sliders stay in one cohesive space.
 - Rebuilt the pane with nested containers that maintain spacing and focus order, removing duplicate widgets from the header while keeping keyboard navigation unchanged.

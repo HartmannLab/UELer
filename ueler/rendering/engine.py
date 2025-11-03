@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Mapping, Optional, Sequence, Tuple
 
+import math
+
 try:  # pragma: no cover - optional dependency is validated via higher-level tests
     from skimage.segmentation import find_boundaries  # type: ignore
 except Exception:  # pragma: no cover - allow environments without skimage
@@ -125,12 +127,78 @@ def _ensure_region_within_bounds(region: Region, bounds: Region) -> Region:
     return (xmin, xmax, ymin, ymax)
 
 
+def _coerce_float(value) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(numeric):
+        return None
+    return numeric
+
+
+def _normalise_roi_region(
+    x_min: Optional[float],
+    x_max: Optional[float],
+    y_min: Optional[float],
+    y_max: Optional[float],
+    fallback: Region,
+) -> Region:
+    if None in (x_min, x_max, y_min, y_max):
+        return fallback
+
+    xmin = int(math.floor(min(x_min, x_max)))
+    xmax = int(math.ceil(max(x_min, x_max)))
+    ymin = int(math.floor(min(y_min, y_max)))
+    ymax = int(math.ceil(max(y_min, y_max)))
+
+    if xmax <= xmin:
+        xmax = xmin + 1
+    if ymax <= ymin:
+        ymax = ymin + 1
+    return (xmin, xmax, ymin, ymax)
+
+
+def _resolve_roi_region(roi_definition: Mapping[str, float], fallback: Region) -> Region:
+    x_min = _coerce_float(roi_definition.get("x_min"))
+    x_max = _coerce_float(roi_definition.get("x_max"))
+    y_min = _coerce_float(roi_definition.get("y_min"))
+    y_max = _coerce_float(roi_definition.get("y_max"))
+
+    if None not in (x_min, x_max, y_min, y_max):
+        return _normalise_roi_region(x_min, x_max, y_min, y_max, fallback)
+
+    x_center = _coerce_float(roi_definition.get("x"))
+    y_center = _coerce_float(roi_definition.get("y"))
+    width = _coerce_float(roi_definition.get("width"))
+    height = _coerce_float(roi_definition.get("height"))
+
+    if None not in (x_center, y_center, width, height) and width > 0 and height > 0:
+        half_w = width / 2.0
+        half_h = height / 2.0
+        return _normalise_roi_region(
+            x_center - half_w,
+            x_center + half_w,
+            y_center - half_h,
+            y_center + half_h,
+            fallback,
+        )
+
+    return fallback
+
+
 def _derive_downsampled_region(region: Region, downsample: int) -> Region:
     xmin, xmax, ymin, ymax = region
     xmin_ds = xmin // downsample
-    xmax_ds = max(xmin_ds + 1, xmax // downsample)
     ymin_ds = ymin // downsample
-    ymax_ds = max(ymin_ds + 1, ymax // downsample)
+
+    width = max(1, int(math.ceil(max(0, xmax - xmin) / downsample)))
+    height = max(1, int(math.ceil(max(0, ymax - ymin) / downsample)))
+
+    xmax_ds = xmin_ds + width
+    ymax_ds = ymin_ds + height
     return (xmin_ds, xmax_ds, ymin_ds, ymax_ds)
 
 
@@ -390,34 +458,16 @@ def render_roi_to_array(
     annotation: Optional[AnnotationRenderSettings] = None,
     masks: Optional[Iterable[MaskRenderSettings]] = None,
 ) -> np.ndarray:
-    if {
-        "x_min",
-        "x_max",
-        "y_min",
-        "y_max",
-    }.issubset(roi_definition):
-        region_xy = (
-            int(roi_definition["x_min"]),
-            int(roi_definition["x_max"]),
-            int(roi_definition["y_min"]),
-            int(roi_definition["y_max"]),
-        )
-    elif {"x", "y", "width", "height"}.issubset(roi_definition):
-        x = float(roi_definition["x"])
-        y = float(roi_definition["y"])
-        width = float(roi_definition["width"])
-        height = float(roi_definition["height"])
-        region_xy = (
-            int(round(x - width / 2.0)),
-            int(round(x + width / 2.0)),
-            int(round(y - height / 2.0)),
-            int(round(y + height / 2.0)),
-        )
-    else:
+    has_bounds = {"x_min", "x_max", "y_min", "y_max"}.issubset(roi_definition)
+    has_center = {"x", "y", "width", "height"}.issubset(roi_definition)
+    if not has_bounds and not has_center:
         raise ValueError(
             "roi_definition must include either (x_min, x_max, y_min, y_max) or (x, y, width, height)"
         )
 
+    bounds = _infer_region(channel_arrays, selected_channels)
+    region_xy = _resolve_roi_region(roi_definition, bounds)
+    region_xy = _ensure_region_within_bounds(region_xy, bounds)
     region_ds = _derive_downsampled_region(region_xy, downsample_factor)
     return render_fov_to_array(
         fov_name,

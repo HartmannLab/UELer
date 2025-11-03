@@ -21,6 +21,53 @@ def calculate_downsample_factor(width, height, ignore_zoom=False, max_dimension=
     return factor
 
 
+def select_downsample_factor(
+    width,
+    height,
+    *,
+    max_dimension=512,
+    allowed_factors=None,
+    minimum=1,
+):
+    """Return the nearest permitted downsample factor for the given image size.
+
+    The helper reuses :func:`calculate_downsample_factor` to determine the
+    smallest power-of-two factor that keeps the longest edge within
+    ``max_dimension`` pixels. When ``allowed_factors`` is provided, the result
+    is clamped to the largest allowed factor that does not exceed the computed
+    baseline. If no permitted value satisfies that condition, the smallest
+    allowed factor is returned instead. When ``allowed_factors`` is omitted, the
+    raw baseline factor is used directly.
+    """
+
+    try:
+        base_factor = int(
+            calculate_downsample_factor(width, height, ignore_zoom=False, max_dimension=max_dimension)
+        )
+    except Exception:
+        base_factor = 1
+
+    base_factor = max(1, base_factor)
+    minimum = max(1, int(minimum or 1))
+
+    if not allowed_factors:
+        return max(minimum, base_factor)
+
+    try:
+        candidates = sorted({int(factor) for factor in allowed_factors if int(factor) >= minimum})
+    except Exception:
+        candidates = []
+
+    if not candidates:
+        return max(minimum, base_factor)
+
+    at_most_base = [factor for factor in candidates if factor <= base_factor]
+    if at_most_base:
+        return at_most_base[-1]
+
+    return candidates[0]
+
+
 import os
 import numpy as np
 import pandas as pd

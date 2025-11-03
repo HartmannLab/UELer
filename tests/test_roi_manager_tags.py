@@ -1,3 +1,4 @@
+import math
 import os
 import sys
 import types
@@ -70,6 +71,82 @@ if "matplotlib.pyplot" not in sys.modules:
     pyplot_stub.show = lambda *_: None
     sys.modules["matplotlib.pyplot"] = pyplot_stub
 
+if "seaborn_image" not in sys.modules:
+    sys.modules["seaborn_image"] = types.ModuleType("seaborn_image")
+
+if "dask" not in sys.modules:
+    dask_stub = types.ModuleType("dask")
+
+    def _delayed(func):  # pragma: no cover - lightweight stub
+        return func
+
+    dask_stub.delayed = _delayed
+    sys.modules["dask"] = dask_stub
+
+if "skimage" not in sys.modules:
+    skimage_stub = types.ModuleType("skimage")
+    sys.modules["skimage"] = skimage_stub
+
+    segmentation_stub = types.ModuleType("skimage.segmentation")
+    segmentation_stub.find_boundaries = lambda *args, **kwargs: None
+    sys.modules["skimage.segmentation"] = segmentation_stub
+
+    io_stub = types.ModuleType("skimage.io")
+    io_stub.imread = lambda *args, **kwargs: None
+    io_stub.imsave = lambda *args, **kwargs: None
+    sys.modules["skimage.io"] = io_stub
+
+    exposure_stub = types.ModuleType("skimage.exposure")
+    exposure_stub.adjust_gamma = lambda image, *_args, **_kwargs: image
+    sys.modules["skimage.exposure"] = exposure_stub
+
+    transform_stub = types.ModuleType("skimage.transform")
+    transform_stub.resize = lambda *args, **kwargs: None
+    sys.modules["skimage.transform"] = transform_stub
+
+    color_stub = types.ModuleType("skimage.color")
+    color_stub.rgb2gray = lambda *args, **kwargs: None
+    sys.modules["skimage.color"] = color_stub
+
+    measure_stub = types.ModuleType("skimage.measure")
+    measure_stub.label = lambda *args, **kwargs: None
+    sys.modules["skimage.measure"] = measure_stub
+
+    draw_stub = types.ModuleType("skimage.draw")
+    draw_stub.circle_perimeter = lambda *args, **kwargs: ((), ())
+    sys.modules["skimage.draw"] = draw_stub
+
+    skimage_stub.segmentation = segmentation_stub
+    skimage_stub.io = io_stub
+    skimage_stub.exposure = exposure_stub
+    skimage_stub.transform = transform_stub
+    skimage_stub.color = color_stub
+    skimage_stub.measure = measure_stub
+    skimage_stub.draw = draw_stub
+
+if "tifffile" not in sys.modules:
+    tifffile_stub = types.ModuleType("tifffile")
+
+    class _FakeTiffFile:  # pragma: no cover - stub for imports
+        def __init__(self, *_args, **_kwargs):
+            self.pages = [self]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def asarray(self):
+            return [[0]]
+
+        @property
+        def shape(self):
+            return (1, 1)
+
+    tifffile_stub.TiffFile = _FakeTiffFile
+    sys.modules["tifffile"] = tifffile_stub
+
 if "ipywidgets" not in sys.modules:
     widgets = types.ModuleType("ipywidgets")
 
@@ -140,6 +217,7 @@ if "ipywidgets" not in sys.modules:
 
     sys.modules["ipywidgets"] = widgets
 
+from ueler.image_utils import select_downsample_factor  # type: ignore[import-error]
 from viewer.plugin.roi_manager_plugin import ROIManagerPlugin
 
 
@@ -253,9 +331,16 @@ def make_plugin():
     plugin._browser_tag_buttons = {}
     plugin._browser_expression_selection = (0, 0)
     plugin._use_browser_expression_js = False
+    plugin._thumbnail_downsample_cache = {}
+    plugin.THUMBNAIL_MAX_EDGE = ROIManagerPlugin.THUMBNAIL_MAX_EDGE
 
     plugin._build_widgets()
     return plugin
+
+
+class FakeArray:
+    def __init__(self, height, width):
+        self.shape = (height, width)
 
 
 class ROIManagerTagsTests(unittest.TestCase):
@@ -389,6 +474,46 @@ class ROIManagerTagsTests(unittest.TestCase):
 
         self.assertEqual(widget.value, "alpha gamma")
         self.assertEqual(plugin._browser_expression_selection, (11, 11))
+
+    def test_thumbnail_downsample_uses_roi_viewport_dimensions(self):
+        plugin = make_plugin()
+        arrays = {"ch1": FakeArray(4096, 8192)}
+        record = {"roi_id": "roi-large", "x_min": 0, "x_max": 8192, "y_min": 0, "y_max": 4096}
+
+        factor = plugin._resolve_thumbnail_downsample("FOV-L", arrays, record)
+
+        self.assertEqual(factor, 32)
+        self.assertLessEqual(math.ceil(8192 / factor), plugin.THUMBNAIL_MAX_EDGE)
+
+        # Cached factor reused for identical ROI metadata.
+        arrays["ch1"] = FakeArray(1024, 1024)
+        self.assertEqual(plugin._resolve_thumbnail_downsample("FOV-L", arrays, record), factor)
+
+    def test_thumbnail_downsample_defaults_to_unity_for_small_images(self):
+        plugin = make_plugin()
+        arrays = {"ch1": FakeArray(128, 200)}
+        record = {"roi_id": "roi-small", "x_min": 10, "x_max": 210, "y_min": 5, "y_max": 133}
+
+        factor = plugin._resolve_thumbnail_downsample("FOV-small", arrays, record)
+        self.assertEqual(factor, 1)
+
+    def test_thumbnail_downsample_falls_back_to_fov_dimensions(self):
+        plugin = make_plugin()
+        arrays = {"ch1": FakeArray(512, 512)}
+        record = {"roi_id": "roi-null"}  # Missing geometry
+
+        factor = plugin._resolve_thumbnail_downsample("FOV-default", arrays, record)
+        self.assertEqual(factor, 2)
+
+    def test_select_downsample_factor_clamps_against_allowed_list(self):
+        allowed = [1, 2, 4, 8]
+
+        # Large image chooses the largest permitted factor under the baseline.
+        factor = select_downsample_factor(1500, 1200, max_dimension=512, allowed_factors=allowed)
+        self.assertEqual(factor, 4)
+
+        # Small images stay at the minimum allowed factor.
+        self.assertEqual(select_downsample_factor(50, 50, max_dimension=512, allowed_factors=allowed), 1)
 
 
 if __name__ == "__main__":  # pragma: no cover

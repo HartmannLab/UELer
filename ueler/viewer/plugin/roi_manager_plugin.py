@@ -59,6 +59,7 @@ class ROIManagerPlugin(PluginBase):
     BROWSER_COLUMNS = 3
     BROWSER_ROWS = 4
     BROWSER_PAGE_SIZE = BROWSER_COLUMNS * BROWSER_ROWS
+    THUMBNAIL_MAX_EDGE = 256
 
     def __init__(self, main_viewer, width: int = 6, height: int = 3) -> None:
         super().__init__(main_viewer, width, height)
@@ -80,6 +81,7 @@ class ROIManagerPlugin(PluginBase):
         self._browser_tag_buttons = {}
         self._browser_expression_selection = None  # type: Optional[Tuple[int, int]]
         self._use_browser_expression_js = True
+        self._thumbnail_downsample_cache: Dict[str, int] = {}
 
         self._build_widgets()
         self._build_layout()
@@ -786,13 +788,7 @@ class ROIManagerPlugin(PluginBase):
                 if marker_profile is None or not marker_profile.selected_channels:
                     message_text = "No channels"
 
-                downsample = record.get("zoom", self.main_viewer.current_downsample_factor)
-                try:
-                    downsample_int = max(1, int(round(float(downsample))))
-                except Exception:  # pragma: no cover - defensive
-                    downsample_int = max(1, int(self.main_viewer.current_downsample_factor))
-
-                tile = None if message_text else self._render_roi_tile(record, marker_profile, downsample_int)
+                tile = None if message_text else self._render_roi_tile(record, marker_profile)
                 if tile is None or tile.size == 0:
                     message_text = message_text or "Preview unavailable"
 
@@ -1096,7 +1092,7 @@ class ROIManagerPlugin(PluginBase):
         self,
         record: Mapping[str, object],
         marker_profile: _MarkerProfile,
-        downsample_factor: int,
+        downsample_factor: Optional[int] = None,
     ) -> Optional[np.ndarray]:
         fov_name = record.get("fov")
         if not fov_name:
@@ -1111,6 +1107,11 @@ class ROIManagerPlugin(PluginBase):
         if channel_arrays is None:
             return None
 
+        factor = downsample_factor
+        if factor is None:
+            factor = self._resolve_thumbnail_downsample(fov_name, channel_arrays, record)
+        factor = max(1, int(factor))
+
         try:
             array = render_roi_to_array(
                 fov_name,
@@ -1118,12 +1119,101 @@ class ROIManagerPlugin(PluginBase):
                 marker_profile.selected_channels,
                 marker_profile.channel_settings,
                 roi_definition=record,
-                downsample_factor=downsample_factor,
+                downsample_factor=factor,
             )
         except Exception:  # pragma: no cover - rendering failures
             return None
 
         return np.clip(array, 0.0, 1.0)
+
+    def _resolve_thumbnail_downsample(
+        self,
+        fov_name: str,
+        channel_arrays: Mapping[str, object],
+        record: Mapping[str, object],
+    ) -> int:
+        width_px, height_px = self._extract_roi_dimensions(record, channel_arrays)
+        cache_key = (record.get("roi_id"), width_px, height_px, fov_name)
+        cached = self._thumbnail_downsample_cache.get(cache_key)
+        if cached:
+            return cached
+
+        longest_edge = max(width_px, height_px, 1)
+        ratio = math.ceil(longest_edge / self.THUMBNAIL_MAX_EDGE)
+        if ratio <= 1:
+            factor = 1
+        else:
+            factor = 1 << int(math.ceil(math.log2(ratio)))
+
+        factor = max(1, int(factor))
+        self._thumbnail_downsample_cache[cache_key] = factor
+        return factor
+
+    def _extract_roi_dimensions(
+        self,
+        record: Mapping[str, object],
+        channel_arrays: Mapping[str, object],
+    ) -> Tuple[int, int]:
+        def _coerce_number(value: object) -> Optional[float]:
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                return None
+            if not math.isfinite(numeric):
+                return None
+            return numeric
+
+        width: Optional[float] = None
+        height: Optional[float] = None
+
+        corners = {"x_min", "x_max", "y_min", "y_max"}
+        if corners.issubset(record):
+            x_min = _coerce_number(record.get("x_min"))
+            x_max = _coerce_number(record.get("x_max"))
+            y_min = _coerce_number(record.get("y_min"))
+            y_max = _coerce_number(record.get("y_max"))
+            if x_min is not None and x_max is not None:
+                width = abs(x_max - x_min)
+            if y_min is not None and y_max is not None:
+                height = abs(y_max - y_min)
+
+        if width is None or height is None:
+            if {"width", "height"}.issubset(record):
+                width_candidate = _coerce_number(record.get("width"))
+                height_candidate = _coerce_number(record.get("height"))
+                if width_candidate is not None:
+                    width = abs(width_candidate)
+                if height_candidate is not None:
+                    height = abs(height_candidate)
+
+        if width is None or height is None or width <= 0 or height <= 0:
+            return self._resolve_fov_dimensions(channel_arrays)
+
+        try:
+            width_px = max(1, int(math.ceil(width)))
+            height_px = max(1, int(math.ceil(height)))
+        except (TypeError, ValueError, OverflowError):
+            return self._resolve_fov_dimensions(channel_arrays)
+
+        return width_px, height_px
+
+    def _resolve_fov_dimensions(self, channel_arrays: Mapping[str, object]) -> Tuple[int, int]:
+        for array in channel_arrays.values():
+            if array is None:
+                continue
+            shape = getattr(array, "shape", None)
+            if shape and len(shape) >= 2:
+                try:
+                    height = int(shape[0])
+                    width = int(shape[1])
+                except Exception:  # pragma: no cover - defensive
+                    continue
+                if height > 0 and width > 0:
+                    return width, height
+
+        fallback_width = int(getattr(self.main_viewer, "width", 1) or 1)
+        fallback_height = int(getattr(self.main_viewer, "height", 1) or 1)
+        return fallback_width, fallback_height
 
     def _build_marker_profile(self, record: Mapping[str, object]) -> Optional[_MarkerProfile]:
         marker_ref = str(record.get("marker_set") or "").strip()
