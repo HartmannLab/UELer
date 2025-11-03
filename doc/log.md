@@ -2,6 +2,11 @@
 **Main viewer downsampling docs**
 - Summarized the automatic FOV downsampling flow in `dev_note/main_viewer.md`, covering factor selection, caching strategy, zoom toggles, and scale bar corrections so notebook users understand how large scenes stay responsive.
 
+**ROI browser layout fixes**
+- Set the ROI browser output widget to a 400px viewport with vertical scrolling so the accordion stays compact even when dozens of thumbnails load.
+- Rebuilt the Matplotlib gallery sizing to keep a fixed three-column grid, pad empty slots, and clamp the figure width to 98% of the plugin width for consistently visible tiles.
+- Ran `python -m unittest tests.test_roi_manager_tags` to cover the new layout helper and scroll container assertions.
+
 **ROI browser thumbnails**
 - Reused the new `select_downsample_factor` helper to downsample ROI previews automatically, capping the longest edge at 256 px and ignoring stale zoom metadata for smoother scrolling.
 - Follow-up: thumbnails now compute their factor from each ROI viewport (`factor = 2^ceil(log2(ceil(longest/256)))`) and `_derive_downsampled_region` applies ceiling division so non-divisible dimensions still render complete tiles.

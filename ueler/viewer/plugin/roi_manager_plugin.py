@@ -60,6 +60,8 @@ class ROIManagerPlugin(PluginBase):
     BROWSER_ROWS = 4
     BROWSER_PAGE_SIZE = BROWSER_COLUMNS * BROWSER_ROWS
     THUMBNAIL_MAX_EDGE = 256
+    GALLERY_WIDTH_RATIO = 0.98
+    BROWSER_SCROLL_HEIGHT = "400px"
 
     def __init__(self, main_viewer, width: int = 6, height: int = 3) -> None:
         super().__init__(main_viewer, width, height)
@@ -381,10 +383,12 @@ class ROIManagerPlugin(PluginBase):
         # ignore 'height' or 'overflow' props; adjust if needed for your target.
         self.ui_component.browser_output = Output(
             layout=Layout(
-                height="auto",
-                width="98%",
-                align_self="center",
-                overflow_y="visible",
+                height=self.BROWSER_SCROLL_HEIGHT,
+                max_height=self.BROWSER_SCROLL_HEIGHT,
+                width="100%",
+                align_self="stretch",
+                overflow_y="auto",
+                overflow_x="hidden",
                 border="1px solid var(--jp-border-color2, #ccc)",
             )
         )
@@ -706,6 +710,32 @@ class ROIManagerPlugin(PluginBase):
 
         return df.reset_index(drop=True)
 
+    def _determine_gallery_layout(self, record_count: int) -> Tuple[int, int, float, float]:
+        columns = max(1, int(self.BROWSER_COLUMNS))
+        active_count = max(1, int(record_count))
+        rows = max(1, math.ceil(active_count / columns))
+
+        raw_plugin_width = getattr(self, "width", 6)
+        try:
+            plugin_width = float(raw_plugin_width)
+        except (TypeError, ValueError):
+            plugin_width = 6.0
+        if plugin_width <= 0:
+            plugin_width = 6.0
+
+        raw_ratio = getattr(self, "GALLERY_WIDTH_RATIO", 0.98)
+        try:
+            width_ratio = float(raw_ratio)
+        except (TypeError, ValueError):
+            width_ratio = 0.98
+        width_ratio = min(max(width_ratio, 0.1), 1.0)
+
+        fig_width = plugin_width * width_ratio
+        fig_width = max(min(fig_width, plugin_width), 1.0)
+        tile_inch = fig_width / columns
+        fig_height = max(tile_inch * rows, tile_inch)
+        return columns, rows, fig_width, fig_height
+
     def _refresh_browser_gallery(self) -> None:
         output = getattr(self.ui_component, "browser_output", None)
         status = getattr(self.ui_component, "browser_status", None)
@@ -753,6 +783,7 @@ class ROIManagerPlugin(PluginBase):
             current_page,
             total_pages,
             total,
+            self.BROWSER_COLUMNS,
         )
 
         if self._browser_last_signature == signature:
@@ -766,23 +797,22 @@ class ROIManagerPlugin(PluginBase):
 
         with output:
             output.clear_output(wait=True)
-            if limited_records:
-                columns = min(self.BROWSER_COLUMNS, max(1, len(limited_records)))
-                rows = max(1, math.ceil(len(limited_records) / columns))
-            else:
-                columns = self.BROWSER_COLUMNS
-                rows = max(1, self.BROWSER_ROWS)
-
-            tile_inch = 2.4
-            fig, axes = plt.subplots(rows, columns, figsize=(columns * tile_inch, rows * tile_inch))
+            columns, rows, fig_width, fig_height = self._determine_gallery_layout(len(limited_records))
+            fig, axes = plt.subplots(rows, columns, figsize=(fig_width, fig_height))
             fig.subplots_adjust(left=0.01, right=0.99, top=0.99, bottom=0.01, wspace=0.02, hspace=0.02)
             axes_array = np.atleast_1d(np.array(axes)).ravel()
 
             rendered = 0
-            for axis in axes_array:
+            for slot_index, axis in enumerate(axes_array):
                 axis.axis("off")
+                if slot_index >= len(limited_records):
+                    try:
+                        axis.set_facecolor("#f8f8f8")
+                    except Exception:  # pragma: no cover - matplotlib backend differences
+                        pass
+                    continue
 
-            for axis, record in zip(axes_array, limited_records):
+                record = limited_records[slot_index]
                 marker_profile = self._build_marker_profile(record)
                 message_text = None
                 if marker_profile is None or not marker_profile.selected_channels:
@@ -800,9 +830,6 @@ class ROIManagerPlugin(PluginBase):
                 axis.axis("off")
                 self._browser_axis_to_roi[axis] = record.get("roi_id")
                 rendered += 1
-
-            for axis in axes_array[len(limited_records) :]:
-                axis.remove()
 
             plt.show(fig)
 

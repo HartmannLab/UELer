@@ -333,6 +333,8 @@ def make_plugin():
     plugin._use_browser_expression_js = False
     plugin._thumbnail_downsample_cache = {}
     plugin.THUMBNAIL_MAX_EDGE = ROIManagerPlugin.THUMBNAIL_MAX_EDGE
+    plugin.width = 6
+    plugin.height = 3
 
     plugin._build_widgets()
     return plugin
@@ -348,6 +350,23 @@ class ROIManagerTagsTests(unittest.TestCase):
         plugin = make_plugin()
         tags_widget = plugin.ui_component.tags
         self.assertTrue(getattr(tags_widget, "allow_new", False))
+
+    def test_browser_output_widget_scrolls_within_fixed_height(self):
+        plugin = make_plugin()
+        layout = plugin.ui_component.browser_output.layout
+        self.assertEqual(getattr(layout, "height", None), ROIManagerPlugin.BROWSER_SCROLL_HEIGHT)
+        self.assertEqual(getattr(layout, "max_height", None), ROIManagerPlugin.BROWSER_SCROLL_HEIGHT)
+        self.assertEqual(getattr(layout, "overflow_y", None), "auto")
+        self.assertEqual(getattr(layout, "overflow_x", None), "hidden")
+
+    def test_gallery_layout_respects_width_ratio_and_columns(self):
+        plugin = make_plugin()
+        columns, rows, fig_width, fig_height = plugin._determine_gallery_layout(2)
+        self.assertEqual(columns, plugin.BROWSER_COLUMNS)
+        self.assertEqual(rows, 1)
+        expected_width = plugin.width * plugin.GALLERY_WIDTH_RATIO
+        self.assertAlmostEqual(fig_width, expected_width)
+        self.assertAlmostEqual(fig_height, fig_width / columns)
 
     def test_new_tags_extend_allowed_pool(self):
         plugin = make_plugin()
