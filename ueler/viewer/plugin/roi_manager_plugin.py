@@ -30,7 +30,15 @@ from ipywidgets import (
 from matplotlib.colors import to_rgb
 from IPython.display import HTML as IPythonHTML, Javascript as IPythonJS, display
 
-from ueler.rendering import ChannelRenderSettings, render_roi_to_array
+from ueler.rendering import (
+    AnnotationOverlaySnapshot,
+    AnnotationRenderSettings,
+    ChannelRenderSettings,
+    MaskOverlaySnapshot,
+    MaskRenderSettings,
+    OverlaySnapshot,
+    render_roi_to_array,
+)
 
 from .plugin_base import PluginBase
 from ..layout_utils import column_block_layout, flex_fill_layout
@@ -92,7 +100,7 @@ class ROIManagerPlugin(PluginBase):
 
         # Populate controls with current data
         self.refresh_marker_options()
-        self.refresh_roi_table()
+        self.refresh_roi_table(force_refresh=True, preserve_page=False)
 
         # Subscribe to ROI manager updates
         self.main_viewer.roi_manager.observable.add_observer(self._on_roi_table_change)
@@ -506,7 +514,7 @@ class ROIManagerPlugin(PluginBase):
     def _connect_events(self) -> None:
         self.ui_component.roi_table.observe(self._on_selection_change, names="value")
         self.ui_component.limit_to_fov_checkbox.observe(
-            lambda *_: self.refresh_roi_table(), names="value"
+            lambda *_: self.refresh_roi_table(force_refresh=True, preserve_page=False), names="value"
         )
         self.ui_component.capture_button.on_click(self._capture_current_view)
         self.ui_component.update_button.on_click(self._update_selected_roi)
@@ -544,7 +552,7 @@ class ROIManagerPlugin(PluginBase):
     # Event handlers and helpers
     # ------------------------------------------------------------------
     def _on_roi_table_change(self, df):  # pragma: no cover - observer callback
-        self.refresh_roi_table(df)
+        self.refresh_roi_table(df, force_refresh=True)
 
     def _on_selection_change(self, change):
         if self._suspend_ui_events or change.get("name") != "value":
@@ -604,7 +612,13 @@ class ROIManagerPlugin(PluginBase):
 
         self._refresh_expression_tag_buttons(allowed)
 
-    def refresh_roi_table(self, df: Optional[pd.DataFrame] = None) -> None:
+    def refresh_roi_table(
+        self,
+        df: Optional[pd.DataFrame] = None,
+        *,
+        preserve_page: bool = True,
+        force_refresh: bool = False,
+    ) -> None:
         source_table = self.main_viewer.roi_manager.table
         self._update_available_tags(source_table)
         self._refresh_browser_filters()
@@ -640,8 +654,12 @@ class ROIManagerPlugin(PluginBase):
             self._suspend_ui_events = False
 
         self._selected_roi_id = selection
-        self._browser_current_page = 1
-        self._browser_last_signature = None
+        if preserve_page:
+            self._browser_current_page = max(1, int(getattr(self, "_browser_current_page", 1)))
+        else:
+            self._browser_current_page = 1
+        if force_refresh:
+            self._browser_last_signature = None
         self._refresh_browser_gallery()
 
         scope = (
@@ -806,7 +824,13 @@ class ROIManagerPlugin(PluginBase):
         expression_text = str(getattr(self.ui_component.browser_expression_input, "value", "") or "").strip()
 
         signature = (
-            tuple(record.get("roi_id") for record in limited_records),
+            tuple(
+                (
+                    record.get("roi_id"),
+                    record.get("updated_at"),
+                )
+                for record in limited_records
+            ),
             tuple(sorted(str(tag) for tag in getattr(self.ui_component.browser_tags_filter, "value", ()))),
             tuple(sorted(str(fov) for fov in getattr(self.ui_component.browser_fov_filter, "value", ()))),
             bool(getattr(self.ui_component.browser_limit_to_current, "value", False)),
@@ -1257,6 +1281,8 @@ class ROIManagerPlugin(PluginBase):
             factor = self._resolve_thumbnail_downsample(fov_name, channel_arrays, record)
         factor = max(1, int(factor))
 
+        annotation_settings, mask_settings = self._resolve_roi_overlays(record, fov_name, factor)
+
         try:
             array = render_roi_to_array(
                 fov_name,
@@ -1265,11 +1291,127 @@ class ROIManagerPlugin(PluginBase):
                 marker_profile.channel_settings,
                 roi_definition=record,
                 downsample_factor=factor,
+                annotation=annotation_settings,
+                masks=mask_settings,
             )
         except Exception:  # pragma: no cover - rendering failures
             return None
 
         return np.clip(array, 0.0, 1.0)
+
+    def _resolve_roi_overlays(
+        self,
+        record: Mapping[str, object],
+        fov_name: str,
+        downsample_factor: int,
+    ) -> tuple[Optional[AnnotationRenderSettings], tuple[MaskRenderSettings, ...]]:
+        snapshot = self._build_overlay_snapshot(record, fov_name)
+        if snapshot is None:
+            return None, ()
+
+        try:
+            return self.main_viewer.build_overlay_settings_from_snapshot(
+                fov_name,
+                downsample_factor,
+                snapshot,
+            )
+        except Exception:  # pragma: no cover - overlay resolution failures
+            return None, ()
+
+    def _build_overlay_snapshot(
+        self,
+        record: Mapping[str, object],
+        fov_name: str,
+    ) -> Optional[OverlaySnapshot]:
+        annotation_snapshot = self._resolve_annotation_overlay(record)
+        mask_snapshots = self._resolve_mask_overlays(record, fov_name)
+        if annotation_snapshot is None and not mask_snapshots:
+            return None
+        return OverlaySnapshot(
+            include_annotations=annotation_snapshot is not None,
+            include_masks=bool(mask_snapshots),
+            annotation=annotation_snapshot,
+            masks=mask_snapshots,
+        )
+
+    def _resolve_annotation_overlay(self, record: Mapping[str, object]) -> Optional[AnnotationOverlaySnapshot]:
+        palette_name = str(record.get("annotation_palette") or "").strip()
+        if not palette_name:
+            return None
+        resolver = getattr(self.main_viewer, "resolve_annotation_palette_snapshot", None)
+        if not callable(resolver):
+            return None
+        return resolver(palette_name)
+
+    def _resolve_mask_overlays(
+        self,
+        record: Mapping[str, object],
+        fov_name: str,
+    ) -> tuple[MaskOverlaySnapshot, ...]:
+        payload = record.get("mask_visibility")
+        if not payload:
+            return tuple()
+        if isinstance(payload, (dict, list)):
+            visibility_state = payload
+        else:
+            try:
+                visibility_state = json.loads(payload)
+            except Exception:  # pragma: no cover - malformed payload
+                return tuple()
+        if not isinstance(visibility_state, dict):
+            return tuple()
+
+        mask_plugin = getattr(self.main_viewer, "mask_painter_plugin", None)
+        color_map: Dict[str, str] = {}
+        default_color = None
+        color_set_name = str(record.get("mask_color_set") or "").strip()
+        if mask_plugin is not None and color_set_name:
+            resolver = getattr(mask_plugin, "resolve_saved_color_map", None)
+            if callable(resolver):
+                resolved = resolver(color_set_name)
+                if resolved:
+                    color_map, default_color = resolved
+
+        color_controls = getattr(self.main_viewer.ui_component, "mask_color_controls", {}) or {}
+        mask_cache = self.main_viewer.mask_cache.get(fov_name, {}) or {}
+        snapshots: list[MaskOverlaySnapshot] = []
+
+        for raw_name, raw_visible in visibility_state.items():
+            mask_name = str(raw_name)
+            visible = bool(raw_visible)
+            if not visible:
+                continue
+            if mask_name not in mask_cache:
+                continue
+
+            color_hex = None
+            if color_map:
+                color_hex = color_map.get(mask_name)
+            if color_hex is None and default_color:
+                color_hex = default_color
+            if color_hex is None:
+                color_key = getattr(color_controls.get(mask_name), "value", None)
+                if color_key:
+                    color_hex = self.main_viewer.predefined_colors.get(color_key, color_key)
+            if color_hex is None:
+                color_hex = "#FFFFFF"
+
+            try:
+                color_rgb = to_rgb(color_hex)
+            except ValueError:  # pragma: no cover - invalid color spec
+                color_rgb = to_rgb("#FFFFFF")
+
+            snapshots.append(
+                MaskOverlaySnapshot(
+                    name=mask_name,
+                    color=color_rgb,
+                    alpha=1.0,
+                    mode="outline",
+                    outline_thickness=int(getattr(self.main_viewer, "mask_outline_thickness", 1)),
+                )
+            )
+
+        return tuple(snapshots)
 
     def _resolve_thumbnail_downsample(
         self,
@@ -1509,7 +1651,7 @@ class ROIManagerPlugin(PluginBase):
         record = self.main_viewer.roi_manager.get_roi(roi_id)
         if not record:
             self.set_status("Selected ROI no longer exists.", level="error")
-            self.refresh_roi_table()
+            self.refresh_roi_table(force_refresh=True)
             return
 
         self._selected_roi_id = roi_id
@@ -1714,7 +1856,7 @@ class ROIManagerPlugin(PluginBase):
 
         result = self.main_viewer.roi_manager.add_roi(record)
         self._selected_roi_id = result.get("roi_id")
-        self.refresh_roi_table()
+        self.refresh_roi_table(force_refresh=True)
         self.set_status("ROI captured from current view.", level="success")
 
     def _update_selected_roi(self, _):
@@ -1740,7 +1882,7 @@ class ROIManagerPlugin(PluginBase):
 
         updated = self.main_viewer.roi_manager.update_roi(self._selected_roi_id, updates)
         if updated:
-            self.refresh_roi_table()
+            self.refresh_roi_table(force_refresh=True)
             self.set_status("ROI updated.", level="success")
         else:
             self.set_status("Failed to update ROI.", level="error")
@@ -1751,7 +1893,7 @@ class ROIManagerPlugin(PluginBase):
             return
         if self.main_viewer.roi_manager.delete_roi(self._selected_roi_id):
             self._selected_roi_id = None
-            self.refresh_roi_table()
+            self.refresh_roi_table(force_refresh=True)
             self.set_status("ROI deleted.", level="success")
         else:
             self.set_status("Failed to delete ROI.", level="error")
@@ -1773,7 +1915,7 @@ class ROIManagerPlugin(PluginBase):
             return
         try:
             self.main_viewer.roi_manager.import_from_csv(path, merge=True)
-            self.refresh_roi_table()
+            self.refresh_roi_table(force_refresh=True)
             self.set_status(f"Imported ROI table from {path}.", level="success")
         except Exception as exc:  # pragma: no cover - defensive
             self.set_status(f"Import failed: {exc}", level="error")
@@ -1785,7 +1927,7 @@ class ROIManagerPlugin(PluginBase):
         record = self.main_viewer.roi_manager.get_roi(self._selected_roi_id)
         if not record:
             self.set_status("Selected ROI no longer exists.", level="error")
-            self.refresh_roi_table()
+            self.refresh_roi_table(force_refresh=True)
             return
         self.main_viewer.center_on_roi(record)
         self.set_status("Centered on ROI.", level="success")
@@ -1798,7 +1940,7 @@ class ROIManagerPlugin(PluginBase):
         record = self.main_viewer.roi_manager.get_roi(self._selected_roi_id)
         if not record:
             self.set_status("Selected ROI no longer exists.", level="error")
-            self.refresh_roi_table()
+            self.refresh_roi_table(force_refresh=True)
             return
 
         self.main_viewer.center_on_roi(record)
@@ -2008,7 +2150,11 @@ class ROIManagerPlugin(PluginBase):
     # Lifecycle hooks
     # ------------------------------------------------------------------
     def on_fov_change(self) -> None:  # type: ignore[override]
-        self.refresh_roi_table()
+        limit_editor = bool(getattr(self.ui_component.limit_to_fov_checkbox, "value", False))
+        limit_browser = bool(getattr(self.ui_component.browser_limit_to_current, "value", False))
+        if not (limit_editor or limit_browser):
+            return
+        self.refresh_roi_table(force_refresh=True, preserve_page=False)
 
     def on_marker_sets_changed(self) -> None:
         self.refresh_marker_options()
@@ -2016,4 +2162,4 @@ class ROIManagerPlugin(PluginBase):
     def after_all_plugins_loaded(self) -> None:  # type: ignore[override]
         super().after_all_plugins_loaded()
         self.refresh_marker_options()
-        self.refresh_roi_table()
+        self.refresh_roi_table(force_refresh=True, preserve_page=False)

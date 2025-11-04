@@ -1296,6 +1296,49 @@ class ImageMaskViewer:
     def get_active_annotation_palette_set(self) -> str:
         return self.active_annotation_palette_set_name or ""
 
+    def resolve_annotation_palette_snapshot(self, name: str) -> Optional[AnnotationOverlaySnapshot]:
+        candidate = (name or "").strip()
+        if not candidate:
+            return None
+        record = self.annotation_palette_registry_records.get(candidate)
+        if record is None:
+            return None
+        path = Path(record.get("path", "")).expanduser()
+        if not path.exists():
+            return None
+        try:
+            payload = read_palette_file(path)
+        except Exception:  # pragma: no cover - IO errors
+            return None
+
+        annotation = str(payload.get("annotation") or "").strip()
+        if not annotation:
+            return None
+
+        class_ids_payload = payload.get("class_ids", [])
+        try:
+            class_ids = [int(value) for value in class_ids_payload]
+        except Exception:  # pragma: no cover - invalid payload
+            class_ids = []
+        if not class_ids:
+            return None
+
+        colors_payload = payload.get("colors", {})
+        if not isinstance(colors_payload, dict):
+            colors_payload = {}
+        normalized_colors = {
+            str(key): normalize_hex_color(value) or DEFAULT_COLOR
+            for key, value in colors_payload.items()
+        }
+
+        palette = apply_color_defaults(class_ids, normalized_colors)
+        return AnnotationOverlaySnapshot(
+            name=annotation,
+            alpha=float(payload.get("alpha", self.annotation_overlay_alpha)),
+            mode=str(payload.get("mode", self.annotation_overlay_mode) or "combined"),
+            palette=dict(palette),
+        )
+
     def apply_annotation_palette_set(self, name: str) -> bool:
         if not name:
             return False

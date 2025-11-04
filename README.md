@@ -101,6 +101,14 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### v0.2.0-rc3
+**ROI browser refresh throttling**
+- The ROI Manager caches its browser signature and only rebuilds thumbnails when ROI data or presets change, so routine FOV navigation keeps pagination and cached previews intact (fixes [#50](https://github.com/HartmannLab/UELer/issues/50)).
+- Thumbnail rendering now honours saved mask painter presets by querying the active colour set before assembling previews, keeping per-ROI styling consistent between the browser and viewer.
+
+**Cell gallery FOV debounce**
+- Cell gallery clicks mark the next viewer-driven FOV change as internal, skipping the immediate `on_fov_change` redraw that previously regenerated the gallery unnecessarily (addresses [#52](https://github.com/HartmannLab/UELer/issues/52)).
+- Scatter-to-gallery workflows still refresh correctly because external plugin broadcasts clear the guard after their single-point navigation completes.
+
 **Chart histogram tuning**
 - The histogram bin slider now updates plots immediately with continuous slider feedback, keeping cutoff markers visible after each redraw so tweaking bins delivers instant insight (addresses [#47](https://github.com/HartmannLab/UELer/issues/47)).
 - Cutoff-based highlights persist as you switch FOVs because the chart plugin reapplies its selection after the viewer clears overlays, ensuring qualifying cells stay emphasized during navigation.

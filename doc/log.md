@@ -1,4 +1,12 @@
 ### v0.2.0-rc3
+**ROI browser refresh throttling**
+- Cached a lightweight browser signature in `ROIManagerPlugin` so routine FOV changes reuse the current page without regenerating thumbnails, while targeted actions (add/update/delete) request a forced refresh to keep presets in sync (fixes [#50](https://github.com/HartmannLab/UELer/issues/50)).
+- Resolved per-ROI preset playback by threading the mask painter's active colour set through thumbnail rendering, ensuring previews match saved settings without wiping pagination.
+
+**Cell gallery FOV debounce**
+- Gallery clicks now track viewer-initiated FOV changes and skip the next `on_fov_change` cycle, preventing the redundant redraw loop reported in [#52](https://github.com/HartmannLab/UELer/issues/52).
+- External plugin interactions (e.g., scatter single-point navigation) still clear the guard so multi-plugin workflows refresh as expected while viewer-driven hops stay snappy.
+
 **ROI filter tabset**
 - ROI manager browser filters now live behind `simple` and `advanced` tabs, separating the AND/OR widgets from expression entry for clearer navigation (addresses [#49](https://github.com/HartmannLab/UELer/issues/49)).
 - The ROI browser only evaluates the active tab's inputs and refreshes pagination on tab switches so tag selections and expressions no longer conflict.

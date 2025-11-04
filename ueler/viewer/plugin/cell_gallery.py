@@ -48,6 +48,7 @@ class CellGalleryDisplay(PluginBase):
         self.data = Data()
         self.hover_timer = None
         self.last_hover_event = None
+        self._skip_next_fov_refresh = False
 
         self.ui_component = UiComponent()
 
@@ -222,13 +223,27 @@ class CellGalleryDisplay(PluginBase):
                     x = df.iloc[cell_index][x_key]
                     y = df.iloc[cell_index][y_key]
                     fov = df.iloc[cell_index][fov_key]
-                    self.main_viewer.ui_component.image_selector.value = fov
-                    self.main_viewer.image_display.ax.set_xlim(
-                        x - crop_width / 2, x + crop_width / 2
+                    image_selector = getattr(
+                        self.main_viewer.ui_component, "image_selector", None
                     )
-                    self.main_viewer.image_display.ax.set_ylim(
-                        y - crop_width / 2, y + crop_width / 2
-                    )
+                    if image_selector is None:
+                        return
+
+                    prior_fov = getattr(image_selector, "value", None)
+                    should_skip_refresh = prior_fov != fov
+                    self._skip_next_fov_refresh = should_skip_refresh
+
+                    try:
+                        image_selector.value = fov
+                        self.main_viewer.image_display.ax.set_xlim(
+                            x - crop_width / 2, x + crop_width / 2
+                        )
+                        self.main_viewer.image_display.ax.set_ylim(
+                            y - crop_width / 2, y + crop_width / 2
+                        )
+                    finally:
+                        if not should_skip_refresh:
+                            self._skip_next_fov_refresh = False
 
             fig.canvas.mpl_connect("button_press_event", on_click)
             fig.canvas.mpl_connect("motion_notify_event", self.on_mouse_move)
@@ -351,6 +366,10 @@ class CellGalleryDisplay(PluginBase):
             chart_plugin.single_point_click_state = 0
             if state == 1:
                 return
+
+        if self._skip_next_fov_refresh:
+            self._skip_next_fov_refresh = False
+            return
 
         selected = getattr(self.data.selected_cells, "value", None)
         if selected:

@@ -528,6 +528,31 @@ class MaskPainterDisplay(PluginBase):
     def get_active_color_set_name(self) -> str:
         return self.active_color_set_name or ""
 
+    def resolve_saved_color_map(self, name: str) -> Optional[Tuple[Dict[str, str], str]]:
+        candidate = (name or "").strip()
+        if not candidate:
+            return None
+        record = self.registry_records.get(candidate)
+        if record is None:
+            return None
+        path = Path(record.get("path", "")).expanduser()
+        if not path.exists():
+            return None
+        try:
+            payload = read_color_set_file(path)
+        except Exception:  # pragma: no cover - IO errors
+            return None
+
+        colors_payload = payload.get("colors", {})
+        if not isinstance(colors_payload, dict):
+            return None
+
+        default_color = normalize_hex_color(payload.get("default_color", self.default_color)) or self.default_color
+        color_map: Dict[str, str] = {}
+        for key, value in colors_payload.items():
+            color_map[str(key)] = normalize_hex_color(value) or default_color
+        return color_map, default_color
+
     def apply_color_set_by_name(self, name: str) -> bool:
         candidate = (name or "").strip()
         if not candidate:
