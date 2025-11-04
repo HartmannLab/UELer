@@ -21,6 +21,7 @@ import cv2
 import math
 from matplotlib.backend_bases import MouseButton
 from ueler.viewer.decorators import update_status_bar
+from .tooltip_utils import format_tooltip_value
 
 
 class ImageDisplay:
@@ -243,11 +244,11 @@ class ImageDisplay:
                         for channel in self.main_viewer.ui_component.channel_selector.value:
                             if channel in cell_data.columns:
                                 value = cell_data[channel].iloc[0]
-                                tooltip_text += f"\n{channel}: {value:.2f}"
+                                tooltip_text += f"\n{channel}: {format_tooltip_value(value)}"
                         for label in getattr(self.main_viewer, 'selected_tooltip_labels', []):
                             if label in cell_data.columns:
                                 value = cell_data[label].iloc[0]
-                                tooltip_text += f"\n{label}: {value}"
+                                tooltip_text += f"\n{label}: {format_tooltip_value(value)}"
 
                     # Update annotation
                     self.mask_id_annotation.xy = (x, y)

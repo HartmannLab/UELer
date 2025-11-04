@@ -1,4 +1,8 @@
 ### v0.2.0-rc3
+**Cell tooltip precision**
+- Updated `ImageDisplay` marker tooltips to fall back to scientific notation whenever fixed-point rounding would display small non-zero intensities as 0.00, keeping near-zero markers readable (fixes [#51](https://github.com/HartmannLab/UELer/issues/51)).
+- Added `tests/test_image_display_tooltip.py` to cover regular, tiny, zero, and negative marker values so the formatter stays stable.
+
 **ROI browser refresh throttling**
 - Cached a lightweight browser signature in `ROIManagerPlugin` so routine FOV changes reuse the current page without regenerating thumbnails, while targeted actions (add/update/delete) request a forced refresh to keep presets in sync (fixes [#50](https://github.com/HartmannLab/UELer/issues/50)).
 - Resolved per-ROI preset playback by threading the mask painter's active colour set through thumbnail rendering, ensuring previews match saved settings without wiping pagination.

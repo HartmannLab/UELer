@@ -101,6 +101,10 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### v0.2.0-rc3
+**Cell tooltip precision**
+- Main viewer tooltips now switch to scientific notation when fixed-point rounding would otherwise render tiny non-zero marker intensities as 0.00, keeping near-zero signals visible (fixes [#51](https://github.com/HartmannLab/UELer/issues/51)).
+- Light regression coverage in `tests/test_image_display_tooltip.py` locks in the formatter for regular, tiny, and negative values.
+
 **ROI browser refresh throttling**
 - The ROI Manager caches its browser signature and only rebuilds thumbnails when ROI data or presets change, so routine FOV navigation keeps pagination and cached previews intact (fixes [#50](https://github.com/HartmannLab/UELer/issues/50)).
 - Thumbnail rendering now honours saved mask painter presets by querying the active colour set before assembling previews, keeping per-ROI styling consistent between the browser and viewer.
