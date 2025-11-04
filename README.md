@@ -100,7 +100,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 - **Wide Plugins**: Enable "Horizontal layout" (for example, in the heatmap plugin) to undock the tool into the footer while keeping the accordion available for other controls.
 
 ## New Update  
-### v0.2.0-rc2
+### v0.2.0-rc3
 **Chart histogram tuning**
 - The histogram bin slider now updates plots immediately with continuous slider feedback, keeping cutoff markers visible after each redraw so tweaking bins delivers instant insight (addresses [#47](https://github.com/HartmannLab/UELer/issues/47)).
 - Cutoff-based highlights persist as you switch FOVs because the chart plugin reapplies its selection after the viewer clears overlays, ensuring qualifying cells stay emphasized during navigation.
@@ -129,6 +129,10 @@ The first release candidate delivers automatic scale bars across the viewer and 
 - The Matplotlib gallery now fixes its three-column grid, pads empty slots, and clamps figure width to 98% of the plugin pane so thumbnails stay fully visible without horizontal clipping.
 - Follow-up: forcing the output container (and parent flex boxes) to `min_width=0` with `flex=1 1 auto` plus a scoped CSS rule keeps rendered figures within the box, letting the scrollbar apply solely to thumbnails and keeping pagination buttons unobscured (reply 8 to [#44](https://github.com/HartmannLab/UELer/issues/44)).
 - Latest tweak: the gallery now wraps the Matplotlib canvas in a fixed-height `VBox`, applies explicit pixel sizing to the canvas layout, and displays the widget directly so the 400px viewport and vertical scrollbar take effect; environments without the widget backend still fall back to the traditional `plt.show` path.
+
+**ROI filter tabset**
+- ROI manager browser filters now live behind `simple` and `advanced` tabs, separating the AND/OR widgets from expression entry for clearer navigation (addresses [#49](https://github.com/HartmannLab/UELer/issues/49)).
+- Only the active tab's inputs drive ROI filtering and the gallery refreshes automatically when you switch tabs, keeping pagination and status messaging in sync with the selected mode.
 
 **Cell gallery tile padding**
 - Gallery slots now expand to the widest rendered tile and center narrower crops so selecting multiple cells never triggers NumPy broadcasting errors when their cutouts differ slightly in width.

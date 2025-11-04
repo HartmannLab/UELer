@@ -1,4 +1,7 @@
 ### v0.2.0-rc3
+**ROI filter tabset**
+- ROI manager browser filters now live behind `simple` and `advanced` tabs, separating the AND/OR widgets from expression entry for clearer navigation (addresses [#49](https://github.com/HartmannLab/UELer/issues/49)).
+- The ROI browser only evaluates the active tab's inputs and refreshes pagination on tab switches so tag selections and expressions no longer conflict.
 
 ### v0.2.0-rc2
 **Mask outline scaling**

@@ -424,34 +424,48 @@ class ROIManagerPlugin(PluginBase):
             layout=Layout(gap="8px", justify_content="center", align_items="center", flex_flow="row wrap"),
         )
 
+        simple_filter_box = VBox(
+            [
+                self.ui_component.browser_tags_filter,
+                self.ui_component.browser_tag_logic,
+            ],
+            layout=column_block_layout(gap="6px"),
+        )
+
+        advanced_filter_box = VBox(
+            [
+                self.ui_component.browser_expression_input,
+                self.ui_component.browser_expression_operator_box,
+                self.ui_component.browser_expression_tag_box,
+                self.ui_component.browser_expression_feedback,
+                self.ui_component.browser_expression_js_output,
+            ],
+            layout=column_block_layout(gap="4px"),
+        )
+
+        self.ui_component.browser_filter_tabs = Tab(
+            children=[simple_filter_box, advanced_filter_box],
+            layout=column_block_layout(gap="6px"),
+        )
+        self.ui_component.browser_filter_tabs.set_title(0, "simple")
+        self.ui_component.browser_filter_tabs.set_title(1, "advanced")
+        if not hasattr(self.ui_component.browser_filter_tabs, "selected_index"):
+            self.ui_component.browser_filter_tabs.selected_index = 0
+
+        general_controls = HBox(
+            [
+                self.ui_component.browser_fov_filter,
+                self.ui_component.browser_limit_to_current,
+                self.ui_component.browser_use_saved_preset,
+                self.ui_component.browser_refresh_button,
+            ],
+            layout=Layout(gap="10px", flex_flow="row wrap", align_items="center"),
+        )
+
         controls = VBox(
             [
-                HBox(
-                    [
-                        self.ui_component.browser_tags_filter,
-                        self.ui_component.browser_tag_logic,
-                        self.ui_component.browser_fov_filter,
-                    ],
-                    layout=Layout(gap="10px", flex_flow="row wrap"),
-                ),
-                HBox(
-                    [
-                        self.ui_component.browser_limit_to_current,
-                        self.ui_component.browser_use_saved_preset,
-                        self.ui_component.browser_refresh_button,
-                    ],
-                    layout=Layout(gap="10px", align_items="center"),
-                ),
-                VBox(
-                    [
-                        self.ui_component.browser_expression_input,
-                        self.ui_component.browser_expression_operator_box,
-                        self.ui_component.browser_expression_tag_box,
-                        self.ui_component.browser_expression_feedback,
-                        self.ui_component.browser_expression_js_output,
-                    ],
-                    layout=column_block_layout(gap="4px"),
-                ),
+                general_controls,
+                self.ui_component.browser_filter_tabs,
             ],
             layout=column_block_layout(gap="6px", min_width="0"),
         )
@@ -522,6 +536,9 @@ class ROIManagerPlugin(PluginBase):
         self.ui_component.browser_refresh_button.on_click(self._on_browser_refresh_clicked)
         self.ui_component.browser_prev_button.on_click(self._on_browser_prev_clicked)
         self.ui_component.browser_next_button.on_click(self._on_browser_next_clicked)
+        self.ui_component.browser_filter_tabs.observe(
+            self._on_browser_filter_tab_change, names="selected_index"
+        )
 
     # ------------------------------------------------------------------
     # Event handlers and helpers
@@ -683,21 +700,23 @@ class ROIManagerPlugin(PluginBase):
         if selected_fovs:
             df = df[df["fov"].astype(str).isin(selected_fovs)]
 
-        expression_widget = getattr(self.ui_component, "browser_expression_input", None)
-        expression_text = str(getattr(expression_widget, "value", "") or "").strip()
-        predicate = None
-        if expression_text:
-            predicate = self._compile_browser_expression(expression_text)
-            if predicate is None:
-                return pd.DataFrame()
+        filter_mode = self._active_filter_mode()
+        if filter_mode == "advanced":
+            expression_widget = getattr(self.ui_component, "browser_expression_input", None)
+            expression_text = str(getattr(expression_widget, "value", "") or "").strip()
+            predicate = None
+            if expression_text:
+                predicate = self._compile_browser_expression(expression_text)
+                if predicate is None:
+                    return pd.DataFrame()
 
-        if predicate is not None:
+            if predicate is not None:
 
-            def _expression_match(raw_value: object) -> bool:
-                row_tags = {tag.strip() for tag in str(raw_value).split(',') if tag.strip()}
-                return predicate(row_tags)
+                def _expression_match(raw_value: object) -> bool:
+                    row_tags = {tag.strip() for tag in str(raw_value).split(',') if tag.strip()}
+                    return predicate(row_tags)
 
-            df = df[df["tags"].apply(_expression_match)]
+                df = df[df["tags"].apply(_expression_match)]
         else:
             selected_tags = set(getattr(self.ui_component.browser_tags_filter, "value", ()))
             if selected_tags:
@@ -1165,6 +1184,8 @@ class ROIManagerPlugin(PluginBase):
             self._browser_expression_selection = (length, length)
         self._browser_expression_cache = None
         self._compile_browser_expression(expression)
+        if self._active_filter_mode() != "advanced":
+            return
         self._browser_current_page = 1
         self._browser_last_signature = None
         self._refresh_browser_gallery()
@@ -1419,8 +1440,37 @@ class ROIManagerPlugin(PluginBase):
             )
         return result
 
+    def _active_filter_mode(self) -> str:
+        tabs = getattr(self.ui_component, "browser_filter_tabs", None)
+        if tabs is None:
+            return "simple"
+        index = getattr(tabs, "selected_index", 0)
+        if index is None:
+            index = 0
+        try:
+            index_value = int(index)
+        except (TypeError, ValueError):
+            index_value = 0
+        return "advanced" if index_value == 1 else "simple"
+
     def _on_browser_filter_change(self, change) -> None:
         if self._suspend_browser_events or change.get("name") != "value":
+            return
+
+        owner = change.get("owner")
+        simple_widgets = (
+            getattr(self.ui_component, "browser_tags_filter", None),
+            getattr(self.ui_component, "browser_tag_logic", None),
+        )
+        if owner in simple_widgets and self._active_filter_mode() != "simple":
+            return
+
+        self._browser_current_page = 1
+        self._browser_last_signature = None
+        self._refresh_browser_gallery()
+
+    def _on_browser_filter_tab_change(self, change) -> None:
+        if change.get("name") != "selected_index":
             return
         self._browser_current_page = 1
         self._browser_last_signature = None
