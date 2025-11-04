@@ -98,7 +98,6 @@
 - Rebuilt the accordion entry with dedicated containers for the selector, marker set controls, and dynamic sliders, preserving spacing and keyboard focus while removing duplicate widgets from the left panel header.
 - Removed the accordion-level scrollbar and capped the slider container height so only the per-channel section scrolls, eliminating double scrollbars while keeping long channel lists navigable.
 
-### v0.2.0-rc2
 **Chart histogram responsiveness**
 - Observed the histogram bin slider to rerender plots immediately by enabling continuous updates, tracking the active histogram column, and redrawing Matplotlib output whenever the bin count changes so users see real-time feedback (fixes [#47](https://github.com/HartmannLab/UELer/issues/47)).
 - Preserved cutoff markers across rerenders by restoring the vertical threshold line and reapplying cell highlights after each redraw.
@@ -106,6 +105,8 @@
 **Cutoff highlight persistence**
 - Reordered the FOV-change refresh flow so chart-driven cutoff highlights reapply after plugin panels clear overlays, keeping qualifying cells highlighted as the user switches images (fixes [#47](https://github.com/HartmannLab/UELer/issues/47)).
 - Attempted `python -m unittest tests.test_chart_footer_behavior`; run blocked because the lightweight test environment lacks `matplotlib.colors`.
+
+### v0.2.0-rc1
 **Wide plugin layout**
 - Increased the control panel width in `uiler.viewer.ui_components.split_control_content` from 360px to 6in so wide plugins have more room for complex controls without horizontal scrolling.
 
