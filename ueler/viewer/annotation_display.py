@@ -45,7 +45,7 @@ class AnnotationDisplay:
         self._vbox_cls = getattr(widgets, "VBox")
 
         setattr(self, "SidePlots_id", "annotation_display_output")
-        self.displayed_name = "Cell annotation"
+        self.displayed_name = "Cell tooltip label selector"
         self.main_viewer = main_viewer
         self.width = width
         self.height = height

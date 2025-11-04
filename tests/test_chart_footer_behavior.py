@@ -457,6 +457,23 @@ class ChartDisplayFooterTests(unittest.TestCase):
 
         self.assertIsNone(gallery.received)
 
+    def test_single_point_click_state_tracks_widget_selection(self):
+        self.chart._on_scatter_selection({7}, "widget")
+        self.assertEqual(self.chart.single_point_click_state, 1)
+
+        self.chart._on_scatter_selection({7, 8}, "widget")
+        self.assertEqual(self.chart.single_point_click_state, 0)
+
+        self.chart._on_scatter_selection(set(), "widget")
+        self.assertEqual(self.chart.single_point_click_state, 0)
+
+    def test_single_point_click_state_tracks_external_selection(self):
+        self.chart._apply_external_selection({11})
+        self.assertEqual(self.chart.single_point_click_state, 1)
+
+        self.chart._apply_external_selection({11, 12})
+        self.assertEqual(self.chart.single_point_click_state, 0)
+
     def test_selection_forwards_to_cell_gallery_when_linked(self):
         gallery = self.viewer.SidePlots.cell_gallery_output
         self.chart.setup_observe()
@@ -466,6 +483,19 @@ class ChartDisplayFooterTests(unittest.TestCase):
         self.chart.selected_indices.value = indices
 
         self.assertEqual(gallery.received, indices)
+
+    def test_single_selection_does_not_update_cell_gallery_when_linked(self):
+        gallery = self.viewer.SidePlots.cell_gallery_output
+        self.chart.setup_observe()
+        self.chart.ui_component.cell_gallery_linked_checkbox.value = True
+
+        multi = {1, 2}
+        self.chart._on_scatter_selection(multi, "widget")
+        self.assertEqual(gallery.received, multi)
+
+        self.chart._on_scatter_selection({3}, "widget")
+
+        self.assertEqual(gallery.received, multi)
 
     def test_footer_layout_toggles_with_scatter_count(self):
         # Initial state: vertical layout retained

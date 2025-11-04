@@ -3,6 +3,10 @@
 - Added downsample-aware outline helpers so viewer overlays, selection highlights, and mask painter recolouring apply `max(1, t/f)` thickness scaling (fixes [#46](https://github.com/HartmannLab/UELer/issues/46)).
 - Centralised the scaling logic in `ueler.rendering.engine` and extended `tests/test_rendering.py` with regression coverage to guard against future regressions.
 
+**Scatter gallery guard**
+- Added `single_point_click_state` to the chart plugin and taught trace/scatter selection paths to toggle it so single-cell interactions mark the next viewer navigation while suppressing single-point gallery syncs (fixes [#48](https://github.com/HartmannLab/UELer/issues/48)).
+- Implemented `CellGalleryDisplay.on_fov_change` to clear the flag, skip single-cell refreshes, and re-render only when multi-cell selections persist, with new tests in `tests/test_chart_footer_behavior.py` and `tests/test_cell_gallery.py` covering the forwarding guard and handshake.
+
 **Main viewer downsampling docs**
 - Summarized the automatic FOV downsampling flow in `dev_note/main_viewer.md`, covering factor selection, caching strategy, zoom toggles, and scale bar corrections so notebook users understand how large scenes stay responsive.
 

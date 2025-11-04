@@ -31,3 +31,9 @@
 - Introduce a transient "single-point selection" flag within the chart plugin so the gallery can decide whether to honor the next `on_fov_change` broadcast, as outlined in issue #48. Clearing that flag after the check would let multi-point selections continue to synchronize normally.
 - Extend the gallery plugin's `on_fov_change` to consult the flag and skip re-rendering when the previous action was a single-point scatter click or trace, preventing the gallery from collapsing to one tile.
 - Consider adding regression coverage that exercises the single-point selection path with the link enabled to avoid future regressions.
+
+## Implementation Notes
+- Added `single_point_click_state` to `ChartDisplay` and updated both scatter and external selection flows to set the flag whenever exactly one index is highlighted; multi-index or cleared selections reset the flag.
+- Suppressed forwarding single-point selections to `CellGalleryDisplay` so the gallery retains its broader context during linked interactions.
+- Implemented `CellGalleryDisplay.on_fov_change` so the gallery inspects the chart flag, skips refreshes triggered by single-point navigation, resets the flag, and only re-renders when broader selections are still active.
+- Extended `tests/test_chart_footer_behavior.py` and `tests/test_cell_gallery.py` with coverage for the new flag propagation, forwarding guard, and the gallery's FOV-change logic.

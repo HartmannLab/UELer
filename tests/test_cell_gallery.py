@@ -1,8 +1,9 @@
 import unittest
+from types import SimpleNamespace
 
 import numpy as np
 
-from ueler.viewer.plugin.cell_gallery import _compose_canvas
+from ueler.viewer.plugin.cell_gallery import CellGalleryDisplay, _compose_canvas
 
 
 class ComposeCanvasTestCase(unittest.TestCase):
@@ -66,6 +67,41 @@ class ComposeCanvasTestCase(unittest.TestCase):
                 0.0,
             )
         )
+
+
+class CellGalleryFovChangeTests(unittest.TestCase):
+    def _build_viewer(self, state=0):
+        chart = SimpleNamespace(single_point_click_state=state)
+        viewer = SimpleNamespace(
+            SidePlots=SimpleNamespace(chart_output=chart),
+            mask_outline_thickness=1,
+            selection_outline_color="#FFFFFF",
+            capture_overlay_snapshot=lambda: None,
+        )
+        return viewer
+
+    def test_on_fov_change_skips_when_single_point_pending(self):
+        viewer = self._build_viewer(state=1)
+        gallery = CellGalleryDisplay(viewer, width=4, height=3)
+        calls = []
+        gallery.plot_gellery = lambda: calls.append("plot")
+
+        gallery.on_fov_change()
+
+        self.assertEqual(calls, [])
+        self.assertEqual(viewer.SidePlots.chart_output.single_point_click_state, 0)
+
+    def test_on_fov_change_refreshes_when_selection_present(self):
+        viewer = self._build_viewer(state=0)
+        gallery = CellGalleryDisplay(viewer, width=4, height=3)
+        gallery.data.selected_cells._value = [1]
+        calls = []
+        gallery.plot_gellery = lambda: calls.append("plot")
+
+        gallery.on_fov_change()
+
+        self.assertEqual(calls, ["plot"])
+        self.assertEqual(viewer.SidePlots.chart_output.single_point_click_state, 0)
 
 
 if __name__ == "__main__":

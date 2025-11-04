@@ -343,6 +343,19 @@ class CellGalleryDisplay(PluginBase):
     def set_selected_cells(self, row_indices):
         self.data.selected_cells.value = list(row_indices)
 
+    def on_fov_change(self) -> None:  # type: ignore[override]
+        side_plots = getattr(self.main_viewer, "SidePlots", None)
+        chart_plugin = getattr(side_plots, "chart_output", None) if side_plots else None
+        if chart_plugin is not None and hasattr(chart_plugin, "single_point_click_state"):
+            state = getattr(chart_plugin, "single_point_click_state", 0)
+            chart_plugin.single_point_click_state = 0
+            if state == 1:
+                return
+
+        selected = getattr(self.data.selected_cells, "value", None)
+        if selected:
+            self.plot_gellery()
+
 
 class UiComponent:
     def __init__(self):

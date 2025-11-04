@@ -89,6 +89,8 @@ class ChartDisplay(PluginBase):
         )
         self._section_location = "vertical"
 
+        self.single_point_click_state = 0
+
         self._wire_events()
         self._build_layout()
         self.setup_widget_observers()
@@ -318,6 +320,7 @@ class ChartDisplay(PluginBase):
         normalized = {
             int(idx) if isinstance(idx, np.integer) else idx for idx in indices
         }
+        self._update_single_point_state(normalized)
         self.selected_indices.value = normalized
         if self.ui_component.mv_linked_checkbox.value and len(normalized) == 1:
             self._focus_main_viewer(next(iter(normalized)))
@@ -332,6 +335,7 @@ class ChartDisplay(PluginBase):
         normalized = {
             int(idx) if isinstance(idx, np.integer) else idx for idx in indices
         }
+        self._update_single_point_state(normalized)
         for scatter in self._scatter_views.values():
             scatter.apply_selection(normalized, announce=False)
         self.selected_indices.value = normalized
@@ -617,6 +621,8 @@ class ChartDisplay(PluginBase):
 
         def forward_to_cell_gallery(indices):
             if self.ui_component.cell_gallery_linked_checkbox.value:
+                if self.single_point_click_state == 1:
+                    return
                 self.main_viewer.SidePlots.cell_gallery_output.set_selected_cells(
                     indices
                 )
@@ -627,6 +633,9 @@ class ChartDisplay(PluginBase):
     def color_points(self, selected_indices, selected_colors=None):
         _ = selected_colors  # legacy parameter retained for compatibility
         self._apply_external_selection(selected_indices)
+
+    def _update_single_point_state(self, normalized: Set[Union[int, str]]) -> None:
+        self.single_point_click_state = 1 if len(normalized) == 1 else 0
 
 
 class UiComponent:
