@@ -103,6 +103,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 ### v0.2.0-rc3
 **ROI gallery width stabilization**
 - The ROI Manager gallery now observes its container width, clamps the canvas to 98% of that span, and scales height from the gallery aspect ratio so thumbnail grids stay stable as the accordion width changes (addresses [#39](https://github.com/HartmannLab/UELer/issues/39)).
+- Follow-up removes leftover min-width locking so tiles shrink with the accordion instead of clipping when the notebook window narrows.
 
 **Cache configuration**
 - Moved the Cache Size control into Advanced Settings and seeded new viewers with a default of 100 so fresh sessions match notebook expectations while keeping the top panel focused (fixes [#53](https://github.com/HartmannLab/UELer/issues/53)).

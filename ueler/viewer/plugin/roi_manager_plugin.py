@@ -1027,10 +1027,8 @@ class ROIManagerPlugin(PluginBase):
     const targetHeight = Math.max(1, targetWidth * ratio);
     wrapper.style.width = targetWidth + 'px';
     wrapper.style.maxWidth = targetWidth + 'px';
-    wrapper.style.minWidth = targetWidth + 'px';
     wrapper.style.height = targetHeight + 'px';
     wrapper.style.maxHeight = targetHeight + 'px';
-    wrapper.style.minHeight = targetHeight + 'px';
     const canvases = wrapper.querySelectorAll('canvas');
     canvases.forEach(function(node) {{
       node.style.width = '100%';

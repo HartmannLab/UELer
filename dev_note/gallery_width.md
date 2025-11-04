@@ -23,3 +23,8 @@
 - The observer re-runs whenever the accordion resizes (parent width changes, sidebar toggles, browser zoom) and on window resize. The script is registered once per gallery render using a unique class token, preventing duplicate observers while keeping legacy Matplotlib fallbacks intact.
 - The initial `ipympl` canvas layout now leaves width at `100%` (instead of hard-coding `99%`) so the resize hook can apply pixel-precise dimensions without fighting `Layout` constraints; the scroll container keeps its 400 px viewport and hidden horizontal overflow, ensuring only vertical scrolling engages when needed.
 
+### Clipping Regression & Fix (2025-11-04)
+- Notebook capture showed ROI tiles still truncating on the right with horizontal scrollbars across the plugin. Inspecting the injected JS revealed we set `wrapper.style.minWidth = targetWidth` (and `minHeight`) when the resize observer fired, effectively locking the canvas wrapper to its initial pixel width. Any subsequent reduction in available space—accordion padding, scrollbar width, or notebook window resize—forced the container to grow instead of letting the canvas shrink, reintroducing the overflow.
+- The fix removes those `minWidth`/`minHeight` assignments while retaining explicit `width`, `height`, and `max*` bounds. The observer still recomputes `targetWidth = W * 0.98` on each resize, so the canvas stays slightly inside the accordion but can now shrink freely with the parent, eliminating the clipping without sacrificing the 98% ratio.
+- Unit tests (`tests.test_roi_manager_tags.ROIManagerTagsTests.test_configure_browser_canvas_applies_layout`) continue to assert the canvas layout wiring; manual notebook verification confirms the gallery resizes without horizontal scrollbars or truncation.
+
