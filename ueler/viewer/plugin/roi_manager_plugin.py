@@ -2,6 +2,7 @@ import html
 import json
 import math
 import os
+import uuid
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
@@ -93,6 +94,7 @@ class ROIManagerPlugin(PluginBase):
         self._browser_expression_selection = None  # type: Optional[Tuple[int, int]]
         self._use_browser_expression_js = True
         self._thumbnail_downsample_cache: Dict[str, int] = {}
+        self._browser_resize_tokens: set = set()
 
         self._build_widgets()
         self._build_layout()
@@ -863,6 +865,12 @@ class ROIManagerPlugin(PluginBase):
                 pass
             fig.subplots_adjust(left=0.01, right=0.99, top=0.99, bottom=0.01, wspace=0.02, hspace=0.02)
             axes_array = np.atleast_1d(np.array(axes)).ravel()
+            aspect_ratio = 1.0
+            if fig_width > 0:
+                try:
+                    aspect_ratio = max(fig_height / fig_width, 1e-3)
+                except Exception:
+                    aspect_ratio = 1.0
 
             rendered = 0
             for slot_index, axis in enumerate(axes_array):
@@ -893,10 +901,11 @@ class ROIManagerPlugin(PluginBase):
                 self._browser_axis_to_roi[axis] = record.get("roi_id")
                 rendered += 1
 
-            configured_widget = self._configure_browser_canvas(fig, fig_height * dpi_value)
+            configured_widget = self._configure_browser_canvas(fig, fig_height * dpi_value, aspect_ratio)
 
             if configured_widget is not None:
                 display(configured_widget)
+                self._install_gallery_resize_hook(configured_widget, getattr(fig, "canvas", None), aspect_ratio)
             else:
                 plt.show(fig)
 
@@ -923,7 +932,7 @@ class ROIManagerPlugin(PluginBase):
         self._update_browser_summary(rendered_count, total)
         self._update_pagination_controls(current_page, total_pages, total)
 
-    def _configure_browser_canvas(self, fig, pixel_height: float) -> Optional[VBox]:
+    def _configure_browser_canvas(self, fig, pixel_height: float, aspect_ratio: float) -> Optional[VBox]:
         canvas = getattr(fig, "canvas", None)
         if canvas is None:
             return None
@@ -932,7 +941,7 @@ class ROIManagerPlugin(PluginBase):
         canvas_layout_kwargs = {
             "height": f"{canvas_height_px}px",
             "max_height": f"{canvas_height_px}px",
-            "width": "99%",
+            "width": "100%",
             "max_width": "100%",
             "min_width": "0",
             "overflow_y": "visible",
@@ -963,6 +972,121 @@ class ROIManagerPlugin(PluginBase):
 
         scroll_container = VBox([canvas], layout=Layout(**container_layout_kwargs))
         return scroll_container
+
+    def _install_gallery_resize_hook(self, container: VBox, canvas, aspect_ratio: float) -> None:
+        if container is None or canvas is None:
+            return
+
+        try:
+            ratio = float(aspect_ratio)
+        except (TypeError, ValueError):
+            ratio = 1.0
+
+        if not math.isfinite(ratio) or ratio <= 0:
+            ratio = 1.0
+
+        identifier = uuid.uuid4().hex
+        container_class = f"roi-gallery-container-{identifier}"
+        canvas_class = f"roi-gallery-canvas-{identifier}"
+
+        try:
+            container.add_class(container_class)
+        except Exception:  # pragma: no cover - widget frontends without add_class
+            return
+
+        try:
+            canvas.add_class(canvas_class)
+        except Exception:  # pragma: no cover - ipympl fallback path
+            pass
+
+        key = (container_class, canvas_class)
+        if key in self._browser_resize_tokens:
+            return
+        self._browser_resize_tokens.add(key)
+
+        script = f"""
+(function() {{
+  const containerSelector = '.{container_class}';
+  const canvasSelector = '.{canvas_class}';
+  const scale = 0.98;
+  const ratio = {ratio};
+  const token = '{identifier}';
+  window.__uelerRoiGalleryResize = window.__uelerRoiGalleryResize || {{}};
+  if (window.__uelerRoiGalleryResize[token]) {{
+    return;
+  }}
+  function applyWidth(width) {{
+    if (!width || width <= 1) {{
+      return;
+    }}
+    const wrapper = document.querySelector(canvasSelector);
+    if (!wrapper) {{
+      return;
+    }}
+    const targetWidth = Math.max(1, width * scale);
+    const targetHeight = Math.max(1, targetWidth * ratio);
+    wrapper.style.width = targetWidth + 'px';
+    wrapper.style.maxWidth = targetWidth + 'px';
+    wrapper.style.minWidth = targetWidth + 'px';
+    wrapper.style.height = targetHeight + 'px';
+    wrapper.style.maxHeight = targetHeight + 'px';
+    wrapper.style.minHeight = targetHeight + 'px';
+    const canvases = wrapper.querySelectorAll('canvas');
+    canvases.forEach(function(node) {{
+      node.style.width = '100%';
+      node.style.height = '100%';
+      node.style.maxWidth = '100%';
+      node.style.maxHeight = '100%';
+      node.style.display = 'block';
+    }});
+  }}
+
+  function requestApply(entry) {{
+    const container = document.querySelector(containerSelector);
+    if (!container) {{
+      return;
+    }}
+    const width = entry && entry.contentRect ? entry.contentRect.width : container.clientWidth;
+    window.requestAnimationFrame(function() {{
+      applyWidth(width);
+    }});
+  }}
+
+  if (typeof ResizeObserver === 'undefined') {{
+    window.addEventListener('resize', function() {{ requestApply(); }});
+    requestApply();
+    window.__uelerRoiGalleryResize[token] = true;
+    return;
+  }}
+
+  const observer = new ResizeObserver(function(entries) {{
+    if (entries && entries.length) {{
+      requestApply(entries[0]);
+    }} else {{
+      requestApply();
+    }}
+  }});
+
+  function attachWhenReady() {{
+    const container = document.querySelector(containerSelector);
+    if (!container) {{
+      window.setTimeout(attachWhenReady, 200);
+      return;
+    }}
+    observer.observe(container);
+    requestApply();
+  }}
+
+  attachWhenReady();
+  window.addEventListener('resize', function() {{ requestApply(); }});
+  window.__uelerRoiGalleryResize[token] = true;
+}})();
+"""
+
+        try:
+            display(IPythonJS(script))
+        except Exception:  # pragma: no cover - headless environments without JS execution
+            pass
 
     def _disconnect_browser_events(self) -> None:
         if self._browser_figure is not None and self._browser_click_cid is not None:

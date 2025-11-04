@@ -373,14 +373,14 @@ class ROIManagerTagsTests(unittest.TestCase):
         fig = SimpleNamespace(canvas=canvas)
 
         pixel_height = 640.0
-        result = plugin._configure_browser_canvas(fig, pixel_height)
+        result = plugin._configure_browser_canvas(fig, pixel_height, 1.0)
 
         self.assertIsNotNone(result)
         configured_layout = canvas.layout
         self.assertIsNotNone(configured_layout)
         self.assertEqual(getattr(configured_layout, "height", None), f"{int(pixel_height)}px")
         self.assertEqual(getattr(configured_layout, "max_height", None), f"{int(pixel_height)}px")
-        self.assertEqual(getattr(configured_layout, "width", None), "99%")
+        self.assertEqual(getattr(configured_layout, "width", None), "100%")
         self.assertEqual(getattr(configured_layout, "overflow_y", None), "visible")
         self.assertEqual(getattr(configured_layout, "overflow_x", None), "hidden")
 

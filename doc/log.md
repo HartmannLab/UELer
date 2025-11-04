@@ -1,4 +1,8 @@
 ### v0.2.0-rc3
+**ROI gallery width stabilization**
+- Instrumented the ROI browser scroll container with a `ResizeObserver` so the Matplotlib canvas resizes to `W * 0.98` and recomputes its height from the gallery aspect ratio, keeping thumbnails stable as the accordion width changes (addresses [#39](https://github.com/HartmannLab/UELer/issues/39)).
+- Relaxed the ipympl layout to allow pixel-precise overrides and injected a front-end hook that updates on window and container resize events, eliminating the drifting width reported in the gallery investigation.
+
 **Cache configuration**
 - Relocated the cache size control to the Advanced Settings tab and raised its default to 100 so fresh viewers follow the tuned cache policy without squatting space in the header (fixes [#53](https://github.com/HartmannLab/UELer/issues/53)).
 - Added `tests/test_cache_settings.py` to pin the widget placement and viewer default, keeping future layout changes from regressing cache behaviour.
