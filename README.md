@@ -102,8 +102,9 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 ## New Update  
 ### v0.2.0-rc3
 **ROI gallery width stabilization**
-- The ROI Manager gallery now observes its container width, clamps the canvas to 98% of that span, and scales height from the gallery aspect ratio so thumbnail grids stay stable as the accordion width changes (addresses [#39](https://github.com/HartmannLab/UELer/issues/39)).
-- Follow-up removes leftover min-width locking so tiles shrink with the accordion instead of clipping when the notebook window narrows.
+- Switched ROI gallery to static narrow figure sizing (4.8 inches at 72 DPI ≈ 346px) to eliminate thumbnail clipping at narrow widths (addresses [#39](https://github.com/HartmannLab/UELer/issues/39)).
+- Removed ResizeObserver-based responsive width code after investigation revealed that JavaScript can only resize DOM wrapper elements, not Matplotlib's pre-rendered raster content—when the container shrinks below the original render width, the fixed-size raster overflows and clips.
+- Gallery now renders conservatively narrow and relies on CSS `width: 100%` to stretch when space is available, trading slight blur at wider widths for guaranteed no-clip behavior in narrow panels.
 
 **Cache configuration**
 - Moved the Cache Size control into Advanced Settings and seeded new viewers with a default of 100 so fresh sessions match notebook expectations while keeping the top panel focused (fixes [#53](https://github.com/HartmannLab/UELer/issues/53)).

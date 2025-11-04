@@ -94,7 +94,6 @@ class ROIManagerPlugin(PluginBase):
         self._browser_expression_selection = None  # type: Optional[Tuple[int, int]]
         self._use_browser_expression_js = True
         self._thumbnail_downsample_cache: Dict[str, int] = {}
-        self._browser_resize_tokens: set = set()
 
         self._build_widgets()
         self._build_layout()
@@ -762,29 +761,11 @@ class ROIManagerPlugin(PluginBase):
         active_count = max(1, int(record_count))
         rows = max(1, math.ceil(active_count / columns))
 
-        raw_plugin_width = getattr(self, "width", 6)
-        try:
-            plugin_width = float(raw_plugin_width)
-        except (TypeError, ValueError):
-            plugin_width = 6.0
-        if plugin_width <= 0:
-            plugin_width = 6.0
-
+        # Use a conservative static width that fits narrow accordions without clipping.
+        # At 72 DPI, 4.8 inches ≈ 346 px which fits comfortably in typical narrow panels.
+        # The canvas will stretch via width:100% when more space is available.
         safe_cols = max(columns, 1)
-        horizontal_padding = 0.4  # inches reserved for borders/margins
-        effective_width_ratio = self.GALLERY_WIDTH_RATIO
-        if effective_width_ratio >= 1.0:
-            effective_width_ratio = 0.98
-
-        raw_ratio = getattr(self, "GALLERY_WIDTH_RATIO", 0.98)
-        try:
-            width_ratio = float(raw_ratio)
-        except (TypeError, ValueError):
-            width_ratio = 0.98
-        width_ratio = min(max(width_ratio, 0.1), effective_width_ratio)
-
-        fig_width = plugin_width * width_ratio
-        fig_width = max(1.0, min(fig_width - horizontal_padding, plugin_width - horizontal_padding))
+        fig_width = 4.8  # inches - static narrow size to avoid clipping
         tile_inch = fig_width / safe_cols
         fig_height = max(tile_inch * rows, tile_inch)
         return columns, rows, fig_width, fig_height
@@ -905,7 +886,6 @@ class ROIManagerPlugin(PluginBase):
 
             if configured_widget is not None:
                 display(configured_widget)
-                self._install_gallery_resize_hook(configured_widget, getattr(fig, "canvas", None), aspect_ratio)
             else:
                 plt.show(fig)
 
@@ -972,119 +952,6 @@ class ROIManagerPlugin(PluginBase):
 
         scroll_container = VBox([canvas], layout=Layout(**container_layout_kwargs))
         return scroll_container
-
-    def _install_gallery_resize_hook(self, container: VBox, canvas, aspect_ratio: float) -> None:
-        if container is None or canvas is None:
-            return
-
-        try:
-            ratio = float(aspect_ratio)
-        except (TypeError, ValueError):
-            ratio = 1.0
-
-        if not math.isfinite(ratio) or ratio <= 0:
-            ratio = 1.0
-
-        identifier = uuid.uuid4().hex
-        container_class = f"roi-gallery-container-{identifier}"
-        canvas_class = f"roi-gallery-canvas-{identifier}"
-
-        try:
-            container.add_class(container_class)
-        except Exception:  # pragma: no cover - widget frontends without add_class
-            return
-
-        try:
-            canvas.add_class(canvas_class)
-        except Exception:  # pragma: no cover - ipympl fallback path
-            pass
-
-        key = (container_class, canvas_class)
-        if key in self._browser_resize_tokens:
-            return
-        self._browser_resize_tokens.add(key)
-
-        script = f"""
-(function() {{
-  const containerSelector = '.{container_class}';
-  const canvasSelector = '.{canvas_class}';
-  const scale = 0.98;
-  const ratio = {ratio};
-  const token = '{identifier}';
-  window.__uelerRoiGalleryResize = window.__uelerRoiGalleryResize || {{}};
-  if (window.__uelerRoiGalleryResize[token]) {{
-    return;
-  }}
-  function applyWidth(width) {{
-    if (!width || width <= 1) {{
-      return;
-    }}
-    const wrapper = document.querySelector(canvasSelector);
-    if (!wrapper) {{
-      return;
-    }}
-    const targetWidth = Math.max(1, width * scale);
-    const targetHeight = Math.max(1, targetWidth * ratio);
-    wrapper.style.width = targetWidth + 'px';
-    wrapper.style.maxWidth = targetWidth + 'px';
-    wrapper.style.height = targetHeight + 'px';
-    wrapper.style.maxHeight = targetHeight + 'px';
-    const canvases = wrapper.querySelectorAll('canvas');
-    canvases.forEach(function(node) {{
-      node.style.width = '100%';
-      node.style.height = '100%';
-      node.style.maxWidth = '100%';
-      node.style.maxHeight = '100%';
-      node.style.display = 'block';
-    }});
-  }}
-
-  function requestApply(entry) {{
-    const container = document.querySelector(containerSelector);
-    if (!container) {{
-      return;
-    }}
-    const width = entry && entry.contentRect ? entry.contentRect.width : container.clientWidth;
-    window.requestAnimationFrame(function() {{
-      applyWidth(width);
-    }});
-  }}
-
-  if (typeof ResizeObserver === 'undefined') {{
-    window.addEventListener('resize', function() {{ requestApply(); }});
-    requestApply();
-    window.__uelerRoiGalleryResize[token] = true;
-    return;
-  }}
-
-  const observer = new ResizeObserver(function(entries) {{
-    if (entries && entries.length) {{
-      requestApply(entries[0]);
-    }} else {{
-      requestApply();
-    }}
-  }});
-
-  function attachWhenReady() {{
-    const container = document.querySelector(containerSelector);
-    if (!container) {{
-      window.setTimeout(attachWhenReady, 200);
-      return;
-    }}
-    observer.observe(container);
-    requestApply();
-  }}
-
-  attachWhenReady();
-  window.addEventListener('resize', function() {{ requestApply(); }});
-  window.__uelerRoiGalleryResize[token] = true;
-}})();
-"""
-
-        try:
-            display(IPythonJS(script))
-        except Exception:  # pragma: no cover - headless environments without JS execution
-            pass
 
     def _disconnect_browser_events(self) -> None:
         if self._browser_figure is not None and self._browser_click_cid is not None:

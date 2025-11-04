@@ -403,9 +403,8 @@ class ROIManagerTagsTests(unittest.TestCase):
         columns, rows, fig_width, fig_height = plugin._determine_gallery_layout(2)
         self.assertEqual(columns, plugin.BROWSER_COLUMNS)
         self.assertEqual(rows, 1)
-        expected_width = plugin.width * plugin.GALLERY_WIDTH_RATIO
-        adjusted_expected = max(1.0, expected_width - 0.4)
-        self.assertAlmostEqual(fig_width, adjusted_expected)
+        # Static narrow width approach to prevent clipping
+        self.assertAlmostEqual(fig_width, 4.8)
         self.assertAlmostEqual(fig_height, fig_width / columns)
 
     def test_new_tags_extend_allowed_pool(self):
