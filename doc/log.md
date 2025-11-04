@@ -1,3 +1,5 @@
+### v0.2.0-rc3
+
 ### v0.2.0-rc2
 **Mask outline scaling**
 - Added downsample-aware outline helpers so viewer overlays, selection highlights, and mask painter recolouring apply `max(1, t/f)` thickness scaling (fixes [#46](https://github.com/HartmannLab/UELer/issues/46)).
