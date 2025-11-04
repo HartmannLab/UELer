@@ -1,4 +1,8 @@
 ### v0.2.0-rc3
+**Cache configuration**
+- Relocated the cache size control to the Advanced Settings tab and raised its default to 100 so fresh viewers follow the tuned cache policy without squatting space in the header (fixes [#53](https://github.com/HartmannLab/UELer/issues/53)).
+- Added `tests/test_cache_settings.py` to pin the widget placement and viewer default, keeping future layout changes from regressing cache behaviour.
+
 **Cell tooltip precision**
 - Updated `ImageDisplay` marker tooltips to fall back to scientific notation whenever fixed-point rounding would display small non-zero intensities as 0.00, keeping near-zero markers readable (fixes [#51](https://github.com/HartmannLab/UELer/issues/51)).
 - Added `tests/test_image_display_tooltip.py` to cover regular, tiny, zero, and negative marker values so the formatter stays stable.

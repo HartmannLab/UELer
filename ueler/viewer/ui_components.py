@@ -318,17 +318,22 @@ def display_ui(viewer):
     )
 
     # Now wrap the container in a Box that makes it scrollable as a whole
-    control_panel_stack = VBox([
-        viewer.ui_component.control_sections,
-        viewer.ui_component.annotation_editor_host
-    ], layout=Layout(width='100%', gap='8px'))
+    control_panel_stack = VBox(
+        [
+            viewer.ui_component.control_sections,
+            viewer.ui_component.annotation_editor_host,
+        ],
+        layout=Layout(width='100%', gap='8px')
+    )
 
-    top_part_widgets = VBox([
-        viewer.ui_component.cache_size_input,
-        viewer.ui_component.image_selector,
-        control_panel_stack,
-        VBox([viewer.ui_component.advanced_settings_accordion])
-    ], layout=Layout(width='100%', overflow_x='hidden'))
+    top_part_widgets = VBox(
+        [
+            viewer.ui_component.image_selector,
+            control_panel_stack,
+            VBox([viewer.ui_component.advanced_settings_accordion]),
+        ],
+        layout=Layout(width='100%', overflow_x='hidden')
+    )
 
     left_panel_children = [top_part_widgets]
     left_panel_children.append(
@@ -337,7 +342,7 @@ def display_ui(viewer):
 
     left_panel = VBox(
         left_panel_children,
-    layout=Layout(width='350px', overflow_x='hidden', overflow_y='auto', gap='10px')
+        layout=Layout(width='350px', overflow_x='hidden', overflow_y='auto', gap='10px')
     )
 
     ui = HBox([
@@ -367,9 +372,10 @@ class uicomponents:
         """Initialize and return all UI widgets."""
         # Initialize cache size input
         self.cache_size_input = IntText(
-            value=3,
+            value=100,
             description='Cache Size:',
-            disabled=False
+            disabled=False,
+            style={'description_width': 'auto'}
         )
         self.cache_size_input.observe(viewer.on_cache_size_change, names='value')
 
@@ -428,9 +434,6 @@ class uicomponents:
         self.no_masks_label = HTML(value='<i>No masks available for this FOV.</i>')
         self.no_annotations_label = HTML(value='<i>No annotations detected.</i>')
         self.empty_controls_placeholder = HTML(value='<i>No viewer controls are available.</i>')
-
-
-        # Initialize markerset widgets
         self.marker_set_dropdown = Dropdown(
             options=[],  # Will be populated with marker set names
             value=None,
@@ -609,9 +612,10 @@ class uicomponents:
             ])
         
         main_viewer_VBox = VBox([
+            self.cache_size_input,
             self.pixel_size_inttext,
             self.enable_downsample_checkbox
-            ])
+        ])
 
         self.advanced_settings_tabs = Tab(
             children=[identifiers_VBox, main_viewer_VBox],

@@ -152,7 +152,7 @@ class ImageMaskViewer:
             raise ValueError("No FOVs found in the base folder.")
 
         # Initialize caches and other variables
-        self.max_cache_size = 3
+        self.max_cache_size = 100
 
         # Initialize current downsample factor
         self.downsample_factors = DOWNSAMPLE_FACTORS
