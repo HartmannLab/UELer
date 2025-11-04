@@ -563,6 +563,7 @@ def _render_tile_for_index(df, index: int, context: _RenderContext):
                     color=context.highlight_rgb,
                     mode="outline",
                     outline_thickness=context.outline_thickness,
+                    downsample_factor=context.downsample_factor,
                 )
             )
 

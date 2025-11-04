@@ -12,6 +12,7 @@ from ueler.image_utils import (
     generate_edges,
     get_axis_limits_with_padding,
 )
+from ueler.rendering.engine import scale_outline_thickness, thicken_outline
 from matplotlib.patches import Polygon
 from matplotlib.widgets import RectangleSelector
 # from skimage.measure import find_contours
@@ -341,8 +342,14 @@ class ImageDisplay:
             if self.selected_masks_label is not None:
                 mask_binary_ds = selected_mask_visible_ds.astype(np.uint8)
 
-                # Find contours in the downsampled mask
-                edge_mask = find_boundaries(mask_binary_ds, mode='thick')
+                outline_thickness = scale_outline_thickness(
+                    getattr(self.main_viewer, "mask_outline_thickness", 1),
+                    downsample_factor,
+                )
+
+                edge_mask = find_boundaries(mask_binary_ds, mode="inner")
+                if outline_thickness > 1:
+                    edge_mask = thicken_outline(edge_mask, outline_thickness - 1)
                 # print(f"sum edge_mask: {np.sum(edge_mask)}")
                 if do_not_reset:
                     combined = self.img_display.get_array().copy()
@@ -427,7 +434,11 @@ class ImageDisplay:
                         print(f"sum(mask_label_ds): {np.sum(mask_label_ds)}")
 
                         # Find contours in the downsampled mask
-                        edge_mask = generate_edges(mask_label_ds.compute())
+                        edge_mask = generate_edges(
+                            mask_label_ds.compute(),
+                            thickness=getattr(self.main_viewer, "mask_outline_thickness", 1),
+                            downsample=cdf,
+                        )
                         if cummulative:
                             combined = self.img_display.get_array().copy()
                         else:

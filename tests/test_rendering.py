@@ -176,6 +176,48 @@ class RenderingHelpersTests(unittest.TestCase):
         self.assertFalse(tinted[1, 3])
         self.assertFalse(tinted[3, 3])
 
+    def test_outline_scaling_respects_downsample_factor(self) -> None:
+        from ueler.viewer import rendering as rendering_mod
+        from ueler.rendering.engine import scale_outline_thickness, thicken_outline
+
+        channels = {"A": np.ones((8, 8), dtype=np.float32)}
+        settings = {
+            "A": ChannelRenderSettings(color=(1.0, 0.0, 0.0), contrast_min=0.0, contrast_max=1.0)
+        }
+
+        mask_array = np.zeros((4, 4), dtype=np.int32)
+        mask_array[1:3, 1:3] = 1
+        mask = MaskRenderSettings(
+            array=mask_array,
+            color=(0.0, 0.0, 1.0),
+            mode="outline",
+            outline_thickness=4,
+            downsample_factor=2,
+        )
+
+        result = render_fov_to_array(
+            "FOV",
+            channels,
+            ("A",),
+            settings,
+            downsample_factor=2,
+            masks=[mask],
+        )
+
+        tinted = np.all(np.isclose(result, [0.0, 0.0, 1.0], atol=1e-6), axis=2)
+        baseline = rendering_mod._label_boundaries(mask_array)
+        scaled = scale_outline_thickness(4, 2)
+        expected = thicken_outline(baseline, max(0, scaled - 1))
+
+        np.testing.assert_array_equal(tinted, expected)
+
+    def test_scale_outline_thickness_clamps_minimum(self) -> None:
+        from ueler.rendering.engine import scale_outline_thickness
+
+        self.assertEqual(scale_outline_thickness(1, 8), 1)
+        self.assertEqual(scale_outline_thickness(5, 10), 1)
+        self.assertEqual(scale_outline_thickness(6, 2), 3)
+
     def test_render_crop_to_array_uses_requested_region(self) -> None:
         crop = render_crop_to_array(
             "FOV",

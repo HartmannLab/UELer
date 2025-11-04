@@ -1811,6 +1811,7 @@ class ImageMaskViewer:
                         color=to_rgb(color_value),
                         mode="outline",
                         outline_thickness=int(self.mask_outline_thickness),
+                        downsample_factor=downsample_factor,
                     )
                 )
 
@@ -1949,6 +1950,7 @@ class ImageMaskViewer:
                         alpha=float(mask_snapshot.alpha),
                         mode=str(mask_snapshot.mode),
                         outline_thickness=int(getattr(mask_snapshot, "outline_thickness", 1)),
+                        downsample_factor=downsample_factor,
                     )
                 )
 

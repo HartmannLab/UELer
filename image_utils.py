@@ -3,9 +3,22 @@
 from skimage.segmentation import find_boundaries
 from dask import delayed
 
-def generate_edges(mask):
-    """Generate edges from a mask."""
-    return delayed(find_boundaries)(mask, mode='inner')
+from ueler.rendering.engine import scale_outline_thickness, thicken_outline
+
+
+def generate_edges(mask, *, thickness: int = 1, downsample: int = 1):
+    """Generate edges from a mask with an optional thickness adjustment."""
+
+    effective = scale_outline_thickness(thickness, downsample)
+    iterations = max(0, int(effective) - 1)
+
+    def _compute_edges(mask_array, extra_iterations):
+        edges = find_boundaries(mask_array, mode="inner")
+        if extra_iterations <= 0:
+            return edges
+        return thicken_outline(edges, extra_iterations)
+
+    return delayed(_compute_edges)(mask, iterations)
 
 def calculate_downsample_factor(width, height, ignore_zoom=False, max_dimension=512):
     """

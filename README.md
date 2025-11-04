@@ -101,6 +101,10 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### v0.2.0-rc2
+**Mask outline scaling**
+- Shared downsample-aware outline helpers so viewer overlays, ROI highlights, and mask painter recolouring all apply `max(1, t/f)` outline thickness (fixes [#46](https://github.com/HartmannLab/UELer/issues/46)) while keeping outlines visible at native zoom.
+- Regression coverage in `tests/test_rendering.py` locks in the new scaling behaviour alongside the legacy outline dilation path.
+
 The first release candidate delivers automatic scale bars across the viewer and batch export workflows while retaining the Batch Export UI, overlay plumbing, and job runner improvements from earlier `v0.2.0` milestones.
 
 **ROI browser pagination**

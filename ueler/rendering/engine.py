@@ -77,6 +77,7 @@ class MaskRenderSettings:
     alpha: float = 1.0
     mode: str = "fill"
     outline_thickness: int = 1
+    downsample_factor: int = 1
 
 
 @dataclass(frozen=True)
@@ -189,6 +190,36 @@ def _resolve_roi_region(roi_definition: Mapping[str, float], fallback: Region) -
     return fallback
 
 
+def scale_outline_thickness(thickness: float | int, downsample: int) -> int:
+    """Scale a requested outline thickness for the provided downsample factor."""
+
+    try:
+        base = float(thickness)
+    except (TypeError, ValueError):
+        base = 1.0
+
+    if not np.isfinite(base) or base <= 0.0:
+        base = 1.0
+
+    try:
+        factor = int(downsample)
+    except (TypeError, ValueError):
+        factor = 1
+
+    factor = max(1, factor)
+
+    scaled = max(1.0, base / factor)
+    # round-half-up to avoid Banker's rounding reducing the requested thickness
+    return max(1, int(math.floor(scaled + 0.5)))
+
+
+def thicken_outline(outline_mask: np.ndarray, iterations: int) -> np.ndarray:
+    if iterations <= 0:
+        return outline_mask.astype(bool, copy=False)
+    baseline = outline_mask.astype(bool, copy=False)
+    return _binary_dilation_4(baseline, iterations)
+
+
 def _derive_downsampled_region(region: Region, downsample: int) -> Region:
     xmin, xmax, ymin, ymax = region
     xmin_ds = xmin // downsample
@@ -270,9 +301,12 @@ def _resolve_mask_pixels(mask_array: np.ndarray, mask: MaskRenderSettings) -> np
             if find_boundaries is not None
             else _label_boundaries(labels)
         )
-        thickness = max(1, int(getattr(mask, "outline_thickness", 1)))
+        thickness = scale_outline_thickness(
+            getattr(mask, "outline_thickness", 1),
+            getattr(mask, "downsample_factor", 1),
+        )
         if thickness > 1:
-            baseline = _binary_dilation_4(baseline, thickness - 1)
+            baseline = thicken_outline(baseline, thickness - 1)
         return baseline
     if mode == "fill":
         return mask_array.astype(bool, copy=False)
@@ -489,6 +523,8 @@ __all__ = [
     "MaskOverlaySnapshot",
     "MaskRenderSettings",
     "OverlaySnapshot",
+    "scale_outline_thickness",
+    "thicken_outline",
     "render_crop_to_array",
     "render_fov_to_array",
     "render_roi_to_array",

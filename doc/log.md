@@ -1,4 +1,8 @@
 ### v0.2.0-rc2
+**Mask outline scaling**
+- Added downsample-aware outline helpers so viewer overlays, selection highlights, and mask painter recolouring apply `max(1, t/f)` thickness scaling (fixes [#46](https://github.com/HartmannLab/UELer/issues/46)).
+- Centralised the scaling logic in `ueler.rendering.engine` and extended `tests/test_rendering.py` with regression coverage to guard against future regressions.
+
 **Main viewer downsampling docs**
 - Summarized the automatic FOV downsampling flow in `dev_note/main_viewer.md`, covering factor selection, caching strategy, zoom toggles, and scale bar corrections so notebook users understand how large scenes stay responsive.
 
