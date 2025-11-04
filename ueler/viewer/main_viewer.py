@@ -570,13 +570,25 @@ class ImageMaskViewer:
 
         self.update_controls(None)
 
-        if self.initialized: 
+        if self.initialized:
             if self.SidePlots:
-                self.SidePlots.chart_output.highlight_cells()
-                if self.SidePlots.heatmap_output.ui_component.main_viewer_checkbox.value:
-                    self.SidePlots.heatmap_output.highlight_cells()
-                else:
+                chart_plugin = getattr(self.SidePlots, "chart_output", None)
+                heatmap_plugin = getattr(self.SidePlots, "heatmap_output", None)
+                heatmap_checkbox = (
+                    getattr(getattr(heatmap_plugin, "ui_component", None), "main_viewer_checkbox", None)
+                    if heatmap_plugin is not None
+                    else None
+                )
+                heatmap_linked = bool(heatmap_checkbox and heatmap_checkbox.value)
+
+                if not heatmap_linked:
                     self.image_display.clear_patches()
+
+                if chart_plugin is not None:
+                    chart_plugin.highlight_cells()
+
+                if heatmap_linked and heatmap_plugin is not None:
+                    heatmap_plugin.highlight_cells()
 
         ax = self.image_display.ax
 

@@ -101,6 +101,10 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### v0.2.0-rc2
+**Chart histogram tuning**
+- The histogram bin slider now updates plots immediately with continuous slider feedback, keeping cutoff markers visible after each redraw so tweaking bins delivers instant insight (addresses [#47](https://github.com/HartmannLab/UELer/issues/47)).
+- Cutoff-based highlights persist as you switch FOVs because the chart plugin reapplies its selection after the viewer clears overlays, ensuring qualifying cells stay emphasized during navigation.
+
 **Mask outline scaling**
 - Shared downsample-aware outline helpers so viewer overlays, ROI highlights, and mask painter recolouring all apply `max(1, t/f)` outline thickness (fixes [#46](https://github.com/HartmannLab/UELer/issues/46)) while keeping outlines visible at native zoom.
 - Regression coverage in `tests/test_rendering.py` locks in the new scaling behaviour alongside the legacy outline dilation path.
