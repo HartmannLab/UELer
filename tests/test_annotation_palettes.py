@@ -1,3 +1,4 @@
+import json
 import sys
 import types
 import unittest
@@ -328,7 +329,12 @@ if "viewer.annotation_display" not in sys.modules:
 
 from data_loader import load_annotations_for_fov
 from viewer.color_palettes import DEFAULT_COLOR, build_discrete_colormap
-from viewer.main_viewer import ImageMaskViewer, _unique_annotation_values
+from viewer.main_viewer import (
+    ANNOTATION_PALETTE_FILE_SUFFIX,
+    ANNOTATION_REGISTRY_FILENAME,
+    ImageMaskViewer,
+    _unique_annotation_values,
+)
 from skimage.segmentation import find_boundaries
 
 
@@ -373,6 +379,112 @@ class AnnotationUtilityTests(unittest.TestCase):
         self.assertTrue(np.array_equal(values, np.array([0, 1, 2, 3], dtype=np.int32)))
 
 
+class AnnotationPalettePersistenceTests(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = TemporaryDirectory()
+        self.addCleanup(self.tmpdir.cleanup)
+        self.folder = Path(self.tmpdir.name)
+        self.viewer = ImageMaskViewer.__new__(ImageMaskViewer)
+        self.viewer.annotation_names_set = {"ann"}
+        self.viewer.annotation_palettes = {"ann": {"0": "#000000", "1": "#111111"}}
+        self.viewer.annotation_class_ids = {"ann": [0, 1]}
+        self.viewer.annotation_class_labels = {"ann": {"0": "bg", "1": "cells"}}
+        self.viewer.annotation_label_display_mode = "id"
+        self.viewer.annotation_palette_registry_records = {}
+        self.viewer.annotation_palette_folder = self.folder
+        self.viewer.annotation_display_enabled = False
+        self.viewer.active_annotation_name = "ann"
+        self.viewer._ensure_annotation_metadata = lambda *_args, **_kwargs: None
+        self.viewer.update_display = lambda *_args, **_kwargs: None
+
+        class _DummyOutput:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):  # pragma: no cover - mimic Output context
+                return False
+
+            def clear_output(self, wait=False):  # pragma: no cover - compatibility method
+                return None
+
+        class _DummyDropdown:
+            def __init__(self):
+                self.options = []
+                self.value = ""
+
+        class _DummyBox:
+            def __init__(self):
+                self.layout = types.SimpleNamespace(display="")
+
+        class _DummyButton:
+            def on_click(self, *_args, **_kwargs):
+                return None
+
+        self.viewer.ui_component = types.SimpleNamespace(
+            annotation_palette_name_input=types.SimpleNamespace(value="Example palette"),
+            annotation_palette_saved_sets_dropdown=_DummyDropdown(),
+            annotation_palette_feedback=_DummyOutput(),
+            annotation_palette_load_picker=None,
+            annotation_palette_load_path_input=types.SimpleNamespace(value=""),
+            annotation_palette_manual_box=_DummyBox(),
+            annotation_palette_manual_input=types.SimpleNamespace(value=""),
+            annotation_palette_change_folder_button=_DummyButton(),
+            annotation_palette_manual_apply=_DummyButton(),
+            annotation_palette_manual_cancel=_DummyButton(),
+            annotation_palette_save_button=_DummyButton(),
+            annotation_palette_load_button=_DummyButton(),
+            annotation_palette_apply_saved_button=_DummyButton(),
+            annotation_palette_overwrite_button=_DummyButton(),
+            annotation_palette_delete_button=_DummyButton(),
+            annotation_palette_tab=types.SimpleNamespace(layout=types.SimpleNamespace(display="")),
+            annotation_selector=types.SimpleNamespace(value="ann"),
+        )
+        self.viewer._log_annotation_palette = lambda *_args, **_kwargs: None
+        self.viewer._refresh_annotation_control_states = lambda: None
+
+    def test_save_active_annotation_palette_creates_file_and_registry(self):
+        self.viewer.save_active_annotation_palette(None)
+
+        palette_path = self.folder / f"example-palette{ANNOTATION_PALETTE_FILE_SUFFIX}"
+        self.assertTrue(palette_path.exists())
+        payload = json.loads(palette_path.read_text(encoding="utf-8"))
+        self.assertEqual(payload["annotation"], "ann")
+        self.assertEqual(payload["colors"].get("1"), "#111111")
+
+        registry_path = self.folder / ANNOTATION_REGISTRY_FILENAME
+        self.assertTrue(registry_path.exists())
+        registry = json.loads(registry_path.read_text(encoding="utf-8"))
+        self.assertIn("Example palette", registry)
+
+    def test_load_annotation_palette_updates_state(self):
+        payload = {
+            "name": "Alt palette",
+            "version": "1.0.0",
+            "annotation": "ann",
+            "class_ids": [0, 2],
+            "default_color": "#a0a0a0",
+            "colors": {"0": "#000000", "2": "#123456"},
+            "labels": {"0": "background", "2": "tumour"},
+            "label_mode": "label",
+            "saved_at": "2025-10-04T00:00:00Z",
+        }
+        palette_path = self.folder / f"alt{ANNOTATION_PALETTE_FILE_SUFFIX}"
+        palette_path.write_text(json.dumps(payload), encoding="utf-8")
+
+        self.viewer.annotation_palettes = {"ann": {}}
+        self.viewer.annotation_class_labels = {"ann": {}}
+        self.viewer.annotation_class_ids = {"ann": []}
+        self.viewer.ui_component.annotation_palette_load_path_input.value = str(palette_path)
+
+        self.viewer.load_annotation_palette_from_ui(None)
+
+        self.assertEqual(self.viewer.annotation_class_ids["ann"], [0, 2])
+        self.assertEqual(self.viewer.annotation_palettes["ann"].get("2"), "#123456")
+        self.assertEqual(self.viewer.annotation_class_labels["ann"].get("2"), "tumour")
+        self.assertEqual(self.viewer.annotation_label_display_mode, "label")
+        self.assertEqual(self.viewer.ui_component.annotation_selector.value, "ann")
+
+
 class AnnotationControlStateTests(unittest.TestCase):
     class _DummyWidget:
         def __init__(self, value=None):
@@ -391,7 +503,6 @@ class AnnotationControlStateTests(unittest.TestCase):
 
         selector = self._DummyWidget()
         display_checkbox = self._DummyWidget(value=True)
-        overlay_mode = self._DummyWidget(value="combined")
         alpha_slider = self._DummyWidget(value=0.5)
         label_mode = self._DummyWidget(value="id")
         edit_button = self._DummyWidget()
@@ -400,7 +511,6 @@ class AnnotationControlStateTests(unittest.TestCase):
         viewer.ui_component = types.SimpleNamespace(
             annotation_selector=selector,
             annotation_display_checkbox=display_checkbox,
-            annotation_overlay_mode=overlay_mode,
             annotation_alpha_slider=alpha_slider,
             annotation_label_mode=label_mode,
             annotation_edit_button=edit_button,
@@ -453,6 +563,7 @@ class AnnotationLayoutTests(unittest.TestCase):
         viewer.ui_component.mask_display_controls = {}
         viewer.ui_component.mask_color_controls = {}
         viewer.ui_component.channel_controls_box = widgets.VBox()
+        viewer.ui_component.channel_section_panel = widgets.VBox()
         viewer.ui_component.mask_controls_box = widgets.VBox()
         viewer.ui_component.annotation_controls_box = widgets.VBox()
         viewer.ui_component.no_channels_label = widgets.HTML()
@@ -465,16 +576,19 @@ class AnnotationLayoutTests(unittest.TestCase):
             options=[("Simple Segmentation", "Simple Segmentation")],
             value="Simple Segmentation"
         )
-        viewer.ui_component.annotation_overlay_mode = widgets.ToggleButtons(
-            options=[("Mask outlines", "mask"), ("Fill", "annotation"), ("Both", "combined")],
-            value="combined"
-        )
         viewer.ui_component.annotation_alpha_slider = widgets.FloatSlider(value=0.5)
         viewer.ui_component.annotation_label_mode = widgets.Dropdown(
             options=[("Class IDs", "id"), ("Labels", "label")],
             value="id"
         )
         viewer.ui_component.annotation_edit_button = widgets.Button(disabled=True)
+        viewer.ui_component.annotation_palette_tab = widgets.Tab(children=())
+        viewer.ui_component.annotation_palette_feedback = widgets.Output()
+        tab_layout = getattr(viewer.ui_component.annotation_palette_tab, "layout", None)
+        if tab_layout is None:
+            viewer.ui_component.annotation_palette_tab.layout = types.SimpleNamespace(display="")
+        else:
+            setattr(tab_layout, "display", "")
 
         accordion = widgets.Accordion()
         accordion.children = ()
@@ -492,16 +606,16 @@ class AnnotationLayoutTests(unittest.TestCase):
 
         return viewer
 
-    def test_annotations_section_precedes_masks(self):
+    def test_masks_section_precedes_annotations(self):
         viewer = self._make_viewer()
 
         viewer.update_controls(None)
 
         sections = viewer.ui_component.control_sections.children
         self.assertEqual(len(sections), 3)
-        self.assertIs(sections[0], viewer.ui_component.channel_controls_box)
-        self.assertIs(sections[1], viewer.ui_component.annotation_controls_box)
-        self.assertIs(sections[2], viewer.ui_component.mask_controls_box)
+        self.assertIs(sections[0], viewer.ui_component.channel_section_panel)
+        self.assertIs(sections[1], viewer.ui_component.mask_controls_box)
+        self.assertIs(sections[2], viewer.ui_component.annotation_controls_box)
 
 
 class AnnotationMetadataTests(unittest.TestCase):
@@ -556,6 +670,7 @@ class RenderImageAnnotationTests(unittest.TestCase):
         self.viewer.mask_cache = {"FOV1": {}}
         self.viewer.label_masks_cache = {"FOV1": {}}
         self.viewer.edge_masks_cache = {"FOV1": {}}
+        self.viewer.mask_outline_thickness = 1
         self.viewer.ui_component = types.SimpleNamespace(
             image_selector=types.SimpleNamespace(value="FOV1"),
             color_controls={"chan": types.SimpleNamespace(value="Red")},

@@ -12,6 +12,7 @@ from ueler.image_utils import (
     generate_edges,
     get_axis_limits_with_padding,
 )
+from ueler.rendering.engine import scale_outline_thickness, thicken_outline
 from matplotlib.patches import Polygon
 from matplotlib.widgets import RectangleSelector
 # from skimage.measure import find_contours
@@ -20,6 +21,7 @@ import cv2
 import math
 from matplotlib.backend_bases import MouseButton
 from ueler.viewer.decorators import update_status_bar
+from .tooltip_utils import format_tooltip_value
 
 
 class ImageDisplay:
@@ -242,11 +244,11 @@ class ImageDisplay:
                         for channel in self.main_viewer.ui_component.channel_selector.value:
                             if channel in cell_data.columns:
                                 value = cell_data[channel].iloc[0]
-                                tooltip_text += f"\n{channel}: {value:.2f}"
+                                tooltip_text += f"\n{channel}: {format_tooltip_value(value)}"
                         for label in getattr(self.main_viewer, 'selected_tooltip_labels', []):
                             if label in cell_data.columns:
                                 value = cell_data[label].iloc[0]
-                                tooltip_text += f"\n{label}: {value}"
+                                tooltip_text += f"\n{label}: {format_tooltip_value(value)}"
 
                     # Update annotation
                     self.mask_id_annotation.xy = (x, y)
@@ -341,8 +343,14 @@ class ImageDisplay:
             if self.selected_masks_label is not None:
                 mask_binary_ds = selected_mask_visible_ds.astype(np.uint8)
 
-                # Find contours in the downsampled mask
-                edge_mask = find_boundaries(mask_binary_ds, mode='thick')
+                outline_thickness = scale_outline_thickness(
+                    getattr(self.main_viewer, "mask_outline_thickness", 1),
+                    downsample_factor,
+                )
+
+                edge_mask = find_boundaries(mask_binary_ds, mode="inner")
+                if outline_thickness > 1:
+                    edge_mask = thicken_outline(edge_mask, outline_thickness - 1)
                 # print(f"sum edge_mask: {np.sum(edge_mask)}")
                 if do_not_reset:
                     combined = self.img_display.get_array().copy()
@@ -427,7 +435,11 @@ class ImageDisplay:
                         print(f"sum(mask_label_ds): {np.sum(mask_label_ds)}")
 
                         # Find contours in the downsampled mask
-                        edge_mask = generate_edges(mask_label_ds.compute())
+                        edge_mask = generate_edges(
+                            mask_label_ds.compute(),
+                            thickness=getattr(self.main_viewer, "mask_outline_thickness", 1),
+                            downsample=cdf,
+                        )
                         if cummulative:
                             combined = self.img_display.get_array().copy()
                         else:

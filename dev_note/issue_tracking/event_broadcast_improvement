@@ -1,0 +1,32 @@
+# Event Broadcast Improvement (Issues #50 & #52)
+
+## Action Plan — 2025-11-04
+1. Trace ROI selection flow from browser click through `ImageMaskViewer.center_on_roi` to identify which observers broadcast FOV updates.
+2. Catalogue ROI Manager plugin callbacks triggered by FOV broadcasts and note any operations that rebuild the full gallery or thumbnails.
+3. Reproduce the cell gallery click path to see how plugin listeners (e.g., `on_fov_change`) respond and whether they unnecessarily regenerate plots.
+4. Review shared broadcast entry points in `ImageMaskViewer` to confirm when `inform_plugins('on_fov_change')` fires and whether alternative, more granular signals exist.
+
+## Investigation Notes
+
+### ROI Browser (#50)
+- Clicking a thumbnail invokes `ROIManagerPlugin._activate_roi_from_browser`, which centers the main viewer via `ImageMaskViewer.center_on_roi`.
+- `center_on_roi` sets the image selector dropdown when the ROI targets a different FOV; this triggers `ImageMaskViewer.on_image_change`.
+- `on_image_change` concludes by calling `inform_plugins('on_fov_change')`, and `ROIManagerPlugin.on_fov_change` immediately calls `refresh_roi_table()`.
+- `refresh_roi_table()` resets `_browser_current_page` and `_browser_last_signature`, forcing the browser to rebuild thumbnails even when only the selected ROI changed.
+- Result: every ROI click that changes FOV (and sometimes even same-FOV when thumbnails invalidate) rebuilds the entire gallery, matching the reported regeneration.
+
+### Cell Gallery (#52)
+- Inside `CellGalleryDisplay._draw_gallery`, a click handler assigns `image_selector.value = fov` for the clicked cell.
+- This fires the same `on_image_change` path, broadcasting `on_fov_change` to all plugins.
+- `CellGalleryDisplay.on_fov_change` re-renders the gallery whenever `selected_cells` is non-empty, so the gallery regenerates after each click.
+- The broadcast happens even when the cell’s FOV already matches the current dropdown value, because downstream code updates axis limits and `update_display` runs, keeping the hover/selection set intact while forcing another draw.
+
+### Shared Broadcast Entry Points
+- `ImageMaskViewer.on_image_change` is the central source of `inform_plugins('on_fov_change')` after any viewer FOV change.
+- `ImageMaskViewer.update_display` also calls `inform_plugins('on_mv_update_display')`, though the ROI and cell gallery plugins do not use this hook yet.
+- Current design treats any FOV focus change the same as a global data refresh, so plugins rebuild their UIs instead of issuing incremental updates.
+
+### Follow-Up Considerations
+- Introduce a lightweight “viewer-focused ROI/cell” signal or pass context to plugins so they can skip full gallery regeneration when only selection changes.
+- Allow `refresh_roi_table()` and `CellGalleryDisplay.on_fov_change()` to short-circuit if the underlying data table has not changed, possibly keyed by revision counters.
+- Explore deferring thumbnail updates until ROI metadata (e.g., per-ROI presets) actually change, which would also enable respecting per-ROI render settings.

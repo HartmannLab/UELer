@@ -3,9 +3,22 @@
 from skimage.segmentation import find_boundaries
 from dask import delayed
 
-def generate_edges(mask):
-    """Generate edges from a mask."""
-    return delayed(find_boundaries)(mask, mode='inner')
+from ueler.rendering.engine import scale_outline_thickness, thicken_outline
+
+
+def generate_edges(mask, *, thickness: int = 1, downsample: int = 1):
+    """Generate edges from a mask with an optional thickness adjustment."""
+
+    effective = scale_outline_thickness(thickness, downsample)
+    iterations = max(0, int(effective) - 1)
+
+    def _compute_edges(mask_array, extra_iterations):
+        edges = find_boundaries(mask_array, mode="inner")
+        if extra_iterations <= 0:
+            return edges
+        return thicken_outline(edges, extra_iterations)
+
+    return delayed(_compute_edges)(mask, iterations)
 
 def calculate_downsample_factor(width, height, ignore_zoom=False, max_dimension=512):
     """
@@ -19,6 +32,53 @@ def calculate_downsample_factor(width, height, ignore_zoom=False, max_dimension=
     while (largest_dimension / factor) > max_dimension:
         factor *= 2
     return factor
+
+
+def select_downsample_factor(
+    width,
+    height,
+    *,
+    max_dimension=512,
+    allowed_factors=None,
+    minimum=1,
+):
+    """Return the nearest permitted downsample factor for the given image size.
+
+    The helper reuses :func:`calculate_downsample_factor` to determine the
+    smallest power-of-two factor that keeps the longest edge within
+    ``max_dimension`` pixels. When ``allowed_factors`` is provided, the result
+    is clamped to the largest allowed factor that does not exceed the computed
+    baseline. If no permitted value satisfies that condition, the smallest
+    allowed factor is returned instead. When ``allowed_factors`` is omitted, the
+    raw baseline factor is used directly.
+    """
+
+    try:
+        base_factor = int(
+            calculate_downsample_factor(width, height, ignore_zoom=False, max_dimension=max_dimension)
+        )
+    except Exception:
+        base_factor = 1
+
+    base_factor = max(1, base_factor)
+    minimum = max(1, int(minimum or 1))
+
+    if not allowed_factors:
+        return max(minimum, base_factor)
+
+    try:
+        candidates = sorted({int(factor) for factor in allowed_factors if int(factor) >= minimum})
+    except Exception:
+        candidates = []
+
+    if not candidates:
+        return max(minimum, base_factor)
+
+    at_most_base = [factor for factor in candidates if factor <= base_factor]
+    if at_most_base:
+        return at_most_base[-1]
+
+    return candidates[0]
 
 
 import os

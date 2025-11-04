@@ -1,9 +1,138 @@
+### v0.2.0-rc3
+**ROI gallery width stabilization**
+- Switched ROI gallery to static narrow figure sizing (4.8 inches at 72 DPI ≈ 346px) to eliminate thumbnail clipping at narrow widths (addresses [#39](https://github.com/HartmannLab/UELer/issues/39)).
+- Removed all ResizeObserver-based responsive width code after investigation revealed that JavaScript can only resize DOM wrapper elements, not Matplotlib's pre-rendered raster content—when the container shrinks below the original render width, the fixed-size raster overflows and clips.
+- Gallery now renders conservatively narrow and relies on CSS `width: 100%` to stretch when space is available, trading slight blur at wider widths for guaranteed no-clip behavior in narrow panels.
+- Updated test expectations in `tests/test_roi_manager_tags.py` to validate static 4.8-inch width instead of dynamic calculation.
+- Documented root cause and solution alternatives in `dev_note/gallery_width.md` for future reference.
+
+**Cache configuration**
+- Relocated the cache size control to the Advanced Settings tab and raised its default to 100 so fresh viewers follow the tuned cache policy without squatting space in the header (fixes [#53](https://github.com/HartmannLab/UELer/issues/53)).
+- Added `tests/test_cache_settings.py` to pin the widget placement and viewer default, keeping future layout changes from regressing cache behaviour.
+
+**Cell tooltip precision**
+- Updated `ImageDisplay` marker tooltips to fall back to scientific notation whenever fixed-point rounding would display small non-zero intensities as 0.00, keeping near-zero markers readable (fixes [#51](https://github.com/HartmannLab/UELer/issues/51)).
+- Added `tests/test_image_display_tooltip.py` to cover regular, tiny, zero, and negative marker values so the formatter stays stable.
+
+**ROI browser refresh throttling**
+- Cached a lightweight browser signature in `ROIManagerPlugin` so routine FOV changes reuse the current page without regenerating thumbnails, while targeted actions (add/update/delete) request a forced refresh to keep presets in sync (fixes [#50](https://github.com/HartmannLab/UELer/issues/50)).
+- Resolved per-ROI preset playback by threading the mask painter's active colour set through thumbnail rendering, ensuring previews match saved settings without wiping pagination.
+
+**Cell gallery FOV debounce**
+- Gallery clicks now track viewer-initiated FOV changes and skip the next `on_fov_change` cycle, preventing the redundant redraw loop reported in [#52](https://github.com/HartmannLab/UELer/issues/52).
+- External plugin interactions (e.g., scatter single-point navigation) still clear the guard so multi-plugin workflows refresh as expected while viewer-driven hops stay snappy.
+
+**ROI filter tabset**
+- ROI manager browser filters now live behind `simple` and `advanced` tabs, separating the AND/OR widgets from expression entry for clearer navigation (addresses [#49](https://github.com/HartmannLab/UELer/issues/49)).
+- The ROI browser only evaluates the active tab's inputs and refreshes pagination on tab switches so tag selections and expressions no longer conflict.
+
 ### v0.2.0-rc2
+**Mask outline scaling**
+- Added downsample-aware outline helpers so viewer overlays, selection highlights, and mask painter recolouring apply `max(1, t/f)` thickness scaling (fixes [#46](https://github.com/HartmannLab/UELer/issues/46)).
+- Centralised the scaling logic in `ueler.rendering.engine` and extended `tests/test_rendering.py` with regression coverage to guard against future regressions.
+
+**Scatter gallery guard**
+- Added `single_point_click_state` to the chart plugin and taught trace/scatter selection paths to toggle it so single-cell interactions mark the next viewer navigation while suppressing single-point gallery syncs (fixes [#48](https://github.com/HartmannLab/UELer/issues/48)).
+- Implemented `CellGalleryDisplay.on_fov_change` to clear the flag, skip single-cell refreshes, and re-render only when multi-cell selections persist, with new tests in `tests/test_chart_footer_behavior.py` and `tests/test_cell_gallery.py` covering the forwarding guard and handshake.
+
+**Main viewer downsampling docs**
+- Summarized the automatic FOV downsampling flow in `dev_note/main_viewer.md`, covering factor selection, caching strategy, zoom toggles, and scale bar corrections so notebook users understand how large scenes stay responsive.
+
+**ROI browser layout fixes**
+- Set the ROI browser output widget to a 400px viewport with vertical scrolling so the accordion stays compact even when dozens of thumbnails load.
+- Rebuilt the Matplotlib gallery sizing to keep a fixed three-column grid, pad empty slots, and clamp the figure width to 98% of the plugin width for consistently visible tiles.
+- Ran `python -m unittest tests.test_roi_manager_tags` to cover the new layout helper and scroll container assertions.
+
+**ROI browser layout follow-up**
+- Allowed the thumbnail output container and parent flex boxes to shrink (`min_width=0`, `flex=1 1 auto`) so the scrollbar scopes to the gallery instead of the entire plugin.
+- Injected a scoped CSS rule (`.roi-browser-output img`) plus DPI tuning to keep Matplotlib renders within the widget bounds and leave pagination buttons unobscured.
+- Added an ipympl-aware canvas layout helper that forces `fig.canvas` to honour the 400px viewport; fall back to `plt.show` when the widget backend is unavailable.
+- Repeated `python -m unittest tests.test_roi_manager_tags` to exercise the new layout expectations and confirm the CSS helper is applied once.
+
+**ROI browser canvas containment**
+- Swapped the direct `plt.show` usage for a fixed-height `VBox` that wraps the Matplotlib canvas, applying a pixel-specific `Layout` so the gallery honours the 400px viewport while clipping horizontal overflow.
+- Updated `_configure_browser_canvas` and its unit tests to accept an explicit pixel height, confirm both the canvas and wrapper sizing, and guarantee the scroll container engages when figures exceed the viewport.
+- Ran `python -m unittest tests.test_roi_manager_tags` to validate the wrapper behaviour and refreshed ipywidgets stubs for positional children support.
+
+**ROI browser thumbnails**
+- Reused the new `select_downsample_factor` helper to downsample ROI previews automatically, capping the longest edge at 256 px and ignoring stale zoom metadata for smoother scrolling.
+- Follow-up: thumbnails now compute their factor from each ROI viewport (`factor = 2^ceil(log2(ceil(longest/256)))`) and `_derive_downsampled_region` applies ceiling division so non-divisible dimensions still render complete tiles.
+
+**ROI preview reliability**
+- Normalised ROI coordinate parsing (strings/NaNs) and synced downsampled bounds with the sampled pixel grid so cropped ROIs render alongside full-FOV entries instead of showing “preview unavailable” (Reply 6 to [#44](https://github.com/HartmannLab/UELer/issues/44)).
+- Added regression coverage for string-based ROI metadata in `tests/test_rendering.py` and reran `python -m unittest tests.test_rendering tests.test_roi_manager_tags` to confirm the fix.
+
+**ROI browser pagination**
+- Replaced the scroll-triggered lazy loader with explicit Previous/Next page buttons and a live page indicator, rendering 3x4 tiles per step so navigation stays deterministic (addresses [#44](https://github.com/HartmannLab/UELer/issues/44)).
+- Reset pagination whenever filters or expressions change and surfaced per-page summaries plus disabled states for boundary pages to keep the gallery responsive.
+
+**Expression helper cursor awareness**
+- Injected a custom widget bridge that tracks selection and focus inside the expression field and reuses it when inserting operator/tag snippets, keeping helpers splice-at-caret instead of appending blindly.
+- Updated ROI manager helpers and unit scaffolding (`tests/test_roi_manager_tags.py`) to match the cursor-aware workflow while dropping the deprecated scroll listener plumbing.
+- Preserved the last focused caret snapshot when helper buttons momentarily steal focus so blur events no longer shove insertions back to index 0, and added a regression test covering the selection hand-off.
+- Hardened the DOM selector logic so the JavaScript bridge finds the Text widget reliably in JupyterLab 4, classic Notebook, and Voila frontends, restoring caret telemetry on stacks where the prior `[data-widget-id]` hooks failed.
+- Reset the stored caret to the end of restored expressions whenever the widget reloads unfocused, ensuring the very first helper insertion appends instead of prefixing text resurrected from notebook state.
+- Reworked `_insert_browser_expression_snippet` to slice around the cached start/end indices so helpers replace highlighted ranges or append at the caret, advancing the stored selection to trail the inserted snippet for chained clicks.
+- Expanded `tests/test_roi_manager_tags.py` with insertion coverage at the head, middle, tail, and with highlighted replacements to guard the new behaviour.
+- Restored the selection resolver and focus-aware caching after a regression so helper buttons continue to update the field even if caret telemetry drops temporary blur events.
+- Moved helper insertion entirely into the browser via custom `insert-snippet` messages so the front end updates the field and caret before syncing changes back to Python, avoiding race conditions with focus churn.
+- Added a readiness check that falls back to the Python insertion path until the browser bridge confirms a caret snapshot, preventing helper buttons from no-oping while the widget script attaches.
+- Swapped the HTML `<script>` injection for `IPython.display.Javascript` so the caret bridge executes even in sanitized JupyterLab outputs, keeping selection telemetry alive across lab builds.
+- Simplified the caret bridge to the DOM-binding pattern proven in the standalone ipywidgets demo so it locates the text input through stable selectors, executes the helper script via a shared `ipywidgets.Output` in the same frame, performs the splice entirely client-side, and then reconciles value/caret state back to Python across Jupyter front-ends.
+
+- ✅ Ran `python -m unittest tests.test_roi_manager_tags` to exercise the caret retention regression, insertion index coverage, and the front-end insertion bridge.
+- ⚠ Additional widget-harness coverage for the pagination helpers remains pending until the revamped stubs land.
+
+**Cell gallery tile padding**
+- Updated `_compose_canvas` to size gallery slots by the largest rendered tile and center narrower crops so mixed-width images no longer raise broadcasting errors when assembling the grid (fixes [#43](https://github.com/HartmannLab/UELer/issues/43)).
+- Added `tests/test_cell_gallery.py` to exercise the padding logic and ran `python -m unittest tests.test_cell_gallery` to confirm the regression stays fixed.
+**Cell gallery rendering unification**
+- Reimplemented `ueler.viewer.plugin.cell_gallery` against the shared `ueler.rendering` engine, wiring cutout sizing, downsampling, and mask-outline controls through overlay snapshots so gallery tiles match the main viewer and batch export outputs (addresses [#43](https://github.com/HartmannLab/UELer/issues/43)).
+- Restored legacy helpers (`find_boundaries`, `_label_boundaries`, `_binary_dilation_4`) via `ueler.viewer.rendering` to keep downstream consumers and renderer tests operational, and reran `python -m unittest tests.test_rendering tests.test_export_fovs_batch` to validate the refactor.
+**Pixel annotation palette management**
+- Introduced `ueler.viewer.palette_store` with shared slugging, registry, and JSON helpers reused by the mask painter and pixel annotation workflows, and migrated the mask painter plugin to the shared implementation.
+- Expanded the Pixel annotations accordion with Save/Load/Manage tabs, optional `ipyfilechooser` pickers, and registry handling that mirrors the mask painter experience so class colour sets can be persisted and restored consistently (addresses [#42](https://github.com/HartmannLab/UELer/issues/42)).
+- Added persistence-focused coverage to `tests/test_annotation_palettes.py`, exercising palette save/load round-trips and refreshing layout stubs to accommodate the new controls.
+
 **FOV detection filtering**
 - Added `_has_tiff_files()` method to `ueler.viewer.main_viewer.ImageMaskViewer` that checks for .tif/.tiff files in the FOV directory or its 'rescaled' subdirectory, mirroring the logic from `load_channel_struct_fov()` to ensure only directories containing TIFF images are recognized as valid FOVs.
 - Updated `available_fovs` initialization to filter out directories without TIFF files, preventing misclassification of folders like '.ueler' as FOVs (fixes [#29](https://github.com/HartmannLab/UELer/issues/29)).
 - Added comprehensive unit tests in `tests/test_fov_detection.py` covering positive cases (directories with TIFF files), negative cases (empty directories, nonexistent directories), and edge cases (rescaled subdirectories) to guard against regressions.
 - Ran `python -m unittest tests.test_fov_detection` to validate the filtering logic and ensure no existing functionality is broken.
+
+**Plugin layout refinements**
+- Added `ueler.viewer.layout_utils` with reusable layout helpers keeping child widths within parent bounds to eliminate shallow horizontal scrollbars in tight containers (fixes [#39](https://github.com/HartmannLab/UELer/issues/39)).
+- Updated ROI Manager, Batch Export, and Go To plugins to adopt the shared layouts so button rows wrap, selectors flex, and status content fits without triggering unnecessary horizontal scrolling.
+- Verified the affected notebooks manually; unit suite not rerun because changes are widget-only.
+- Follow-up: corrected the Batch Export plugin's widget builder to pass the new layout helpers explicitly, fixing the NameError raised when instantiating the plugin after the refactor.
+
+**Annotation control separation**
+- Removed the Overlay mode toggle from the pixel annotation controls so mask visibility remains governed by mask checkboxes even when annotations are hidden, delivering the separation requested in [#41](https://github.com/HartmannLab/UELer/issues/41).
+- Renamed the accordion entry to `Pixel annotations` and enforced the order `Channels`, `Masks`, `Pixel annotations` so mask controls precede annotation options while keeping the palette editor accessible.
+- Updated `tests/test_annotation_palettes.py` to reflect the new accordion order and the pared-down control list ahead of regression runs.
+
+**ROI browser presets**
+- Rebuilt the ROI Manager plugin to expose `ROI browser` and `ROI editor` tabs, adding a Matplotlib-backed gallery with tag/FOV filters plus a centre-with-preset action that replays saved rendering metadata (addresses [#44](https://github.com/HartmannLab/UELer/issues/44)).
+- Extended ROI persistence to store annotation palette and mask colour set identifiers and taught `ImageMaskViewer` to report/apply the active palette name so plugins can capture and restore presets reliably.
+- Refined the browser with AND/OR tag filtering, a saved-preset toggle, 500px scroll container with 98 % width tiles, incremental "show 4 more" pagination, and mask visibility restoration alongside existing preset metadata.
+
+**ROI browser expression filtering**
+- Added `ueler.viewer.tag_expression.compile_tag_expression` with tokenization, shunting-yard parsing, and eager validation so ROI tag filters accept boolean expressions using `()`, `&`, `|`, and `!` syntax (addresses [#44](https://github.com/HartmannLab/UELer/issues/44)).
+- Expanded the browser UI with operator/tag shortcut buttons, inline error feedback, HUD-free Matplotlib canvases sized to 98 % of the scroll container, and a fixed lazy-loading listener that requests four more previews when the scroller nears the end.
+- Updated `tests/test_roi_manager_tags.py` and added `tests/test_tag_expression.py` to cover parser behaviour and plugin wiring; ran `python -m unittest tests.test_tag_expression tests.test_roi_manager_tags` to confirm the changes.
+
+**Channels accordion consolidation**
+- Relocated the channel tag chips plus marker set dropdown, name field, and action buttons into the Channels accordion pane so selection presets sit next to their per-channel sliders (addresses [#40](https://github.com/HartmannLab/UELer/issues/40)).
+- Rebuilt the accordion entry with dedicated containers for the selector, marker set controls, and dynamic sliders, preserving spacing and keyboard focus while removing duplicate widgets from the left panel header.
+- Removed the accordion-level scrollbar and capped the slider container height so only the per-channel section scrolls, eliminating double scrollbars while keeping long channel lists navigable.
+
+**Chart histogram responsiveness**
+- Observed the histogram bin slider to rerender plots immediately by enabling continuous updates, tracking the active histogram column, and redrawing Matplotlib output whenever the bin count changes so users see real-time feedback (fixes [#47](https://github.com/HartmannLab/UELer/issues/47)).
+- Preserved cutoff markers across rerenders by restoring the vertical threshold line and reapplying cell highlights after each redraw.
+
+**Cutoff highlight persistence**
+- Reordered the FOV-change refresh flow so chart-driven cutoff highlights reapply after plugin panels clear overlays, keeping qualifying cells highlighted as the user switches images (fixes [#47](https://github.com/HartmannLab/UELer/issues/47)).
+- Attempted `python -m unittest tests.test_chart_footer_behavior`; run blocked because the lightweight test environment lacks `matplotlib.colors`.
 
 ### v0.2.0-rc1
 **Wide plugin layout**

@@ -1,27 +1,95 @@
 # ui_components.py
-from ipywidgets import (
-    SelectMultiple,
-    FloatSlider,
-    Dropdown,
-    Box,
-    VBox,
-    Output,
-    Image,
-    Checkbox,
-    IntText,
-    Text,
-    Button,
-    HBox,
-    Accordion,
-    Layout,
-    Tab,
-    TagsInput,
-    HTML,
-    ToggleButtons,
-    IntSlider,
-)
+import ipywidgets as widgets
+import importlib
+from pathlib import Path
+
 from IPython.display import display
 from types import SimpleNamespace
+
+_FileChooserModule = None
+try:  # pragma: no cover - optional dependency for richer load dialogs
+    _FileChooserModule = importlib.import_module("ipyfilechooser")
+except Exception:  # pragma: no cover - executed when ipyfilechooser is unavailable
+    _FileChooserModule = None
+
+FileChooser = getattr(_FileChooserModule, "FileChooser", None)
+
+_widget_attr = getattr(widgets, "Widget", None)
+if not isinstance(_widget_attr, type):  # pragma: no cover - ensure baseline widget API exists
+    class _FallbackWidget:  # type: ignore[override]
+        def __init__(self, *args, **kwargs):
+            children = kwargs.get("children")
+            if children is None and args:
+                children = args[0]
+            self.children = tuple(children or ())
+            self.value = kwargs.get("value")
+            self.options = list(kwargs.get("options", ()))
+            self.description = kwargs.get("description", "")
+            self.disabled = kwargs.get("disabled", False)
+            self.layout = kwargs.get("layout")
+
+        def observe(self, *_args, **_kwargs):
+            return None
+
+        def on_click(self, *_args, **_kwargs):  # pragma: no cover - parity with ipywidgets API
+            return None
+
+        def set_title(self, *_args, **_kwargs):  # pragma: no cover - accordion/tab helper
+            return None
+
+    setattr(widgets, "Widget", _FallbackWidget)
+
+Widget = getattr(widgets, "Widget")
+
+Layout = getattr(widgets, "Layout", None)
+if Layout is None:  # pragma: no cover - fallback for stripped stubs
+    try:
+        from ipywidgets.widgets.widget_layout import Layout  # type: ignore
+    except Exception:  # pragma: no cover - minimal stand-in when submodule missing
+        class Layout:  # type: ignore[override]
+            def __init__(self, **kwargs):
+                self.__dict__.update(kwargs)
+
+setattr(widgets, "Layout", Layout)
+
+
+class _FallbackOutput(Widget):  # pragma: no cover - minimal output widget stand-in
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.outputs = ()
+
+    def clear_output(self, *_args, **_kwargs):
+        self.outputs = ()
+
+
+def _ensure_widget_class(name, *, default=None):
+    value = getattr(widgets, name, None)
+    if isinstance(value, type):
+        return value
+    resolved = default or Widget
+    if not isinstance(resolved, type):  # pragma: no cover - defensive guard
+        resolved = Widget
+    setattr(widgets, name, resolved)
+    return resolved
+
+
+SelectMultiple = _ensure_widget_class("SelectMultiple")
+FloatSlider = _ensure_widget_class("FloatSlider")
+Dropdown = _ensure_widget_class("Dropdown")
+VBox = _ensure_widget_class("VBox")
+Output = _ensure_widget_class("Output", default=_FallbackOutput)
+Checkbox = _ensure_widget_class("Checkbox")
+IntText = _ensure_widget_class("IntText")
+Text = _ensure_widget_class("Text")
+Button = _ensure_widget_class("Button")
+HBox = _ensure_widget_class("HBox")
+Accordion = _ensure_widget_class("Accordion")
+Tab = _ensure_widget_class("Tab")
+HTML = _ensure_widget_class("HTML")
+ToggleButtons = _ensure_widget_class("ToggleButtons")
+IntSlider = _ensure_widget_class("IntSlider")
+TagsInput = _ensure_widget_class("TagsInput")
+Image = _ensure_widget_class("Image")
 
 from .plugin.chart import ChartDisplay  # type: ignore[import-error]
 from .plugin.cell_gallery import CellGalleryDisplay  # type: ignore[import-error]
@@ -211,14 +279,6 @@ def create_widgets(viewer):
 
 def display_ui(viewer):
     """Display the main UI."""
-    marker_set_widgets = VBox([
-        VBox([viewer.ui_component.marker_set_dropdown, viewer.ui_component.marker_set_name_input]),
-        HBox([
-            VBox([viewer.ui_component.load_marker_set_button, viewer.ui_component.save_marker_set_button]),
-            VBox([viewer.ui_component.update_marker_set_button, viewer.ui_component.delete_marker_set_button])
-        ]),
-        viewer.ui_component.delete_confirmation_checkbox
-    ])
     # Add a new output widget for charts
     viewer.BottomPlots = BottomPlots()
     if viewer.cell_table is not None:
@@ -258,20 +318,22 @@ def display_ui(viewer):
     )
 
     # Now wrap the container in a Box that makes it scrollable as a whole
-    control_panel_stack = VBox([
-        viewer.ui_component.control_sections,
-        viewer.ui_component.annotation_editor_host
-    ], layout=Layout(gap='8px'))
+    control_panel_stack = VBox(
+        [
+            viewer.ui_component.control_sections,
+            viewer.ui_component.annotation_editor_host,
+        ],
+        layout=Layout(width='100%', gap='8px')
+    )
 
-    top_part_widgets = VBox([
-        viewer.ui_component.cache_size_input,
-        viewer.ui_component.image_selector,
-        viewer.ui_component.channel_selector_text,
-        viewer.ui_component.channel_selector,
-        marker_set_widgets,
-        control_panel_stack,
-        VBox([viewer.ui_component.advanced_settings_accordion])
-    ])
+    top_part_widgets = VBox(
+        [
+            viewer.ui_component.image_selector,
+            control_panel_stack,
+            VBox([viewer.ui_component.advanced_settings_accordion]),
+        ],
+        layout=Layout(width='100%', overflow_x='hidden')
+    )
 
     left_panel_children = [top_part_widgets]
     left_panel_children.append(
@@ -280,7 +342,7 @@ def display_ui(viewer):
 
     left_panel = VBox(
         left_panel_children,
-        layout=Layout(width='350px', overflow_y='auto', gap='10px')
+        layout=Layout(width='350px', overflow_x='hidden', overflow_y='auto', gap='10px')
     )
 
     ui = HBox([
@@ -289,7 +351,7 @@ def display_ui(viewer):
         viewer.side_plot  # Add the chart output widget to the right
     ])
 
-    root = VBox([ui, viewer.wide_plugin_panel], layout=Layout(width='100%'))
+    root = VBox([ui, viewer.wide_plugin_panel], layout=Layout(width='100%', max_width='100%', gap='12px'))
 
     if hasattr(viewer, 'refresh_bottom_panel'):
         viewer.refresh_bottom_panel()
@@ -310,9 +372,10 @@ class uicomponents:
         """Initialize and return all UI widgets."""
         # Initialize cache size input
         self.cache_size_input = IntText(
-            value=3,
+            value=100,
             description='Cache Size:',
-            disabled=False
+            disabled=False,
+            style={'description_width': 'auto'}
         )
         self.cache_size_input.observe(viewer.on_cache_size_change, names='value')
 
@@ -343,7 +406,8 @@ class uicomponents:
                 width='100%',
                 overflow_y='auto',
                 gap='6px',
-                padding='4px 0'
+                padding='4px 0',
+                max_height='320px'
             )
         )
         self.mask_controls_box = VBox(
@@ -370,18 +434,6 @@ class uicomponents:
         self.no_masks_label = HTML(value='<i>No masks available for this FOV.</i>')
         self.no_annotations_label = HTML(value='<i>No annotations detected.</i>')
         self.empty_controls_placeholder = HTML(value='<i>No viewer controls are available.</i>')
-
-        self.control_sections = Accordion(
-            children=(self.channel_controls_box,),
-            layout=Layout(width='100%', max_height='640px')
-        )
-        self.control_sections.set_title(0, 'Channels')
-
-        self.annotation_editor_host = VBox(
-            layout=Layout(width='100%', padding='8px 0 0 0')
-        )
-
-        # Initialize markerset widgets
         self.marker_set_dropdown = Dropdown(
             options=[],  # Will be populated with marker set names
             value=None,
@@ -435,6 +487,71 @@ class uicomponents:
             value=False,
             description='Confirm Deletion',
             disabled=False
+        )
+
+        channel_selector_layout = Layout(width='100%', gap='4px')
+        self.channel_selection_panel = VBox(
+            children=(
+                self.channel_selector_text,
+                self.channel_selector,
+            ),
+            layout=channel_selector_layout,
+        )
+
+        marker_set_pickers = VBox(
+            children=(
+                self.marker_set_dropdown,
+                self.marker_set_name_input,
+            ),
+            layout=Layout(width='100%', gap='4px')
+        )
+
+        marker_set_buttons = HBox(
+            children=(
+                VBox(
+                    children=(
+                        self.load_marker_set_button,
+                        self.save_marker_set_button,
+                    ),
+                    layout=Layout(width='100%', gap='4px')
+                ),
+                VBox(
+                    children=(
+                        self.update_marker_set_button,
+                        self.delete_marker_set_button,
+                    ),
+                    layout=Layout(width='100%', gap='4px')
+                ),
+            ),
+            layout=Layout(width='100%', gap='8px')
+        )
+
+        self.marker_set_controls_panel = VBox(
+            children=(
+                marker_set_pickers,
+                marker_set_buttons,
+                self.delete_confirmation_checkbox,
+            ),
+            layout=Layout(width='100%', gap='6px')
+        )
+
+        self.channel_section_panel = VBox(
+            children=(
+                self.channel_selection_panel,
+                self.marker_set_controls_panel,
+                self.channel_controls_box,
+            ),
+            layout=Layout(width='100%', gap='10px')
+        )
+
+        self.control_sections = Accordion(
+            children=(self.channel_section_panel,),
+            layout=Layout(width='98%', overflow_y='hidden')
+        )
+        self.control_sections.set_title(0, 'Channels')
+
+        self.annotation_editor_host = VBox(
+            layout=Layout(width='100%', padding='8px 0 0 0')
         )
         # Initialize enable downsample checkbox
         self.pixel_size_inttext = IntText(
@@ -495,9 +612,10 @@ class uicomponents:
             ])
         
         main_viewer_VBox = VBox([
+            self.cache_size_input,
             self.pixel_size_inttext,
             self.enable_downsample_checkbox
-            ])
+        ])
 
         self.advanced_settings_tabs = Tab(
             children=[identifiers_VBox, main_viewer_VBox],
@@ -525,7 +643,7 @@ class uicomponents:
         self.mask_display_controls = {}
 
         # Annotation controls (initially disabled until annotations are detected)
-        self.annotation_controls_header = HTML(value='<b>Annotations</b>')
+        self.annotation_controls_header = HTML(value='<b>Pixel annotations</b>')
         self.annotation_controls_box = VBox(
             layout=Layout(
                 width='100%',
@@ -553,20 +671,6 @@ class uicomponents:
             style={'description_width': 'auto'}
         )
         self.annotation_selector.observe(viewer.on_annotation_selection_change, names='value')
-
-        self.annotation_overlay_mode = ToggleButtons(
-            options=[
-                ('Mask outlines', 'mask'),
-                ('Annotation fill', 'annotation'),
-                ('Fill + mask edges', 'combined')
-            ],
-            value='combined',
-            description='Overlay mode:',
-            disabled=True,
-            layout=Layout(width='100%'),
-            style={'description_width': 'auto'}
-        )
-        self.annotation_overlay_mode.observe(viewer.on_annotation_overlay_mode_change, names='value')
 
         self.annotation_alpha_slider = FloatSlider(
             value=0.5,
@@ -599,3 +703,105 @@ class uicomponents:
             layout=Layout(width='auto')
         )
         self.annotation_edit_button.on_click(viewer.on_edit_annotation_palette)
+
+        self.annotation_palette_name_input = Text(description='Name:', placeholder='My palette')
+        self.annotation_palette_save_button = Button(description='Save palette', icon='save')
+
+        self.annotation_palette_folder_display = Text(
+            description='Folder:',
+            value='',
+            disabled=True,
+            layout=Layout(width='70%'),
+            style={'description_width': 'auto'}
+        )
+        self.annotation_palette_change_folder_button = Button(description='Change location', icon='folder-open')
+        annotation_folder_header = HBox([
+            self.annotation_palette_folder_display,
+            self.annotation_palette_change_folder_button,
+        ])
+
+        self.annotation_palette_manual_input = Text(description='Override:', placeholder='path/to/folder')
+        self.annotation_palette_manual_apply = Button(description='Use override', button_style='info')
+        self.annotation_palette_manual_cancel = Button(description='Cancel', button_style='warning')
+        self.annotation_palette_manual_box = VBox(
+            [
+                self.annotation_palette_manual_input,
+                HBox([
+                    self.annotation_palette_manual_apply,
+                    self.annotation_palette_manual_cancel,
+                ], layout=Layout(gap='6px')),
+            ],
+            layout=Layout(display='none', padding='0.5rem 0 0 0', gap='6px'),
+        )
+
+        annotation_save_children = [
+            annotation_folder_header,
+            self.annotation_palette_manual_box,
+            self.annotation_palette_name_input,
+            self.annotation_palette_save_button,
+        ]
+        self.annotation_palette_save_box = VBox(annotation_save_children, layout=Layout(gap='6px'))
+
+        default_palette_folder = str(Path.cwd())
+        if FileChooser is not None:
+            self.annotation_palette_load_picker = FileChooser(default_palette_folder)
+            self.annotation_palette_load_picker.filter_pattern = '*.pixelannotations.json'
+            self.annotation_palette_load_path_input = None
+        else:
+            self.annotation_palette_load_picker = None
+            self.annotation_palette_load_path_input = Text(
+                description='File:',
+                placeholder='path/to/file.pixelannotations.json',
+                layout=Layout(width='100%'),
+                style={'description_width': 'auto'}
+            )
+        self.annotation_palette_load_button = Button(description='Load file', icon='upload')
+
+        annotation_load_children = []
+        if self.annotation_palette_load_picker is not None:
+            annotation_load_children.append(self.annotation_palette_load_picker)
+        if self.annotation_palette_load_path_input is not None:
+            annotation_load_children.append(self.annotation_palette_load_path_input)
+        annotation_load_children.append(self.annotation_palette_load_button)
+        self.annotation_palette_load_box = VBox(annotation_load_children, layout=Layout(gap='6px'))
+
+        self.annotation_palette_saved_sets_dropdown = Dropdown(
+            description='Saved sets:',
+            options=[('No saved sets', '')],
+            layout=Layout(width='100%'),
+            style={'description_width': 'auto'}
+        )
+        self.annotation_palette_apply_saved_button = Button(description='Apply set')
+        self.annotation_palette_overwrite_button = Button(description='Overwrite')
+        self.annotation_palette_delete_button = Button(description='Delete', button_style='danger')
+
+        annotation_manage_row = HBox(
+            [
+                self.annotation_palette_apply_saved_button,
+                self.annotation_palette_overwrite_button,
+                self.annotation_palette_delete_button,
+            ],
+            layout=Layout(gap='6px')
+        )
+        self.annotation_palette_manage_box = VBox(
+            [
+                self.annotation_palette_saved_sets_dropdown,
+                annotation_manage_row,
+            ],
+            layout=Layout(gap='6px')
+        )
+
+        self.annotation_palette_tab = Tab(
+            children=[
+                self.annotation_palette_save_box,
+                self.annotation_palette_load_box,
+                self.annotation_palette_manage_box,
+            ]
+        )
+        self.annotation_palette_tab.set_title(0, 'Save')
+        self.annotation_palette_tab.set_title(1, 'Load')
+        self.annotation_palette_tab.set_title(2, 'Manage')
+
+        self.annotation_palette_feedback = Output(
+            layout=Layout(max_height='120px', overflow_y='auto')
+        )
