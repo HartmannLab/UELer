@@ -375,21 +375,16 @@ class ROIManagerTagsTests(unittest.TestCase):
         pixel_height = 640.0
         result = plugin._configure_browser_canvas(fig, pixel_height, 1.0)
 
+        # Canvas is returned directly now (browser_output handles scrolling)
         self.assertIsNotNone(result)
+        self.assertIs(result, canvas)
+        
         configured_layout = canvas.layout
         self.assertIsNotNone(configured_layout)
         self.assertEqual(getattr(configured_layout, "height", None), f"{int(pixel_height)}px")
-        self.assertEqual(getattr(configured_layout, "max_height", None), f"{int(pixel_height)}px")
+        # max_height is not set anymore - let browser_output handle scrolling
         self.assertEqual(getattr(configured_layout, "width", None), "100%")
-        self.assertEqual(getattr(configured_layout, "overflow_y", None), "visible")
-        self.assertEqual(getattr(configured_layout, "overflow_x", None), "hidden")
-
-        container_layout = getattr(result, "layout", None)
-        self.assertIsNotNone(container_layout)
-        self.assertEqual(getattr(container_layout, "height", None), plugin.BROWSER_SCROLL_HEIGHT)
-        self.assertEqual(getattr(container_layout, "max_height", None), plugin.BROWSER_SCROLL_HEIGHT)
-        self.assertEqual(getattr(container_layout, "overflow_y", None), "auto")
-        self.assertEqual(getattr(container_layout, "overflow_x", None), "hidden")
+        self.assertEqual(getattr(configured_layout, "overflow", None), "visible")
 
     def test_browser_root_layout_can_shrink(self):
         plugin = make_plugin()

@@ -27,6 +27,7 @@ from ipywidgets import (
     Textarea,
     ToggleButtons,
     VBox,
+    Widget,
 )
 from matplotlib.colors import to_rgb
 from IPython.display import HTML as IPythonHTML, Javascript as IPythonJS, display
@@ -912,29 +913,19 @@ class ROIManagerPlugin(PluginBase):
         self._update_browser_summary(rendered_count, total)
         self._update_pagination_controls(current_page, total_pages, total)
 
-    def _configure_browser_canvas(self, fig, pixel_height: float, aspect_ratio: float) -> Optional[VBox]:
+    def _configure_browser_canvas(self, fig, pixel_height: float, aspect_ratio: float) -> Optional[Widget]:
         canvas = getattr(fig, "canvas", None)
         if canvas is None:
             return None
 
         canvas_height_px = max(1, int(math.ceil(pixel_height)))
+        # Don't constrain canvas height - let browser_output handle scrolling
         canvas_layout_kwargs = {
             "height": f"{canvas_height_px}px",
-            "max_height": f"{canvas_height_px}px",
             "width": "100%",
             "max_width": "100%",
             "min_width": "0",
-            "overflow_y": "visible",
-            "overflow_x": "hidden",
-            "display": "block",
-        }
-        container_layout_kwargs = {
-            "height": self.BROWSER_SCROLL_HEIGHT,
-            "max_height": self.BROWSER_SCROLL_HEIGHT,
-            "width": "100%",
-            "min_width": "0",
-            "overflow_y": "auto",
-            "overflow_x": "hidden",
+            "overflow": "visible",
             "display": "block",
         }
 
@@ -950,8 +941,8 @@ class ROIManagerPlugin(PluginBase):
                         except Exception:  # pragma: no cover - traitlets validation
                             pass
 
-        scroll_container = VBox([canvas], layout=Layout(**container_layout_kwargs))
-        return scroll_container
+        # Return canvas directly - browser_output already provides scrolling
+        return canvas
 
     def _disconnect_browser_events(self) -> None:
         if self._browser_figure is not None and self._browser_click_cid is not None:

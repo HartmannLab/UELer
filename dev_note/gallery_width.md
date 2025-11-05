@@ -190,3 +190,46 @@ Re-implement Option A (static 4.8-inch figure width) as the only robust solution
 - `README.md` (user-facing documentation updated)
 - `dev_note/github_issues.md` (implementation report added)
 - `dev_note/gallery_width.md` (this file - investigation documented)
+
+### Vertical Clipping Fix (2025-11-05)
+
+**New Issue Reported**: After fixing horizontal clipping, user reported that bottom thumbnails are clipped vertically - the last row out of 4 rows is entirely clipped and the third row is partially clipped, even when scrolled to the bottom.
+
+**Root Cause**: The `_configure_browser_canvas` method was creating a redundant scroll container. The structure was:
+1. `browser_output` (Output widget with 400px height and `overflow_y="auto"`)
+2. Inside that: `scroll_container` (VBox with 400px height and `overflow_y="auto"`)  
+3. Inside that: `canvas` (with calculated height, e.g., 500px for 4 rows)
+
+Having two nested scroll containers both with 400px height limits caused the canvas to be clipped. The outer `browser_output` already provides scrolling functionality, so the inner VBox wrapper was redundant and interfering with proper scrolling.
+
+**Solution**: 
+- Removed the VBox scroll container wrapper - return canvas directly from `_configure_browser_canvas`
+- Removed `max_height` constraint on canvas to allow it to extend to its full calculated height
+- Changed separate `overflow_y` and `overflow_x` to single `overflow: "visible"` to allow canvas content to extend properly
+- Let `browser_output` handle all scrolling with its 400px viewport
+
+**Changes Made**:
+1. **`_configure_browser_canvas` method** in `roi_manager_plugin.py`:
+   - Changed return type from `Optional[VBox]` to `Optional[Widget]`
+   - Removed VBox wrapper creation and redundant `container_layout_kwargs`
+   - Removed `max_height` from canvas layout (only sets `height` to calculated pixel height)
+   - Changed `overflow_y: "visible"` and `overflow_x: "hidden"` to single `overflow: "visible"`
+   - Now returns canvas directly instead of wrapped in VBox
+
+2. **Import statement** - Added `Widget` to ipywidgets imports
+
+3. **Test updates** in `test_roi_manager_tags.py`:
+   - Updated `test_configure_browser_canvas_applies_layout` to expect canvas returned directly
+   - Removed assertions about VBox container layout
+   - Updated overflow assertions to check for single `overflow` property instead of separate `overflow_y` and `overflow_x`
+
+**Result**:
+- Canvas now extends to its full calculated height (e.g., 500px for 4 rows)
+- `browser_output` provides the only scrolling container with its 400px viewport
+- All 4 rows of thumbnails are fully visible when scrolling to the bottom
+- All 20 unit tests pass
+- Vertical scrolling works correctly without clipping any content
+
+**Files Modified**:
+- `ueler/viewer/plugin/roi_manager_plugin.py` (simplified canvas configuration)
+- `tests/test_roi_manager_tags.py` (updated test expectations)

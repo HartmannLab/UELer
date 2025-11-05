@@ -3,7 +3,8 @@
 - Switched ROI gallery to static narrow figure sizing (4.8 inches at 72 DPI ≈ 346px) to eliminate thumbnail clipping at narrow widths (addresses [#39](https://github.com/HartmannLab/UELer/issues/39)).
 - Removed all ResizeObserver-based responsive width code after investigation revealed that JavaScript can only resize DOM wrapper elements, not Matplotlib's pre-rendered raster content—when the container shrinks below the original render width, the fixed-size raster overflows and clips.
 - Gallery now renders conservatively narrow and relies on CSS `width: 100%` to stretch when space is available, trading slight blur at wider widths for guaranteed no-clip behavior in narrow panels.
-- Updated test expectations in `tests/test_roi_manager_tags.py` to validate static 4.8-inch width instead of dynamic calculation.
+- Fixed vertical clipping issue by removing redundant VBox scroll container wrapper—`browser_output` now provides the only scrolling container, allowing canvas to extend to its full calculated height.
+- Updated test expectations in `tests/test_roi_manager_tags.py` to validate static 4.8-inch width and direct canvas return without wrapper.
 - Documented root cause and solution alternatives in `dev_note/gallery_width.md` for future reference.
 
 **Cache configuration**
