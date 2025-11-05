@@ -15,6 +15,7 @@ from ueler.rendering import (
     ChannelRenderSettings,
     MaskRenderSettings,
     OverlaySnapshot,
+    get_cell_color,
     render_crop_to_array,
 )
 from ueler.viewer.decorators import update_status_bar
@@ -638,18 +639,14 @@ def _render_tile_for_index(df, index: int, context: _RenderContext):
         # Use the uniform color from the color picker
         cell_color = context.highlight_rgb
     else:
-        # Try to get the painted color from the mask painter
-        mask_painter = getattr(context.viewer, "SidePlots", None)
-        if mask_painter:
-            mask_painter_plugin = getattr(mask_painter, "mask_painter_output", None)
-            if mask_painter_plugin and hasattr(mask_painter_plugin, "get_cell_color"):
-                painted_color = mask_painter_plugin.get_cell_color(fov, mask_id)
-                if painted_color:
-                    try:
-                        from matplotlib.colors import to_rgb
-                        cell_color = to_rgb(painted_color)
-                    except (ValueError, TypeError):
-                        pass
+        # Try to get the painted color from the centralized color registry
+        painted_color = get_cell_color(fov, mask_id)
+        if painted_color:
+            try:
+                from matplotlib.colors import to_rgb
+                cell_color = to_rgb(painted_color)
+            except (ValueError, TypeError):
+                pass
     
     # Apply mask outline if we have a valid color and mask
     if cell_color is not None and context.mask_name and mask_id is not None:

@@ -42,6 +42,7 @@ from ueler.viewer.palette_store import (
     slugify_name as shared_slugify_name,
     write_palette_file,
 )
+from ueler.rendering import set_cell_color, get_cell_color, clear_cell_colors
 COLOR_SET_FILE_SUFFIX = ".maskcolors.json"
 REGISTRY_FILENAME = "mask_color_sets_index.json"
 COLOR_SET_VERSION = "1.0.0"
@@ -148,10 +149,6 @@ class MaskPainterDisplay(PluginBase):
         self.hidden_color_cache: Dict[str, str] = {}
         self.registry_records: Dict[str, Dict[str, str]] = {}
         self.active_color_set_name = ""
-        
-        # Store mapping of (fov, mask_id) -> color for painted masks
-        # This allows the cell gallery to retrieve painted colors
-        self.cell_id_to_color: Dict[Tuple[str, int], str] = {}
 
         storage_folder = self._determine_storage_folder()
         if storage_folder is None:
@@ -731,9 +728,9 @@ class MaskPainterDisplay(PluginBase):
                 cummulative=True,
             )
             
-            # Store the color mapping for each cell ID
+            # Store the color mapping for each cell ID in the centralized registry
             for mask_id in mask_ids:
-                self.cell_id_to_color[(current_fov, mask_id)] = color
+                set_cell_color(current_fov, mask_id, color)
 
         for cls_str, cls_value in reversed(converted_visible):
             picker = self.class_color_controls.get(cls_str)
@@ -775,9 +772,11 @@ class MaskPainterDisplay(PluginBase):
     def get_cell_color(self, fov: str, mask_id: int) -> Optional[str]:
         """Get the painted color for a specific cell ID in a specific FOV.
         
+        This method now delegates to the centralized rendering engine registry.
+        
         Returns None if no color has been painted for this cell.
         """
-        return self.cell_id_to_color.get((fov, mask_id))
+        return get_cell_color(fov, mask_id)
 
     def initiate_ui(self):
         controls = HBox([
