@@ -392,22 +392,16 @@ class ROIManagerPlugin(PluginBase):
 
         # Allow the output widget to size to its content. Some frontends may
         # ignore 'height' or 'overflow' props; adjust if needed for your target.
-        # Note: Output widgets don't constrain widget children, only text output.
-        # Scrolling is handled by the VBox wrapper around the canvas.
-        self.ui_component.browser_output = Output(
-            layout=Layout(
-                width="100%",
-                min_width="0",
-                flex="1 1 auto",
-                align_self="stretch",
-                border="1px solid var(--jp-border-color2, #ccc)",
-            )
+        # Simple Output widget with scrolling, matching cell gallery's approach
+        # The Output must be wrapped in a VBox with fixed height to properly constrain
+        # the Matplotlib figure and prevent overlap with pagination controls below
+        self.ui_component.browser_output_inner = Output(
+            layout=Layout(max_height="400px", overflow_y="auto")
         )
-        try:
-            self.ui_component.browser_output.add_class("roi-browser-output")
-        except Exception:  # pragma: no cover - add_class may be unavailable on older widgets
-            pass
-        self._ensure_browser_css()
+        self.ui_component.browser_output = VBox(
+            [self.ui_component.browser_output_inner],
+            layout=Layout(height="400px")
+        )
 
         self.ui_component.browser_status = HTML("<em>No ROI captured yet.</em>")
         self.ui_component.browser_page_label = HTML("<em>Page 1 of 1</em>")
@@ -770,7 +764,7 @@ class ROIManagerPlugin(PluginBase):
         return columns, rows, fig_width, fig_height
 
     def _refresh_browser_gallery(self) -> None:
-        output = getattr(self.ui_component, "browser_output", None)
+        output = getattr(self.ui_component, "browser_output_inner", None)
         status = getattr(self.ui_component, "browser_status", None)
         if output is None or status is None:
             return
@@ -881,12 +875,8 @@ class ROIManagerPlugin(PluginBase):
                 self._browser_axis_to_roi[axis] = record.get("roi_id")
                 rendered += 1
 
-            configured_widget = self._configure_browser_canvas(fig, fig_height * dpi_value, aspect_ratio)
-
-            if configured_widget is not None:
-                display(configured_widget)
-            else:
-                plt.show(fig)
+            # Display figure directly, matching cell gallery's simple approach
+            plt.show(fig)
 
             try:
                 canvas = getattr(fig, "canvas", None)
@@ -910,49 +900,6 @@ class ROIManagerPlugin(PluginBase):
         rendered_count = rendered
         self._update_browser_summary(rendered_count, total)
         self._update_pagination_controls(current_page, total_pages, total)
-
-    def _configure_browser_canvas(self, fig, pixel_height: float, aspect_ratio: float) -> Optional[VBox]:
-        canvas = getattr(fig, "canvas", None)
-        if canvas is None:
-            return None
-
-        canvas_height_px = max(1, int(math.ceil(pixel_height)))
-        # Canvas layout - full calculated height, width stretches to container
-        canvas_layout_kwargs = {
-            "height": f"{canvas_height_px}px",
-            "width": "100%",
-            "max_width": "100%",
-            "min_width": "0",
-            "display": "block",
-        }
-
-        try:
-            canvas.layout = Layout(**canvas_layout_kwargs)
-        except Exception:  # pragma: no cover - ipympl may reuse existing layout instance
-            existing_layout = getattr(canvas, "layout", None)
-            if existing_layout is not None:
-                for key, value in canvas_layout_kwargs.items():
-                    if hasattr(existing_layout, key):
-                        try:
-                            setattr(existing_layout, key, value)
-                        except Exception:  # pragma: no cover - traitlets validation
-                            pass
-
-        # Wrap canvas in a scrollable VBox that matches browser_output's height constraint
-        # The wrapper provides the scrolling viewport while the canvas can be its full height
-        wrapper = VBox(
-            [canvas],
-            layout=Layout(
-                height=self.BROWSER_SCROLL_HEIGHT,
-                max_height=self.BROWSER_SCROLL_HEIGHT,
-                width="100%",
-                min_width="0",
-                overflow_y="auto",
-                overflow_x="hidden",
-                display="block",
-            )
-        )
-        return wrapper
 
     def _disconnect_browser_events(self) -> None:
         if self._browser_figure is not None and self._browser_click_cid is not None:

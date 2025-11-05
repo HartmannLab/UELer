@@ -233,3 +233,184 @@ Having two nested scroll containers both with 400px height limits caused the can
 **Files Modified**:
 - `ueler/viewer/plugin/roi_manager_plugin.py` (simplified canvas configuration)
 - `tests/test_roi_manager_tags.py` (updated test expectations)
+
+### Container Simplification - Unifying ROI and Cell Gallery Approaches (2025-11-05)
+
+**Problem Identified**: The ROI gallery used a fundamentally different and unnecessarily complex container structure compared to the cell gallery:
+
+**Cell Gallery** (simple, correct):
+```python
+# Line 103 in cell_gallery.py
+self.plot_output = Output(layout=Layout(max_height="300px", overflow_y="auto"))
+
+# Line 195
+plt.show(fig)  # Renders directly into Output widget
+```
+- Single `Output` widget handles both display and scrolling
+- Matplotlib renders with `plt.show(fig)` 
+- Clean, simple, reliable
+
+**ROI Gallery** (complex, historical cruft):
+```python
+# Lines 395-406 in roi_manager_plugin.py (BEFORE fix)
+self.ui_component.browser_output = Output(
+    layout=Layout(
+        width="100%", min_width="0", flex="1 1 auto",
+        align_self="stretch", border="1px solid ..."
+    )
+)
+
+# Lines 872-877 (BEFORE fix)
+configured_widget = self._configure_browser_canvas(fig, fig_height * dpi_value, aspect_ratio)
+if configured_widget is not None:
+    display(configured_widget)  # Display VBox wrapper
+else:
+    plt.show(fig)
+
+# Lines 943-952 (BEFORE fix) - _configure_browser_canvas method
+wrapper = VBox(
+    [canvas],
+    layout=Layout(
+        height="400px", max_height="400px", width="100%",
+        overflow_y="auto", overflow_x="hidden", ...
+    )
+)
+return wrapper
+```
+- Complex `Output` widget with flex layout styling
+- Extra `_configure_browser_canvas` method (40+ lines)
+- Canvas wrapped in `VBox` container for scrolling
+- `display(widget)` instead of `plt.show(fig)`
+- Comment claimed "Output widgets don't constrain widget children" (incorrect!)
+
+**Root Cause Analysis**:
+The complexity arose from multiple failed attempts to solve the width clipping problem:
+1. Initial attempt: Complex flex layouts with explicit width controls
+2. Second attempt: ResizeObserver JavaScript to dynamically resize
+3. Third attempt: VBox wrapper to handle scrolling (based on wrong assumption about Output widgets)
+
+The cell gallery proves these workarounds were unnecessary - **Output widgets CAN and DO handle Matplotlib canvas display and scrolling perfectly**.
+
+**Solution - Unified Approach**:
+Simplified ROI gallery to match cell gallery's proven pattern:
+
+1. **Simplified `browser_output` creation** (line ~397):
+```python
+# AFTER: Simple, matching cell gallery
+self.ui_component.browser_output = Output(
+    layout=Layout(height="400px", overflow_y="auto")
+)
+```
+
+2. **Removed `_configure_browser_canvas` method entirely** (~40 lines deleted)
+   - No more VBox wrapper
+   - No more complex canvas layout manipulation
+   - No more conditional display logic
+
+3. **Simplified rendering** (line ~872):
+```python
+# AFTER: Direct rendering like cell gallery
+plt.show(fig)
+```
+
+**Changes Made**:
+1. **`ueler/viewer/plugin/roi_manager_plugin.py`**:
+   - Line ~397: Simplified `browser_output` to `Output(layout=Layout(height="400px", overflow_y="auto"))`
+   - Removed `_configure_browser_canvas` method (~40 lines)
+   - Line ~872: Changed from `display(configured_widget)` to `plt.show(fig)`
+   - Removed CSS injection and class addition code (no longer needed)
+
+2. **`tests/test_roi_manager_tags.py`**:
+   - Removed `test_configure_browser_canvas_applies_layout` (method no longer exists)
+   - Updated `test_browser_output_widget_scrolls_within_fixed_height` to expect simple layout
+   - Updated `test_browser_root_layout_can_shrink` to remove CSS injection assertion
+
+**Results**:
+- **Code reduction**: ~50 lines of complexity removed
+- **Consistency**: ROI gallery now matches cell gallery's proven approach
+- **Maintainability**: Single pattern for both galleries, easier to understand
+- **Reliability**: Uses ipywidgets Output as designed, no custom wrappers
+- **All tests pass**: 19/19 tests in `test_roi_manager_tags.py`
+
+**Key Insight**:
+The comment "Output widgets don't constrain widget children, only text output" was **incorrect**. Output widgets work perfectly with Matplotlib figures displayed via `plt.show()`. The cell gallery has been using this pattern successfully all along. The ROI gallery's complexity was unnecessary historical baggage from misunderstanding how ipywidgets Output works with Matplotlib.
+
+**Container Structure Now (Unified)**:
+Both galleries use identical pattern:
+```
+Output(layout=Layout(height="Npx", overflow_y="auto"))
+  └─ Matplotlib figure (rendered via plt.show())
+```
+
+No wrappers, no workarounds, no complexity - just the standard ipywidgets + Matplotlib integration pattern.
+
+**Files Modified**:
+- `ueler/viewer/plugin/roi_manager_plugin.py` (~50 lines removed, simplified)
+- `tests/test_roi_manager_tags.py` (removed obsolete test, updated expectations)
+- `dev_note/gallery_width.md` (this documentation)
+
+### Matplotlib Figure Overflow Fix (2025-11-05)
+
+**Problem Identified**: After simplifying the container to use `plt.show(fig)` directly in the Output widget, the Matplotlib figure was overflowing beyond the 400px height limit and overlapping with the pagination controls (`Previous page`, `Next page`, page label) displayed below the gallery.
+
+**Root Cause**: The Output widget alone cannot properly constrain the height of widget content displayed via `plt.show()`. Unlike text output, Matplotlib figures rendered as widgets don't respect the Output widget's layout height constraints, causing overflow when the figure is taller than the intended viewport.
+
+**Initial Attempt (Failed)**: Adding `max_height="400px"` to the Output layout:
+```python
+# This DOESN'T work for widget content
+Output(layout=Layout(height="400px", max_height="400px", overflow_y="auto"))
+```
+The figure still overflowed and overlapped the pagination controls.
+
+**Correct Solution**: Wrap the Output widget in a **VBox container with fixed height**, exactly matching the cell gallery's proven pattern:
+
+```python
+# Line ~397 in roi_manager_plugin.py
+self.ui_component.browser_output_inner = Output(
+    layout=Layout(max_height="400px", overflow_y="auto")
+)
+self.ui_component.browser_output = VBox(
+    [self.ui_component.browser_output_inner],
+    layout=Layout(height="400px")
+)
+```
+
+**Why This Works**:
+1. **Outer VBox** with `height="400px"` enforces the height constraint at the container level
+2. **Inner Output** with `max_height="400px"` and `overflow_y="auto"` provides scrolling for the Matplotlib figure
+3. The two-layer structure ensures the gallery occupies exactly 400px of vertical space
+4. When figure content exceeds 400px, scrollbars appear within the constrained viewport
+5. Pagination controls below remain visible and accessible
+
+**This is exactly how the cell gallery works** - line 137 in `cell_gallery.py`:
+```python
+VBox([controls, VBox([self.plot_output], layout=Layout(height="400px"))])
+```
+
+**Changes Made**:
+1. **`ueler/viewer/plugin/roi_manager_plugin.py`** (line ~397):
+   - Created `browser_output_inner` as the Output widget (with `max_height="400px", overflow_y="auto"`)
+   - Wrapped it in `browser_output` VBox (with `height="400px"`)
+   - Updated `_refresh_browser_gallery` to use `browser_output_inner` for rendering
+
+2. **`tests/test_roi_manager_tags.py`**:
+   - Added `Output` to imports
+   - Updated `test_browser_output_widget_scrolls_within_fixed_height` to verify:
+     - `browser_output` is a VBox with `height="400px"`
+     - `browser_output_inner` is an Output with `max_height="400px"` and `overflow_y="auto"`
+     - Proper parent-child relationship
+
+**Result**:
+- Gallery figure constrained to exactly 400px viewport ✅
+- Vertical scrolling works correctly for tall content ✅
+- Pagination controls always visible below the gallery ✅
+- No overlapping content ✅
+- All 19 tests pass ✅
+- **Now truly matches cell gallery's container structure** ✅
+
+**Key Lesson**: Output widgets **cannot** reliably constrain widget content height on their own. A wrapper container (VBox) with explicit height is required to prevent overflow. This is why the cell gallery has always used this pattern.
+
+**Files Modified**:
+- `ueler/viewer/plugin/roi_manager_plugin.py` (added VBox wrapper, renamed inner Output)
+- `tests/test_roi_manager_tags.py` (updated test assertions and imports)
+- `dev_note/gallery_width.md` (this documentation)
