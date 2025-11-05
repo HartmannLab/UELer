@@ -392,16 +392,14 @@ class ROIManagerPlugin(PluginBase):
 
         # Allow the output widget to size to its content. Some frontends may
         # ignore 'height' or 'overflow' props; adjust if needed for your target.
+        # Note: Output widgets don't constrain widget children, only text output.
+        # Scrolling is handled by the VBox wrapper around the canvas.
         self.ui_component.browser_output = Output(
             layout=Layout(
-                height=self.BROWSER_SCROLL_HEIGHT,
-                max_height=self.BROWSER_SCROLL_HEIGHT,
                 width="100%",
                 min_width="0",
                 flex="1 1 auto",
                 align_self="stretch",
-                overflow_y="auto",
-                overflow_x="hidden",
                 border="1px solid var(--jp-border-color2, #ccc)",
             )
         )
@@ -913,19 +911,18 @@ class ROIManagerPlugin(PluginBase):
         self._update_browser_summary(rendered_count, total)
         self._update_pagination_controls(current_page, total_pages, total)
 
-    def _configure_browser_canvas(self, fig, pixel_height: float, aspect_ratio: float) -> Optional[Widget]:
+    def _configure_browser_canvas(self, fig, pixel_height: float, aspect_ratio: float) -> Optional[VBox]:
         canvas = getattr(fig, "canvas", None)
         if canvas is None:
             return None
 
         canvas_height_px = max(1, int(math.ceil(pixel_height)))
-        # Don't constrain canvas height - let browser_output handle scrolling
+        # Canvas layout - full calculated height, width stretches to container
         canvas_layout_kwargs = {
             "height": f"{canvas_height_px}px",
             "width": "100%",
             "max_width": "100%",
             "min_width": "0",
-            "overflow": "visible",
             "display": "block",
         }
 
@@ -941,8 +938,21 @@ class ROIManagerPlugin(PluginBase):
                         except Exception:  # pragma: no cover - traitlets validation
                             pass
 
-        # Return canvas directly - browser_output already provides scrolling
-        return canvas
+        # Wrap canvas in a scrollable VBox that matches browser_output's height constraint
+        # The wrapper provides the scrolling viewport while the canvas can be its full height
+        wrapper = VBox(
+            [canvas],
+            layout=Layout(
+                height=self.BROWSER_SCROLL_HEIGHT,
+                max_height=self.BROWSER_SCROLL_HEIGHT,
+                width="100%",
+                min_width="0",
+                overflow_y="auto",
+                overflow_x="hidden",
+                display="block",
+            )
+        )
+        return wrapper
 
     def _disconnect_browser_events(self) -> None:
         if self._browser_figure is not None and self._browser_click_cid is not None:
