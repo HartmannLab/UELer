@@ -2114,6 +2114,8 @@ class ImageMaskViewer:
         sideplots = getattr(self, "SidePlots", None)
         if sideplots is None:
             return
+        
+        # Notify export plugin
         plugin = getattr(sideplots, "export_fovs_output", None)
         if hasattr(plugin, "on_viewer_mask_outline_change"):
             try:
@@ -2121,6 +2123,15 @@ class ImageMaskViewer:
             except Exception:
                 if self._debug:
                     print("[viewer] Plugin notification for mask outline change failed")
+        
+        # Notify cell gallery plugin
+        cell_gallery_plugin = getattr(sideplots, "cell_gallery_output", None)
+        if hasattr(cell_gallery_plugin, "on_viewer_mask_outline_change"):
+            try:
+                cell_gallery_plugin.on_viewer_mask_outline_change(thickness)
+            except Exception:
+                if self._debug:
+                    print("[viewer] Cell gallery notification for mask outline change failed")
 
     def on_plugin_mask_outline_change(self, thickness: int) -> None:
         try:

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
-from ipywidgets import Button, ColorPicker, HBox, IntSlider, IntText, Layout, Output, VBox
+from ipywidgets import Button, Checkbox, ColorPicker, HBox, IntSlider, IntText, Layout, Output, VBox
 from matplotlib.colors import to_rgb
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
@@ -100,6 +100,13 @@ class CellGalleryDisplay(PluginBase):
             style={"description_width": "auto"},
         )
 
+        self.ui_component.use_uniform_color_checkbox = Checkbox(
+            value=False,
+            description="Use uniform color",
+            tooltip="When enabled, all masks use the same color. When disabled, painted mask colors from mask painter are shown.",
+            style={"description_width": "auto"},
+        )
+
         self.plot_output = Output(layout=Layout(max_height="300px", overflow_y="auto"))
 
         self.ui_component.refresh_button = Button(
@@ -132,6 +139,7 @@ class CellGalleryDisplay(PluginBase):
                         self.ui_component.mask_outline_thickness_slider,
                     ]
                 ),
+                HBox([self.ui_component.use_uniform_color_checkbox]),
             ]
         )
         self.ui = VBox([controls, VBox([self.plot_output], layout=Layout(height="400px"))])
@@ -149,6 +157,7 @@ class CellGalleryDisplay(PluginBase):
         downsample_factor = max(1, int(self.ui_component.downsample_slider.value))
         highlight_colour = self.ui_component.mask_outline_picker.value
         outline_thickness = int(self.ui_component.mask_outline_thickness_slider.value)
+        use_uniform_color = bool(self.ui_component.use_uniform_color_checkbox.value)
 
         return _UiValues(
             crop_width=crop_width,
@@ -156,6 +165,7 @@ class CellGalleryDisplay(PluginBase):
             downsample_factor=downsample_factor,
             highlight_colour=highlight_colour,
             outline_thickness=outline_thickness,
+            use_uniform_color=use_uniform_color,
         )
 
     def _show_empty_message(self, message: str = "No cells selected."):
@@ -271,6 +281,7 @@ class CellGalleryDisplay(PluginBase):
             label_key=self.main_viewer.label_key,
             highlight_outline_color=ui_values.highlight_colour,
             mask_outline_thickness=ui_values.outline_thickness,
+            use_uniform_color=ui_values.use_uniform_color,
         )
 
         if not displayed_indices:
@@ -375,6 +386,37 @@ class CellGalleryDisplay(PluginBase):
         if selected:
             self.plot_gellery()
 
+    def on_viewer_mask_outline_change(self, thickness: int) -> None:
+        """Handle mask outline thickness changes from the main viewer.
+        
+        This callback is invoked when the main viewer's mask outline thickness
+        slider is adjusted, ensuring the cell gallery stays synchronized.
+        """
+        try:
+            thickness = max(1, min(thickness, MAX_MASK_OUTLINE_THICKNESS))
+        except (TypeError, ValueError):
+            thickness = DEFAULT_MASK_OUTLINE_THICKNESS
+        
+        # Update the cell gallery's thickness slider to match
+        if self.ui_component.mask_outline_thickness_slider is not None:
+            self.ui_component.mask_outline_thickness_slider.value = thickness
+        
+        # Refresh the gallery if there are selected cells
+        selected = getattr(self.data.selected_cells, "value", None)
+        if selected:
+            self.plot_gellery()
+
+    def on_mask_painter_change(self) -> None:
+        """Handle mask painter color application changes.
+        
+        This callback is invoked when the mask painter applies new colors to masks,
+        ensuring the cell gallery reflects the updated mask colors immediately.
+        """
+        # Refresh the gallery if there are selected cells
+        selected = getattr(self.data.selected_cells, "value", None)
+        if selected:
+            self.plot_gellery()
+
 
 class UiComponent:
     def __init__(self):
@@ -384,6 +426,7 @@ class UiComponent:
         self.downsample_slider: IntSlider | None = None
         self.mask_outline_picker: ColorPicker | None = None
         self.mask_outline_thickness_slider: IntSlider | None = None
+        self.use_uniform_color_checkbox: Checkbox | None = None
         self.refresh_button: Button | None = None
 
 
@@ -416,6 +459,7 @@ class _RenderContext:
     label_key: str
     highlight_rgb: Tuple[float, float, float]
     outline_thickness: int
+    use_uniform_color: bool
     mask_name: Optional[str]
     fov_key: str
     x_key: str
@@ -429,6 +473,7 @@ class _UiValues:
     downsample_factor: int
     highlight_colour: str
     outline_thickness: int
+    use_uniform_color: bool
 
 
 def _resolve_mask_array(viewer, fov_name: str, mask_name: Optional[str]) -> Optional[np.ndarray]:
@@ -586,13 +631,34 @@ def _render_tile_for_index(df, index: int, context: _RenderContext):
     )
 
     masks = list(mask_settings)
-    if context.mask_name and mask_id is not None:
+    
+    # Determine which color to use for this cell's mask outline
+    cell_color = None
+    if context.use_uniform_color:
+        # Use the uniform color from the color picker
+        cell_color = context.highlight_rgb
+    else:
+        # Try to get the painted color from the mask painter
+        mask_painter = getattr(context.viewer, "SidePlots", None)
+        if mask_painter:
+            mask_painter_plugin = getattr(mask_painter, "mask_painter_output", None)
+            if mask_painter_plugin and hasattr(mask_painter_plugin, "get_cell_color"):
+                painted_color = mask_painter_plugin.get_cell_color(fov, mask_id)
+                if painted_color:
+                    try:
+                        from matplotlib.colors import to_rgb
+                        cell_color = to_rgb(painted_color)
+                    except (ValueError, TypeError):
+                        pass
+    
+    # Apply mask outline if we have a valid color and mask
+    if cell_color is not None and context.mask_name and mask_id is not None:
         mask_array = _resolve_mask_array(viewer, fov, context.mask_name)
         if mask_array is not None and np.any(mask_array == mask_id):
             masks.append(
                 MaskRenderSettings(
                     array=mask_array == mask_id,
-                    color=context.highlight_rgb,
+                    color=cell_color,
                     mode="outline",
                     outline_thickness=context.outline_thickness,
                     downsample_factor=context.downsample_factor,
@@ -625,6 +691,7 @@ def create_gallery(
     label_key: str = "label",
     highlight_outline_color: Union[str, Tuple[float, float, float]] = "#FFFFFF",
     mask_outline_thickness: int = 1,
+    use_uniform_color: bool = False,
 ):
     indices = _limit_selection(selected_indices, max_displayed_cells)
 
@@ -667,6 +734,7 @@ def create_gallery(
         label_key=label_key,
         highlight_rgb=highlight_rgb,
         outline_thickness=outline_thickness,
+        use_uniform_color=use_uniform_color,
         mask_name=mask_name,
         fov_key=fov_key,
         x_key=x_key,

@@ -148,6 +148,10 @@ class MaskPainterDisplay(PluginBase):
         self.hidden_color_cache: Dict[str, str] = {}
         self.registry_records: Dict[str, Dict[str, str]] = {}
         self.active_color_set_name = ""
+        
+        # Store mapping of (fov, mask_id) -> color for painted masks
+        # This allows the cell gallery to retrieve painted colors
+        self.cell_id_to_color: Dict[Tuple[str, int], str] = {}
 
         storage_folder = self._determine_storage_folder()
         if storage_folder is None:
@@ -726,6 +730,10 @@ class MaskPainterDisplay(PluginBase):
                 color=color,
                 cummulative=True,
             )
+            
+            # Store the color mapping for each cell ID
+            for mask_id in mask_ids:
+                self.cell_id_to_color[(current_fov, mask_id)] = color
 
         for cls_str, cls_value in reversed(converted_visible):
             picker = self.class_color_controls.get(cls_str)
@@ -739,6 +747,9 @@ class MaskPainterDisplay(PluginBase):
                 _apply_color(cls_value, self.default_color)
 
         self._log("Masks updated with class-based colors.")
+        
+        # Notify cell gallery plugin that mask colors have changed
+        self._notify_cell_gallery_update()
 
     def on_cell_table_change(self):
         self._initialise_identifier_options()
@@ -746,6 +757,27 @@ class MaskPainterDisplay(PluginBase):
     def on_mv_update_display(self):
         if self.ui_component.enabled_checkbox.value:
             self.apply_colors_to_masks(None)
+
+    def _notify_cell_gallery_update(self) -> None:
+        """Notify the cell gallery plugin that mask painter has applied color changes."""
+        sideplots = getattr(self.main_viewer, "SidePlots", None)
+        if sideplots is None:
+            return
+        
+        cell_gallery_plugin = getattr(sideplots, "cell_gallery_output", None)
+        if hasattr(cell_gallery_plugin, "on_mask_painter_change"):
+            try:
+                cell_gallery_plugin.on_mask_painter_change()
+            except Exception as exc:
+                if getattr(self.main_viewer, "_debug", False):
+                    print(f"[mask_painter] Failed to notify cell gallery: {exc}")
+
+    def get_cell_color(self, fov: str, mask_id: int) -> Optional[str]:
+        """Get the painted color for a specific cell ID in a specific FOV.
+        
+        Returns None if no color has been painted for this cell.
+        """
+        return self.cell_id_to_color.get((fov, mask_id))
 
     def initiate_ui(self):
         controls = HBox([
