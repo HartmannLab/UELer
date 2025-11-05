@@ -1,4 +1,13 @@
 ### v0.2.0-rc3
+**Cell gallery mask painter synchronization**
+- Synchronized cell gallery with mask painter for adaptive thickness and painted color display (fixes [#54](https://github.com/HartmannLab/UELer/issues/54)).
+- Extended `_notify_plugins_mask_outline_changed` in `main_viewer.py` to notify the cell gallery plugin when mask outline thickness changes, ensuring all viewing contexts stay synchronized.
+- Added `on_viewer_mask_outline_change` and `on_mask_painter_change` callbacks to `CellGalleryDisplay` so the gallery auto-refreshes when the main viewer's thickness slider moves or the mask painter applies colors.
+- Implemented persistent `cell_id_to_color` mapping in the mask painter plugin that stores `(fov, mask_id)` -> `color` for all painted cells, enabling the cell gallery to retrieve and display exact painted colors.
+- Added "Use uniform color" checkbox to the cell gallery UI: when disabled (default), the gallery displays painted mask colors from the mask painter; when enabled, all masks use the uniform color from the "Mask colour" picker.
+- Modified `_render_tile_for_index` in `cell_gallery.py` to query the mask painter's color mapping when `use_uniform_color=False`, ensuring painted classifications appear correctly in gallery thumbnails.
+- Ran `python -m py_compile` on all modified files to validate syntax correctness.
+
 **ROI gallery width stabilization**
 - Switched ROI gallery to static narrow figure sizing (4.8 inches at 72 DPI ≈ 346px) to eliminate thumbnail clipping at narrow widths (addresses [#39](https://github.com/HartmannLab/UELer/issues/39)).
 - Removed all ResizeObserver-based responsive width code after investigation revealed that JavaScript can only resize DOM wrapper elements, not Matplotlib's pre-rendered raster content—when the container shrinks below the original render width, the fixed-size raster overflows and clips.

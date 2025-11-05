@@ -101,6 +101,13 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### v0.2.0-rc3
+**Cell gallery mask painter synchronization**
+- Cell gallery now synchronizes with the mask painter for adaptive thickness and painted color display (fixes [#54](https://github.com/HartmannLab/UELer/issues/54)).
+- Added "Use uniform color" checkbox to the cell gallery: when disabled (default), painted mask colors from the mask painter are displayed in gallery thumbnails; when enabled, all masks use the uniform color from the "Mask colour" picker.
+- The cell gallery's outline thickness slider automatically syncs with the main viewer's mask outline thickness setting, ensuring consistent rendering across all viewing contexts.
+- Implemented persistent color mapping in the mask painter that stores which color was applied to each cell, allowing the cell gallery to retrieve and display exact painted colors.
+- The gallery auto-refreshes when the mask painter applies colors or when the main viewer's thickness slider changes, keeping all views synchronized without manual intervention.
+
 **ROI gallery width stabilization**
 - Switched ROI gallery to static narrow figure sizing (4.8 inches at 72 DPI ≈ 346px) to eliminate thumbnail clipping at narrow widths (addresses [#39](https://github.com/HartmannLab/UELer/issues/39)).
 - Removed ResizeObserver-based responsive width code after investigation revealed that JavaScript can only resize DOM wrapper elements, not Matplotlib's pre-rendered raster content—when the container shrinks below the original render width, the fixed-size raster overflows and clips.
