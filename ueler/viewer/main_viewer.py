@@ -1841,9 +1841,7 @@ class ImageMaskViewer:
                     mode=self.annotation_overlay_mode,
                 )
 
-        mask_settings: list[MaskRenderSettings] = []
-        selected_masks: list[str] = []
-        mask_regions: dict[str, np.ndarray] = {}
+        mask_settings = []
         if self.masks_available:
             selected_masks = [
                 mask_name for mask_name, cb in controls.mask_display_controls.items() if cb.value
@@ -1893,16 +1891,43 @@ class ImageMaskViewer:
             masks=mask_settings,
         )
 
-        if mask_regions:
+        painter_enabled = self._is_mask_painter_enabled()
+        if painter_enabled and mask_regions:
+            # Exclude currently selected cells so they remain white-highlighted
+            excluded = set(self.image_display.selected_cells) if hasattr(self.image_display, 'selected_cells') else set()
             combined = apply_registry_colors(
                 combined,
                 fov=current_fov,
                 mask_regions=mask_regions,
                 outline_thickness=int(self.mask_outline_thickness),
                 downsample_factor=downsample_factor,
+                exclude_ids=excluded,
             )
 
         return combined
+
+    # ------------------------------------------------------------------
+    # Mask painter integration
+    # ------------------------------------------------------------------
+    def _is_mask_painter_enabled(self) -> bool:
+        """Check if the mask painter plugin is enabled."""
+        sideplots = getattr(self, "SidePlots", None)
+        if sideplots is None:
+            return False
+        
+        painter = getattr(sideplots, "mask_painter_output", None)
+        if painter is None:
+            return False
+        
+        ui = getattr(painter, "ui_component", None)
+        if ui is None:
+            return False
+        
+        checkbox = getattr(ui, "enabled_checkbox", None)
+        if checkbox is None:
+            return False
+        
+        return bool(getattr(checkbox, "value", False))
 
     # ------------------------------------------------------------------
     # Export overlay helpers

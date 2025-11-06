@@ -1,9 +1,4 @@
 ### v0.2.0-rc3
-**Mask painter parity**
-- The main viewer now reapplies registry-driven cell colours inside `render_image`, so selecting a cell keeps previously painted outlines while overlays continue to honour the uniform mask colour for untouched IDs.
-- Refactored the cell gallery to share the same overlay helper, meaning gallery tiles mirror the viewer when painted colours are active and only stick to uniform outlines when the checkbox explicitly enables them.
-- Relaxed the mask painter's auto-refresh notifier so the gallery no longer re-plots on every click, restoring the original debounce while still reacting immediately to real colour edits.
-- Added `tests/test_mask_color_overlay.py` with targeted coverage for the shared helper and gallery integration, executed via `/omics/groups/OE0622/internal/ywu/UELer_public/.venv/bin/python -m unittest tests.test_mask_color_overlay tests.test_cell_gallery`.
 **Cell gallery mask painter synchronization**
 - Synchronized cell gallery with mask painter for adaptive thickness and painted color display (fixes [#54](https://github.com/HartmannLab/UELer/issues/54)).
 - Extended `_notify_plugins_mask_outline_changed` in `main_viewer.py` to notify the cell gallery plugin when mask outline thickness changes, ensuring all viewing contexts stay synchronized.

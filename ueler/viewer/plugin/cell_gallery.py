@@ -15,15 +15,11 @@ from ueler.rendering import (
     ChannelRenderSettings,
     MaskRenderSettings,
     OverlaySnapshot,
-    render_fov_to_array,
+    get_cell_color,
+    render_crop_to_array,
 )
 from ueler.viewer.decorators import update_status_bar
 from ueler.viewer.observable import Observable
-from ueler.viewer.mask_color_overlay import (
-    apply_registry_colors,
-    collect_mask_regions,
-    compute_crop_regions,
-)
 
 from .plugin_base import PluginBase
 
@@ -481,6 +477,25 @@ class _UiValues:
     use_uniform_color: bool
 
 
+def _resolve_mask_array(viewer, fov_name: str, mask_name: Optional[str]) -> Optional[np.ndarray]:
+    if viewer is None or not mask_name:
+        return None
+
+    mask_cache = getattr(viewer, "mask_cache", {})
+    masks_for_fov = mask_cache.get(fov_name)
+    if not masks_for_fov:
+        return None
+
+    mask_array = masks_for_fov.get(mask_name)
+    if mask_array is None:
+        return None
+
+    try:
+        return mask_array.compute()
+    except AttributeError:
+        return np.asarray(mask_array)
+
+
 def _limit_selection(indices, max_displayed: float) -> List[int]:
     if isinstance(indices, set):
         indices = list(indices)
@@ -602,6 +617,8 @@ def _render_tile_for_index(df, index: int, context: _RenderContext):
     record = df.iloc[index]
     fov = record[context.fov_key]
     center_xy = (float(record[context.x_key]), float(record[context.y_key]))
+    mask_id = _extract_mask_id(record, context.label_key)
+
     viewer = context.viewer
     viewer.load_fov(fov, context.selected_channels)
     channel_arrays = viewer.image_cache[fov]
@@ -615,55 +632,47 @@ def _render_tile_for_index(df, index: int, context: _RenderContext):
     )
 
     masks = list(mask_settings)
+    
+    # Determine which color to use for this cell's mask outline
+    cell_color = None
+    if context.use_uniform_color:
+        # Use the uniform color from the color picker
+        cell_color = context.highlight_rgb
+    else:
+        # Try to get the painted color from the centralized color registry
+        painted_color = get_cell_color(fov, mask_id)
+        if painted_color:
+            try:
+                from matplotlib.colors import to_rgb
+                cell_color = to_rgb(painted_color)
+            except (ValueError, TypeError):
+                pass
+    
+    # Apply mask outline if we have a valid color and mask
+    if cell_color is not None and context.mask_name and mask_id is not None:
+        mask_array = _resolve_mask_array(viewer, fov, context.mask_name)
+        if mask_array is not None and np.any(mask_array == mask_id):
+            masks.append(
+                MaskRenderSettings(
+                    array=mask_array == mask_id,
+                    color=cell_color,
+                    mode="outline",
+                    outline_thickness=context.outline_thickness,
+                    downsample_factor=context.downsample_factor,
+                )
+            )
 
-    first_channel = next(iter(channel_arrays.values()), None)
-    if first_channel is None:
-        return None
-
-    shape = getattr(first_channel, "shape", None)
-    if not shape or len(shape) < 2:
-        first_channel = np.asarray(first_channel)
-        shape = first_channel.shape
-
-    height, width = int(shape[0]), int(shape[1])
-    bounds = (0, width, 0, height)
-
-    region_xy, region_ds = compute_crop_regions(
-        center_xy,
-        context.crop_width,
-        bounds,
-        context.downsample_factor,
-    )
-
-    tile = render_fov_to_array(
+    tile = render_crop_to_array(
         fov,
         channel_arrays,
         context.selected_channels,
         context.channel_settings,
+        center_xy=center_xy,
+        size_px=context.crop_width,
         downsample_factor=context.downsample_factor,
-        region_xy=region_xy,
-        region_ds=region_ds,
         annotation=annotation_settings,
         masks=tuple(masks),
     )
-
-    if not context.use_uniform_color and context.mask_name:
-        label_cache = viewer.label_masks_cache.get(fov, {})
-        mask_regions = collect_mask_regions(
-            label_cache,
-            (context.mask_name,),
-            context.downsample_factor,
-            region_ds,
-        )
-        if mask_regions:
-            tile = apply_registry_colors(
-                tile,
-                fov=fov,
-                mask_regions=mask_regions,
-                outline_thickness=context.outline_thickness,
-                downsample_factor=context.downsample_factor,
-            )
-
     return np.clip(tile, 0.0, 1.0)
 
 
