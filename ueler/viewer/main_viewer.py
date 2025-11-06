@@ -50,6 +50,7 @@ from ueler.viewer.color_palettes import (
     merge_palette_updates,
     normalize_hex_color,
 )
+from ueler.viewer.mask_color_overlay import apply_registry_colors, collect_mask_regions
 from ueler.rendering import (
     AnnotationOverlaySnapshot,
     AnnotationRenderSettings,
@@ -1840,7 +1841,9 @@ class ImageMaskViewer:
                     mode=self.annotation_overlay_mode,
                 )
 
-        mask_settings = []
+        mask_settings: list[MaskRenderSettings] = []
+        selected_masks: list[str] = []
+        mask_regions: dict[str, np.ndarray] = {}
         if self.masks_available:
             selected_masks = [
                 mask_name for mask_name, cb in controls.mask_display_controls.items() if cb.value
@@ -1870,7 +1873,15 @@ class ImageMaskViewer:
                     )
                 )
 
-        return render_fov_to_array(
+            label_cache = self.label_masks_cache.get(current_fov, {})
+            mask_regions = collect_mask_regions(
+                label_cache,
+                selected_masks,
+                downsample_factor,
+                region_ds,
+            )
+
+        combined = render_fov_to_array(
             current_fov,
             fov_images,
             selected_channels,
@@ -1881,6 +1892,17 @@ class ImageMaskViewer:
             annotation=annotation_settings,
             masks=mask_settings,
         )
+
+        if mask_regions:
+            combined = apply_registry_colors(
+                combined,
+                fov=current_fov,
+                mask_regions=mask_regions,
+                outline_thickness=int(self.mask_outline_thickness),
+                downsample_factor=downsample_factor,
+            )
+
+        return combined
 
     # ------------------------------------------------------------------
     # Export overlay helpers

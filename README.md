@@ -101,6 +101,11 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### v0.2.0-rc3
+**Mask painter parity**
+- Main viewer rendering now reapplies mask painter colours during each redraw so selecting cells keeps previously painted outlines, while unpainted masks continue to follow the uniform colour picker.
+- Shared a new overlay helper between the viewer and cell gallery, letting gallery tiles mirror painted colours when the "Use uniform color" toggle is off and fall back to uniform outlines only when explicitly enabled.
+- Mask painter auto-refreshes no longer force gallery re-plots on every click, restoring the original debounce while still reacting instantly to real colour edits.
+- Added `tests/test_mask_color_overlay.py` and ran `/omics/groups/OE0622/internal/ywu/UELer_public/.venv/bin/python -m unittest tests.test_mask_color_overlay tests.test_cell_gallery` to lock in the shared overlay behaviour.
 **Cell gallery mask painter synchronization**
 - Cell gallery now synchronizes with the mask painter for adaptive thickness and painted color display (fixes [#54](https://github.com/HartmannLab/UELer/issues/54)).
 - Added "Use uniform color" checkbox to the cell gallery: when disabled (default), painted mask colors from the mask painter are displayed in gallery thumbnails; when enabled, all masks use the uniform color from the "Mask colour" picker.

@@ -681,7 +681,7 @@ class MaskPainterDisplay(PluginBase):
     # ------------------------------------------------------------------
     # Viewer integration
     # ------------------------------------------------------------------
-    def apply_colors_to_masks(self, _):
+    def apply_colors_to_masks(self, _, *, notify_cell_gallery: bool = True):
         identifier = self.ui_component.identifier_dropdown.value
         if not identifier:
             self._log("No identifier selected.", error=True, clear=True)
@@ -744,16 +744,16 @@ class MaskPainterDisplay(PluginBase):
                 _apply_color(cls_value, self.default_color)
 
         self._log("Masks updated with class-based colors.")
-        
-        # Notify cell gallery plugin that mask colors have changed
-        self._notify_cell_gallery_update()
+
+        if notify_cell_gallery:
+            self._notify_cell_gallery_update()
 
     def on_cell_table_change(self):
         self._initialise_identifier_options()
 
     def on_mv_update_display(self):
         if self.ui_component.enabled_checkbox.value:
-            self.apply_colors_to_masks(None)
+            self.apply_colors_to_masks(None, notify_cell_gallery=False)
 
     def _notify_cell_gallery_update(self) -> None:
         """Notify the cell gallery plugin that mask painter has applied color changes."""
