@@ -1,4 +1,11 @@
 ### v0.2.0-rc3
+**Gallery painted colors independence**
+- Fixed issue [#56](https://github.com/HartmannLab/UELer/issues/56) where painted cell mask colors only appeared in the gallery when an FOV was loaded and masks were painted in the main viewer.
+- Refactored `apply_colors_to_masks` in `mask_painter.py` to separate two responsibilities: painting masks in the viewer (current FOV only) and registering colors globally (all FOVs).
+- The mask painter now registers colors for **all cells** matching each class across **all FOVs** in the cell table, not just those in the currently displayed FOV.
+- Gallery can now access painted colors via the centralized `_CELL_COLOR_REGISTRY` regardless of which FOV is loaded in the viewer or whether the viewer has been opened.
+- Added `_register_color_globally` helper that iterates through the entire cell table to ensure complete color coverage for gallery rendering.
+
 **Cell gallery mask color consistency - Phase 5 & 6 (Error handling, polish, and documentation)**
 - Added graceful error handling for corrupted or missing mask data—gallery now displays red-tinted error placeholders instead of crashing when tile rendering fails (addresses [#55](https://github.com/HartmannLab/UELer/issues/55)).
 - Implemented performance warning system that alerts users when display count exceeds 100 cells: "Performance may degrade above 100 cells. Consider reducing display count for better responsiveness."

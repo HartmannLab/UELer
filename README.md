@@ -101,6 +101,12 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### v0.2.0-rc3
+**Gallery painted colors independence**
+- Fixed issue [#56](https://github.com/HartmannLab/UELer/issues/56) where painted cell mask colors only appeared in the gallery when an FOV was loaded and masks were painted in the main viewer.
+- The mask painter now registers colors for **all cells** matching each class across **all FOVs**, not just the currently displayed FOV.
+- Gallery can now access painted colors regardless of which FOV is loaded in the viewer or whether the viewer has been opened at all.
+- Refactored `apply_colors_to_masks` to separate viewer display updates (current FOV only) from global color registration (all FOVs).
+
 **Cell gallery mask color fix - Complete (Phases 1-6)**
 - Fixed cell gallery to display mask painter's color assignments for ALL cells, not just the centered one (fixes [#55](https://github.com/HartmannLab/UELer/issues/55)).
 - Root cause: Color registry lookups failed due to type mismatch between float mask_id values (e.g., 1.0) and integer keys (e.g., 1). Fixed by ensuring consistent integer conversion in both gallery and rendering engine.

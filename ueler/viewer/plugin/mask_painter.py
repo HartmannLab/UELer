@@ -711,7 +711,8 @@ class MaskPainterDisplay(PluginBase):
         hidden_classes = self._get_hidden_classes()
         converted_hidden = [(cls, _convert(cls)) for cls in hidden_classes]
 
-        def _apply_color(cls_value, color):
+        def _apply_color_to_current_fov(cls_value, color):
+            """Apply color to masks in the currently loaded FOV (viewer display only)."""
             mask_ids = self.main_viewer.cell_table.loc[
                 (self.main_viewer.cell_table[self.main_viewer.fov_key] == current_fov)
                 & (self.main_viewer.cell_table[identifier] == cls_value),
@@ -727,21 +728,35 @@ class MaskPainterDisplay(PluginBase):
                 color=color,
                 cummulative=True,
             )
-            
-            # Store the color mapping for each cell ID in the centralized registry
-            for mask_id in mask_ids:
-                set_cell_color(current_fov, mask_id, color)
 
+        def _register_color_globally(cls_value, color):
+            """Register color for all cells of this class across all FOVs (for gallery)."""
+            matching_cells = self.main_viewer.cell_table.loc[
+                self.main_viewer.cell_table[identifier] == cls_value,
+                [self.main_viewer.fov_key, self.main_viewer.label_key],
+            ]
+            
+            for _, row in matching_cells.iterrows():
+                fov = row[self.main_viewer.fov_key]
+                mask_id = row[self.main_viewer.label_key]
+                set_cell_color(fov, mask_id, color)
+
+        # Apply colors to visible classes
         for cls_str, cls_value in reversed(converted_visible):
             picker = self.class_color_controls.get(cls_str)
             if picker is None:
                 self._log(f"Class '{cls_str}' not found in controls; skipping.", error=True)
                 continue
-            _apply_color(cls_value, picker.value)
+            
+            color = picker.value
+            _apply_color_to_current_fov(cls_value, color)
+            _register_color_globally(cls_value, color)
 
+        # Apply default color to hidden classes
         if hidden_classes:
             for cls_str, cls_value in converted_hidden:
-                _apply_color(cls_value, self.default_color)
+                _apply_color_to_current_fov(cls_value, self.default_color)
+                _register_color_globally(cls_value, self.default_color)
 
         self._log("Masks updated with class-based colors.")
 
