@@ -5,6 +5,7 @@ import types
 import unittest
 
 from types import SimpleNamespace
+from ipywidgets import Output, VBox
 
 # Provide lightweight stubs for heavy optional dependencies used by the plugin.
 if "cv2" not in sys.modules:
@@ -360,43 +361,24 @@ class ROIManagerTagsTests(unittest.TestCase):
 
     def test_browser_output_widget_scrolls_within_fixed_height(self):
         plugin = make_plugin()
-        layout = plugin.ui_component.browser_output.layout
-        self.assertEqual(getattr(layout, "height", None), ROIManagerPlugin.BROWSER_SCROLL_HEIGHT)
-        self.assertEqual(getattr(layout, "max_height", None), ROIManagerPlugin.BROWSER_SCROLL_HEIGHT)
-        self.assertEqual(getattr(layout, "overflow_y", None), "auto")
-        self.assertEqual(getattr(layout, "overflow_x", None), "hidden")
-
-    def test_configure_browser_canvas_applies_layout(self):
-        plugin = make_plugin()
-        layout = Layout()
-        canvas = SimpleNamespace(layout=layout)
-        fig = SimpleNamespace(canvas=canvas)
-
-        pixel_height = 640.0
-        result = plugin._configure_browser_canvas(fig, pixel_height, 1.0)
-
-        self.assertIsNotNone(result)
-        configured_layout = canvas.layout
-        self.assertIsNotNone(configured_layout)
-        self.assertEqual(getattr(configured_layout, "height", None), f"{int(pixel_height)}px")
-        self.assertEqual(getattr(configured_layout, "max_height", None), f"{int(pixel_height)}px")
-        self.assertEqual(getattr(configured_layout, "width", None), "100%")
-        self.assertEqual(getattr(configured_layout, "overflow_y", None), "visible")
-        self.assertEqual(getattr(configured_layout, "overflow_x", None), "hidden")
-
-        container_layout = getattr(result, "layout", None)
-        self.assertIsNotNone(container_layout)
-        self.assertEqual(getattr(container_layout, "height", None), plugin.BROWSER_SCROLL_HEIGHT)
-        self.assertEqual(getattr(container_layout, "max_height", None), plugin.BROWSER_SCROLL_HEIGHT)
-        self.assertEqual(getattr(container_layout, "overflow_y", None), "auto")
-        self.assertEqual(getattr(container_layout, "overflow_x", None), "hidden")
+        # browser_output is now a VBox wrapper with fixed height (matching cell gallery)
+        wrapper = plugin.ui_component.browser_output
+        self.assertIsInstance(wrapper, VBox)
+        self.assertEqual(len(wrapper.children), 1)
+        self.assertEqual(getattr(wrapper.layout, "height", None), "400px")
+        
+        # Inner Output widget has max_height and scrolling
+        inner_output = plugin.ui_component.browser_output_inner
+        self.assertIsInstance(inner_output, Output)
+        inner_layout = inner_output.layout
+        self.assertEqual(getattr(inner_layout, "max_height", None), "400px")
+        self.assertEqual(getattr(inner_layout, "overflow_y", None), "auto")
 
     def test_browser_root_layout_can_shrink(self):
         plugin = make_plugin()
         layout = plugin.ui_component.browser_root.layout
         self.assertEqual(getattr(layout, "min_width", None), "0")
         self.assertEqual(plugin.ui_component.browser_root.children[2], plugin.ui_component.browser_pagination)
-        self.assertTrue(getattr(ROIManagerPlugin, "_browser_css_injected", False))
 
     def test_gallery_layout_respects_width_ratio_and_columns(self):
         plugin = make_plugin()

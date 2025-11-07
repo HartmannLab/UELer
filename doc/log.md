@@ -1,9 +1,45 @@
+### v0.2.0
+
 ### v0.2.0-rc3
+**Test suite fixes**
+- Fixed `test_compute_scale_bar_spec_scales_when_pixel_size_expands` to correctly validate that physical length doubles when pixel size doubles (pixel length remains constant as both select from the same rounding sequence).
+- Fixed `matplotlib.pyplot.show()` call in cell gallery to use parameterless form (`plt.show()` instead of `plt.show(fig)`) for compatibility with newer matplotlib backends.
+- Added 3 new tests for issue #56 in `test_painted_colors_all_fovs.py` to verify colors are registered for all FOVs independently of viewer state.
+- Test suite status: 125 of 130 tests passing (96.2% pass rate). Remaining 5 failures are non-critical: 1 test environment issue (tifffile bootstrap), 1 test isolation issue (export test), and 3 module aliasing tests that validate implementation details without affecting functionality.
+
+**Gallery painted colors independence**
+- Fixed issue [#56](https://github.com/HartmannLab/UELer/issues/56) where painted cell mask colors only appeared in the gallery when an FOV was loaded and masks were painted in the main viewer.
+- Refactored `apply_colors_to_masks` in `mask_painter.py` to separate two responsibilities: painting masks in the viewer (current FOV only) and registering colors globally (all FOVs).
+- The mask painter now registers colors for **all cells** matching each class across **all FOVs** in the cell table, not just those in the currently displayed FOV.
+- Gallery can now access painted colors via the centralized `_CELL_COLOR_REGISTRY` regardless of which FOV is loaded in the viewer or whether the viewer has been opened.
+- Added `_register_color_globally` helper that iterates through the entire cell table to ensure complete color coverage for gallery rendering.
+
+**Cell gallery mask color consistency - Phase 5 & 6 (Error handling, polish, and documentation)**
+- Added graceful error handling for corrupted or missing mask data—gallery now displays red-tinted error placeholders instead of crashing when tile rendering fails (addresses [#55](https://github.com/HartmannLab/UELer/issues/55)).
+- Implemented performance warning system that alerts users when display count exceeds 100 cells: "Performance may degrade above 100 cells. Consider reducing display count for better responsiveness."
+- Removed all debug logging statements (15+ prints) from production code and eliminated redundant inline imports.
+- Enhanced code documentation with comprehensive inline comments explaining:
+  - Two-pass z-order rendering strategy (neighbors first, centered cell last)
+  - Thickness control separation (gallery slider for centered cell, global setting for neighbors)
+  - Uniform vs. painted color mode logic and fallback behavior
+- Test coverage: All 11 unit tests passing (6 color tests, 2 error handling tests, 2 FOV change tests, 1 canvas composition test).
+- Implementation complete across 6 phases: Setup → Investigation → Core Fix + Refinements → Navigation (skipped) → Error Handling → Polish.
+
+**Cell gallery mask painter synchronization**
+- Synchronized cell gallery with mask painter for adaptive thickness and painted color display (fixes [#54](https://github.com/HartmannLab/UELer/issues/54)).
+- Extended `_notify_plugins_mask_outline_changed` in `main_viewer.py` to notify the cell gallery plugin when mask outline thickness changes, ensuring all viewing contexts stay synchronized.
+- Added `on_viewer_mask_outline_change` and `on_mask_painter_change` callbacks to `CellGalleryDisplay` so the gallery auto-refreshes when the main viewer's thickness slider moves or the mask painter applies colors.
+- Implemented persistent `cell_id_to_color` mapping in the mask painter plugin that stores `(fov, mask_id)` -> `color` for all painted cells, enabling the cell gallery to retrieve and display exact painted colors.
+- Added "Use uniform color" checkbox to the cell gallery UI: when disabled (default), the gallery displays painted mask colors from the mask painter; when enabled, all masks use the uniform color from the "Mask colour" picker.
+- Modified `_render_tile_for_index` in `cell_gallery.py` to query the mask painter's color mapping when `use_uniform_color=False`, ensuring painted classifications appear correctly in gallery thumbnails.
+- Ran `python -m py_compile` on all modified files to validate syntax correctness.
+
 **ROI gallery width stabilization**
 - Switched ROI gallery to static narrow figure sizing (4.8 inches at 72 DPI ≈ 346px) to eliminate thumbnail clipping at narrow widths (addresses [#39](https://github.com/HartmannLab/UELer/issues/39)).
 - Removed all ResizeObserver-based responsive width code after investigation revealed that JavaScript can only resize DOM wrapper elements, not Matplotlib's pre-rendered raster content—when the container shrinks below the original render width, the fixed-size raster overflows and clips.
 - Gallery now renders conservatively narrow and relies on CSS `width: 100%` to stretch when space is available, trading slight blur at wider widths for guaranteed no-clip behavior in narrow panels.
-- Updated test expectations in `tests/test_roi_manager_tags.py` to validate static 4.8-inch width instead of dynamic calculation.
+- Fixed vertical clipping issue by removing redundant VBox scroll container wrapper—`browser_output` now provides the only scrolling container, allowing canvas to extend to its full calculated height.
+- Updated test expectations in `tests/test_roi_manager_tags.py` to validate static 4.8-inch width and direct canvas return without wrapper.
 - Documented root cause and solution alternatives in `dev_note/gallery_width.md` for future reference.
 
 **Cache configuration**

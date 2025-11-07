@@ -50,6 +50,7 @@ from ueler.viewer.color_palettes import (
     merge_palette_updates,
     normalize_hex_color,
 )
+from ueler.viewer.mask_color_overlay import apply_registry_colors, collect_mask_regions
 from ueler.rendering import (
     AnnotationOverlaySnapshot,
     AnnotationRenderSettings,
@@ -1870,7 +1871,15 @@ class ImageMaskViewer:
                     )
                 )
 
-        return render_fov_to_array(
+            label_cache = self.label_masks_cache.get(current_fov, {})
+            mask_regions = collect_mask_regions(
+                label_cache,
+                selected_masks,
+                downsample_factor,
+                region_ds,
+            )
+
+        combined = render_fov_to_array(
             current_fov,
             fov_images,
             selected_channels,
@@ -1881,6 +1890,44 @@ class ImageMaskViewer:
             annotation=annotation_settings,
             masks=mask_settings,
         )
+
+        painter_enabled = self._is_mask_painter_enabled()
+        if painter_enabled and mask_regions:
+            # Exclude currently selected cells so they remain white-highlighted
+            excluded = set(self.image_display.selected_cells) if hasattr(self.image_display, 'selected_cells') else set()
+            combined = apply_registry_colors(
+                combined,
+                fov=current_fov,
+                mask_regions=mask_regions,
+                outline_thickness=int(self.mask_outline_thickness),
+                downsample_factor=downsample_factor,
+                exclude_ids=excluded,
+            )
+
+        return combined
+
+    # ------------------------------------------------------------------
+    # Mask painter integration
+    # ------------------------------------------------------------------
+    def _is_mask_painter_enabled(self) -> bool:
+        """Check if the mask painter plugin is enabled."""
+        sideplots = getattr(self, "SidePlots", None)
+        if sideplots is None:
+            return False
+        
+        painter = getattr(sideplots, "mask_painter_output", None)
+        if painter is None:
+            return False
+        
+        ui = getattr(painter, "ui_component", None)
+        if ui is None:
+            return False
+        
+        checkbox = getattr(ui, "enabled_checkbox", None)
+        if checkbox is None:
+            return False
+        
+        return bool(getattr(checkbox, "value", False))
 
     # ------------------------------------------------------------------
     # Export overlay helpers
@@ -2114,6 +2161,8 @@ class ImageMaskViewer:
         sideplots = getattr(self, "SidePlots", None)
         if sideplots is None:
             return
+        
+        # Notify export plugin
         plugin = getattr(sideplots, "export_fovs_output", None)
         if hasattr(plugin, "on_viewer_mask_outline_change"):
             try:
@@ -2121,6 +2170,15 @@ class ImageMaskViewer:
             except Exception:
                 if self._debug:
                     print("[viewer] Plugin notification for mask outline change failed")
+        
+        # Notify cell gallery plugin
+        cell_gallery_plugin = getattr(sideplots, "cell_gallery_output", None)
+        if hasattr(cell_gallery_plugin, "on_viewer_mask_outline_change"):
+            try:
+                cell_gallery_plugin.on_viewer_mask_outline_change(thickness)
+            except Exception:
+                if self._debug:
+                    print("[viewer] Cell gallery notification for mask outline change failed")
 
     def on_plugin_mask_outline_change(self, thickness: int) -> None:
         try:

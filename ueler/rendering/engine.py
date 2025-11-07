@@ -516,6 +516,70 @@ def render_roi_to_array(
     )
 
 
+# ==============================================================================
+# Cell Color Registry
+# ==============================================================================
+# Global registry for cell-level mask colors set by the mask painter.
+# This allows all rendering contexts (main viewer, cell gallery, ROI gallery,
+# batch export) to access the same painted color mappings.
+
+_CELL_COLOR_REGISTRY: dict[tuple[str, int], str] = {}
+
+
+def set_cell_color(fov: str, mask_id: int, color: str) -> None:
+    """Register a color for a specific cell (mask ID) in a specific FOV.
+    
+    This is typically called by the mask painter plugin when applying colors
+    to cell classes. The color mappings are then available to all rendering
+    components.
+    
+    Args:
+        fov: The FOV name where the cell resides
+        mask_id: The mask/label ID of the cell
+        color: The color string (e.g., "#00FFFF" for cyan)
+    """
+    _CELL_COLOR_REGISTRY[(fov, mask_id)] = color
+
+
+def get_cell_color(fov: str, mask_id: int) -> Optional[str]:
+    """Retrieve the painted color for a specific cell.
+    
+    Args:
+        fov: The FOV name where the cell resides
+        mask_id: The mask/label ID of the cell
+    
+    Returns:
+        The color string if one has been set, None otherwise
+    """
+    return _CELL_COLOR_REGISTRY.get((fov, mask_id))
+
+
+def clear_cell_colors(fov: Optional[str] = None) -> None:
+    """Clear painted colors for a specific FOV or all FOVs.
+    
+    Args:
+        fov: If provided, only clear colors for this FOV. If None, clear all colors.
+    """
+    if fov is None:
+        _CELL_COLOR_REGISTRY.clear()
+    else:
+        keys_to_remove = [key for key in _CELL_COLOR_REGISTRY if key[0] == fov]
+        for key in keys_to_remove:
+            del _CELL_COLOR_REGISTRY[key]
+
+
+def get_all_cell_colors_for_fov(fov: str) -> dict[int, str]:
+    """Get all painted colors for cells in a specific FOV.
+    
+    Args:
+        fov: The FOV name
+    
+    Returns:
+        Dictionary mapping mask_id -> color for all cells in the FOV
+    """
+    return {mask_id: color for (fov_name, mask_id), color in _CELL_COLOR_REGISTRY.items() if fov_name == fov}
+
+
 __all__ = [
     "AnnotationOverlaySnapshot",
     "AnnotationRenderSettings",
@@ -528,4 +592,8 @@ __all__ = [
     "render_crop_to_array",
     "render_fov_to_array",
     "render_roi_to_array",
+    "set_cell_color",
+    "get_cell_color",
+    "clear_cell_colors",
+    "get_all_cell_colors_for_fov",
 ]

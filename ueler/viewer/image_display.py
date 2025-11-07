@@ -319,11 +319,6 @@ class ImageDisplay:
             # Skip updating patches if already handling a draw event
             return
 
-        # print("Updating patches")
-        # Remove existing patches
-        # for patch in list(self.ax.patches):
-        #     patch.remove()
-
         # Adjust for downsample factor
         downsample_factor = self.main_viewer.current_downsample_factor
 
@@ -340,7 +335,7 @@ class ImageDisplay:
 
         # If selected_mask_full_visible is defined
         if selected_mask_visible_ds is not None:
-            if self.selected_masks_label is not None:
+            if self.selected_masks_label:
                 mask_binary_ds = selected_mask_visible_ds.astype(np.uint8)
 
                 outline_thickness = scale_outline_thickness(
@@ -351,7 +346,7 @@ class ImageDisplay:
                 edge_mask = find_boundaries(mask_binary_ds, mode="inner")
                 if outline_thickness > 1:
                     edge_mask = thicken_outline(edge_mask, outline_thickness - 1)
-                # print(f"sum edge_mask: {np.sum(edge_mask)}")
+                
                 if do_not_reset:
                     combined = self.img_display.get_array().copy()
                 else:
@@ -359,13 +354,20 @@ class ImageDisplay:
                     if combined is None:
                         return
 
+                # Highlight selected cells in white
                 combined[edge_mask] = [1, 1, 1]
                 self.img_display.set_data(combined)
 
-                # self.edge_mask = edge_mask
                 if self.main_viewer._debug:
                     print("Redrawing canvas")
                 self.fig.canvas.draw_idle()
+            else:
+                # No cells selected - just refresh to show painted colors if painter is enabled
+                if not do_not_reset:
+                    combined = self._materialize_combined()
+                    if combined is not None:
+                        self.img_display.set_data(combined)
+                        self.fig.canvas.draw_idle()
 
     def set_mask_ids(self, mask_name, mask_ids):
         """

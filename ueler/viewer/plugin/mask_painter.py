@@ -42,6 +42,7 @@ from ueler.viewer.palette_store import (
     slugify_name as shared_slugify_name,
     write_palette_file,
 )
+from ueler.rendering import set_cell_color, get_cell_color, clear_cell_colors
 COLOR_SET_FILE_SUFFIX = ".maskcolors.json"
 REGISTRY_FILENAME = "mask_color_sets_index.json"
 COLOR_SET_VERSION = "1.0.0"
@@ -680,7 +681,7 @@ class MaskPainterDisplay(PluginBase):
     # ------------------------------------------------------------------
     # Viewer integration
     # ------------------------------------------------------------------
-    def apply_colors_to_masks(self, _):
+    def apply_colors_to_masks(self, _, *, notify_cell_gallery: bool = True):
         identifier = self.ui_component.identifier_dropdown.value
         if not identifier:
             self._log("No identifier selected.", error=True, clear=True)
@@ -710,7 +711,8 @@ class MaskPainterDisplay(PluginBase):
         hidden_classes = self._get_hidden_classes()
         converted_hidden = [(cls, _convert(cls)) for cls in hidden_classes]
 
-        def _apply_color(cls_value, color):
+        def _apply_color_to_current_fov(cls_value, color):
+            """Apply color to masks in the currently loaded FOV (viewer display only)."""
             mask_ids = self.main_viewer.cell_table.loc[
                 (self.main_viewer.cell_table[self.main_viewer.fov_key] == current_fov)
                 & (self.main_viewer.cell_table[identifier] == cls_value),
@@ -727,25 +729,69 @@ class MaskPainterDisplay(PluginBase):
                 cummulative=True,
             )
 
+        def _register_color_globally(cls_value, color):
+            """Register color for all cells of this class across all FOVs (for gallery)."""
+            matching_cells = self.main_viewer.cell_table.loc[
+                self.main_viewer.cell_table[identifier] == cls_value,
+                [self.main_viewer.fov_key, self.main_viewer.label_key],
+            ]
+            
+            for _, row in matching_cells.iterrows():
+                fov = row[self.main_viewer.fov_key]
+                mask_id = row[self.main_viewer.label_key]
+                set_cell_color(fov, mask_id, color)
+
+        # Apply colors to visible classes
         for cls_str, cls_value in reversed(converted_visible):
             picker = self.class_color_controls.get(cls_str)
             if picker is None:
                 self._log(f"Class '{cls_str}' not found in controls; skipping.", error=True)
                 continue
-            _apply_color(cls_value, picker.value)
+            
+            color = picker.value
+            _apply_color_to_current_fov(cls_value, color)
+            _register_color_globally(cls_value, color)
 
+        # Apply default color to hidden classes
         if hidden_classes:
             for cls_str, cls_value in converted_hidden:
-                _apply_color(cls_value, self.default_color)
+                _apply_color_to_current_fov(cls_value, self.default_color)
+                _register_color_globally(cls_value, self.default_color)
 
         self._log("Masks updated with class-based colors.")
+
+        if notify_cell_gallery:
+            self._notify_cell_gallery_update()
 
     def on_cell_table_change(self):
         self._initialise_identifier_options()
 
     def on_mv_update_display(self):
         if self.ui_component.enabled_checkbox.value:
-            self.apply_colors_to_masks(None)
+            self.apply_colors_to_masks(None, notify_cell_gallery=False)
+
+    def _notify_cell_gallery_update(self) -> None:
+        """Notify the cell gallery plugin that mask painter has applied color changes."""
+        sideplots = getattr(self.main_viewer, "SidePlots", None)
+        if sideplots is None:
+            return
+        
+        cell_gallery_plugin = getattr(sideplots, "cell_gallery_output", None)
+        if hasattr(cell_gallery_plugin, "on_mask_painter_change"):
+            try:
+                cell_gallery_plugin.on_mask_painter_change()
+            except Exception as exc:
+                if getattr(self.main_viewer, "_debug", False):
+                    print(f"[mask_painter] Failed to notify cell gallery: {exc}")
+
+    def get_cell_color(self, fov: str, mask_id: int) -> Optional[str]:
+        """Get the painted color for a specific cell ID in a specific FOV.
+        
+        This method now delegates to the centralized rendering engine registry.
+        
+        Returns None if no color has been painted for this cell.
+        """
+        return get_cell_color(fov, mask_id)
 
     def initiate_ui(self):
         controls = HBox([
