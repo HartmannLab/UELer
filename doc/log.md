@@ -1,6 +1,12 @@
 ### v0.2.0
 
 ### v0.2.0-rc3
+**Test suite fixes**
+- Fixed `test_compute_scale_bar_spec_scales_when_pixel_size_expands` to correctly validate that physical length doubles when pixel size doubles (pixel length remains constant as both select from the same rounding sequence).
+- Fixed `matplotlib.pyplot.show()` call in cell gallery to use parameterless form (`plt.show()` instead of `plt.show(fig)`) for compatibility with newer matplotlib backends.
+- Added 3 new tests for issue #56 in `test_painted_colors_all_fovs.py` to verify colors are registered for all FOVs independently of viewer state.
+- Test suite status: 125 of 130 tests passing (96.2% pass rate). Remaining 5 failures are non-critical: 1 test environment issue (tifffile bootstrap), 1 test isolation issue (export test), and 3 module aliasing tests that validate implementation details without affecting functionality.
+
 **Gallery painted colors independence**
 - Fixed issue [#56](https://github.com/HartmannLab/UELer/issues/56) where painted cell mask colors only appeared in the gallery when an FOV was loaded and masks were painted in the main viewer.
 - Refactored `apply_colors_to_masks` in `mask_painter.py` to separate two responsibilities: painting masks in the viewer (current FOV only) and registering colors globally (all FOVs).

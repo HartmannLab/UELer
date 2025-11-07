@@ -30,7 +30,9 @@ class ScaleBarHelperTests(unittest.TestCase):
     def test_compute_scale_bar_spec_scales_when_pixel_size_expands(self) -> None:
         base = compute_scale_bar_spec(image_width_px=256, pixel_size_nm=500.0, max_fraction=0.1)
         doubled = compute_scale_bar_spec(image_width_px=256, pixel_size_nm=1000.0, max_fraction=0.1)
-        self.assertAlmostEqual(doubled.pixel_length, base.pixel_length / 2.0)
+        # When pixel size doubles, the physical length should increase proportionally
+        # while pixel length stays similar (both select from same rounding sequence)
+        self.assertAlmostEqual(doubled.physical_length_um, base.physical_length_um * 2.0)
 
 
 if __name__ == "__main__":

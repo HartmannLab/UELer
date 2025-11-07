@@ -209,7 +209,7 @@ class CellGalleryDisplay(PluginBase):
 
             fig.canvas.header_visible = False
             fig.tight_layout()
-            plt.show(fig)
+            plt.show()
 
             self.data.fig = fig
             self.data.ax = ax
