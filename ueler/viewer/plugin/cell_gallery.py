@@ -264,10 +264,26 @@ class CellGalleryDisplay(PluginBase):
             self.hover_timer.add_callback(self.process_hover_event)
             self.hover_timer.start()
 
+    def _show_warning(self, message: str) -> None:
+        """Display warning to user when display count exceeds recommended limit.
+        
+        Args:
+            message: Warning text to display
+        """
+        with self.plot_output:
+            print(f"⚠️  Warning: {message}")
+
     @update_status_bar
     def plot_gellery(self):  # noqa: N802 - preserve legacy method name
         selected_indices = list(self.data.selected_cells.value or [])
         ui_values = self._collect_ui_values()
+
+        # Check for performance warning
+        if ui_values.max_cells > 100:
+            self._show_warning(
+                "Performance may degrade above 100 cells. "
+                "Consider reducing display count for better responsiveness."
+            )
 
         overlay_snapshot = self._capture_overlay_snapshot()
 
@@ -460,6 +476,7 @@ class _RenderContext:
     label_key: str
     highlight_rgb: Tuple[float, float, float]
     outline_thickness: int
+    neighbor_outline_thickness: int  # Thickness for non-centered cells
     use_uniform_color: bool
     mask_name: Optional[str]
     fov_key: str
@@ -497,6 +514,10 @@ def _resolve_mask_array(viewer, fov_name: str, mask_name: Optional[str]) -> Opti
 
 
 def _limit_selection(indices, max_displayed: float) -> List[int]:
+    """Limit selection to max_displayed cells, randomly sampling if needed.
+    
+    Uses deterministic seeding based on selection sum for reproducibility.
+    """
     if isinstance(indices, set):
         indices = list(indices)
 
@@ -507,10 +528,26 @@ def _limit_selection(indices, max_displayed: float) -> List[int]:
     safe_indices = np.asarray(indices, dtype=int)
     seed = int(abs(int(safe_indices.sum()))) % (2**32)
     rng = np.random.default_rng(seed=seed)
+    
     sample_size = max(1, int(max_displayed))
-    sampled = rng.choice(safe_indices, sample_size, replace=False)
+    sampled = rng.choice(safe_indices, size=sample_size, replace=False)
     print(f"Randomly sampled {sample_size} cells for display.")
     return sorted(int(i) for i in sampled.tolist())
+
+
+def _create_error_placeholder(crop_width: int, message: str = "Error loading mask") -> np.ndarray:
+    """Generate a visual error indicator when mask data cannot be loaded.
+    
+    Args:
+        crop_width: Tile size in pixels
+        message: Error description (for future text overlay)
+    
+    Returns:
+        RGB tile array with red-tinted background indicating error
+    """
+    # Red-tinted background to indicate error
+    tile = np.full((crop_width, crop_width, 3), [0.8, 0.2, 0.2], dtype=np.float32)
+    return tile
 
 
 def _build_channel_settings(
@@ -614,66 +651,190 @@ def _extract_mask_id(record, label_key: str):
 
 
 def _render_tile_for_index(df, index: int, context: _RenderContext):
-    record = df.iloc[index]
-    fov = record[context.fov_key]
-    center_xy = (float(record[context.x_key]), float(record[context.y_key]))
-    mask_id = _extract_mask_id(record, context.label_key)
+    try:
+        record = df.iloc[index]
+        fov = record[context.fov_key]
+        center_xy = (float(record[context.x_key]), float(record[context.y_key]))
+        mask_id = _extract_mask_id(record, context.label_key)
 
-    viewer = context.viewer
-    viewer.load_fov(fov, context.selected_channels)
-    channel_arrays = viewer.image_cache[fov]
+        viewer = context.viewer
+        viewer.load_fov(fov, context.selected_channels)
+        channel_arrays = viewer.image_cache[fov]
 
-    annotation_settings, mask_settings = _resolve_overlay_settings(
-        viewer,
-        fov,
-        context.downsample_factor,
-        context.overlay_snapshot,
-        context.overlay_cache,
-    )
+        annotation_settings, mask_settings = _resolve_overlay_settings(
+            viewer,
+            fov,
+            context.downsample_factor,
+            context.overlay_snapshot,
+            context.overlay_cache,
+        )
 
-    masks = list(mask_settings)
+        # Start with empty mask list - we'll build it based on painted colors or uniform mode
+        masks = []
+        
+        # Get the full mask array to check for all cells in the crop region
+        # This is needed for both uniform and painted color modes
+        mask_array = _resolve_mask_array(viewer, fov, context.mask_name) if context.mask_name else None
+        
+        if context.use_uniform_color:
+            # UNIFORM COLOR MODE: All cells use the same color from mask control panel
+            # Centered cell uses gallery highlight color; neighbors use viewer's global mask color
+            
+            if mask_array is not None:
+                # Calculate crop region bounds
+                half_size = max(1, int(context.crop_width) // 2)
+                center_x = int(round(center_xy[0]))
+                center_y = int(round(center_xy[1]))
+                
+                # Ensure we stay within mask array bounds
+                y_min = max(0, center_y - half_size)
+                y_max = min(mask_array.shape[0], center_y + half_size)
+                x_min = max(0, center_x - half_size)
+                x_max = min(mask_array.shape[1], center_x + half_size)
+                
+                # Get unique cell IDs in the crop region
+                crop_region = mask_array[y_min:y_max, x_min:x_max]
+                unique_ids = np.unique(crop_region)
+                unique_ids = unique_ids[unique_ids != 0]  # Exclude background
+                
+                # Extract mask color from viewer's mask control panel
+                # This color is used for all neighboring cells in uniform mode
+                viewer_mask_color = None
+                if mask_settings:
+                    # Get the color from the first mask setting (the mask overlay color)
+                    viewer_mask_color = mask_settings[0].color
+                
+                # IMPORTANT: Two-pass rendering for proper z-order
+                # Pass 1: Add neighbors first so they render underneath
+                # Pass 2: Add centered cell last so it renders on top
+                # This ensures the centered cell's outline is always visible, even when cells overlap
+                centered_cell_mask = None
+                
+                # First pass: Add all neighboring cells
+                for cell_id in unique_ids:
+                    if int(cell_id) == mask_id:
+                        # Save centered cell for later - render it last (ensures proper z-order)
+                        # Uses gallery highlight color and gallery-specific thickness
+                        centered_cell_mask = (cell_id, context.highlight_rgb, context.outline_thickness)
+                    else:
+                        # Neighbors: Use viewer's global mask color and neighbor thickness
+                        # neighbor_outline_thickness defaults to viewer's global mask thickness setting
+                        cell_color = viewer_mask_color
+                        
+                        if cell_color is not None:
+                            masks.append(
+                                MaskRenderSettings(
+                                    array=mask_array == cell_id,
+                                    color=cell_color,
+                                    mode="outline",
+                                    outline_thickness=context.neighbor_outline_thickness,
+                                    downsample_factor=context.downsample_factor,
+                                )
+                            )
+                
+                # Second pass: Add centered cell LAST so it renders on top
+                if centered_cell_mask is not None:
+                    cell_id, cell_color, thickness = centered_cell_mask
+                    masks.append(
+                        MaskRenderSettings(
+                            array=mask_array == cell_id,
+                            color=cell_color,
+                            mode="outline",
+                            outline_thickness=thickness,
+                            downsample_factor=context.downsample_factor,
+                        )
+                    )
+        else:
+            # PAINTED COLOR MODE: Each cell uses its individual painted color from ROI manager
+            # If no painted colors exist, falls back to viewer's mask overlay settings
+            # Maintains same two-pass z-order logic as uniform mode
+            if mask_array is not None:
+                # Calculate crop region bounds
+                half_size = max(1, int(context.crop_width) // 2)
+                center_x = int(round(center_xy[0]))
+                center_y = int(round(center_xy[1]))
+                
+                # Ensure we stay within mask array bounds
+                y_min = max(0, center_y - half_size)
+                y_max = min(mask_array.shape[0], center_y + half_size)
+                x_min = max(0, center_x - half_size)
+                x_max = min(mask_array.shape[1], center_x + half_size)
+                
+                # Get unique cell IDs in the crop region
+                crop_region = mask_array[y_min:y_max, x_min:x_max]
+                unique_ids = np.unique(crop_region)
+                unique_ids = unique_ids[unique_ids != 0]  # Exclude background
+                
+                # IMPORTANT: Two-pass rendering for proper z-order (same as uniform mode)
+                # Pass 1: Add neighbors first so they render underneath
+                # Pass 2: Add centered cell last so it renders on top
+                centered_cell_data = None
+                cells_with_colors = 0
+                
+                # First pass: Add all neighboring cells with painted colors
+                for cell_id in unique_ids:
+                    # Check if this cell has a user-painted color from ROI manager
+                    painted_color = get_cell_color(fov, int(cell_id))
+                    
+                    if painted_color:
+                        # This cell has a user-painted color - convert to RGB tuple
+                        try:
+                            cell_color = to_rgb(painted_color)
+                            
+                            if int(cell_id) == mask_id:
+                                # Save centered cell for later - uses gallery-specific thickness
+                                centered_cell_data = (cell_id, cell_color, context.outline_thickness)
+                            else:
+                                # Add neighbor immediately - uses neighbor thickness (from global setting)
+                                masks.append(
+                                    MaskRenderSettings(
+                                        array=mask_array == cell_id,
+                                        color=cell_color,
+                                        mode="outline",
+                                        outline_thickness=context.neighbor_outline_thickness,
+                                        downsample_factor=context.downsample_factor,
+                                    )
+                                )
+                                cells_with_colors += 1
+                        except (ValueError, TypeError):
+                            # Skip cells with invalid colors
+                            pass
+                
+                # Second pass: Add centered cell LAST so it renders on top
+                if centered_cell_data is not None:
+                    cell_id, cell_color, thickness = centered_cell_data
+                    masks.append(
+                        MaskRenderSettings(
+                            array=mask_array == cell_id,
+                            color=cell_color,
+                            mode="outline",
+                            outline_thickness=thickness,
+                            downsample_factor=context.downsample_factor,
+                        )
+                    )
+                    cells_with_colors += 1
+                
+                # If no cells have painted colors, fall back to viewer overlays
+                if cells_with_colors == 0:
+                    masks = list(mask_settings)
+
+        tile = render_crop_to_array(
+            fov,
+            channel_arrays,
+            context.selected_channels,
+            context.channel_settings,
+            center_xy=center_xy,
+            size_px=context.crop_width,
+            downsample_factor=context.downsample_factor,
+            annotation=annotation_settings,
+            masks=tuple(masks),
+        )
+        return np.clip(tile, 0.0, 1.0)
     
-    # Determine which color to use for this cell's mask outline
-    cell_color = None
-    if context.use_uniform_color:
-        # Use the uniform color from the color picker
-        cell_color = context.highlight_rgb
-    else:
-        # Try to get the painted color from the centralized color registry
-        painted_color = get_cell_color(fov, mask_id)
-        if painted_color:
-            try:
-                from matplotlib.colors import to_rgb
-                cell_color = to_rgb(painted_color)
-            except (ValueError, TypeError):
-                pass
-    
-    # Apply mask outline if we have a valid color and mask
-    if cell_color is not None and context.mask_name and mask_id is not None:
-        mask_array = _resolve_mask_array(viewer, fov, context.mask_name)
-        if mask_array is not None and np.any(mask_array == mask_id):
-            masks.append(
-                MaskRenderSettings(
-                    array=mask_array == mask_id,
-                    color=cell_color,
-                    mode="outline",
-                    outline_thickness=context.outline_thickness,
-                    downsample_factor=context.downsample_factor,
-                )
-            )
-
-    tile = render_crop_to_array(
-        fov,
-        channel_arrays,
-        context.selected_channels,
-        context.channel_settings,
-        center_xy=center_xy,
-        size_px=context.crop_width,
-        downsample_factor=context.downsample_factor,
-        annotation=annotation_settings,
-        masks=tuple(masks),
-    )
-    return np.clip(tile, 0.0, 1.0)
+    except Exception as e:
+        # If any error occurs during tile rendering, return error placeholder
+        print(f"[ERROR] Failed to render tile for index={index}: {e}")
+        return _create_error_placeholder(context.crop_width, str(e))
 
 
 def create_gallery(
@@ -688,6 +849,7 @@ def create_gallery(
     label_key: str = "label",
     highlight_outline_color: Union[str, Tuple[float, float, float]] = "#FFFFFF",
     mask_outline_thickness: int = 1,
+    neighbor_outline_thickness: Optional[int] = None,
     use_uniform_color: bool = False,
 ):
     indices = _limit_selection(selected_indices, max_displayed_cells)
@@ -710,6 +872,10 @@ def create_gallery(
 
     highlight_rgb = to_rgb(highlight_outline_color)
     outline_thickness = max(1, int(mask_outline_thickness))
+    # Use global mask thickness for neighbors if not specified
+    if neighbor_outline_thickness is None:
+        neighbor_outline_thickness = getattr(viewer, "mask_outline_thickness", 1)
+    neighbor_outline_thickness = max(1, int(neighbor_outline_thickness))
     mask_name = getattr(viewer, "mask_key", None)
 
     fov_key = getattr(viewer, "fov_key", "fov")
@@ -731,6 +897,7 @@ def create_gallery(
         label_key=label_key,
         highlight_rgb=highlight_rgb,
         outline_thickness=outline_thickness,
+        neighbor_outline_thickness=neighbor_outline_thickness,
         use_uniform_color=use_uniform_color,
         mask_name=mask_name,
         fov_key=fov_key,

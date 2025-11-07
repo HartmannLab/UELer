@@ -1,4 +1,15 @@
 ### v0.2.0-rc3
+**Cell gallery mask color consistency - Phase 5 & 6 (Error handling, polish, and documentation)**
+- Added graceful error handling for corrupted or missing mask data—gallery now displays red-tinted error placeholders instead of crashing when tile rendering fails (addresses [#55](https://github.com/HartmannLab/UELer/issues/55)).
+- Implemented performance warning system that alerts users when display count exceeds 100 cells: "Performance may degrade above 100 cells. Consider reducing display count for better responsiveness."
+- Removed all debug logging statements (15+ prints) from production code and eliminated redundant inline imports.
+- Enhanced code documentation with comprehensive inline comments explaining:
+  - Two-pass z-order rendering strategy (neighbors first, centered cell last)
+  - Thickness control separation (gallery slider for centered cell, global setting for neighbors)
+  - Uniform vs. painted color mode logic and fallback behavior
+- Test coverage: All 11 unit tests passing (6 color tests, 2 error handling tests, 2 FOV change tests, 1 canvas composition test).
+- Implementation complete across 6 phases: Setup → Investigation → Core Fix + Refinements → Navigation (skipped) → Error Handling → Polish.
+
 **Cell gallery mask painter synchronization**
 - Synchronized cell gallery with mask painter for adaptive thickness and painted color display (fixes [#54](https://github.com/HartmannLab/UELer/issues/54)).
 - Extended `_notify_plugins_mask_outline_changed` in `main_viewer.py` to notify the cell gallery plugin when mask outline thickness changes, ensuring all viewing contexts stay synchronized.

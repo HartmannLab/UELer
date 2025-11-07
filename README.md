@@ -101,6 +101,15 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### v0.2.0-rc3
+**Cell gallery mask color fix - Complete (Phases 1-6)**
+- Fixed cell gallery to display mask painter's color assignments for ALL cells, not just the centered one (fixes [#55](https://github.com/HartmannLab/UELer/issues/55)).
+- Root cause: Color registry lookups failed due to type mismatch between float mask_id values (e.g., 1.0) and integer keys (e.g., 1). Fixed by ensuring consistent integer conversion in both gallery and rendering engine.
+- Implemented two-pass z-order rendering: neighbors render first (underneath), centered cell renders last (on top), ensuring the centered cell's outline is always visible even when cells overlap.
+- Separated thickness controls: gallery "Outline px" slider now only affects the centered/highlighted cell, while neighboring cells use the viewer's global mask thickness setting for more intuitive behavior.
+- Added graceful error handling: corrupted or missing mask data now displays red-tinted error placeholders instead of crashing the gallery.
+- Added performance warnings: alerts users when display count exceeds 100 cells to maintain responsiveness.
+- Complete test coverage: 11 unit tests passing (6 color consistency tests, 2 error handling tests, 2 FOV change tests, 1 canvas composition test).
+
 **Cell gallery mask painter synchronization**
 - Cell gallery now synchronizes with the mask painter for adaptive thickness and painted color display (fixes [#54](https://github.com/HartmannLab/UELer/issues/54)).
 - Added "Use uniform color" checkbox to the cell gallery: when disabled (default), painted mask colors from the mask painter are displayed in gallery thumbnails; when enabled, all masks use the uniform color from the "Mask colour" picker.
