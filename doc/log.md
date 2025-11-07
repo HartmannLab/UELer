@@ -1,3 +1,5 @@
+### v0.2.0
+
 ### v0.2.0-rc3
 **Gallery painted colors independence**
 - Fixed issue [#56](https://github.com/HartmannLab/UELer/issues/56) where painted cell mask colors only appeared in the gallery when an FOV was loaded and masks were painted in the main viewer.
