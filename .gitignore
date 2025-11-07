@@ -28,3 +28,8 @@ dev_note/github_issues.md
 .binder/
 .github/
 .specify/
+specs/
+
+
+script/*.ipynb
+!script/run_ueler.ipynb
