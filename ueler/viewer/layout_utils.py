@@ -15,6 +15,7 @@ def column_block_layout(**overrides) -> Layout:
     base = {
         "width": "98%",
         "box_sizing": "border-box",
+        "min_width": "0",
     }
     base.update(overrides)
     return Layout(**base)

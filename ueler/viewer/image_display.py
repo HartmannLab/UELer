@@ -12,6 +12,7 @@ from ueler.image_utils import (
     generate_edges,
     get_axis_limits_with_padding,
 )
+from ueler.rendering.engine import scale_outline_thickness, thicken_outline
 from matplotlib.patches import Polygon
 from matplotlib.widgets import RectangleSelector
 # from skimage.measure import find_contours
@@ -20,6 +21,7 @@ import cv2
 import math
 from matplotlib.backend_bases import MouseButton
 from ueler.viewer.decorators import update_status_bar
+from .tooltip_utils import format_tooltip_value
 
 
 class ImageDisplay:
@@ -242,11 +244,11 @@ class ImageDisplay:
                         for channel in self.main_viewer.ui_component.channel_selector.value:
                             if channel in cell_data.columns:
                                 value = cell_data[channel].iloc[0]
-                                tooltip_text += f"\n{channel}: {value:.2f}"
+                                tooltip_text += f"\n{channel}: {format_tooltip_value(value)}"
                         for label in getattr(self.main_viewer, 'selected_tooltip_labels', []):
                             if label in cell_data.columns:
                                 value = cell_data[label].iloc[0]
-                                tooltip_text += f"\n{label}: {value}"
+                                tooltip_text += f"\n{label}: {format_tooltip_value(value)}"
 
                     # Update annotation
                     self.mask_id_annotation.xy = (x, y)
@@ -317,11 +319,6 @@ class ImageDisplay:
             # Skip updating patches if already handling a draw event
             return
 
-        # print("Updating patches")
-        # Remove existing patches
-        # for patch in list(self.ax.patches):
-        #     patch.remove()
-
         # Adjust for downsample factor
         downsample_factor = self.main_viewer.current_downsample_factor
 
@@ -338,12 +335,18 @@ class ImageDisplay:
 
         # If selected_mask_full_visible is defined
         if selected_mask_visible_ds is not None:
-            if self.selected_masks_label is not None:
+            if self.selected_masks_label:
                 mask_binary_ds = selected_mask_visible_ds.astype(np.uint8)
 
-                # Find contours in the downsampled mask
-                edge_mask = find_boundaries(mask_binary_ds, mode='thick')
-                # print(f"sum edge_mask: {np.sum(edge_mask)}")
+                outline_thickness = scale_outline_thickness(
+                    getattr(self.main_viewer, "mask_outline_thickness", 1),
+                    downsample_factor,
+                )
+
+                edge_mask = find_boundaries(mask_binary_ds, mode="inner")
+                if outline_thickness > 1:
+                    edge_mask = thicken_outline(edge_mask, outline_thickness - 1)
+                
                 if do_not_reset:
                     combined = self.img_display.get_array().copy()
                 else:
@@ -351,13 +354,20 @@ class ImageDisplay:
                     if combined is None:
                         return
 
+                # Highlight selected cells in white
                 combined[edge_mask] = [1, 1, 1]
                 self.img_display.set_data(combined)
 
-                # self.edge_mask = edge_mask
                 if self.main_viewer._debug:
                     print("Redrawing canvas")
                 self.fig.canvas.draw_idle()
+            else:
+                # No cells selected - just refresh to show painted colors if painter is enabled
+                if not do_not_reset:
+                    combined = self._materialize_combined()
+                    if combined is not None:
+                        self.img_display.set_data(combined)
+                        self.fig.canvas.draw_idle()
 
     def set_mask_ids(self, mask_name, mask_ids):
         """
@@ -427,7 +437,11 @@ class ImageDisplay:
                         print(f"sum(mask_label_ds): {np.sum(mask_label_ds)}")
 
                         # Find contours in the downsampled mask
-                        edge_mask = generate_edges(mask_label_ds.compute())
+                        edge_mask = generate_edges(
+                            mask_label_ds.compute(),
+                            thickness=getattr(self.main_viewer, "mask_outline_thickness", 1),
+                            downsample=cdf,
+                        )
                         if cummulative:
                             combined = self.img_display.get_array().copy()
                         else:

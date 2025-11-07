@@ -100,45 +100,35 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 - **Wide Plugins**: Enable "Horizontal layout" (for example, in the heatmap plugin) to undock the tool into the footer while keeping the accordion available for other controls.
 
 ## New Update  
-### v0.2.0-rc2
-The first release candidate delivers automatic scale bars across the viewer and batch export workflows while retaining the Batch Export UI, overlay plumbing, and job runner improvements from earlier `v0.2.0` milestones.
+### **UELer v0.2.0 Summary**
+**Gallery and Mask Painting**
+- Painted mask colors now persist across all FOVs and appear in the gallery even when the viewer isn’t open.
+- Fixed multiple gallery color and rendering issues, ensuring all cells display correct mask colors.
+- Improved synchronization between the mask painter and cell gallery for consistent colors and outline thickness.
 
-**Phase 4b cell export fixes**
-- Marker profiles now fall back to the viewer's active channel selection when stored marker sets lack entries, preventing blank single-cell exports and enforcing per-channel render settings before jobs run.
-- The single-cell preview reuses captured overlays, passes keyword arguments into `_finalise_array`, and draws optional scale bars so the UI preview mirrors batch outputs without triggering the earlier signature error.
-- Extended `tests/test_export_fovs_batch.py` with regression cases covering the fallback logic and preview workflow.
+**ROI and Cell Gallery Enhancements**
+- ROI and cell galleries stabilized with predictable layout, no clipping, and consistent tile sizing.
+- Introduced pagination with clear navigation controls and fixed caret/focus behavior in expression filters.
+- Implemented ROI filtering tabs (simple/advanced) and added error handling plus performance warnings.
 
-**Scale bar automation**
-- Added `ueler.viewer.scale_bar` with an engineering-style rounding helper that picks tidy physical lengths (≤10 % of the frame) and formats labels in µm/mm as needed.
-- Refreshed the main viewer so the scale bar updates whenever pixel size, downsample, or view extents change, ensuring on-screen measurements stay accurate without manual tweaks.
-- Batch exports now draw the same scale bar into PNG/JPEG/TIFF outputs and embed it ahead of PDF saves, capturing the computed length in per-item metadata.
-- Phase 4a hotfix: the interactive viewer now scales the rendered bar using the active downsample factor, preventing undersized annotations when zoomed out.
+**Rendering and Visualization**
+- Unified gallery and viewer rendering through a shared engine for visual consistency.
+- Added automatic scale bars across viewer and exports with accurate physical scaling.
+- Improved outline scaling, tooltip precision, and histogram responsiveness.
 
-**Batch export experience**
-- The plugin continues to provide mode-aware exports (Full FOV, Single Cells, ROIs), overlay snapshots, and cancellation-ready jobs, now seeded with the viewer's pixel size to keep in-app and exported measurements in sync.
-- Raster/PDF writers share a Matplotlib-based overlay helper, guaranteeing consistent styling and placement across formats while preserving previous mask/annotation options.
+**Batch Export and Performance**
+- Batch exports now include accurate scale bars and synchronized viewer settings.
+- Enhanced ROI browser caching and FOV filtering for faster, more reliable browsing.
+- Added throttling, debounce logic, and guards to prevent redundant redraws and improve responsiveness.
 
-**Linked plugin reliability**
-- Scatter chart plugins now re-run observer setup after dynamic plugin loading, ensuring the cell gallery reflects scatter selections as soon as the link toggle is enabled and avoiding duplicate callbacks when plugins refresh.
-- Added regression coverage in `tests/test_chart_footer_behavior.py` for both linked and unlinked flows, alongside lightweight imaging stubs that keep the fast suite dependency-light.
+**UI and Plugin Improvements**
+- Consolidated and refined plugin layouts to prevent overflow and improve usability.
+- Reorganized channel and pixel annotation panels with clearer controls and consistent palette management.
+- Added cache configuration to advanced settings and maintained test coverage for layout stability.
 
-**Rendering & tests**
-- Extended `_finalise_array` to return scale bar specifications, introduced `_render_with_scale_bar`/`_write_pdf_with_scale_bar`, and added fallbacks for environments lacking full Matplotlib bindings.
-- Added `tests/test_scale_bar_helper.py` to lock in rounding behaviour and effective pixel sizing, alongside updates to the existing batch export suite (with fresh ipywidgets/matplotlib stubs) to cover the new pipeline.
-- Extra regression coverage ensures non-unity downsample factors stay accurate in both helper calculations and viewer rendering.
-
-**FOV detection filtering**
-- Enhanced FOV detection to only recognize directories containing .tif or .tiff files as valid FOVs, preventing misclassification of folders like '.ueler' that lack image data.
-- Added comprehensive unit tests to validate the filtering logic and ensure no regressions in existing functionality.
-
-**Plugin layout refinements**
-- Introduced shared layout helpers for ipywidgets containers and applied them to the ROI Manager, Batch Export, and Go To plugins so control rows wrap cleanly without producing horizontal scrollbars.
-- Tightened button groups and selectors to flex within their parents, eliminating the ~5 % overflow scroll bars called out in issue #39.
-
-**Verification**
-- `python -m unittest tests.test_scale_bar_helper tests.test_export_fovs_batch`
-- `python -m unittest tests.test_export_fovs_batch`
-- `python -m unittest tests.test_fov_detection`
+**Testing and Documentation**
+- Extensive new unit tests for rendering, ROI management, caching, palettes, and scale bars.
+- Updated documentation explaining FOV downsampling and rendering behavior.
 
 ## Earlier Updates  
 

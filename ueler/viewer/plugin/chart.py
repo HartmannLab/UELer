@@ -63,6 +63,7 @@ class ChartDisplay(PluginBase):
         self.point_size = 10.0
         self.histogram_line = None
         self.cutoff: Optional[float] = None
+        self._active_histogram_column: Optional[str] = None
 
         self.selected_indices: Observable = Observable(set())
 
@@ -88,6 +89,8 @@ class ChartDisplay(PluginBase):
         )
         self._section_location = "vertical"
 
+        self.single_point_click_state = 0
+
         self._wire_events()
         self._build_layout()
         self.setup_widget_observers()
@@ -100,6 +103,9 @@ class ChartDisplay(PluginBase):
         self.ui_component.trace_button.on_click(self.trace_cells)
         self.ui_component.point_size_slider.observe(
             self._on_point_size_change, names="value"
+        )
+        self.ui_component.bin_slider.observe(
+            self._on_bin_slider_change, names="value"
         )
         self.ui_component.subset_on_dropdown.observe(
             self.on_subset_on_dropdown_change, names="value"
@@ -228,6 +234,8 @@ class ChartDisplay(PluginBase):
             self._render_histogram(x_col)
             return
 
+        self._active_histogram_column = None
+
         required_columns = [
             col for col in [x_col, y_col, c_col] if col and col != "None"
         ]
@@ -261,6 +269,7 @@ class ChartDisplay(PluginBase):
             self._plot_host.children = [HTML("<i>No rows available for histogram.</i>")]
             return
 
+        self._active_histogram_column = x_col
         self._hist_output.clear_output(wait=True)
         fig, ax = plt.subplots(figsize=(self.width * 0.9, self.height))
         with self._hist_output:
@@ -273,6 +282,10 @@ class ChartDisplay(PluginBase):
             ax.set_xlabel(x_col)
             ax.set_ylabel("Cell count")
             self.histogram_line = None
+            if self.cutoff is not None:
+                self.histogram_line = ax.axvline(
+                    self.cutoff, color="red", linestyle="--"
+                )
 
             def onclick(event):
                 if event.inaxes != ax:
@@ -295,6 +308,8 @@ class ChartDisplay(PluginBase):
             plt.show(fig)
 
         self._plot_host.children = [self._hist_output]
+        if self.cutoff is not None:
+            self.highlight_cells()
 
     # ------------------------------------------------------------------
     # Selection + linking helpers
@@ -305,6 +320,7 @@ class ChartDisplay(PluginBase):
         normalized = {
             int(idx) if isinstance(idx, np.integer) else idx for idx in indices
         }
+        self._update_single_point_state(normalized)
         self.selected_indices.value = normalized
         if self.ui_component.mv_linked_checkbox.value and len(normalized) == 1:
             self._focus_main_viewer(next(iter(normalized)))
@@ -319,6 +335,7 @@ class ChartDisplay(PluginBase):
         normalized = {
             int(idx) if isinstance(idx, np.integer) else idx for idx in indices
         }
+        self._update_single_point_state(normalized)
         for scatter in self._scatter_views.values():
             scatter.apply_selection(normalized, announce=False)
         self.selected_indices.value = normalized
@@ -591,12 +608,21 @@ class ChartDisplay(PluginBase):
         for scatter in self._scatter_views.values():
             scatter.set_point_size(self.point_size)
 
+    def _on_bin_slider_change(self, change) -> None:
+        if change.get("name") != "value":
+            return
+        if self._active_histogram_column is None:
+            return
+        self._render_histogram(self._active_histogram_column)
+
     def setup_observe(self):
         if self._observers_registered:
             return
 
         def forward_to_cell_gallery(indices):
             if self.ui_component.cell_gallery_linked_checkbox.value:
+                if self.single_point_click_state == 1:
+                    return
                 self.main_viewer.SidePlots.cell_gallery_output.set_selected_cells(
                     indices
                 )
@@ -607,6 +633,9 @@ class ChartDisplay(PluginBase):
     def color_points(self, selected_indices, selected_colors=None):
         _ = selected_colors  # legacy parameter retained for compatibility
         self._apply_external_selection(selected_indices)
+
+    def _update_single_point_state(self, normalized: Set[Union[int, str]]) -> None:
+        self.single_point_click_state = 1 if len(normalized) == 1 else 0
 
 
 class UiComponent:
@@ -655,7 +684,7 @@ class UiComponent:
             max=200,
             step=1,
             description="Bins:",
-            continuous_update=False,
+            continuous_update=True,
             style={'description_width': 'auto'},
             layout=Layout(width="250px"),
         )

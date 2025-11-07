@@ -36,7 +36,7 @@ from ipywidgets import (
 from matplotlib import pyplot as plt
 from matplotlib.colors import to_rgb
 
-from ..rendering import (
+from ueler.rendering import (
     AnnotationRenderSettings,
     ChannelRenderSettings,
     MaskOverlaySnapshot,
@@ -928,6 +928,7 @@ class BatchExportPlugin(PluginBase):
                     alpha=mask.alpha,
                     mode=mask.mode,
                     outline_thickness=self._mask_outline_thickness,
+                    downsample_factor=downsample,
                 )
                 for mask in mask_settings
             )

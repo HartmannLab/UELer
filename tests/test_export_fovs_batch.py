@@ -259,7 +259,7 @@ for widget_name in (
 
 from ueler.viewer.main_viewer import ImageMaskViewer
 from ueler.viewer.plugin.export_fovs import BatchExportPlugin
-from ueler.viewer.rendering import OverlaySnapshot
+from ueler.rendering import OverlaySnapshot
 
 
 class _StubWidget:

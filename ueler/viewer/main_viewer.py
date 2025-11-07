@@ -2,8 +2,11 @@
 
 import logging
 import os
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, List, Mapping, Optional
+
 import numpy as np
-from typing import Optional
 import matplotlib.pyplot as plt
 from matplotlib.colors import to_rgb
 from matplotlib.text import Annotation
@@ -27,6 +30,7 @@ from ueler.image_utils import (
     calculate_downsample_factor,
     generate_edges,
     get_axis_limits_with_padding,
+    select_downsample_factor,
 )
 from ueler.viewer.images import load_asset_bytes
 from ueler.viewer.scale_bar import compute_scale_bar_spec, effective_pixel_size_nm
@@ -44,8 +48,10 @@ from ueler.viewer.color_palettes import (
     apply_color_defaults,
     build_discrete_colormap,
     merge_palette_updates,
+    normalize_hex_color,
 )
-from ueler.viewer.rendering import (
+from ueler.viewer.mask_color_overlay import apply_registry_colors, collect_mask_regions
+from ueler.rendering import (
     AnnotationOverlaySnapshot,
     AnnotationRenderSettings,
     ChannelRenderSettings,
@@ -56,6 +62,15 @@ from ueler.viewer.rendering import (
 )
 from ueler.export.job import Job, JobItem
 # viewer/main_viewer.py
+
+from ueler.viewer.palette_store import (
+    PaletteStoreError,
+    load_registry as load_palette_registry,
+    read_palette_file,
+    resolve_palette_path,
+    save_registry as save_palette_registry,
+    write_palette_file,
+)
 
 from weakref import WeakKeyDictionary
 
@@ -74,6 +89,12 @@ __all__ = ["ImageMaskViewer"]
 
 
 logger = logging.getLogger(__name__)
+
+
+ANNOTATION_PALETTE_FILE_SUFFIX = ".pixelannotations.json"
+ANNOTATION_PALETTE_VERSION = "1.0.0"
+ANNOTATION_REGISTRY_FILENAME = "pixel_annotation_sets_index.json"
+ANNOTATION_PALETTE_FOLDER_NAME = "pixel_annotation_palettes"
 
 
 def _unique_annotation_values(array):
@@ -132,7 +153,7 @@ class ImageMaskViewer:
             raise ValueError("No FOVs found in the base folder.")
 
         # Initialize caches and other variables
-        self.max_cache_size = 3
+        self.max_cache_size = 100
 
         # Initialize current downsample factor
         self.downsample_factors = DOWNSAMPLE_FACTORS
@@ -149,6 +170,9 @@ class ImageMaskViewer:
         self.annotation_palettes = {}
         self.annotation_class_labels = {}
         self.annotation_class_ids = {}
+        self.annotation_palette_folder: Optional[Path] = None
+        self.annotation_palette_registry_records: Dict[str, Dict[str, str]] = {}
+        self.active_annotation_palette_set_name: Optional[str] = None
         self.annotation_display_enabled = False
         self.active_annotation_name: Optional[str] = None
         self.annotation_overlay_mode = "combined"
@@ -170,6 +194,7 @@ class ImageMaskViewer:
         # ROI management
         self.roi_manager = ROIManager(self.base_folder)
         self.roi_plugin: Optional[ROIManagerPlugin] = None
+        self.active_marker_set_name: Optional[str] = None
 
         # Initialize marker sets
         self.marker_sets = {}
@@ -188,15 +213,12 @@ class ImageMaskViewer:
         self.height, self.width = first_channel_image.shape
 
         # Calculate the downsample factor based on image size
-        self.current_downsample_factor = calculate_downsample_factor(self.width, self.height)
-
-        # Ensure the downsample factor is one of the allowed factors
-        if self.current_downsample_factor not in self.downsample_factors:
-            # Choose the closest allowed downsample factor
-            self.current_downsample_factor = max(
-                [factor for factor in self.downsample_factors if factor <= self.current_downsample_factor],
-                default=1
-            )
+        self.current_downsample_factor = select_downsample_factor(
+            self.width,
+            self.height,
+            max_dimension=512,
+            allowed_factors=self.downsample_factors,
+        )
 
         # Initialize image output and image display
         self.image_output = Output()
@@ -228,6 +250,7 @@ class ImageMaskViewer:
         )
         self.ui_component.annotation_editor_host.children = (self.annotation_palette_editor,)
         self.ui_component.annotation_editor_host.layout.display = ""
+        self._initialize_annotation_palette_manager()
         self._refresh_annotation_control_states()
 
         # Setup widget observers
@@ -548,13 +571,25 @@ class ImageMaskViewer:
 
         self.update_controls(None)
 
-        if self.initialized: 
+        if self.initialized:
             if self.SidePlots:
-                self.SidePlots.chart_output.highlight_cells()
-                if self.SidePlots.heatmap_output.ui_component.main_viewer_checkbox.value:
-                    self.SidePlots.heatmap_output.highlight_cells()
-                else:
+                chart_plugin = getattr(self.SidePlots, "chart_output", None)
+                heatmap_plugin = getattr(self.SidePlots, "heatmap_output", None)
+                heatmap_checkbox = (
+                    getattr(getattr(heatmap_plugin, "ui_component", None), "main_viewer_checkbox", None)
+                    if heatmap_plugin is not None
+                    else None
+                )
+                heatmap_linked = bool(heatmap_checkbox and heatmap_checkbox.value)
+
+                if not heatmap_linked:
                     self.image_display.clear_patches()
+
+                if chart_plugin is not None:
+                    chart_plugin.highlight_cells()
+
+                if heatmap_linked and heatmap_plugin is not None:
+                    heatmap_plugin.highlight_cells()
 
         ax = self.image_display.ax
 
@@ -945,13 +980,16 @@ class ImageMaskViewer:
                 self.ui_component.annotation_controls_header,
                 self.ui_component.annotation_display_checkbox,
                 self.ui_component.annotation_selector,
-                self.ui_component.annotation_overlay_mode,
                 self.ui_component.annotation_alpha_slider,
                 self.ui_component.annotation_label_mode,
                 self.ui_component.annotation_edit_button,
+                self.ui_component.annotation_palette_tab,
+                self.ui_component.annotation_palette_feedback,
             ]
+            self.ui_component.annotation_palette_tab.layout.display = ""
             self.ui_component.annotation_controls_box.children = tuple(annotation_widgets)
         else:
+            self.ui_component.annotation_palette_tab.layout.display = "none"
             self.ui_component.annotation_controls_box.children = (
                 self.ui_component.no_annotations_label,
             )
@@ -965,20 +1003,8 @@ class ImageMaskViewer:
         ):
             previous_title = self._control_section_titles[previous_index]
 
-        section_children = []
-        section_titles = []
-
-        if self.ui_component.channel_controls_box.children:
-            section_children.append(self.ui_component.channel_controls_box)
-            section_titles.append("Channels")
-
-        if self.annotations_available:
-            if not annotation_widgets:
-                self.ui_component.annotation_controls_box.children = (
-                    self.ui_component.no_annotations_label,
-                )
-            section_children.append(self.ui_component.annotation_controls_box)
-            section_titles.append("Annotations")
+        section_children = [self.ui_component.channel_section_panel]
+        section_titles = ["Channels"]
 
         if self.masks_available:
             if not mask_widgets:
@@ -988,9 +1014,17 @@ class ImageMaskViewer:
             section_children.append(self.ui_component.mask_controls_box)
             section_titles.append("Masks")
 
+        if self.annotations_available:
+            if not annotation_widgets:
+                self.ui_component.annotation_controls_box.children = (
+                    self.ui_component.no_annotations_label,
+                )
+            section_children.append(self.ui_component.annotation_controls_box)
+            section_titles.append("Pixel annotations")
+
         if not section_children:
             section_children = (
-                VBox([self.ui_component.empty_controls_placeholder], layout=Layout(width="98%")),
+                VBox([self.ui_component.empty_controls_placeholder], layout=Layout(width="100%")),
             )
             section_titles = ["Controls"]
 
@@ -1090,6 +1124,504 @@ class ImageMaskViewer:
 
         if edit_button is not None:
             edit_button.disabled = current_selection is None
+
+    # ------------------------------------------------------------------
+    # Annotation palette persistence
+    # ------------------------------------------------------------------
+    def _initialize_annotation_palette_manager(self) -> None:
+        ui = getattr(self, "ui_component", None)
+        if ui is None:
+            return
+
+        ui.annotation_palette_save_button.on_click(self.save_active_annotation_palette)
+        ui.annotation_palette_load_button.on_click(self.load_annotation_palette_from_ui)
+        ui.annotation_palette_change_folder_button.on_click(self._on_annotation_palette_change_folder_clicked)
+        ui.annotation_palette_manual_apply.on_click(self._apply_annotation_palette_manual_folder)
+        ui.annotation_palette_manual_cancel.on_click(self._cancel_annotation_palette_manual_folder)
+        ui.annotation_palette_apply_saved_button.on_click(self.apply_saved_annotation_palette)
+        ui.annotation_palette_overwrite_button.on_click(self.overwrite_saved_annotation_palette)
+        ui.annotation_palette_delete_button.on_click(self.delete_saved_annotation_palette)
+
+        folder = self._determine_annotation_palette_folder()
+        if folder is None:
+            folder = Path.cwd()
+            ui.annotation_palette_manual_box.layout.display = "block"
+            self._log_annotation_palette(
+                "Pixel annotation palette directory unavailable; enter a custom location.",
+                error=True,
+                clear=True,
+            )
+        else:
+            ui.annotation_palette_manual_box.layout.display = "none"
+
+        self.annotation_palette_folder = folder.resolve()
+        ui.annotation_palette_folder_display.value = str(self.annotation_palette_folder)
+        self._load_annotation_palette_registry(self.annotation_palette_folder)
+
+    def _determine_annotation_palette_folder(self) -> Optional[Path]:
+        base_folder = getattr(self, "base_folder", None)
+        if not base_folder:
+            return None
+        base_path = Path(base_folder).expanduser()
+        target = base_path / ".UELer" / ANNOTATION_PALETTE_FOLDER_NAME
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+        except Exception:  # pragma: no cover - fallback for restricted environments
+            return None
+        return target
+
+    def _load_annotation_palette_registry(self, folder: Path) -> None:
+        folder = folder.expanduser().resolve()
+        self.annotation_palette_folder = folder
+        ui = self.ui_component
+        ui.annotation_palette_folder_display.value = str(folder)
+        try:
+            records = load_palette_registry(folder, ANNOTATION_REGISTRY_FILENAME)
+        except PaletteStoreError as err:
+            self._log_annotation_palette(f"Failed to load palette registry: {err}", error=True, clear=True)
+            records = {}
+        self.annotation_palette_registry_records = records
+        for record in self.annotation_palette_registry_records.values():
+            record.setdefault("folder", str(folder))
+        self._refresh_annotation_palette_dropdown()
+        load_picker = getattr(ui, "annotation_palette_load_picker", None)
+        if load_picker is not None:
+            try:
+                load_picker.reset(path=str(folder))
+            except Exception:  # pragma: no cover - FileChooser may not expose reset
+                pass
+
+    def _refresh_annotation_palette_dropdown(self) -> None:
+        dropdown = self.ui_component.annotation_palette_saved_sets_dropdown
+        if not self.annotation_palette_registry_records:
+            dropdown.options = [("No saved sets", "")]
+            dropdown.value = ""
+            return
+
+        entries = []
+        for name in sorted(self.annotation_palette_registry_records.keys()):
+            record = self.annotation_palette_registry_records.get(name, {})
+            annotation = (record.get("annotation") or "").strip()
+            label = f"{name} ({annotation})" if annotation else name
+            entries.append((label, name))
+        dropdown.options = [("Select a set", "")] + entries
+        dropdown.value = ""
+
+    def _log_annotation_palette(self, message: str, *, error: bool = False, clear: bool = False) -> None:
+        output = getattr(self.ui_component, "annotation_palette_feedback", None)
+        if output is None:
+            return
+        with output:
+            if clear:
+                output.clear_output(wait=True)
+            prefix = "⚠️ " if error else ""
+            print(f"{prefix}{message}")
+
+    def save_active_annotation_palette(self, _button) -> None:
+        try:
+            ui = self.ui_component
+            name = ui.annotation_palette_name_input.value.strip()
+            if not name:
+                raise PaletteStoreError("Please provide a name for the palette.")
+            if self.annotation_palette_folder is None:
+                raise PaletteStoreError("Select a palette folder before saving.")
+            annotation = (self.active_annotation_name or '').strip()
+            if not annotation:
+                raise PaletteStoreError("Select an annotation before saving a palette.")
+
+            self._ensure_annotation_metadata(annotation)
+            class_ids = list(self.annotation_class_ids.get(annotation, []))
+            if not class_ids:
+                raise PaletteStoreError(f"No classes detected for annotation '{annotation}'.")
+
+            palette = apply_color_defaults(class_ids, self.annotation_palettes.get(annotation, {}))
+            labels = dict(self.annotation_class_labels.get(annotation, {}))
+            timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+            payload = {
+                "name": name,
+                "version": ANNOTATION_PALETTE_VERSION,
+                "annotation": annotation,
+                "class_ids": list(class_ids),
+                "default_color": DEFAULT_COLOR,
+                "colors": dict(palette),
+                "labels": labels,
+                "label_mode": self.annotation_label_display_mode,
+                "saved_at": timestamp,
+            }
+
+            folder = self.annotation_palette_folder
+            path = resolve_palette_path(
+                folder,
+                name,
+                ANNOTATION_PALETTE_FILE_SUFFIX,
+                default_slug="pixel-annotations",
+            )
+            write_palette_file(path, payload)
+            self._update_annotation_palette_registry(folder, name, path, annotation, timestamp)
+            self.active_annotation_palette_set_name = name
+            self._log_annotation_palette(
+                f"Saved palette '{name}' for annotation '{annotation}'.",
+                clear=True,
+            )
+        except Exception as err:  # pylint: disable=broad-except
+            self._log_annotation_palette(f"Failed to save palette: {err}", error=True, clear=True)
+
+    def _update_annotation_palette_registry(
+        self,
+        folder: Path,
+        name: str,
+        path: Path,
+        annotation: str,
+        timestamp: str,
+    ) -> None:
+        try:
+            records = load_palette_registry(folder, ANNOTATION_REGISTRY_FILENAME)
+        except PaletteStoreError:
+            records = {}
+        records[name] = {
+            "name": name,
+            "path": str(path.resolve()),
+            "annotation": annotation,
+            "last_modified": timestamp,
+            "folder": str(folder.resolve()),
+        }
+        save_palette_registry(folder, ANNOTATION_REGISTRY_FILENAME, records)
+        if (
+            self.annotation_palette_folder is not None
+            and folder.resolve() == self.annotation_palette_folder.resolve()
+        ):
+            self.annotation_palette_registry_records = records
+            self._refresh_annotation_palette_dropdown()
+
+    def get_active_annotation_palette_set(self) -> str:
+        return self.active_annotation_palette_set_name or ""
+
+    def resolve_annotation_palette_snapshot(self, name: str) -> Optional[AnnotationOverlaySnapshot]:
+        candidate = (name or "").strip()
+        if not candidate:
+            return None
+        record = self.annotation_palette_registry_records.get(candidate)
+        if record is None:
+            return None
+        path = Path(record.get("path", "")).expanduser()
+        if not path.exists():
+            return None
+        try:
+            payload = read_palette_file(path)
+        except Exception:  # pragma: no cover - IO errors
+            return None
+
+        annotation = str(payload.get("annotation") or "").strip()
+        if not annotation:
+            return None
+
+        class_ids_payload = payload.get("class_ids", [])
+        try:
+            class_ids = [int(value) for value in class_ids_payload]
+        except Exception:  # pragma: no cover - invalid payload
+            class_ids = []
+        if not class_ids:
+            return None
+
+        colors_payload = payload.get("colors", {})
+        if not isinstance(colors_payload, dict):
+            colors_payload = {}
+        normalized_colors = {
+            str(key): normalize_hex_color(value) or DEFAULT_COLOR
+            for key, value in colors_payload.items()
+        }
+
+        palette = apply_color_defaults(class_ids, normalized_colors)
+        return AnnotationOverlaySnapshot(
+            name=annotation,
+            alpha=float(payload.get("alpha", self.annotation_overlay_alpha)),
+            mode=str(payload.get("mode", self.annotation_overlay_mode) or "combined"),
+            palette=dict(palette),
+        )
+
+    def apply_annotation_palette_set(self, name: str) -> bool:
+        if not name:
+            return False
+
+        record = self.annotation_palette_registry_records.get(name)
+        if record is None:
+            return False
+
+        path = Path(record.get("path", "")).expanduser()
+        if not path.exists():
+            return False
+
+        try:
+            self._load_annotation_palette(path)
+        except Exception:  # pragma: no cover - delegated error reporting
+            return False
+
+        self.active_annotation_palette_set_name = name
+        dropdown = getattr(self.ui_component, "annotation_palette_saved_sets_dropdown", None)
+        if dropdown is not None:
+            try:
+                option_values = [value if isinstance(value, str) else value[1] for value in getattr(dropdown, "options", [])]
+                if name in option_values:
+                    dropdown.value = name
+            except Exception:
+                pass
+        return True
+
+    def get_mask_visibility_state(self) -> Dict[str, bool]:
+        controls = getattr(self.ui_component, "mask_display_controls", {})
+        if not isinstance(controls, dict):
+            return {}
+        state: Dict[str, bool] = {}
+        for name, checkbox in controls.items():
+            try:
+                state[name] = bool(getattr(checkbox, "value", False))
+            except Exception:  # pragma: no cover - widget access guard
+                continue
+        return state
+
+    def apply_mask_visibility_state(self, state: Mapping[str, object]) -> bool:
+        if not state:
+            return False
+
+        controls = getattr(self.ui_component, "mask_display_controls", {})
+        if not isinstance(controls, dict) or not controls:
+            return False
+
+        matched_any = False
+        updated = False
+        for name, desired in state.items():
+            checkbox = controls.get(name)
+            if checkbox is None:
+                continue
+            matched_any = True
+            desired_value = bool(desired)
+            try:
+                current_value = bool(getattr(checkbox, "value", False))
+            except Exception:  # pragma: no cover - widget guard
+                current_value = False
+            if current_value != desired_value:
+                checkbox.value = desired_value
+                updated = True
+
+        if updated:
+            try:
+                self.update_display(self.current_downsample_factor)
+            except Exception:  # pragma: no cover - downstream update guard
+                pass
+
+        return matched_any or updated
+
+    def _get_annotation_palette_load_path(self) -> Optional[Path]:
+        picker = getattr(self.ui_component, "annotation_palette_load_picker", None)
+        if picker is not None:
+            selected = getattr(picker, "selected", None)
+            if selected:
+                return Path(selected).expanduser()
+        path_input = getattr(self.ui_component, "annotation_palette_load_path_input", None)
+        if path_input is not None:
+            value = path_input.value.strip()
+            if value:
+                return Path(value).expanduser()
+        return None
+
+    def load_annotation_palette_from_ui(self, _button) -> None:
+        try:
+            path = self._get_annotation_palette_load_path()
+            if path is None:
+                raise PaletteStoreError("Select a palette file to load.")
+            self._load_annotation_palette(path)
+        except Exception as err:  # pylint: disable=broad-except
+            self._log_annotation_palette(f"Failed to load palette: {err}", error=True, clear=True)
+
+    def _load_annotation_palette(self, path: Path) -> None:
+        if not path.exists():
+            raise PaletteStoreError(f"Palette file '{path}' was not found.")
+
+        payload = read_palette_file(path)
+        annotation = str(payload.get("annotation") or "").strip()
+        if not annotation:
+            raise PaletteStoreError("Palette file does not specify an annotation name.")
+
+        if annotation not in self.annotation_names_set:
+            raise PaletteStoreError(
+                f"Annotation '{annotation}' is not available in the current dataset."
+            )
+
+        class_ids_payload = payload.get("class_ids", [])
+        class_ids: List[int] = []
+        for item in class_ids_payload:
+            try:
+                class_ids.append(int(item))
+            except (TypeError, ValueError) as err:
+                raise PaletteStoreError("Palette file contains invalid class identifiers.") from err
+
+        colors_payload = payload.get("colors", {})
+        if not isinstance(colors_payload, dict):
+            raise PaletteStoreError("Palette file stores colors in an unexpected format.")
+        normalized_colors = {
+            str(key): normalize_hex_color(value) or DEFAULT_COLOR
+            for key, value in colors_payload.items()
+        }
+
+        if not class_ids:
+            inferred_ids = []
+            for key in normalized_colors.keys():
+                try:
+                    inferred_ids.append(int(key))
+                except (TypeError, ValueError):
+                    continue
+            class_ids = sorted(set(inferred_ids))
+
+        if not class_ids:
+            raise PaletteStoreError("Palette file does not declare any class identifiers.")
+
+        palette = apply_color_defaults(class_ids, normalized_colors)
+        labels_payload = payload.get("labels", {})
+        labels = {str(key): str(value) for key, value in labels_payload.items()} if isinstance(labels_payload, dict) else {}
+
+        label_mode = payload.get("label_mode")
+        if isinstance(label_mode, str) and label_mode in {"id", "label"}:
+            self.annotation_label_display_mode = label_mode
+
+        self.annotation_class_ids[annotation] = list(class_ids)
+        self.annotation_palettes[annotation] = dict(palette)
+        if labels:
+            self.annotation_class_labels[annotation] = labels
+
+        selector = self.ui_component.annotation_selector
+        selector.value = annotation
+        self.active_annotation_name = annotation
+
+        self._refresh_annotation_control_states()
+        if self.annotation_display_enabled:
+            self.update_display(self.current_downsample_factor)
+
+        palette_name = str(payload.get("name", path.stem))
+        self.active_annotation_palette_set_name = palette_name
+
+        self._log_annotation_palette(
+            f"Loaded palette '{payload.get('name', path.stem)}' for annotation '{annotation}'.",
+            clear=True,
+        )
+
+    def _get_selected_annotation_palette_record(self) -> Optional[Dict[str, str]]:
+        dropdown = self.ui_component.annotation_palette_saved_sets_dropdown
+        name = dropdown.value
+        if not name:
+            return None
+        return self.annotation_palette_registry_records.get(name)
+
+    def apply_saved_annotation_palette(self, _button) -> None:
+        try:
+            record = self._get_selected_annotation_palette_record()
+            if record is None:
+                raise PaletteStoreError("Select a saved palette to apply.")
+            path = Path(record.get("path", "")).expanduser()
+            if not path.exists():
+                raise PaletteStoreError(f"Palette file '{path}' was not found.")
+            self._load_annotation_palette(path)
+            dropdown = self.ui_component.annotation_palette_saved_sets_dropdown
+            selected_name = dropdown.value or ""
+            if not selected_name:
+                selected_name = record.get("annotation") or path.stem
+            self.active_annotation_palette_set_name = selected_name
+        except Exception as err:  # pylint: disable=broad-except
+            self._log_annotation_palette(f"Failed to apply palette: {err}", error=True, clear=True)
+
+    def overwrite_saved_annotation_palette(self, _button) -> None:
+        try:
+            record = self._get_selected_annotation_palette_record()
+            if record is None:
+                raise PaletteStoreError("Select a saved palette to overwrite.")
+            annotation = (self.active_annotation_name or '').strip()
+            if not annotation:
+                raise PaletteStoreError("Select an annotation before overwriting a palette.")
+
+            self._ensure_annotation_metadata(annotation)
+            class_ids = list(self.annotation_class_ids.get(annotation, []))
+            if not class_ids:
+                raise PaletteStoreError(f"No classes detected for annotation '{annotation}'.")
+
+            palette = apply_color_defaults(class_ids, self.annotation_palettes.get(annotation, {}))
+            labels = dict(self.annotation_class_labels.get(annotation, {}))
+            timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+            path = Path(record.get("path", "")).expanduser()
+            if not str(path):
+                raise PaletteStoreError("Saved palette path is missing.")
+
+            payload = {
+                "name": self.ui_component.annotation_palette_saved_sets_dropdown.value,
+                "version": ANNOTATION_PALETTE_VERSION,
+                "annotation": annotation,
+                "class_ids": list(class_ids),
+                "default_color": DEFAULT_COLOR,
+                "colors": dict(palette),
+                "labels": labels,
+                "label_mode": self.annotation_label_display_mode,
+                "saved_at": timestamp,
+            }
+
+            write_palette_file(path, payload)
+            folder = Path(record.get("folder", path.parent)).expanduser()
+            name = self.ui_component.annotation_palette_saved_sets_dropdown.value
+            self._update_annotation_palette_registry(folder, name, path, annotation, timestamp)
+            self._log_annotation_palette("Palette overwritten successfully.", clear=True)
+        except Exception as err:  # pylint: disable=broad-except
+            self._log_annotation_palette(f"Failed to overwrite palette: {err}", error=True, clear=True)
+
+    def delete_saved_annotation_palette(self, _button) -> None:
+        try:
+            record = self._get_selected_annotation_palette_record()
+            if record is None:
+                raise PaletteStoreError("Select a saved palette to delete.")
+
+            path = Path(record.get("path", "")).expanduser()
+            if path.exists():
+                path.unlink()
+
+            folder = Path(record.get("folder", self.annotation_palette_folder or path.parent)).expanduser()
+            records = load_palette_registry(folder, ANNOTATION_REGISTRY_FILENAME)
+            name = self.ui_component.annotation_palette_saved_sets_dropdown.value
+            records.pop(name, None)
+            save_palette_registry(folder, ANNOTATION_REGISTRY_FILENAME, records)
+
+            if (
+                self.annotation_palette_folder is not None
+                and folder.resolve() == self.annotation_palette_folder.resolve()
+            ):
+                self.annotation_palette_registry_records = records
+                self._refresh_annotation_palette_dropdown()
+
+            self._log_annotation_palette("Deleted saved palette.", clear=True)
+        except Exception as err:  # pylint: disable=broad-except
+            self._log_annotation_palette(f"Failed to delete palette: {err}", error=True, clear=True)
+
+    def _on_annotation_palette_change_folder_clicked(self, _button) -> None:
+        self.ui_component.annotation_palette_manual_box.layout.display = "block"
+
+    def _apply_annotation_palette_manual_folder(self, _button) -> None:
+        raw_value = self.ui_component.annotation_palette_manual_input.value.strip()
+        if not raw_value:
+            self._log_annotation_palette("Enter a folder path to use for palettes.", error=True, clear=True)
+            return
+
+        folder = Path(raw_value).expanduser()
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except Exception as err:  # pylint: disable=broad-except
+            self._log_annotation_palette(f"Could not use folder '{folder}': {err}", error=True, clear=True)
+            return
+
+        self.ui_component.annotation_palette_manual_input.value = ""
+        self.ui_component.annotation_palette_manual_box.layout.display = "none"
+        self._load_annotation_palette_registry(folder)
+        self._log_annotation_palette(f"Using custom palette directory {folder}", clear=True)
+
+    def _cancel_annotation_palette_manual_folder(self, _button) -> None:
+        self.ui_component.annotation_palette_manual_input.value = ""
+        self.ui_component.annotation_palette_manual_box.layout.display = "none"
 
     def on_annotation_toggle(self, change):
         self.annotation_display_enabled = bool(change.get("new"))
@@ -1335,10 +1867,19 @@ class ImageMaskViewer:
                         color=to_rgb(color_value),
                         mode="outline",
                         outline_thickness=int(self.mask_outline_thickness),
+                        downsample_factor=downsample_factor,
                     )
                 )
 
-        return render_fov_to_array(
+            label_cache = self.label_masks_cache.get(current_fov, {})
+            mask_regions = collect_mask_regions(
+                label_cache,
+                selected_masks,
+                downsample_factor,
+                region_ds,
+            )
+
+        combined = render_fov_to_array(
             current_fov,
             fov_images,
             selected_channels,
@@ -1349,6 +1890,44 @@ class ImageMaskViewer:
             annotation=annotation_settings,
             masks=mask_settings,
         )
+
+        painter_enabled = self._is_mask_painter_enabled()
+        if painter_enabled and mask_regions:
+            # Exclude currently selected cells so they remain white-highlighted
+            excluded = set(self.image_display.selected_cells) if hasattr(self.image_display, 'selected_cells') else set()
+            combined = apply_registry_colors(
+                combined,
+                fov=current_fov,
+                mask_regions=mask_regions,
+                outline_thickness=int(self.mask_outline_thickness),
+                downsample_factor=downsample_factor,
+                exclude_ids=excluded,
+            )
+
+        return combined
+
+    # ------------------------------------------------------------------
+    # Mask painter integration
+    # ------------------------------------------------------------------
+    def _is_mask_painter_enabled(self) -> bool:
+        """Check if the mask painter plugin is enabled."""
+        sideplots = getattr(self, "SidePlots", None)
+        if sideplots is None:
+            return False
+        
+        painter = getattr(sideplots, "mask_painter_output", None)
+        if painter is None:
+            return False
+        
+        ui = getattr(painter, "ui_component", None)
+        if ui is None:
+            return False
+        
+        checkbox = getattr(ui, "enabled_checkbox", None)
+        if checkbox is None:
+            return False
+        
+        return bool(getattr(checkbox, "value", False))
 
     # ------------------------------------------------------------------
     # Export overlay helpers
@@ -1473,6 +2052,7 @@ class ImageMaskViewer:
                         alpha=float(mask_snapshot.alpha),
                         mode=str(mask_snapshot.mode),
                         outline_thickness=int(getattr(mask_snapshot, "outline_thickness", 1)),
+                        downsample_factor=downsample_factor,
                     )
                 )
 
@@ -1581,6 +2161,8 @@ class ImageMaskViewer:
         sideplots = getattr(self, "SidePlots", None)
         if sideplots is None:
             return
+        
+        # Notify export plugin
         plugin = getattr(sideplots, "export_fovs_output", None)
         if hasattr(plugin, "on_viewer_mask_outline_change"):
             try:
@@ -1588,6 +2170,15 @@ class ImageMaskViewer:
             except Exception:
                 if self._debug:
                     print("[viewer] Plugin notification for mask outline change failed")
+        
+        # Notify cell gallery plugin
+        cell_gallery_plugin = getattr(sideplots, "cell_gallery_output", None)
+        if hasattr(cell_gallery_plugin, "on_viewer_mask_outline_change"):
+            try:
+                cell_gallery_plugin.on_viewer_mask_outline_change(thickness)
+            except Exception:
+                if self._debug:
+                    print("[viewer] Cell gallery notification for mask outline change failed")
 
     def on_plugin_mask_outline_change(self, thickness: int) -> None:
         try:
@@ -1717,55 +2308,84 @@ class ImageMaskViewer:
         self.ui_component.delete_confirmation_checkbox.value = False  # Reset the checkbox
         print(f"Marker set '{set_name}' deleted.")
 
+    def _apply_marker_set(self, set_name: str, *, silent: bool = False) -> bool:
+        if not set_name:
+            if not silent:
+                print("Please provide a valid marker set name.")
+            return False
+
+        marker_set = self.marker_sets.get(set_name)
+        if marker_set is None:
+            if not silent:
+                print(f"Marker set '{set_name}' not found.")
+            return False
+
+        selected_channels = tuple(marker_set.get('selected_channels', ()))
+        if not selected_channels:
+            if not silent:
+                print(f"Marker set '{set_name}' has no channels saved.")
+            return False
+
+        channel_settings = marker_set.get('channel_settings', {}) or {}
+
+        for ch in selected_channels:
+            settings = channel_settings.get(ch, {}) if isinstance(channel_settings, dict) else {}
+            saved_max = settings.get('contrast_max') if isinstance(settings, dict) else None
+            if saved_max is not None:
+                self._merge_channel_max(ch, saved_max, sync=False)
+
+        selector = getattr(self.ui_component, 'channel_selector', None)
+        if selector is None:
+            if not silent:
+                print("Channel selector widget unavailable; cannot load marker set.")
+            return False
+
+        selector.value = selected_channels
+        self.update_controls(None)
+
+        color_controls = getattr(self.ui_component, 'color_controls', {}) or {}
+        min_controls = getattr(self.ui_component, 'contrast_min_controls', {}) or {}
+        max_controls = getattr(self.ui_component, 'contrast_max_controls', {}) or {}
+
+        for ch in selected_channels:
+            settings = channel_settings.get(ch, {}) if isinstance(channel_settings, dict) else {}
+
+            self._sync_channel_controls(ch)
+
+            color_control = color_controls.get(ch)
+            min_control = min_controls.get(ch)
+            max_control = max_controls.get(ch)
+
+            if color_control is not None and isinstance(settings, dict) and 'color' in settings:
+                color_control.value = settings['color']
+            if min_control is not None and isinstance(settings, dict) and 'contrast_min' in settings:
+                min_control.value = settings['contrast_min']
+            if max_control is not None and isinstance(settings, dict) and 'contrast_max' in settings:
+                max_control.value = settings['contrast_max']
+
+            if isinstance(settings, dict) and 'contrast_max' in settings:
+                self._merge_channel_max(ch, settings['contrast_max'])
+
+        try:
+            self.update_display(self.current_downsample_factor)
+        except Exception:  # pragma: no cover - rendering safeguards
+            if not silent:
+                print("Marker set applied, but display refresh failed.")
+
+        self.active_marker_set_name = set_name
+        if not silent:
+            print(f"Marker set '{set_name}' loaded.")
+        return True
+
     def load_marker_set(self, button):
         set_name = self.ui_component.marker_set_dropdown.value
         if not set_name:
             print("No marker set selected to load.")
             return
-        if set_name not in self.marker_sets:
-            print(f"Marker set '{set_name}' not found.")
-            return
+        self._apply_marker_set(set_name, silent=False)
 
-        marker_set = self.marker_sets[set_name]
-        selected_channels = marker_set['selected_channels']
-        channel_settings = marker_set['channel_settings']
-
-        # Ensure cached maxima accommodate saved settings before controls refresh
-        for ch in selected_channels:
-            settings = channel_settings.get(ch, {})
-            saved_max = settings.get('contrast_max')
-            if saved_max is not None:
-                self._merge_channel_max(ch, saved_max, sync=False)
-
-        # Update channel selector
-        self.ui_component.channel_selector.value = tuple(selected_channels)
-
-        # Update controls
-        self.update_controls(None)
-
-        for ch in selected_channels:
-            settings = channel_settings.get(ch, {})
-
-            # Ensure slider ranges expand to cover any stored maxima
-            self._sync_channel_controls(ch)
-
-            color_control = self.ui_component.color_controls.get(ch) if hasattr(self.ui_component, 'color_controls') else None
-            min_control = self.ui_component.contrast_min_controls.get(ch) if hasattr(self.ui_component, 'contrast_min_controls') else None
-            max_control = self.ui_component.contrast_max_controls.get(ch) if hasattr(self.ui_component, 'contrast_max_controls') else None
-
-            if color_control is not None and 'color' in settings:
-                color_control.value = settings['color']
-            if min_control is not None and 'contrast_min' in settings:
-                min_control.value = settings['contrast_min']
-            if max_control is not None and 'contrast_max' in settings:
-                max_control.value = settings['contrast_max']
-
-            if 'contrast_max' in settings:
-                self._merge_channel_max(ch, settings['contrast_max'])
-
-        # Update display
-        self.update_display(self.current_downsample_factor)
-        print(f"Marker set '{set_name}' loaded.")
+    def apply_marker_set_by_name(self, set_name: str) -> bool:
+        return self._apply_marker_set(set_name, silent=True)
 
     def update_marker_set_dropdown(self):
         if self.marker_sets:
