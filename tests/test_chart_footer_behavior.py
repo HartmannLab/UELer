@@ -3,6 +3,8 @@ import types
 import unittest
 from types import SimpleNamespace
 
+import tests.bootstrap  # noqa: F401  # Ensure shared test bootstrap runs
+
 # ---------------------------------------------------------------------------
 # Optional dependency stubs
 # ---------------------------------------------------------------------------
@@ -58,6 +60,66 @@ if "numpy" not in sys.modules:  # pragma: no cover - stub fallback
     numpy_stub.greater = staticmethod(lambda a, b: a > b)
     numpy_stub.less = staticmethod(lambda a, b: a < b)
     sys.modules["numpy"] = numpy_stub
+
+if "dask" not in sys.modules:  # pragma: no cover - stub fallback
+    dask_stub = types.ModuleType("dask")
+
+    def _noop_delayed(func):
+        return func
+
+    dask_stub.delayed = _noop_delayed
+    sys.modules["dask"] = dask_stub
+
+if "seaborn_image" not in sys.modules:  # pragma: no cover - stub fallback
+    seaborn_stub = types.ModuleType("seaborn_image")
+    seaborn_stub.imshow = lambda *_, **__: None
+    sys.modules["seaborn_image"] = seaborn_stub
+
+if "tifffile" not in sys.modules:  # pragma: no cover - stub fallback
+    tifffile_stub = types.ModuleType("tifffile")
+
+    class _StubTiffFile:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    tifffile_stub.TiffFile = _StubTiffFile
+    sys.modules["tifffile"] = tifffile_stub
+
+if "cv2" not in sys.modules:  # pragma: no cover - stub fallback
+    cv2_stub = types.ModuleType("cv2")
+    sys.modules["cv2"] = cv2_stub
+
+if "skimage" not in sys.modules:  # pragma: no cover - stub fallback
+    skimage_stub = types.ModuleType("skimage")
+    segmentation_stub = types.ModuleType("skimage.segmentation")
+    segmentation_stub.find_boundaries = lambda *_, **__: None
+    io_stub = types.ModuleType("skimage.io")
+    io_stub.imread = lambda *_, **__: None
+    io_stub.imsave = lambda *_, **__: None
+    exposure_stub = types.ModuleType("skimage.exposure")
+    exposure_stub.rescale_intensity = lambda image, **_: image
+    transform_stub = types.ModuleType("skimage.transform")
+    transform_stub.resize = lambda *_, **__: None
+    color_stub = types.ModuleType("skimage.color")
+    color_stub.label2rgb = lambda *_, **__: None
+    measure_stub = types.ModuleType("skimage.measure")
+    measure_stub.regionprops_table = lambda *_, **__: {}
+    draw_stub = types.ModuleType("skimage.draw")
+    draw_stub.circle_perimeter = lambda *_, **__: ([], [])
+    sys.modules["skimage"] = skimage_stub
+    sys.modules["skimage.segmentation"] = segmentation_stub
+    sys.modules["skimage.io"] = io_stub
+    sys.modules["skimage.exposure"] = exposure_stub
+    sys.modules["skimage.transform"] = transform_stub
+    sys.modules["skimage.color"] = color_stub
+    sys.modules["skimage.measure"] = measure_stub
+    sys.modules["skimage.draw"] = draw_stub
 
 try:  # pragma: no cover - prefer real library when available
     import ipywidgets as widgets  # type: ignore
@@ -179,8 +241,17 @@ if "matplotlib.pyplot" not in sys.modules:  # pragma: no cover - stub fallback
     pyplot_stub.subplots = _subplots
     pyplot_stub.show = _show
     matplotlib_stub.pyplot = pyplot_stub
+    font_manager_stub = types.ModuleType("matplotlib.font_manager")
+    font_manager_stub.FontProperties = type("FontProperties", (), {"__init__": lambda self, *_, **__: None})
+    matplotlib_stub.font_manager = font_manager_stub
     sys.modules["matplotlib"] = matplotlib_stub
     sys.modules["matplotlib.pyplot"] = pyplot_stub
+    sys.modules["matplotlib.font_manager"] = font_manager_stub
+
+if "matplotlib.font_manager" not in sys.modules:  # pragma: no cover - stub fallback
+    font_manager_stub = types.ModuleType("matplotlib.font_manager")
+    font_manager_stub.FontProperties = type("FontProperties", (), {"__init__": lambda self, *_, **__: None})
+    sys.modules["matplotlib.font_manager"] = font_manager_stub
 
 if "pandas" not in sys.modules:  # pragma: no cover - stub fallback
     pandas_stub = types.ModuleType("pandas")
@@ -290,6 +361,8 @@ class _StubViewer:
         self._debug = False
         self.base_folder = "/tmp"
         self.cell_table = pd.DataFrame({"x": [1, 2], "y": [3, 4]})
+        self.SidePlots = SimpleNamespace(cell_gallery_output=_StubCellGallery())
+        self.BottomPlots = SimpleNamespace()
         self.refresh_calls = 0
 
     def refresh_bottom_panel(self, ordering=None):
@@ -346,6 +419,14 @@ class _StubHeatmap(PluginBase):
             self.plot_section.children = children + (self.plot_output,)
 
 
+class _StubCellGallery:
+    def __init__(self):
+        self.received = None
+
+    def set_selected_cells(self, indices):
+        self.received = indices
+
+
 class _ViewerWithFooter(_StubViewer):
     def __init__(self):
         super().__init__()
@@ -366,6 +447,55 @@ class ChartDisplayFooterTests(unittest.TestCase):
         self.viewer = _StubViewer()
         self.chart = ChartDisplay(self.viewer, width=6, height=4)
         self.viewer.refresh_calls = 0
+
+    def test_selection_does_not_forward_when_unlinked(self):
+        gallery = self.viewer.SidePlots.cell_gallery_output
+        self.chart.setup_observe()
+        self.chart.ui_component.cell_gallery_linked_checkbox.value = False
+
+        self.chart.selected_indices.value = {1}
+
+        self.assertIsNone(gallery.received)
+
+    def test_single_point_click_state_tracks_widget_selection(self):
+        self.chart._on_scatter_selection({7}, "widget")
+        self.assertEqual(self.chart.single_point_click_state, 1)
+
+        self.chart._on_scatter_selection({7, 8}, "widget")
+        self.assertEqual(self.chart.single_point_click_state, 0)
+
+        self.chart._on_scatter_selection(set(), "widget")
+        self.assertEqual(self.chart.single_point_click_state, 0)
+
+    def test_single_point_click_state_tracks_external_selection(self):
+        self.chart._apply_external_selection({11})
+        self.assertEqual(self.chart.single_point_click_state, 1)
+
+        self.chart._apply_external_selection({11, 12})
+        self.assertEqual(self.chart.single_point_click_state, 0)
+
+    def test_selection_forwards_to_cell_gallery_when_linked(self):
+        gallery = self.viewer.SidePlots.cell_gallery_output
+        self.chart.setup_observe()
+        self.chart.ui_component.cell_gallery_linked_checkbox.value = True
+
+        indices = {1, 2}
+        self.chart.selected_indices.value = indices
+
+        self.assertEqual(gallery.received, indices)
+
+    def test_single_selection_does_not_update_cell_gallery_when_linked(self):
+        gallery = self.viewer.SidePlots.cell_gallery_output
+        self.chart.setup_observe()
+        self.chart.ui_component.cell_gallery_linked_checkbox.value = True
+
+        multi = {1, 2}
+        self.chart._on_scatter_selection(multi, "widget")
+        self.assertEqual(gallery.received, multi)
+
+        self.chart._on_scatter_selection({3}, "widget")
+
+        self.assertEqual(gallery.received, multi)
 
     def test_footer_layout_toggles_with_scatter_count(self):
         # Initial state: vertical layout retained

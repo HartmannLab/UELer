@@ -4,6 +4,8 @@ from pathlib import Path
 import unittest
 from unittest import mock
 
+import tests.bootstrap  # noqa: F401  # Ensure shared test bootstrap runs
+
 import pandas as pd
 
 

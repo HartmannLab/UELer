@@ -1,9 +1,11 @@
+import math
 import os
 import sys
 import types
 import unittest
 
 from types import SimpleNamespace
+from ipywidgets import Output, VBox
 
 # Provide lightweight stubs for heavy optional dependencies used by the plugin.
 if "cv2" not in sys.modules:
@@ -16,6 +18,136 @@ if "pandas" not in sys.modules:
     pandas_stub.isna = lambda value: value is None
     sys.modules["pandas"] = pandas_stub
 
+if "matplotlib" not in sys.modules:
+    matplotlib_stub = types.ModuleType("matplotlib")
+    sys.modules["matplotlib"] = matplotlib_stub
+
+if "matplotlib.colors" not in sys.modules:
+    colors_stub = types.ModuleType("matplotlib.colors")
+    colors_stub.to_rgb = lambda value: (1.0, 1.0, 1.0)
+    sys.modules["matplotlib.colors"] = colors_stub
+
+if "matplotlib.pyplot" not in sys.modules:
+    pyplot_stub = types.ModuleType("matplotlib.pyplot")
+
+    class _Canvas:
+        def __init__(self):
+            self.toolbar_visible = False
+            self.header_visible = False
+            self.footer_visible = False
+
+        def mpl_connect(self, *_):
+            return 1
+
+    class _Figure:
+        def __init__(self):
+            self.canvas = _Canvas()
+
+        def subplots_adjust(self, **_):
+            return None
+
+    class _Axis:
+        def axis(self, *_):
+            return None
+
+        def text(self, *_args, **_kwargs):
+            return None
+
+        def imshow(self, *_args, **_kwargs):
+            return None
+
+        def remove(self):
+            return None
+
+    def _build_axes(rows, cols):
+        axes = [[_Axis() for _ in range(cols)] for _ in range(rows)]
+        return axes if rows > 1 else axes[0][0]
+
+    def subplots(rows, cols, **_):
+        fig = _Figure()
+        axes = _build_axes(rows, cols)
+        return fig, axes
+
+    pyplot_stub.subplots = subplots
+    pyplot_stub.show = lambda *_: None
+    sys.modules["matplotlib.pyplot"] = pyplot_stub
+
+if "seaborn_image" not in sys.modules:
+    sys.modules["seaborn_image"] = types.ModuleType("seaborn_image")
+
+if "dask" not in sys.modules:
+    dask_stub = types.ModuleType("dask")
+
+    def _delayed(func):  # pragma: no cover - lightweight stub
+        return func
+
+    dask_stub.delayed = _delayed
+    sys.modules["dask"] = dask_stub
+
+if "skimage" not in sys.modules:
+    skimage_stub = types.ModuleType("skimage")
+    sys.modules["skimage"] = skimage_stub
+
+    segmentation_stub = types.ModuleType("skimage.segmentation")
+    segmentation_stub.find_boundaries = lambda *args, **kwargs: None
+    sys.modules["skimage.segmentation"] = segmentation_stub
+
+    io_stub = types.ModuleType("skimage.io")
+    io_stub.imread = lambda *args, **kwargs: None
+    io_stub.imsave = lambda *args, **kwargs: None
+    sys.modules["skimage.io"] = io_stub
+
+    exposure_stub = types.ModuleType("skimage.exposure")
+    exposure_stub.adjust_gamma = lambda image, *_args, **_kwargs: image
+    sys.modules["skimage.exposure"] = exposure_stub
+
+    transform_stub = types.ModuleType("skimage.transform")
+    transform_stub.resize = lambda *args, **kwargs: None
+    sys.modules["skimage.transform"] = transform_stub
+
+    color_stub = types.ModuleType("skimage.color")
+    color_stub.rgb2gray = lambda *args, **kwargs: None
+    sys.modules["skimage.color"] = color_stub
+
+    measure_stub = types.ModuleType("skimage.measure")
+    measure_stub.label = lambda *args, **kwargs: None
+    sys.modules["skimage.measure"] = measure_stub
+
+    draw_stub = types.ModuleType("skimage.draw")
+    draw_stub.circle_perimeter = lambda *args, **kwargs: ((), ())
+    sys.modules["skimage.draw"] = draw_stub
+
+    skimage_stub.segmentation = segmentation_stub
+    skimage_stub.io = io_stub
+    skimage_stub.exposure = exposure_stub
+    skimage_stub.transform = transform_stub
+    skimage_stub.color = color_stub
+    skimage_stub.measure = measure_stub
+    skimage_stub.draw = draw_stub
+
+if "tifffile" not in sys.modules:
+    tifffile_stub = types.ModuleType("tifffile")
+
+    class _FakeTiffFile:  # pragma: no cover - stub for imports
+        def __init__(self, *_args, **_kwargs):
+            self.pages = [self]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def asarray(self):
+            return [[0]]
+
+        @property
+        def shape(self):
+            return (1, 1)
+
+    tifffile_stub.TiffFile = _FakeTiffFile
+    sys.modules["tifffile"] = tifffile_stub
+
 if "ipywidgets" not in sys.modules:
     widgets = types.ModuleType("ipywidgets")
 
@@ -24,8 +156,13 @@ if "ipywidgets" not in sys.modules:
             self.__dict__.update(kwargs)
 
     class _Widget:
-        def __init__(self, *_, **kwargs):
-            self.children = kwargs.get("children", tuple())
+        def __init__(self, *args, **kwargs):
+            children = kwargs.get("children")
+            if children is None and args:
+                children = args[0]
+            if children is None:
+                children = ()
+            self.children = tuple(children)
             self.value = kwargs.get("value")
             self.allowed_tags = kwargs.get("allowed_tags", [])
             self.allow_duplicates = kwargs.get("allow_duplicates", False)
@@ -86,6 +223,9 @@ if "ipywidgets" not in sys.modules:
 
     sys.modules["ipywidgets"] = widgets
 
+from ipywidgets import Layout
+
+from ueler.image_utils import select_downsample_factor  # type: ignore[import-error]
 from viewer.plugin.roi_manager_plugin import ROIManagerPlugin
 
 
@@ -93,8 +233,8 @@ class RestrictiveTagsWidget:
     """Widget stub that enforces membership in allowed_tags when applying values."""
 
     def __init__(self):
-        self._value = tuple()
-        self._allowed_tags: list[str] = []
+        self._value = ()
+        self._allowed_tags = []
         self.allow_new = True
         self.allow_duplicates = False
         self.layout = None
@@ -155,7 +295,7 @@ class DummyMainViewer:
         self.ui_component = SimpleNamespace(
             image_selector=SimpleNamespace(value="FOV1"),
             marker_set_dropdown=SimpleNamespace(value=None),
-            channel_selector=SimpleNamespace(value=tuple()),
+            channel_selector=SimpleNamespace(value=()),
         )
 
     def capture_viewport_bounds(self):
@@ -187,9 +327,30 @@ def make_plugin():
     plugin.initialized = False
     plugin.STATUS_COLORS = ROIManagerPlugin.STATUS_COLORS
     plugin.CURRENT_MARKER_VALUE = ROIManagerPlugin.CURRENT_MARKER_VALUE
+    plugin._suspend_browser_events = False
+    plugin._browser_axis_to_roi = {}
+    plugin._browser_click_cid = None
+    plugin._browser_figure = None
+    plugin._browser_current_page = 1
+    plugin._browser_total_pages = 1
+    plugin._browser_last_signature = None
+    plugin._browser_expression_cache = None
+    plugin._browser_expression_error = None
+    plugin._browser_tag_buttons = {}
+    plugin._browser_expression_selection = (0, 0)
+    plugin._use_browser_expression_js = False
+    plugin._thumbnail_downsample_cache = {}
+    plugin.THUMBNAIL_MAX_EDGE = ROIManagerPlugin.THUMBNAIL_MAX_EDGE
+    plugin.width = 6
+    plugin.height = 3
 
     plugin._build_widgets()
     return plugin
+
+
+class FakeArray:
+    def __init__(self, height, width):
+        self.shape = (height, width)
 
 
 class ROIManagerTagsTests(unittest.TestCase):
@@ -197,6 +358,36 @@ class ROIManagerTagsTests(unittest.TestCase):
         plugin = make_plugin()
         tags_widget = plugin.ui_component.tags
         self.assertTrue(getattr(tags_widget, "allow_new", False))
+
+    def test_browser_output_widget_scrolls_within_fixed_height(self):
+        plugin = make_plugin()
+        # browser_output is now a VBox wrapper with fixed height (matching cell gallery)
+        wrapper = plugin.ui_component.browser_output
+        self.assertIsInstance(wrapper, VBox)
+        self.assertEqual(len(wrapper.children), 1)
+        self.assertEqual(getattr(wrapper.layout, "height", None), "400px")
+        
+        # Inner Output widget has max_height and scrolling
+        inner_output = plugin.ui_component.browser_output_inner
+        self.assertIsInstance(inner_output, Output)
+        inner_layout = inner_output.layout
+        self.assertEqual(getattr(inner_layout, "max_height", None), "400px")
+        self.assertEqual(getattr(inner_layout, "overflow_y", None), "auto")
+
+    def test_browser_root_layout_can_shrink(self):
+        plugin = make_plugin()
+        layout = plugin.ui_component.browser_root.layout
+        self.assertEqual(getattr(layout, "min_width", None), "0")
+        self.assertEqual(plugin.ui_component.browser_root.children[2], plugin.ui_component.browser_pagination)
+
+    def test_gallery_layout_respects_width_ratio_and_columns(self):
+        plugin = make_plugin()
+        columns, rows, fig_width, fig_height = plugin._determine_gallery_layout(2)
+        self.assertEqual(columns, plugin.BROWSER_COLUMNS)
+        self.assertEqual(rows, 1)
+        # Static narrow width approach to prevent clipping
+        self.assertAlmostEqual(fig_width, 4.8)
+        self.assertAlmostEqual(fig_height, fig_width / columns)
 
     def test_new_tags_extend_allowed_pool(self):
         plugin = make_plugin()
@@ -258,6 +449,111 @@ class ROIManagerTagsTests(unittest.TestCase):
         self.assertIsNotNone(recorded)
         self.assertIn("tags", recorded)
         self.assertIn("novel-tag", recorded["tags"])
+
+    def test_browser_expression_compilation(self):
+        plugin = make_plugin()
+        predicate = plugin._compile_browser_expression("alpha & !beta")
+        self.assertIsNotNone(predicate)
+        self.assertTrue(predicate(["alpha"]))
+        self.assertFalse(predicate(["alpha", "beta"]))
+        self.assertIsNone(plugin._browser_expression_error)
+
+        invalid = plugin._compile_browser_expression("alpha & | beta")
+        self.assertIsNone(invalid)
+        self.assertIsNotNone(plugin._browser_expression_error)
+
+    def test_expression_restores_tail_selection_for_backend_updates(self):
+        plugin = make_plugin()
+        widget = plugin.ui_component.browser_expression_input
+
+        # Avoid DataFrame-dependent paths for this focused caret test.
+        plugin._refresh_browser_gallery = lambda: None
+
+        expression = "(good&hi)|~bad"
+        widget.value = expression
+
+        # Simulate a backend-driven value restore while selection is unknown.
+        plugin._browser_expression_selection = None
+        plugin._on_browser_expression_change({
+            "name": "value",
+            "new": expression,
+        })
+
+        expected_tail = (len(expression), len(expression))
+        self.assertEqual(plugin._browser_expression_selection, expected_tail)
+
+        # Inserting an operator should now append at the tail rather than prefixing.
+        plugin._insert_browser_expression_snippet("&")
+        updated_value = plugin.ui_component.browser_expression_input.value
+        self.assertTrue(updated_value.rstrip().endswith("&"))
+
+    def test_expression_insertion_respects_cached_selection(self):
+        plugin = make_plugin()
+        widget = plugin.ui_component.browser_expression_input
+
+        plugin._refresh_browser_gallery = lambda: None
+
+        widget.value = "alpha beta"
+        plugin._browser_expression_selection = (5, 5)
+
+        plugin._insert_browser_expression_snippet("&")
+
+        self.assertEqual(widget.value, "alpha & beta")
+        self.assertEqual(plugin._browser_expression_selection, (7, 7))
+
+    def test_expression_insertion_replaces_highlighted_range(self):
+        plugin = make_plugin()
+        widget = plugin.ui_component.browser_expression_input
+
+        plugin._refresh_browser_gallery = lambda: None
+
+        widget.value = "alpha beta"
+        plugin._browser_expression_selection = (6, 10)
+
+        plugin._insert_browser_expression_snippet("gamma")
+
+        self.assertEqual(widget.value, "alpha gamma")
+        self.assertEqual(plugin._browser_expression_selection, (11, 11))
+
+    def test_thumbnail_downsample_uses_roi_viewport_dimensions(self):
+        plugin = make_plugin()
+        arrays = {"ch1": FakeArray(4096, 8192)}
+        record = {"roi_id": "roi-large", "x_min": 0, "x_max": 8192, "y_min": 0, "y_max": 4096}
+
+        factor = plugin._resolve_thumbnail_downsample("FOV-L", arrays, record)
+
+        self.assertEqual(factor, 32)
+        self.assertLessEqual(math.ceil(8192 / factor), plugin.THUMBNAIL_MAX_EDGE)
+
+        # Cached factor reused for identical ROI metadata.
+        arrays["ch1"] = FakeArray(1024, 1024)
+        self.assertEqual(plugin._resolve_thumbnail_downsample("FOV-L", arrays, record), factor)
+
+    def test_thumbnail_downsample_defaults_to_unity_for_small_images(self):
+        plugin = make_plugin()
+        arrays = {"ch1": FakeArray(128, 200)}
+        record = {"roi_id": "roi-small", "x_min": 10, "x_max": 210, "y_min": 5, "y_max": 133}
+
+        factor = plugin._resolve_thumbnail_downsample("FOV-small", arrays, record)
+        self.assertEqual(factor, 1)
+
+    def test_thumbnail_downsample_falls_back_to_fov_dimensions(self):
+        plugin = make_plugin()
+        arrays = {"ch1": FakeArray(512, 512)}
+        record = {"roi_id": "roi-null"}  # Missing geometry
+
+        factor = plugin._resolve_thumbnail_downsample("FOV-default", arrays, record)
+        self.assertEqual(factor, 2)
+
+    def test_select_downsample_factor_clamps_against_allowed_list(self):
+        allowed = [1, 2, 4, 8]
+
+        # Large image chooses the largest permitted factor under the baseline.
+        factor = select_downsample_factor(1500, 1200, max_dimension=512, allowed_factors=allowed)
+        self.assertEqual(factor, 4)
+
+        # Small images stay at the minimum allowed factor.
+        self.assertEqual(select_downsample_factor(50, 50, max_dimension=512, allowed_factors=allowed), 1)
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ueler"
+version = "0.2.0"
+description = "Usability Enhanced Linked Viewer packaged skeleton"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Proprietary" }
+authors = [
+	{ name = "Yu-Le Wu (Hartmann Lab, DKFZ)" }
+]
+keywords = ["imaging", "viewer", "notebook"]
+classifiers = [
+	"Programming Language :: Python :: 3",
+	"License :: Other/Proprietary License",
+	"Operating System :: OS Independent",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+	"pytest>=7.0",
+	"pytest-cov>=4.0",
+]
+
+[project.urls]
+homepage = "https://github.com/HartmannLab/UELer"
+documentation = "https://github.com/HartmannLab/UELer"
+
+[tool.setuptools]
+include-package-data = true
+py-modules = ["constants", "data_loader", "image_utils"]
+
+[tool.setuptools.packages.find]
+include = ["ueler", "ueler.*", "viewer", "viewer.*"]
+exclude = ["tests", "tests.*"]
