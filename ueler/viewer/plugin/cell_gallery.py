@@ -50,6 +50,9 @@ class CellGalleryDisplay(PluginBase):
         self.hover_timer = None
         self.last_hover_event = None
         self._skip_next_fov_refresh = False
+        
+        # Track last rendered state to avoid unnecessary regeneration
+        self._last_rendered_cells: Optional[tuple] = None
 
         self.ui_component = UiComponent()
 
@@ -303,11 +306,15 @@ class CellGalleryDisplay(PluginBase):
 
         if not displayed_indices:
             self._show_empty_message()
+            self._last_rendered_cells = None
             return
 
         self.data.displayed_cells = displayed_indices
         self._update_tile_metadata(canvas, n, m)
         self._draw_gallery(canvas, n, displayed_indices, ui_values.crop_width)
+        
+        # Track what we just rendered to avoid unnecessary regeneration
+        self._last_rendered_cells = tuple(sorted(selected_indices))
 
     def on_mouse_move(self, event):
         if self.data.ax is None or event.inaxes != self.data.ax:
@@ -387,6 +394,11 @@ class CellGalleryDisplay(PluginBase):
         self.data.selected_cells.value = list(row_indices)
 
     def on_fov_change(self) -> None:  # type: ignore[override]
+        """Handle FOV changes in the main viewer.
+        
+        Only regenerate the gallery if it's necessary. FOV changes alone don't
+        require regeneration since the gallery can display cells from any FOV.
+        """
         side_plots = getattr(self.main_viewer, "SidePlots", None)
         chart_plugin = getattr(side_plots, "chart_output", None) if side_plots else None
         if chart_plugin is not None and hasattr(chart_plugin, "single_point_click_state"):
@@ -399,9 +411,18 @@ class CellGalleryDisplay(PluginBase):
             self._skip_next_fov_refresh = False
             return
 
+        # Check if regeneration is needed
         selected = getattr(self.data.selected_cells, "value", None)
-        if selected:
-            self.plot_gellery()
+        if not selected:
+            return
+            
+        # Only regenerate if the selected cells have changed
+        # (FOV change alone doesn't affect the gallery content)
+        current_selection = tuple(sorted(selected))
+        if current_selection == self._last_rendered_cells:
+            return
+        
+        self.plot_gellery()
 
     def on_viewer_mask_outline_change(self, thickness: int) -> None:
         """Handle mask outline thickness changes from the main viewer.
@@ -418,6 +439,9 @@ class CellGalleryDisplay(PluginBase):
         if self.ui_component.mask_outline_thickness_slider is not None:
             self.ui_component.mask_outline_thickness_slider.value = thickness
         
+        # Invalidate cache since visual appearance will change
+        self._last_rendered_cells = None
+        
         # Refresh the gallery if there are selected cells
         selected = getattr(self.data.selected_cells, "value", None)
         if selected:
@@ -429,6 +453,9 @@ class CellGalleryDisplay(PluginBase):
         This callback is invoked when the mask painter applies new colors to masks,
         ensuring the cell gallery reflects the updated mask colors immediately.
         """
+        # Invalidate cache since colors have changed
+        self._last_rendered_cells = None
+        
         # Refresh the gallery if there are selected cells
         selected = getattr(self.data.selected_cells, "value", None)
         if selected:
