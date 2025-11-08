@@ -1,4 +1,10 @@
+### v0.2.1
+**Mask painter performance patch**
+- Fixed performance regression introduced in v0.2.0 where using the mask painter across multiple FOVs caused slowdowns due to expensive global color registration and unnecessary cell gallery regeneration on FOV changes.
+
 ### v0.2.0
+**Branch merge organization**
+- Merged `pre-release` into `main` to consolidate all v0.2.0 release candidate changes.
 
 ### v0.2.0-rc3
 **Test suite fixes**

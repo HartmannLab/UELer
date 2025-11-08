@@ -149,6 +149,11 @@ class MaskPainterDisplay(PluginBase):
         self.hidden_color_cache: Dict[str, str] = {}
         self.registry_records: Dict[str, Dict[str, str]] = {}
         self.active_color_set_name = ""
+        
+        # Track last applied state to avoid unnecessary re-application
+        self._last_applied_fov: Optional[str] = None
+        self._last_applied_identifier: Optional[str] = None
+        self._last_applied_classes: Optional[set] = None
 
         storage_folder = self._determine_storage_folder()
         if storage_folder is None:
@@ -681,7 +686,17 @@ class MaskPainterDisplay(PluginBase):
     # ------------------------------------------------------------------
     # Viewer integration
     # ------------------------------------------------------------------
-    def apply_colors_to_masks(self, _, *, notify_cell_gallery: bool = True):
+    def apply_colors_to_masks(self, _, *, notify_cell_gallery: bool = True, register_globally: bool = True):
+        """Apply colors to masks.
+        
+        Parameters
+        ----------
+        notify_cell_gallery : bool
+            Whether to notify the cell gallery of color changes
+        register_globally : bool
+            Whether to register colors globally for all FOVs (slow for large datasets).
+            Set to False when called automatically on display updates.
+        """
         identifier = self.ui_component.identifier_dropdown.value
         if not identifier:
             self._log("No identifier selected.", error=True, clear=True)
@@ -750,25 +765,63 @@ class MaskPainterDisplay(PluginBase):
             
             color = picker.value
             _apply_color_to_current_fov(cls_value, color)
-            _register_color_globally(cls_value, color)
+            if register_globally:
+                _register_color_globally(cls_value, color)
 
         # Apply default color to hidden classes
         if hidden_classes:
             for cls_str, cls_value in converted_hidden:
                 _apply_color_to_current_fov(cls_value, self.default_color)
-                _register_color_globally(cls_value, self.default_color)
+                if register_globally:
+                    _register_color_globally(cls_value, self.default_color)
 
         self._log("Masks updated with class-based colors.")
+        
+        # Track the applied state
+        self._last_applied_fov = current_fov
+        self._last_applied_identifier = identifier
+        self._last_applied_classes = set(visible_classes)
 
         if notify_cell_gallery:
             self._notify_cell_gallery_update()
 
     def on_cell_table_change(self):
         self._initialise_identifier_options()
+        # Clear tracking state when cell table changes
+        self._last_applied_fov = None
+        self._last_applied_identifier = None
+        self._last_applied_classes = None
 
     def on_mv_update_display(self):
-        if self.ui_component.enabled_checkbox.value:
-            self.apply_colors_to_masks(None, notify_cell_gallery=False)
+        """Handle main viewer display updates.
+        
+        Only re-apply colors if:
+        1. Mask painter is enabled
+        2. AND one of the following has changed:
+           - Current FOV
+           - Selected identifier
+           - Set of visible classes
+           
+        Note: This only applies colors to the current FOV for display purposes.
+        Global registration (for gallery) is skipped to avoid performance issues.
+        """
+        if not self.ui_component.enabled_checkbox.value:
+            return
+        
+        current_fov = self.main_viewer.ui_component.image_selector.value
+        current_identifier = self.ui_component.identifier_dropdown.value
+        current_classes = set(self._get_visible_classes()) if current_identifier else set()
+        
+        # Check if state has actually changed
+        state_changed = (
+            self._last_applied_fov != current_fov
+            or self._last_applied_identifier != current_identifier
+            or self._last_applied_classes != current_classes
+        )
+        
+        if state_changed:
+            # Only apply to current FOV, don't register globally (performance optimization)
+            self.apply_colors_to_masks(None, notify_cell_gallery=False, register_globally=False)
 
     def _notify_cell_gallery_update(self) -> None:
         """Notify the cell gallery plugin that mask painter has applied color changes."""
