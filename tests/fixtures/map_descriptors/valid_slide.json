@@ -1,0 +1,26 @@
+{
+  "exportDateTime": "2024-11-04T12:45:08.914Z",
+  "fovFormatVersion": "1.6",
+  "fovs": [
+    {
+      "name": "FOV_A",
+      "slideId": 402,
+      "centerPointMicrons": {"x": 13880.0, "y": 47536.0},
+      "fovSizeMicrons": 400.0,
+      "frameSizePixels": {"width": 1024, "height": 1024},
+      "imagingPreset": {"preset": "Coarse", "displayName": "Coarse"},
+      "timingDescription": "0.5 ms",
+      "scanCount": 1
+    },
+    {
+      "name": "FOV_B",
+      "slideId": 402,
+      "centerPointMicrons": {"x": 14280.0, "y": 47536.0},
+      "fovSizeMicrons": 400.0,
+      "frameSizePixels": {"width": 1024, "height": 1024},
+      "imagingPreset": {"preset": "Coarse", "displayName": "Coarse"},
+      "timingDescription": "0.5 ms",
+      "scanCount": 1
+    }
+  ]
+}

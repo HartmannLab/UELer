@@ -24,7 +24,7 @@ Thumbs.db
 *.ipynb_checkpoints/
 
 # Project-specific
-dev_note/github_issues.md
+dev_note/github_issue.md
 .binder/
 .github/
 .specify/

@@ -101,6 +101,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### **UELer v0.3.0-alpha Summary**
+- Translation-only map descriptors can now be scanned (behind the `ENABLE_MAP_MODE` flag). The viewer validates JSON inputs with the new `MapDescriptorLoader`, surfaces descriptor warnings, and keeps single-FOV rendering unchanged while groundwork for issue #3 proceeds.
 
 ## Earlier Updates  
 

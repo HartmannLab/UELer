@@ -71,6 +71,7 @@ from ueler.viewer.palette_store import (
     save_registry as save_palette_registry,
     write_palette_file,
 )
+from ueler.viewer.map_descriptor_loader import MapDescriptorLoader
 
 from weakref import WeakKeyDictionary
 
@@ -95,6 +96,9 @@ ANNOTATION_PALETTE_FILE_SUFFIX = ".pixelannotations.json"
 ANNOTATION_PALETTE_VERSION = "1.0.0"
 ANNOTATION_REGISTRY_FILENAME = "pixel_annotation_sets_index.json"
 ANNOTATION_PALETTE_FOLDER_NAME = "pixel_annotation_palettes"
+
+MAP_DESCRIPTOR_RELATIVE_PATH = Path(".UELer") / "maps"
+_MAP_MODE_FLAG = os.getenv("ENABLE_MAP_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _unique_annotation_values(array):
@@ -137,6 +141,11 @@ class ImageMaskViewer:
         # Initialize the cell table
         self.cell_table = None
 
+        # Map mode scaffolding (feature-flagged)
+        self._map_mode_enabled = _MAP_MODE_FLAG
+        self._map_mode_messages = []
+        self._map_descriptors = {}
+
         # Specifiy the keys for the x, y and label columns in the cell table
         self.x_key = "X"
         self.y_key = "Y"
@@ -151,6 +160,9 @@ class ImageMaskViewer:
                                if os.path.isdir(os.path.join(self.base_folder, fov)) and self._has_tiff_files(fov)]
         if not self.available_fovs:
             raise ValueError("No FOVs found in the base folder.")
+
+        if self._map_mode_enabled:
+            self._initialize_map_descriptors()
 
         # Initialize caches and other variables
         self.max_cache_size = 100
@@ -293,6 +305,30 @@ class ImageMaskViewer:
         tiff_files += glob.glob(os.path.join(channel_folder, '*.tif'))
         
         return bool(tiff_files)
+
+    def _initialize_map_descriptors(self) -> None:
+        """Load map descriptors when map mode is enabled."""
+
+        descriptor_root = Path(self.base_folder) / MAP_DESCRIPTOR_RELATIVE_PATH
+        loader = MapDescriptorLoader()
+        result = loader.load_from_directory(descriptor_root)
+        self._map_descriptors = result.slides
+
+        for message in result.warnings:
+            self._record_map_mode_warning(message)
+        for message in result.errors:
+            self._record_map_mode_warning(message)
+
+    def _record_map_mode_warning(self, message: str) -> None:
+        text = f"[Map mode] {message}"
+        if text in self._map_mode_messages:
+            return
+        self._map_mode_messages.append(text)
+        logger.warning(text)
+        try:
+            print(f"Map mode warning: {message}")
+        except Exception:  # pragma: no cover - console output best effort
+            pass
     
     def after_all_plugins_loaded(self):
         # loop through all the attributes of self.SidePlots, call the `after_all_plugins_loaded`` method

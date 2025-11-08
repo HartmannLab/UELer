@@ -1,4 +1,8 @@
 ### v0.3.0-alpha
+**Map descriptor loader groundwork (#3)**
+- Added `MapDescriptorLoader` to validate translation-only slide descriptors, reject mixed-unit inputs, and surface duplicate FOV warnings in preparation for map-based tiled mode.
+- Wired the loader into `ImageMaskViewer` behind the `ENABLE_MAP_MODE` feature flag so descriptor parsing feedback reaches users without affecting existing single-FOV workflows.
+- Introduced unit fixtures covering valid, mixed-unit, and malformed descriptors to guarantee deterministic slide/FOV registries during ingest.
 
 ### v0.2.1
 **Mask painter performance patch**
