@@ -100,11 +100,12 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 - **Wide Plugins**: Enable "Horizontal layout" (for example, in the heatmap plugin) to undock the tool into the footer while keeping the accordion available for other controls.
 
 ## New Update  
-### **UELer v0.2.0 Summary**
+### **UELer v0.2.1 Summary**
 **Gallery and Mask Painting**
 - Painted mask colors now persist across all FOVs and appear in the gallery even when the viewer isn’t open.
 - Fixed multiple gallery color and rendering issues, ensuring all cells display correct mask colors.
 - Improved synchronization between the mask painter and cell gallery for consistent colors and outline thickness.
+- Resolved performance issues when using the mask painter across multiple FOVs.
 
 **ROI and Cell Gallery Enhancements**
 - ROI and cell galleries stabilized with predictable layout, no clipping, and consistent tile sizing.
