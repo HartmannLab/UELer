@@ -103,6 +103,20 @@ This document captures the product and engineering specification for rendering m
   3. Document translation-only coordinate requirements and release sample descriptors.
 - Update `README` and `doc/log` during rollout phases to communicate the feature and its flag status.
 
+### 12. Implementation Plan
+1. **Descriptor ingestion groundwork**
+  - Build `MapDescriptorLoader` with validation against the translation-only schema; add fixtures covering mixed units and malformed entries.
+  - Integrate loader into viewer bootstrap behind `ENABLE_MAP_MODE`, wiring errors to the new user-facing warnings.
+  - Extend tests to assert parsed descriptors populate slide and FOV registries deterministically.
+2. **VirtualMapLayer core**
+  - Implement tile indexing, viewport intersection math, and stitched buffer assembly using existing `render_image` calls.
+  - Thread cache hooks (`map_tile_cache`, invalidation triggers) through `ImageMaskViewer` in alignment with `FOV_load_cycle.md` semantics.
+  - Add unit coverage for offset alignment, zero-fill gaps, and cache eviction behaviour.
+3. **UI integration and exports**
+  - Add the map-mode toggle, selector wiring, and tooltip metadata to `ui_components`; ensure plugin notifications receive slide context.
+  - Update batch export plumbing to recognise stitched renders and stream tiles in descriptor order; add corresponding functional tests.
+  - Document user workflow and update smoke notebooks to exercise toggle, overlays, and export scenarios.
+
 ### 13. Dependencies & References
 - Relies on `ImageMaskViewer.load_fov`, caches, and `render_image` entry points documented in `dev_note/FOV_load_cycle.md`.
 
