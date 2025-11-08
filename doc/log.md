@@ -1,3 +1,5 @@
+### v0.3.0-alpha
+
 ### v0.2.1
 **Mask painter performance patch**
 - Fixed performance regression introduced in v0.2.0 where using the mask painter across multiple FOVs caused slowdowns due to expensive global color registration and unnecessary cell gallery regeneration on FOV changes.
