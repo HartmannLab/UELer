@@ -1,130 +1,112 @@
-## Map-based tiled mode
-### **Enable loading multiple FOV tiles into the same view**
-Related issue: [#3](https://github.com/HartmannLab/UELer/issues/3)
+## Map-Based Tiled Mode Specification
 
-### Original post
-Currently, users can only view individual FOV (Field of View) images separately. It would be valuable to allow loading multiple FOV tiles into the same view if the user requests this, enabling the display of all FOVs on the same slide for easier comparison and analysis.
+**Related issue:** [#3](https://github.com/HartmannLab/UELer/issues/3)
 
-Implement a feature that lets users choose to load all FOV tiles together in a single view. This will require adjustments to how FOV images are currently handled, including:
-- Changing image loading logic to support multiple FOVs displayed simultaneously.
-- Ensuring correct placement and alignment of tiles on the slide.
-- Updating the UI to provide an option for loading all FOVs into the same view.
-- Handling potential performance impacts and memory management when rendering many tiles.
+This document captures the product and engineering specification for rendering multiple Fields of View (FOVs) inside a single composite view. It aligns with the established runtime described in `dev_note/FOV_load_cycle.md` and must be read alongside that reference.
 
-This enhancement will improve usability for users needing to visualize the complete set of FOVs together.
+### 1. Objectives
+- Enable users to switch between single-FOV and slide-wide map views without altering on-disk assets.
+- Preserve existing FOV load, cache, and render semantics by extending—not rewriting—the flow documented in `FOV_load_cycle.md`.
+- Deliver responsive navigation for slides containing dozens of FOVs while supporting all overlays (masks, annotations, painter).
 
-### Implementation notes
+### 2. Functional Requirements
+- **Map discovery:** Accept one or more JSON descriptors that group FOVs by slide and expose them as selectable map entries in the UI.
+- **Viewport stitching:** Composite the subset of tiles within the active viewport into the buffer consumed by `ImageDisplay.update_display`.
+- **Overlay parity:** Render masks, annotations, and painter colors exactly as in single-FOV mode; mask hit-testing must operate on the stitched region.
+- **Plugin compatibility:** Maintain current plugin lifecycle calls (`on_fov_change`, `on_mv_update_display`) and provide slide-aware context when required.
+- **State transitions:** Users can toggle map mode at runtime; the viewer must restore single-FOV behaviour instantly when map mode is disabled.
+- **Batch exports:** Support exporting stitched map views through the existing batch export pipeline, writing tiles sequentially to honour descriptor order and keep memory usage predictable.
 
-Below are implementation notes for supporting map-based multi-FOV views while preserving the current per-FOV storage format and keeping the rest of the application unchanged.
+### 3. Non-functional Requirements
+- **Performance:** Match single-FOV pan/zoom responsiveness (<150 ms render queue) for slides with up to 25 tiles at downsample factors ≥4.
+- **Memory:** Use downsampled buffers sized to the viewport; stitched tiles must never exceed the pixel footprint requested by `update_display`.
+- **Caching:** Respect the LRU policies outlined in `FOV_load_cycle.md`; map-mode caches may not cause premature eviction of per-FOV assets.
 
-1) Keep individual FOV files and current storage unchanged
-- Continue storing each FOV image and its masks/annotations as before (single-FOV files, discovered by `load_fov`, see `dev_note/FOV_load_cycle.md`).
-- The virtual map layer does not change the on-disk layout or per-FOV cache entries; instead it composes from them at render time.
+### 4. Inputs & Data Model
+- **Map Descriptor (`*.json`):**
+  - `slideId` (int|string) groups FOVs into a virtual slide.
+  - `centerPointMicrons` (x, y) defines tile placement; initial scope supports translation-only positioning on a shared coordinate system.
+  - `frameSizePixels.width|height` supplies per-tile pixel shapes.
+  - `fovSizeMicrons` enables micron-to-pixel scaling when downsample factors differ between slides.
+- **Viewer State:**
+  - `ImageMaskViewer.image_cache`, `label_masks_cache`, `annotation_label_cache` (see `FOV_load_cycle.md`).
+  - Channel, mask, and annotation selections held by UI widgets.
+- **Runtime Flags:**
+  - `map_mode_enabled` (bool): top-level toggle.
+  - `active_map_id` (slideId) and optional `active_map_name`.
 
-2) Image selector UI: show map names / slides
-The FOVs' spatial arrangment on a slide is described by a new JSON-based map descriptor file that lists all FOVs with their coordinates. This file is created during the image acquisition/export process and follows this schema:
+### 5. Architecture
+- **VirtualMapLayer (new component):**
+  - Created when map mode initializes; receives the viewer instance, resolved map descriptor, and allowed `DOWNSAMPLE_FACTORS`.
+  - Exposes `set_viewport(xmin, xmax, ymin, ymax, downsample)` and `render(selected_channels, xym, xym_ds)`.
+  - Internally selects tiles that fall within the current viewport, requests channel assets through the existing `load_fov` pipeline, and stitches RGB overlays.
+- **Integration with FOV cycle:**
+  - `ImageMaskViewer.on_image_change` detects map selections and calls `load_fov` for all tiles referenced by the map so caches warm before render.
+  - `update_display` delegates to `VirtualMapLayer.render` when map mode is active; otherwise it executes the baseline single-FOV path.
+  - `render_image` remains the source of truth for channel compositing; the virtual layer reuses it per tile to guarantee colour parity.
 
-```json
-{
-    "exportDateTime": "2024-11-04T12:45:08.914Z",
-    "fovFormatVersion": "1.6",
-    "fovs": [
-      {
-        "centerPointMicrons": {
-          "x": 13880,
-          "y": 47536
-        },
-        "fovSizeMicrons": 400,
-        "focusSite": "NW",
-        "focusOnly": 0,
-        "timingChoice": 10,
-        "frameSizePixels": {
-          "width": 1024,
-          "height": 1024
-        },
-        "imagingPreset": {
-          "preset": "Coarse",
-          "displayName": "Coarse"
-        },
-        "name": "CSL005mibi_1_run1_CSL069_Hep-PKf_A1_coarse_p5ms_fov400_frame1024_1",
-        "standardTarget": null,
-        "sectionId": 3707,
-        "notes": null,
-        "slideId": 402,
-        "timingDescription": "0.5 ms",
-        "scanCount": 1
-      },
-      {
-        "centerPointMicrons": {
-          "x": 14280,
-          "y": 47536
-        },
-        "fovSizeMicrons": 400,
-        "focusSite": "None",
-        "focusOnly": 0,
-        "timingChoice": 10,
-        "frameSizePixels": {
-          "width": 1024,
-          "height": 1024
-        },
-        "imagingPreset": {
-          "preset": "Coarse",
-          "displayName": "Coarse"
-        },
-        "name": "CSL005mibi_1_run1_CSL069_Hep-PKf_A1_coarse_p5ms_fov400_frame1024_2",
-        "standardTarget": null,
-        "sectionId": 3707,
-        "notes": null,
-        "slideId": 402,
-        "timingDescription": "0.5 ms",
-        "scanCount": 1
-      }
-    ]
-}
-```
-- The JSON lists all FOVs with their spatial coordinates (in microns) and metadata.
-- FOVs sharing the same `slideId` belong to the same slide/map and should be treated as a single virtual image (see below).
-- When a map JSON is loaded the `ui_component.image_selector` should switch to a map-mode where top-level entries are `map_name` values and the selector exposes a control to pick the active map.
-- Keep a toggle or selection mode: single-FOV mode (current behavior) vs map mode. In map mode, selecting a map activates the virtual image layer.
+### 6. Stitching Workflow
+1. **Viewport analysis:** Translate the current axes bounds into slide coordinates using the micron scale recorded in the descriptor.
+2. **Tile selection:** Include tiles whose axis-aligned bounding boxes (AABB) fall within the viewport bounds; track per-tile pixel offsets relative to the viewport origin. No inter-tile overlap handling is required.
+3. **Channel acquisition:** Ensure required channels are present via `load_fov` (idempotent); reuse cached downsampled arrays when available.
+4. **Tile rendering:** Call `render_image` per tile using the tile-specific `xym` window; discard plugin notifications emitted during these calls.
+5. **Canvas assembly:** Place each tile’s RGB output into the stitched buffer using computed offsets. Regions with no tile coverage are filled with zeros (black).
+6. **Overlay merge:**
+   - Masks: read from `label_masks_cache`, respecting outline thickness; aggregate into map-mode `current_label_masks` keyed by composite map identifiers.
+   - Annotations: sample from `annotation_label_cache` and merge embeddings using palette metadata.
+7. **Painter integration:** Run `collect_mask_regions` across the selected tile subset and call `apply_registry_colors` once on the final buffer.
+8. **Publish:** Write the stitched buffer to `self.image_display.combined` and continue the standard `ImageDisplay` update path.
 
-3) Virtual image layer (responsibility and design)
-- Purpose: act as a compositing layer that stitches the relevant FOV images into a single virtual image for the current viewport. It will own the process of deciding which FOVs intersect the current view and produce a stitched `combined` image for `image_display`.
+### 7. UI Specification
+- **Selector Changes:**
+  - Add a toggle labelled “Map mode” adjacent to the existing FOV selector.
+  - When enabled, replace the selector options with map identifiers (e.g., `slideId`, human-readable `map_name`).
+  - Provide a read-only summary of the number of tiles and coverage extents.
+- **Status Indicators:**
+  - Show a badge when per-tile loads are in flight (`Loading 12/32 tiles…`).
+  - Display warning banners if the descriptor omits any FOV present in the dataset or contains malformed coordinates.
+- **Tile metadata:** Surface per-tile FOV names via hover tooltips (mirroring single-FOV mode) while keeping the composite view uncluttered.
+- **Plugin Notifications:**
+  - Emit `on_fov_change(map_id, visible_fovs=[...])` so existing plugins can inspect which FOVs populate the viewport.
+  - Preserve toolbar navigation history by recording map identifier entries alongside single-FOV states.
 
-- API surface (suggested):
-  - class VirtualMapLayer:
-    - __init__(viewer, map_descriptor, downsample_factors)
-    - set_viewport(xmin, xmax, ymin, ymax, downsample_factor)
-    - get_combined_image(selected_channels, xym, xym_ds) -> ndarray
+### 8. Cache & Invalidation
+- Maintain a dedicated `map_tile_cache: OrderedDict[CacheKey, np.ndarray]` where `CacheKey = (map_id, fov_name, downsample, channel_signature)`.
+- Invalidate cache entries when:
+  - `load_fov` evicts a tile from `image_cache` (hook into the same eviction branch noted in `FOV_load_cycle.md`).
+  - Viewer settings that affect render output change (channel colour, contrast, mask toggles, annotation palette).
+- Limit stitched viewport caches to N entries (default 6) and drop least recently used when full.
 
-- Responsibilities and behaviours:
-  - Maintain a lightweight index of FOV positions (from the JSON) and their original pixel sizes.
-  - Given a viewport and downsample factor, compute which FOVs intersect the viewport (bounding-box intersection) and the appropriate offsets to place each downsampled tile into the stitched canvas.
-  - For each required FOV & channel, use the viewer's existing `image_cache` or `load_one_channel_fov` to obtain a downsampled tile (prefer using precomputed downsampled arrays if available). Do not reimplement disk loading logic — reuse `load_fov`.
-  - Stitch downsampled tiles into a temporary buffer sized to the requested `xym_ds` region (not full-resolution). This keeps memory usage and compute bounded by the display scale.
-  - Apply per-channel contrast/color mapping and overlays using the same `render_image` helpers where possible. The virtual layer can either:
-    - request per-channel RGB tiles and composite them using the same additive logic, or
-    - produce a stitched multi-channel tile and forward it to the existing `render_image` path for color mapping.
-  - Produce and return a combined RGB buffer matching the `image_display` expected shape. The viewer then assigns it to `image_display.combined` and draws it. The virtual layer should not directly write to the Matplotlib artist; follow the same `update_display` handoff.
+### 9. Error Handling
+- Gracefully disable map mode with a user-facing message if descriptor parsing fails.
+- Fallback to blank regions with toast notifications when individual tile loads fail; log detailed tracebacks for diagnostics.
+- Ensure plugin notifications still fire with `visible_fovs=[]` so listeners can reset state if a render fails.
 
-4) Cache & invalidation strategy
-- Virtual layer should maintain a small in-memory cache of stitched tiles keyed by (viewport quantised to tiles, downsample_factor, selected_channels, map_name) to speed panning when the view doesn't change much.
-- When a single FOV's underlying data changes (masks, annotations, channel maxima), the virtual layer should be notified (via `viewer.inform_plugins` or explicit `invalidate([fov])`) to drop affected cache entries.
-- Respect the viewer's `max_cache_size` for per-FOV caches; the virtual layer cache should have its own small tunable limit.
+### 10. Testing Strategy
+- **Unit Tests:**
+  - Descriptor parsing (valid/invalid JSON, mixed coordinate units).
+  - Tile selection against viewport bounds (edge-touching, partially visible, fully outside).
+  - Stitch assembly verifying pixel alignment and zero-fill gaps.
+- **Functional Tests:**
+  - Simulate map mode toggles inside `tests/test_rendering.py` or new spec dedicated suite.
+  - Confirm mask hover hit-testing uses stitched `current_label_masks`.
+  - Verify plugin notifications receive correct `visible_fovs` payloads.
+  - Exercise batch export paths that target stitched map views and confirm tiles stream to disk following descriptor order.
+- **Performance Harness:**
+  - Benchmark render latency and memory usage for slides with 9, 16, and 25 tiles at downsample factors 4 and 8.
 
-5) Mask and annotation handling
-- Masks and annotations remain per-FOV. The virtual layer should request downsampled masks/annotations for each FOV tile and composite them into the stitched RGB in the same order/opacity used by `render_image`.
-- Update `current_label_masks` and `full_resolution_label_masks` semantics: when in map mode, `current_label_masks` should contain the stitched, visible-region mask slices (indexed by mask_name or by unique key combining map+mask) so UI patching logic can continue to work unchanged. The virtual layer can produce these derived masks before `image_display.update_patches()` runs.
+### 11. Rollout Plan
+- Gate map mode behind `ENABLE_MAP_MODE` feature flag.
+- Phase deployment:
+  1. Land descriptor parser and virtual layer behind the flag, default off.
+  2. Add UI toggle and smoke tests; collect feedback from notebook users.
+  3. Document translation-only coordinate requirements and release sample descriptors.
+- Update `README` and `doc/log` during rollout phases to communicate the feature and its flag status.
 
-6) UI & compatibility considerations
-- Keep existing single-FOV behavior unchanged and opt into map-mode via a UI toggle. When map-mode is active, most of the viewer internals should behave as if the viewer had a single large virtual image; only the virtual layer composes from multiple FOVs.
-- Keep plugin hook names unchanged (`on_fov_change`, `on_mv_update_display`). When map-mode is active, `on_fov_change` should be triggered when the selected map changes, and plugins that need per-FOV semantics may be passed the list of active FOVs in the viewport.
+### 13. Dependencies & References
+- Relies on `ImageMaskViewer.load_fov`, caches, and `render_image` entry points documented in `dev_note/FOV_load_cycle.md`.
 
-7) Performance and testing notes
-- Stitching only at the downsampled scale reduces memory and CPU usage dramatically; implement and test for typical microscope slide scales (e.g., 4x/8x downsampled tiles).
-- Add tests that simulate map JSONs with a few adjacent FOVs and assert correct stitching offsets, overlay behavior, and cache invalidation when underlying FOVs are updated.
-- Measure latencies (panning, zooming) and tune the virtual layer cache size and downsample factor thresholds to maintain interactive frame rates.
-
-8) Migration steps
-- Add the JSON map loader and a minimal VisualMapLayer implementation behind a feature flag toggled in the UI.
-- Once stable, expose the feature to users with documentation on how to author map JSON files (coordinate system, units, expected image sizes).
-
+### 14. Acceptance Criteria
+- Map mode renders stitched tiles with masking and annotation parity relative to single-FOV mode.
+- Toggling map mode on/off does not leave stale cache entries or break navigation history.
+- Automated tests cover descriptor parsing, stitching, and overlay correctness; manual notebook validation confirms performance targets.
