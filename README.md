@@ -5,47 +5,7 @@ Usability Enhanced Linked Viewer: a Jupyter Notebook integrated viewer for MIBI 
 You can try UELer without installation by launching it on [Binder](https://mybinder.org/v2/gh/HartmannLab/UELer/binder-app?urlpath=%2Fdoc%2Ftree%2Fscript%2Frun_ueler.ipynb):
 [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/HartmannLab/UELer/binder-app?urlpath=%2Fdoc%2Ftree%2Fscript%2Frun_ueler.ipynb)
 
-## Try it on Binder
-You can try UELer without installation by launching it on [Binder](https://mybinder.org/v2/gh/HartmannLab/UELer/binder-app?urlpath=%2Fdoc%2Ftree%2Fscript%2Frun_ueler.ipynb):
-[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/HartmannLab/UELer/binder-app?urlpath=%2Fdoc%2Ftree%2Fscript%2Frun_ueler.ipynb)
-
 ## Installation
-
-### 1. Set up the environment
-
-You can create a compatible environment using the `environment.yml` file provided in this repository.
-
-1. Download the `environment.yml` file to your preferred folder.
-2. Change your current directory to that folder.
-3. Create the environment by running:
-
-   ```shell
-   micromamba env create --name ark-analysis-ueler --file environment.yml
-   ```
-
-### 2. Install UELer
-
-1. Navigate to the directory where you want to install the tool, then clone the repository:
-
-   ```shell
-   git clone https://github.com/HartmannLab/UELer.git
-   ```
-2. Activate your environment:
-
-   ```shell
-   micromamba activate ark-analysis-ueler
-   ```
-3. Change into the cloned UELer directory:
-
-   ```shell
-   cd <path-to-UELer-folder>
-   ```
-4. Install the package in editable mode:
-
-   ```shell
-   pip install -e .
-   ```
-
 
 ### 1. Set up the environment
 
@@ -107,14 +67,9 @@ git pull
 ## Getting started
 1. Open your favorite editor that supports Jupyter notebook.
 2. Navigate to the cloned UELer repository, then open the notebook `/script/run_ueler.ipynb`.
-2. Navigate to the cloned UELer repository, then open the notebook `/script/run_ueler.ipynb`.
 3. Select the kernel for an ark-analysis compatible conda/micromamba env.
 4. Change the lines according to the instructions in the notebook: when configuring the `/script/run_ueler.ipynb`, ensure that you specify the following directory paths:
-4. Change the lines according to the instructions in the notebook: when configuring the `/script/run_ueler.ipynb`, ensure that you specify the following directory paths:
   - **`base_folder`**: The directory containing the FOV (Field of View) folders with image data (e.g., `.../image_data`).
-  - **`masks_folder`** (optional): The directory containing the segmentation `.tif` files for cell segmentation (e.g., `.../segmentation/cellpose_output`).
-  - **`annotations_folder`** (optional): The directory containing annotation files for marking regions of interest (e.g., `.../annotations`).
-  - **`cell_table_path`** (optional): The path to the file containing the cell table data (e.g., `.../segmentation/cell_table/cell_table_size_normalized.csv`).
   - **`masks_folder`** (optional): The directory containing the segmentation `.tif` files for cell segmentation (e.g., `.../segmentation/cellpose_output`).
   - **`annotations_folder`** (optional): The directory containing annotation files for marking regions of interest (e.g., `.../annotations`).
   - **`cell_table_path`** (optional): The path to the file containing the cell table data (e.g., `.../segmentation/cell_table/cell_table_size_normalized.csv`).
@@ -145,26 +100,13 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 - **Wide Plugins**: Enable "Horizontal layout" (for example, in the heatmap plugin) to undock the tool into the footer while keeping the accordion available for other controls.
 
 ## New Update  
-### **UELer v0.2.0 Summary**
+### **UELer v0.2.1 Summary**
 **Gallery and Mask Painting**
 - Painted mask colors now persist across all FOVs and appear in the gallery even when the viewer isn’t open.
 - Fixed multiple gallery color and rendering issues, ensuring all cells display correct mask colors.
 - Improved synchronization between the mask painter and cell gallery for consistent colors and outline thickness.
-### **UELer v0.2.0 Summary**
-**Gallery and Mask Painting**
-- Painted mask colors now persist across all FOVs and appear in the gallery even when the viewer isn’t open.
-- Fixed multiple gallery color and rendering issues, ensuring all cells display correct mask colors.
-- Improved synchronization between the mask painter and cell gallery for consistent colors and outline thickness.
+- Resolved performance issues when using the mask painter across multiple FOVs.
 
-**ROI and Cell Gallery Enhancements**
-- ROI and cell galleries stabilized with predictable layout, no clipping, and consistent tile sizing.
-- Introduced pagination with clear navigation controls and fixed caret/focus behavior in expression filters.
-- Implemented ROI filtering tabs (simple/advanced) and added error handling plus performance warnings.
-
-**Rendering and Visualization**
-- Unified gallery and viewer rendering through a shared engine for visual consistency.
-- Added automatic scale bars across viewer and exports with accurate physical scaling.
-- Improved outline scaling, tooltip precision, and histogram responsiveness.
 **ROI and Cell Gallery Enhancements**
 - ROI and cell galleries stabilized with predictable layout, no clipping, and consistent tile sizing.
 - Introduced pagination with clear navigation controls and fixed caret/focus behavior in expression filters.
@@ -179,23 +121,12 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 - Batch exports now include accurate scale bars and synchronized viewer settings.
 - Enhanced ROI browser caching and FOV filtering for faster, more reliable browsing.
 - Added throttling, debounce logic, and guards to prevent redundant redraws and improve responsiveness.
-**Batch Export and Performance**
-- Batch exports now include accurate scale bars and synchronized viewer settings.
-- Enhanced ROI browser caching and FOV filtering for faster, more reliable browsing.
-- Added throttling, debounce logic, and guards to prevent redundant redraws and improve responsiveness.
 
 **UI and Plugin Improvements**
 - Consolidated and refined plugin layouts to prevent overflow and improve usability.
 - Reorganized channel and pixel annotation panels with clearer controls and consistent palette management.
 - Added cache configuration to advanced settings and maintained test coverage for layout stability.
-**UI and Plugin Improvements**
-- Consolidated and refined plugin layouts to prevent overflow and improve usability.
-- Reorganized channel and pixel annotation panels with clearer controls and consistent palette management.
-- Added cache configuration to advanced settings and maintained test coverage for layout stability.
 
-**Testing and Documentation**
-- Extensive new unit tests for rendering, ROI management, caching, palettes, and scale bars.
-- Updated documentation explaining FOV downsampling and rendering behavior.
 **Testing and Documentation**
 - Extensive new unit tests for rendering, ROI management, caching, palettes, and scale bars.
 - Updated documentation explaining FOV downsampling and rendering behavior.
