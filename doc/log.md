@@ -1,4 +1,17 @@
 ### v0.3.0-alpha
+**Map-mode cache integration (#3)**
+- Centralized the stitched tile cache inside `ImageMaskViewer`, wiring image cache evictions to `VirtualMapLayer.invalidate_for_fov` and driving cache keys with the viewer's channel/mask/annotation state so map renders stay in sync with UI changes.
+- Extended `tests/test_virtual_map_layer.py` to assert cache busting when the viewer signature changes, protecting the new integration path.
+
+**FOV load cycle documentation (map mode)**
+- Expanded `dev_note/FOV_load_cycle.md` with the current map mode scaffolding, covering the `ENABLE_MAP_MODE` flag, descriptor ingestion via `MapDescriptorLoader`, and how `VirtualMapLayer` reuses `_render_fov_region` for stitched viewport renders.
+- Documented the region-level cache keys and geometry helpers exposed by `VirtualMapLayer`, plus the pending invalidation wiring so backend groundwork is visible ahead of UI integration.
+
+**VirtualMapLayer core groundwork (#3)**
+- Introduced `VirtualMapLayer` to stitch slide descriptors into viewport-sized composites, including per-tile caching and viewport intersection logic.
+- Refactored `ImageMaskViewer` rendering into a reusable `_compose_fov_image` helper and exposed `_render_fov_region` so map mode can reuse existing channel, annotation, and mask pipelines.
+- Added `tests/test_virtual_map_layer.py` to verify gap handling, cache reuse, and invalidation semantics for the new layer.
+
 **Map descriptor loader groundwork (#3)**
 - Added `MapDescriptorLoader` to validate translation-only slide descriptors, reject mixed-unit inputs, and surface duplicate FOV warnings in preparation for map-based tiled mode.
 - Wired the loader into `ImageMaskViewer` behind the `ENABLE_MAP_MODE` feature flag so descriptor parsing feedback reaches users without affecting existing single-FOV workflows.

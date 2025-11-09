@@ -40,6 +40,7 @@ class VirtualMapLayer:
     ) -> None:
         self._viewer = viewer
         self.descriptor = descriptor
+        self._map_id = descriptor.slide_id
 
         parsed = []
         for factor in allowed_downsample:
@@ -106,13 +107,28 @@ class VirtualMapLayer:
 
         canvas = self._allocate_canvas(xmin_um, xmax_um, ymin_um, ymax_um, ds_factor)
         channels_tuple = tuple(selected_channels)
+        state_signature = None
+        signature_provider = getattr(self._viewer, "_map_state_signature", None)
+        if callable(signature_provider):
+            try:
+                state_signature = signature_provider(channels_tuple, ds_factor)
+            except Exception:  # pragma: no cover - viewer-provided signature is optional
+                state_signature = None
 
         for tile, intersection in visible_tiles:
             region = self._compute_tile_region(tile, intersection, ds_factor)
             if region is None:
                 continue
             region_xy, region_ds = region
-            cache_key = (tile.name, ds_factor, channels_tuple, region_xy)
+            cache_key = (
+                "tile",
+                self._map_id,
+                tile.name,
+                ds_factor,
+                channels_tuple,
+                region_xy,
+                state_signature,
+            )
             image = self._cache_lookup(cache_key)
             if image is None:
                 image = self._viewer._render_fov_region(  # pylint: disable=protected-access
@@ -128,7 +144,21 @@ class VirtualMapLayer:
         return canvas
 
     def invalidate_for_fov(self, fov_name: str) -> None:
-        remove_keys = [key for key in self._cache if key[0] == fov_name]
+        keys = list(self._cache.keys())
+        remove_keys = []
+        for key in keys:
+            if not isinstance(key, tuple):
+                continue
+            if key and key[0] == "tile":
+                tile_name_index = 2
+            else:
+                tile_name_index = 0
+            try:
+                tile_name = key[tile_name_index]
+            except IndexError:
+                continue
+            if tile_name == fov_name:
+                remove_keys.append(key)
         for key in remove_keys:
             self._cache.pop(key, None)
 

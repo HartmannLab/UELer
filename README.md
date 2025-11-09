@@ -102,6 +102,8 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 ## New Update  
 ### **UELer v0.3.0-alpha Summary**
 - Translation-only map descriptors can now be scanned (behind the `ENABLE_MAP_MODE` flag). The viewer validates JSON inputs with the new `MapDescriptorLoader`, surfaces descriptor warnings, and keeps single-FOV rendering unchanged while groundwork for issue #3 proceeds.
+- Virtual map stitching is underway: `VirtualMapLayer` now renders stitched viewports via the existing `ImageMaskViewer` pipeline and ships with unit tests covering tile gaps, caching, and invalidation (still behind `ENABLE_MAP_MODE`).
+- Map tile caching now lives in `ImageMaskViewer`, which shares a stitched cache with `VirtualMapLayer`, hooks FOV LRU evictions, and includes UI state in cache keys so map renders reflect channel, mask, and annotation tweaks.
 
 ## Earlier Updates  
 

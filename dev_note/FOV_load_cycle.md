@@ -52,17 +52,16 @@ flowchart TD
 - Returns the final `np.float32` RGB array ready for `update_display`.
 
 ## Cache structures & supporting fields
-- `image_cache: OrderedDict[str, dict[str, np.ndarray | None]]` — lazily populated channel images per FOV; LRU-trimmed in `load_fov` and when cache size inputs change.
-- `mask_cache` and `label_masks_cache` — raw masks plus stride-sampled versions keyed by downsample factor (`{1, 2, 4, ...}`). `edge_masks_cache` is primed for future edge generation but currently left empty.
-- `annotation_cache` / `annotation_label_cache` — store full-resolution annotation rasters and their downsampled views; palette metadata lives in `annotation_palettes`, `annotation_class_labels`, and `annotation_class_ids`.
-- `current_label_masks` / `full_resolution_label_masks` — short-lived selections scoped to the active viewport for interactive mask hover and click handling.
-- `channel_max_values` — merged display maxima (`merge_channel_max`) referenced when rescaling intensities and reconfiguring UI sliders.
 
+## Map mode scaffolding (feature-flagged)
+- `ENABLE_MAP_MODE` gate — `ImageMaskViewer` reads `ENABLE_MAP_MODE` at import time and only activates map descriptors when the flag resolves truthy. During construction `_initialize_map_descriptors` scans `<dataset>/.UELer/maps/*.json` via `MapDescriptorLoader`, capturing normalized `SlideDescriptor` objects and surfacing any parser warnings through `_record_map_mode_warning`.
+- Descriptor guarantees — `MapDescriptorLoader` enforces translation-only placement (rejecting rotations or pixel-based centers), deduplicates FOV entries per slide, and requires a consistent micron-per-pixel scale within each descriptor before emitting sorted `MapFOVSpec` tuples.
+- Virtual layer entrypoint — `VirtualMapLayer` wraps stitched rendering. Once created it accepts viewport bounds in microns through `set_viewport(...)` and, on `render(selected_channels)`, reuses the viewer’s `_render_fov_region` helper so every tile goes through `_compose_fov_image` (channel colours, masks, annotations, painter overlays) without reimplementing the core pipeline.
+- Region-level renders — Tiles are intersected against the viewport, converted to per-tile pixel windows, and rendered one at a time. The layer caches each `(fov, downsample, channel tuple, region_xy)` result in an `OrderedDict` capped at six entries by default so rapid pans reuse previous tile slices without replaying the full viewer flow.
+- Map geometry — The layer derives a base pixel size from the first valid tile, rejects inconsistent FOV scales, and exposes `map_bounds()` / `base_pixel_size_um()` to align future navigation widgets with the stitched coordinate system.
+- Invalidation hooks — `VirtualMapLayer.invalidate_for_fov(fov_name)` purges cached regions when upstream viewers evict or mutate a tile; integration points inside `ImageMaskViewer` are staged but not yet wired to UI toggles, so map mode remains backend-only until selector plumbing lands.
 ## Plugin and runner hooks
 - Lifecycle notifications use `inform_plugins`, which iterates `self.SidePlots` entries and calls handlers such as `on_fov_change`, `on_mv_update_display`, and `on_marker_sets_changed` when available.
-- The mask painter plugin reads `collect_mask_regions` output and cooperates with `apply_registry_colors` to tint labels after the core render pass.
-- Notebook runners (`ueler/runner.py`) trigger `viewer.on_image_change(None)` and `update_display(...)` during refresh cycles; defensive guards prevent crashes when toolbars or plugins are still initialising.
-
 This document is intentionally focused on the steady-state runtime behaviour. See also:
 - `ueler/viewer/image_display.py` for canvas management and overlay patches.
 - `ueler/rendering/__init__.py` for the channel compositing pipeline used by `render_image`.

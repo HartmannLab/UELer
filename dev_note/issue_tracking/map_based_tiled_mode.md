@@ -109,9 +109,9 @@ This document captures the product and engineering specification for rendering m
   - Integrate loader into viewer bootstrap behind `ENABLE_MAP_MODE`, wiring errors to the new user-facing warnings.
   - Extend tests to assert parsed descriptors populate slide and FOV registries deterministically.
 2. **VirtualMapLayer core**
-  - Implement tile indexing, viewport intersection math, and stitched buffer assembly using existing `render_image` calls.
-  - Thread cache hooks (`map_tile_cache`, invalidation triggers) through `ImageMaskViewer` in alignment with `FOV_load_cycle.md` semantics.
-  - Add unit coverage for offset alignment, zero-fill gaps, and cache eviction behaviour.
+  - Implement tile indexing, viewport intersection math, and stitched buffer assembly using existing `render_image` calls. _Status: done via `ueler/viewer/virtual_map_layer.py` with `_compose_fov_image` helper in `main_viewer`._
+  - Thread cache hooks (`map_tile_cache`, invalidation triggers) through `ImageMaskViewer` in alignment with `FOV_load_cycle.md` semantics. _Status: done via viewer-managed tile cache, eviction hooks on FOV LRU pops, and render-state signatures shared with `VirtualMapLayer`._
+  - Add unit coverage for offset alignment, zero-fill gaps, and cache eviction behaviour. _Status: done in `tests/test_virtual_map_layer.py`._
 3. **UI integration and exports**
   - Add the map-mode toggle, selector wiring, and tooltip metadata to `ui_components`; ensure plugin notifications receive slide context.
   - Update batch export plumbing to recognise stitched renders and stream tiles in descriptor order; add corresponding functional tests.

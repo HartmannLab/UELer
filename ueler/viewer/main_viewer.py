@@ -4,7 +4,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Mapping, Optional
+from typing import Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -72,6 +72,7 @@ from ueler.viewer.palette_store import (
     write_palette_file,
 )
 from ueler.viewer.map_descriptor_loader import MapDescriptorLoader
+from .virtual_map_layer import VirtualMapLayer
 
 from weakref import WeakKeyDictionary
 
@@ -145,6 +146,10 @@ class ImageMaskViewer:
         self._map_mode_enabled = _MAP_MODE_FLAG
         self._map_mode_messages = []
         self._map_descriptors = {}
+        self._map_tile_cache_capacity = 6
+        self._map_tile_cache = OrderedDict()
+        self._map_layers = {}
+        self._active_map_id = None
 
         # Specifiy the keys for the x, y and label columns in the cell table
         self.x_key = "X"
@@ -313,6 +318,8 @@ class ImageMaskViewer:
         loader = MapDescriptorLoader()
         result = loader.load_from_directory(descriptor_root)
         self._map_descriptors = result.slides
+        self._map_layers.clear()
+        self._map_tile_cache.clear()
 
         for message in result.warnings:
             self._record_map_mode_warning(message)
@@ -329,6 +336,140 @@ class ImageMaskViewer:
             print(f"Map mode warning: {message}")
         except Exception:  # pragma: no cover - console output best effort
             pass
+
+    def _get_map_layer(self, map_id: str) -> VirtualMapLayer:
+        if not self._map_mode_enabled:
+            raise RuntimeError("Map mode is disabled.")
+        descriptor = self._map_descriptors.get(map_id)
+        if descriptor is None:
+            raise KeyError(map_id)
+        layer = self._map_layers.get(map_id)
+        if layer is None:
+            allowed = tuple(getattr(self, "downsample_factors", DOWNSAMPLE_FACTORS))
+            layer = VirtualMapLayer(
+                self,
+                descriptor,
+                allowed_downsample=allowed,
+                cache=self._map_tile_cache,
+                cache_capacity=self._map_tile_cache_capacity,
+            )
+            self._map_layers[map_id] = layer
+        return layer
+
+    def _invalidate_map_tiles_for_fov(self, fov_name: str) -> None:
+        if not self._map_layers:
+            return
+        for layer in self._map_layers.values():
+            try:
+                layer.invalidate_for_fov(fov_name)
+            except Exception:
+                if self._debug:
+                    print(f"[viewer] Failed to invalidate map cache for {fov_name}")
+
+    def _map_state_signature(
+        self,
+        selected_channels: Tuple[str, ...],
+        downsample_factor: int,
+    ):
+        if not self._map_mode_enabled:
+            return None
+        controls = getattr(self, "ui_component", None)
+        if controls is None:
+            return None
+
+        try:
+            outline = int(self.mask_outline_thickness)
+        except Exception:
+            outline = 1
+
+        channel_entries = []
+        color_controls = getattr(controls, "color_controls", {})
+        contrast_min_controls = getattr(controls, "contrast_min_controls", {})
+        contrast_max_controls = getattr(controls, "contrast_max_controls", {})
+        for channel in selected_channels:
+            color_widget = color_controls.get(channel)
+            color_key = color_widget.value if color_widget is not None else None
+            if isinstance(color_key, str):
+                color_value = self.predefined_colors.get(color_key, color_key)
+            else:
+                color_value = color_key
+            min_widget = contrast_min_controls.get(channel)
+            max_widget = contrast_max_controls.get(channel)
+            try:
+                min_val = float(min_widget.value)
+            except Exception:
+                min_val = 0.0
+            try:
+                max_val = float(max_widget.value)
+            except Exception:
+                max_val = 0.0
+            channel_entries.append(
+                (channel, color_value, round(min_val, 6), round(max_val, 6))
+            )
+
+        mask_entries = []
+        mask_display_controls = getattr(controls, "mask_display_controls", {})
+        mask_color_controls = getattr(controls, "mask_color_controls", {})
+        if self.masks_available and mask_display_controls:
+            for mask_name, checkbox in mask_display_controls.items():
+                if not bool(getattr(checkbox, "value", False)):
+                    continue
+                color_widget = mask_color_controls.get(mask_name)
+                color_key = color_widget.value if color_widget is not None else None
+                if isinstance(color_key, str):
+                    color_value = self.predefined_colors.get(color_key, color_key)
+                else:
+                    color_value = color_key
+                mask_entries.append((mask_name, color_value))
+        mask_signature = tuple(sorted(mask_entries))
+
+        annotation_signature = None
+        if (
+            self.annotations_available
+            and self.annotation_display_enabled
+            and self.active_annotation_name
+        ):
+            name = self.active_annotation_name
+            palette = tuple(
+                sorted((str(k), str(v)) for k, v in self.annotation_palettes.get(name, {}).items())
+            )
+            labels = tuple(
+                sorted((str(k), str(v)) for k, v in self.annotation_class_labels.get(name, {}).items())
+            )
+            try:
+                alpha = round(float(self.annotation_overlay_alpha), 6)
+            except Exception:
+                alpha = 0.5
+            annotation_signature = (
+                name,
+                alpha,
+                str(self.annotation_overlay_mode),
+                str(self.annotation_label_display_mode),
+                palette,
+                labels,
+            )
+
+        display = getattr(self, "image_display", None)
+        if display is not None:
+            selected_cells = getattr(display, "selected_cells", ())
+            try:
+                painter_selected = tuple(sorted(selected_cells))
+            except Exception:
+                painter_selected = ()
+        else:
+            painter_selected = ()
+
+        painter_signature = (bool(self._is_mask_painter_enabled()), painter_selected)
+
+        return (
+            "v1",
+            int(downsample_factor),
+            tuple(channel_entries),
+            mask_signature,
+            annotation_signature,
+            outline,
+            painter_signature,
+        )
     
     def after_all_plugins_loaded(self):
         # loop through all the attributes of self.SidePlots, call the `after_all_plugins_loaded`` method
@@ -419,6 +560,7 @@ class ImageMaskViewer:
         while len(self.image_cache) > self.max_cache_size:
             removed_fov, _ = self.image_cache.popitem(last=False)
             print(f"Removed FOV '{removed_fov}' from image cache.")
+            self._invalidate_map_tiles_for_fov(removed_fov)
 
         else:
             # Move the accessed FOV to the end to mark it as recently used
@@ -1799,16 +1941,149 @@ class ImageMaskViewer:
         self.image_display.fig.canvas.draw_idle()
         self.update_display(self.current_downsample_factor)
 
+    def _compose_fov_image(
+        self,
+        fov_name: str,
+        selected_channels: Tuple[str, ...],
+        downsample_factor: int,
+        region_xy: Tuple[int, int, int, int],
+        region_ds: Tuple[int, int, int, int],
+    ) -> np.ndarray:
+        if not selected_channels:
+            height = max(1, region_ds[3] - region_ds[2])
+            width = max(1, region_ds[1] - region_ds[0])
+            return np.zeros((height, width, 3), dtype=np.float32)
+
+        self.load_fov(fov_name, selected_channels)
+        fov_images = self.image_cache[fov_name]
+
+        controls = self.ui_component
+        channel_settings = {}
+        for ch in selected_channels:
+            control = controls.color_controls.get(ch)
+            color_key = control.value if control is not None else "Red"
+            color_value = self.predefined_colors.get(color_key, color_key)
+            color_rgb = to_rgb(color_value)
+            min_control = controls.contrast_min_controls.get(ch)
+            max_control = controls.contrast_max_controls.get(ch)
+            channel_settings[ch] = ChannelRenderSettings(
+                color=color_rgb,
+                contrast_min=min_control.value if min_control is not None else 0.0,
+                contrast_max=max_control.value if max_control is not None else 65535.0,
+            )
+
+        annotation_settings = None
+        if (
+            self.annotations_available
+            and self.annotation_display_enabled
+            and self.active_annotation_name is not None
+        ):
+            annotation_layers = self.annotation_label_cache.get(fov_name, {})
+            annotation_entry = annotation_layers.get(self.active_annotation_name, {})
+            annotation_ds = annotation_entry.get(downsample_factor)
+            if annotation_ds is None and annotation_entry:
+                base_array = annotation_entry.get(1)
+                if base_array is not None:
+                    annotation_ds = base_array[::downsample_factor, ::downsample_factor]
+            if annotation_ds is not None:
+                class_ids = self.annotation_class_ids.get(self.active_annotation_name)
+                if not class_ids:
+                    cache_source = self.annotation_cache.get(fov_name, {}).get(
+                        self.active_annotation_name
+                    )
+                    if cache_source is not None:
+                        class_ids = list(_unique_annotation_values(cache_source))
+                palette = self.annotation_palettes.get(self.active_annotation_name, {})
+                colormap = build_discrete_colormap(class_ids or [0], palette)
+                annotation_settings = AnnotationRenderSettings(
+                    array=annotation_ds,
+                    colormap=colormap,
+                    alpha=self.annotation_overlay_alpha,
+                    mode=self.annotation_overlay_mode,
+                )
+
+        mask_settings = []
+        mask_regions = {}
+        if self.masks_available:
+            selected_masks = [
+                mask_name
+                for mask_name, cb in controls.mask_display_controls.items()
+                if getattr(cb, "value", False)
+            ]
+            for mask_name in selected_masks:
+                label_dict = self.label_masks_cache.get(fov_name, {}).get(mask_name)
+                if not label_dict:
+                    continue
+                label_mask_ds = label_dict.get(downsample_factor)
+                if label_mask_ds is None:
+                    continue
+                try:
+                    mask_array = label_mask_ds.compute()
+                except AttributeError:
+                    mask_array = np.asarray(label_mask_ds)
+                if mask_array.size == 0:
+                    continue
+                color_control = controls.mask_color_controls.get(mask_name)
+                color_key = color_control.value if color_control is not None else "White"
+                color_value = self.predefined_colors.get(color_key, color_key)
+                mask_settings.append(
+                    MaskRenderSettings(
+                        array=mask_array,
+                        color=to_rgb(color_value),
+                        mode="outline",
+                        outline_thickness=int(self.mask_outline_thickness),
+                        downsample_factor=downsample_factor,
+                    )
+                )
+
+            label_cache = self.label_masks_cache.get(fov_name, {})
+            mask_regions = collect_mask_regions(
+                label_cache,
+                selected_masks,
+                downsample_factor,
+                region_ds,
+            )
+
+        combined = render_fov_to_array(
+            fov_name,
+            fov_images,
+            selected_channels,
+            channel_settings,
+            downsample_factor=downsample_factor,
+            region_xy=region_xy,
+            region_ds=region_ds,
+            annotation=annotation_settings,
+            masks=mask_settings,
+        )
+
+        painter_enabled = self._is_mask_painter_enabled()
+        if painter_enabled and mask_regions:
+            excluded = (
+                set(self.image_display.selected_cells)
+                if hasattr(self.image_display, "selected_cells")
+                else set()
+            )
+            combined = apply_registry_colors(
+                combined,
+                fov=fov_name,
+                mask_regions=mask_regions,
+                outline_thickness=int(self.mask_outline_thickness),
+                downsample_factor=downsample_factor,
+                exclude_ids=excluded,
+            )
+
+        return combined
+
     def render_image(self, selected_channels, downsample_factor, xym, xym_ds):
         """Render a composite image for the active viewer selection."""
 
         current_fov = self.ui_component.image_selector.value
-        self.load_fov(current_fov, selected_channels)
-        fov_images = self.image_cache[current_fov]
 
         if xym is not None:
             xmin, xmax, ymin, ymax = (int(v) for v in xym)
         else:
+            self.load_fov(current_fov, tuple(selected_channels))
+            fov_images = self.image_cache.get(current_fov, {})
             first_channel = next(iter(fov_images.values()), None)
             if first_channel is None:
                 raise ValueError(f"FOV '{current_fov}' has no loaded channels")
@@ -1830,117 +2105,31 @@ class ImageMaskViewer:
 
         region_ds = (xmin_ds, xmax_ds, ymin_ds, ymax_ds)
 
-        if not selected_channels:
-            height = max(1, ymax_ds - ymin_ds)
-            width = max(1, xmax_ds - xmin_ds)
-            return np.zeros((height, width, 3), dtype=np.float32)
-
-        controls = self.ui_component
-        channel_settings = {}
-        for ch in selected_channels:
-            color_key = controls.color_controls[ch].value
-            color_value = self.predefined_colors.get(color_key, color_key)
-            color_rgb = to_rgb(color_value)
-            channel_settings[ch] = ChannelRenderSettings(
-                color=color_rgb,
-                contrast_min=controls.contrast_min_controls[ch].value,
-                contrast_max=controls.contrast_max_controls[ch].value,
-            )
-
-        annotation_settings = None
-        if (
-            self.annotations_available
-            and self.annotation_display_enabled
-            and self.active_annotation_name is not None
-        ):
-            annotation_layers = self.annotation_label_cache.get(current_fov, {})
-            annotation_entry = annotation_layers.get(self.active_annotation_name, {})
-            annotation_ds = annotation_entry.get(downsample_factor)
-            if annotation_ds is None and annotation_entry:
-                base_array = annotation_entry.get(1)
-                if base_array is not None:
-                    annotation_ds = base_array[::downsample_factor, ::downsample_factor]
-            if annotation_ds is not None:
-                class_ids = self.annotation_class_ids.get(self.active_annotation_name)
-                if not class_ids:
-                    cache_source = self.annotation_cache.get(current_fov, {}).get(
-                        self.active_annotation_name
-                    )
-                    if cache_source is not None:
-                        class_ids = list(_unique_annotation_values(cache_source))
-                palette = self.annotation_palettes.get(self.active_annotation_name, {})
-                colormap = build_discrete_colormap(class_ids or [0], palette)
-                annotation_settings = AnnotationRenderSettings(
-                    array=annotation_ds,
-                    colormap=colormap,
-                    alpha=self.annotation_overlay_alpha,
-                    mode=self.annotation_overlay_mode,
-                )
-
-        mask_settings = []
-        if self.masks_available:
-            selected_masks = [
-                mask_name for mask_name, cb in controls.mask_display_controls.items() if cb.value
-            ]
-            for mask_name in selected_masks:
-                label_dict = self.label_masks_cache.get(current_fov, {}).get(mask_name)
-                if not label_dict:
-                    continue
-                label_mask_ds = label_dict.get(downsample_factor)
-                if label_mask_ds is None:
-                    continue
-                try:
-                    mask_array = label_mask_ds.compute()
-                except AttributeError:
-                    mask_array = np.asarray(label_mask_ds)
-                if mask_array.size == 0:
-                    continue
-                color_key = controls.mask_color_controls[mask_name].value
-                color_value = self.predefined_colors.get(color_key, color_key)
-                mask_settings.append(
-                    MaskRenderSettings(
-                        array=mask_array,
-                        color=to_rgb(color_value),
-                        mode="outline",
-                        outline_thickness=int(self.mask_outline_thickness),
-                        downsample_factor=downsample_factor,
-                    )
-                )
-
-            label_cache = self.label_masks_cache.get(current_fov, {})
-            mask_regions = collect_mask_regions(
-                label_cache,
-                selected_masks,
-                downsample_factor,
-                region_ds,
-            )
-
-        combined = render_fov_to_array(
+        combined = self._compose_fov_image(
             current_fov,
-            fov_images,
-            selected_channels,
-            channel_settings,
-            downsample_factor=downsample_factor,
-            region_xy=region_xy,
-            region_ds=region_ds,
-            annotation=annotation_settings,
-            masks=mask_settings,
+            tuple(selected_channels),
+            downsample_factor,
+            region_xy,
+            region_ds,
         )
 
-        painter_enabled = self._is_mask_painter_enabled()
-        if painter_enabled and mask_regions:
-            # Exclude currently selected cells so they remain white-highlighted
-            excluded = set(self.image_display.selected_cells) if hasattr(self.image_display, 'selected_cells') else set()
-            combined = apply_registry_colors(
-                combined,
-                fov=current_fov,
-                mask_regions=mask_regions,
-                outline_thickness=int(self.mask_outline_thickness),
-                downsample_factor=downsample_factor,
-                exclude_ids=excluded,
-            )
-
         return combined
+
+    def _render_fov_region(
+        self,
+        fov_name: str,
+        selected_channels: Tuple[str, ...],
+        downsample_factor: int,
+        region_xy: Tuple[int, int, int, int],
+        region_ds: Tuple[int, int, int, int],
+    ) -> np.ndarray:
+        return self._compose_fov_image(
+            fov_name,
+            tuple(selected_channels),
+            downsample_factor,
+            region_xy,
+            region_ds,
+        )
 
     # ------------------------------------------------------------------
     # Mask painter integration
