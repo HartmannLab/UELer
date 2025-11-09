@@ -1,10 +1,11 @@
 # viewer.py
 
 import logging
+import math
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Mapping, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -150,6 +151,10 @@ class ImageMaskViewer:
         self._map_tile_cache = OrderedDict()
         self._map_layers = {}
         self._active_map_id = None
+        self._map_mode_active = False
+        self._visible_map_fovs = ()
+        self._map_pixel_size_nm = None
+        self._map_canvas_size = None
 
         # Specifiy the keys for the x, y and label columns in the cell table
         self.x_key = "X"
@@ -246,6 +251,7 @@ class ImageMaskViewer:
 
         # Initialize widgets
         create_widgets(self)
+        self._refresh_map_controls()
         pixel_widget = getattr(self.ui_component, "pixel_size_inttext", None)
         if pixel_widget is not None:
             try:
@@ -320,6 +326,8 @@ class ImageMaskViewer:
         self._map_descriptors = result.slides
         self._map_layers.clear()
         self._map_tile_cache.clear()
+        if hasattr(self, "ui_component"):
+            self._refresh_map_controls()
 
         for message in result.warnings:
             self._record_map_mode_warning(message)
@@ -337,6 +345,226 @@ class ImageMaskViewer:
         except Exception:  # pragma: no cover - console output best effort
             pass
 
+    def _refresh_map_controls(self) -> None:
+        ui = getattr(self, "ui_component", None)
+        if ui is None:
+            return
+
+        toggle = getattr(ui, "map_mode_toggle", None)
+        selector = getattr(ui, "map_selector", None)
+        summary = getattr(ui, "map_summary", None)
+        container = getattr(ui, "map_controls_box", None)
+
+        has_maps = bool(self._map_descriptors)
+        if container is not None:
+            container.layout.display = "" if has_maps else "none"
+
+        if toggle is not None:
+            toggle.disabled = not (self._map_mode_enabled and has_maps)
+            if not has_maps:
+                toggle.value = False
+
+        options = []
+        if has_maps:
+            for map_id, descriptor in sorted(self._map_descriptors.items()):
+                tiles = len(descriptor.fovs)
+                label = f"{map_id} ({tiles} tile{'s' if tiles != 1 else ''})"
+                options.append((label, map_id))
+
+        selected_value = None
+        if selector is not None:
+            selector.options = options
+            if options:
+                values = [value for _label, value in options]
+                if self._active_map_id in values:
+                    selected_value = self._active_map_id
+                else:
+                    selected_value = values[0]
+                if selector.value != selected_value:
+                    selector.value = selected_value
+            else:
+                selector.value = None
+            selector.disabled = not (self._map_mode_active or (has_maps and bool(options) and toggle is not None and toggle.value))
+            selected_value = selector.value
+
+        if summary is not None:
+            summary.value = self._compose_map_summary(selected_value)
+
+    def _compose_map_summary(self, map_id: Optional[str]) -> str:
+        if not map_id:
+            return ""
+        descriptor = self._map_descriptors.get(map_id)
+        if descriptor is None:
+            return ""
+        try:
+            layer = self._get_map_layer(map_id)
+        except Exception:
+            tiles = len(descriptor.fovs)
+            return f"<span style='font-size:90%'>Tiles: {tiles}</span>"
+
+        width_px, height_px, base_pixel = self._compute_map_canvas_dimensions(layer)
+        bounds = layer.map_bounds()
+        width_um = max(0.0, bounds[1] - bounds[0])
+        height_um = max(0.0, bounds[3] - bounds[2])
+        tiles = len(descriptor.fovs)
+        return (
+            "<span style='font-size:90%'>Tiles: {tiles} | Canvas: {width_px}x{height_px}px | "
+            "Span: {width_um:.0f}x{height_um:.0f} um</span>"
+        ).format(
+            tiles=tiles,
+            width_px=width_px,
+            height_px=height_px,
+            width_um=width_um,
+            height_um=height_um,
+        )
+
+    def _compute_map_canvas_dimensions(self, layer) -> Tuple[int, int, float]:
+        bounds = layer.map_bounds()
+        base_pixel = max(1e-9, float(layer.base_pixel_size_um()))
+        width_um = max(0.0, bounds[1] - bounds[0])
+        height_um = max(0.0, bounds[3] - bounds[2])
+        width_px = max(1, int(math.ceil(width_um / base_pixel)))
+        height_px = max(1, int(math.ceil(height_um / base_pixel)))
+        return width_px, height_px, base_pixel
+
+    def _select_default_map_id(self) -> Optional[str]:
+        if not self._map_descriptors:
+            return None
+        return sorted(self._map_descriptors.keys())[0]
+
+    def _set_map_canvas_dimensions(self, width_px: int, height_px: int) -> None:
+        self.width = width_px
+        self.height = height_px
+        display = getattr(self, "image_display", None)
+        if display is None:
+            return
+        display.width = width_px
+        display.height = height_px
+        display.ax.set_xlim(0, width_px)
+        display.ax.set_ylim(height_px, 0)
+        try:
+            display.img_display.set_extent((0, width_px, height_px, 0))
+            blank = np.zeros((height_px, width_px, 3), dtype=np.float32)
+            display.img_display.set_data(blank)
+            display.combined = blank
+        except Exception:
+            pass
+
+    def _sync_canvas_to_current_fov(self) -> None:
+        selector = getattr(self.ui_component, "image_selector", None)
+        if selector is None:
+            return
+        fov_name = selector.value
+        if not fov_name:
+            return
+        channels = tuple(getattr(self.ui_component.channel_selector, "value", ()))
+        try:
+            self.load_fov(fov_name, channels)
+        except Exception:
+            pass
+        fov_images = self.image_cache.get(fov_name, {})
+        first_channel = next(iter(fov_images.values()), None)
+        if first_channel is None:
+            return
+        height, width = first_channel.shape
+        self._set_map_canvas_dimensions(width, height)
+
+    def on_map_mode_toggle(self, change):
+        new_value = bool(change.get("new"))
+        if new_value == self._map_mode_active:
+            return
+        if new_value:
+            map_id = getattr(self.ui_component, "map_selector", None)
+            candidate = map_id.value if map_id is not None else None
+            if not candidate:
+                candidate = self._select_default_map_id()
+                if map_id is not None:
+                    map_id.value = candidate
+            if candidate is None:
+                toggle = getattr(self.ui_component, "map_mode_toggle", None)
+                if toggle is not None:
+                    toggle.value = False
+                return
+            self._activate_map_mode(candidate)
+            self._refresh_map_controls()
+        else:
+            self._deactivate_map_mode()
+            self._refresh_map_controls()
+
+        self.update_display(self.current_downsample_factor)
+        self.inform_plugins('on_fov_change')
+
+    def on_map_selector_change(self, change):
+        new_value = change.get("new") if isinstance(change, dict) else None
+        if not new_value:
+            return
+        if new_value not in self._map_descriptors:
+            return
+        self._active_map_id = new_value
+        if self._map_mode_active:
+            self._activate_map_mode(new_value)
+            self._refresh_map_controls()
+            self.update_display(self.current_downsample_factor)
+            self.inform_plugins('on_fov_change')
+        else:
+            self._refresh_map_controls()
+
+    def _activate_map_mode(self, map_id: str) -> None:
+        if map_id not in self._map_descriptors:
+            raise KeyError(map_id)
+        layer = self._get_map_layer(map_id)
+        width_px, height_px, base_pixel = self._compute_map_canvas_dimensions(layer)
+        self._map_mode_active = True
+        self._active_map_id = map_id
+        self._map_pixel_size_nm = base_pixel * 1000.0
+        self._map_canvas_size = (width_px, height_px)
+        selector = getattr(self.ui_component, "map_selector", None)
+        if selector is not None and selector.value != map_id:
+            selector.value = map_id
+        image_selector = getattr(self.ui_component, "image_selector", None)
+        if image_selector is not None:
+            image_selector.disabled = True
+        if selector is not None:
+            selector.disabled = False
+        self._set_map_canvas_dimensions(width_px, height_px)
+
+    def _deactivate_map_mode(self) -> None:
+        self._map_mode_active = False
+        self._map_pixel_size_nm = None
+        self._map_canvas_size = None
+        self._visible_map_fovs = ()
+        image_selector = getattr(self.ui_component, "image_selector", None)
+        if image_selector is not None:
+            image_selector.disabled = False
+        map_selector = getattr(self.ui_component, "map_selector", None)
+        if map_selector is not None:
+            map_selector.disabled = True
+        self._sync_canvas_to_current_fov()
+
+    def _render_map_view(
+        self,
+        selected_channels: Sequence[str],
+        downsample_factor: int,
+        viewport_pixels: Tuple[int, int, int, int],
+    ) -> Tuple[np.ndarray, Tuple[str, ...]]:
+        if not self._active_map_id:
+            return np.zeros((1, 1, 3), dtype=np.float32), ()
+        layer = self._get_map_layer(self._active_map_id)
+        base_pixel = layer.base_pixel_size_um()
+        xmin, xmax, ymin, ymax = viewport_pixels
+        xmin_um = xmin * base_pixel
+        xmax_um = xmax * base_pixel
+        ymin_um = ymin * base_pixel
+        ymax_um = ymax * base_pixel
+        layer.set_viewport(
+            xmin_um,
+            xmax_um,
+            ymin_um,
+            ymax_um,
+            downsample_factor=downsample_factor,
+        )
+        combined = layer.render(tuple(selected_channels))
+        return combined, layer.last_visible_fovs()
     def _get_map_layer(self, map_id: str) -> VirtualMapLayer:
         if not self._map_mode_enabled:
             raise RuntimeError("Map mode is disabled.")
@@ -861,6 +1089,11 @@ class ImageMaskViewer:
                 print("[viewer] Plugin notification for pixel size change failed")
 
     def get_pixel_size_nm(self) -> float:
+        if self._map_mode_active and self._map_pixel_size_nm is not None:
+            try:
+                return max(1.0, float(self._map_pixel_size_nm))
+            except (TypeError, ValueError):
+                pass
         return max(1.0, float(getattr(self, "pixel_size_nm", 390.0)))
 
     def update_scale_bar(self) -> None:
@@ -2295,21 +2528,62 @@ class ImageMaskViewer:
         
         # Get selected channels
         selected_channels = list(self.ui_component.channel_selector.value)
-        
+        channel_tuple = tuple(selected_channels)
+
         if not selected_channels:
-            # If no channels selected, display black image
-            self.image_display.img_display.set_data(np.zeros((xym_ds[3] - xym_ds[2], xym_ds[1] - xym_ds[0], 3), dtype=np.float32))
+            # If no channels selected, display black image sized to the current viewport
+            viewport_height = max(1, int(xym_ds[3] - xym_ds[2]))
+            viewport_width = max(1, int(xym_ds[1] - xym_ds[0]))
+            blank = np.zeros((viewport_height, viewport_width, 3), dtype=np.float32)
+            self.image_display.img_display.set_data(blank)
             self.image_display.img_display.set_extent(xym_r)
+            self.image_display.combined = blank
             self.image_display.fig.canvas.draw_idle()
             return
-        
-        # Render the image
-        combined = self.render_image(
-            selected_channels, 
-            downsample_factor,
-            xym,
-            xym_ds
-        )
+
+        visible_fovs: Tuple[str, ...] = ()
+        if self._map_mode_active and self._active_map_id:
+            combined, visible_fovs = self._render_map_view(
+                channel_tuple,
+                downsample_factor,
+                (int(xym[0]), int(xym[1]), int(xym[2]), int(xym[3])),
+            )
+            self.current_label_masks = {}
+            self.full_resolution_label_masks = {}
+        else:
+            combined = self.render_image(
+                selected_channels,
+                downsample_factor,
+                xym,
+                xym_ds,
+            )
+            selector = getattr(self.ui_component, "image_selector", None)
+            current_fov = selector.value if selector is not None else None
+            if current_fov:
+                visible_fovs = (str(current_fov),)
+            if self.masks_available:
+                self.current_label_masks = {}
+                self.full_resolution_label_masks = {}
+                selected_masks = [
+                    mask_name
+                    for mask_name, cb in self.ui_component.mask_display_controls.items()
+                    if getattr(cb, "value", False)
+                ]
+                for mask_name in selected_masks:
+                    label_cache = self.label_masks_cache.get(self.ui_component.image_selector.value, {})
+                    label_mask_dict = label_cache.get(mask_name)
+                    if not label_mask_dict:
+                        continue
+                    if 1 in label_mask_dict:
+                        label_mask_full = label_mask_dict[1]
+                        self.full_resolution_label_masks[mask_name] = label_mask_full
+                    label_mask_ds = label_mask_dict.get(downsample_factor)
+                    if label_mask_ds is None:
+                        continue
+                    self.current_label_masks[mask_name] = label_mask_ds[ymin_ds:ymax_ds, xmin_ds:xmax_ds]
+
+                if hasattr(self.image_display, "update_patches"):
+                    self.image_display.update_patches()
 
         # Update the displayed image
         self.image_display.img_display.set_data(combined)
@@ -2317,30 +2591,7 @@ class ImageMaskViewer:
         self.image_display.img_display.set_extent(xym_r)
         self.image_display.fig.canvas.draw_idle()
 
-        # Update the current label masks for interaction only if masks are available
-        if self.masks_available:
-            self.current_label_masks = {}
-            self.full_resolution_label_masks = {}
-            selected_masks = [
-                mask_name
-                for mask_name, cb in self.ui_component.mask_display_controls.items()
-                if getattr(cb, "value", False)
-            ]
-            for mask_name in selected_masks:
-                label_cache = self.label_masks_cache.get(self.ui_component.image_selector.value, {})
-                label_mask_dict = label_cache.get(mask_name)
-                if not label_mask_dict:
-                    continue
-                if 1 in label_mask_dict:
-                    label_mask_full = label_mask_dict[1]
-                    self.full_resolution_label_masks[mask_name] = label_mask_full
-                label_mask_ds = label_mask_dict.get(downsample_factor)
-                if label_mask_ds is None:
-                    continue
-                self.current_label_masks[mask_name] = label_mask_ds[ymin_ds:ymax_ds, xmin_ds:xmax_ds]
-
-            if hasattr(self.image_display, "update_patches"):
-                self.image_display.update_patches()
+        self._visible_map_fovs = visible_fovs
 
         self.inform_plugins('on_mv_update_display')
         self.update_scale_bar()

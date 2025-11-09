@@ -329,6 +329,7 @@ def display_ui(viewer):
     top_part_widgets = VBox(
         [
             viewer.ui_component.image_selector,
+            viewer.ui_component.map_controls_box,
             control_panel_stack,
             VBox([viewer.ui_component.advanced_settings_accordion]),
         ],
@@ -387,6 +388,38 @@ class uicomponents:
             disabled=False
         )
         self.image_selector.observe(viewer.on_image_change, names='value')
+
+        map_controls_disabled = not (getattr(viewer, "_map_mode_enabled", False) and getattr(viewer, "_map_descriptors", {}))
+        self.map_mode_toggle = Checkbox(
+            value=False,
+            description='Map mode',
+            disabled=map_controls_disabled,
+            layout=Layout(width='auto'),
+            style={'description_width': 'auto'},
+        )
+        self.map_mode_toggle.observe(viewer.on_map_mode_toggle, names='value')
+
+        self.map_selector = Dropdown(
+            options=[],
+            value=None,
+            description='Select map:',
+            disabled=True,
+            layout=Layout(width='100%'),
+            style={'description_width': 'auto'},
+        )
+        self.map_selector.observe(viewer.on_map_selector_change, names='value')
+
+        self.map_summary = HTML(value='', layout=Layout(width='100%'))
+        self.map_controls_box = VBox(
+            children=(
+                HBox([self.map_mode_toggle], layout=Layout(width='100%')),
+                self.map_selector,
+                self.map_summary,
+            ),
+            layout=Layout(width='100%', gap='4px')
+        )
+        if map_controls_disabled:
+            self.map_controls_box.layout.display = 'none'
 
         self.channel_selector_text = HTML(value='Channels:')
 

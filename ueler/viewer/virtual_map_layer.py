@@ -41,6 +41,7 @@ class VirtualMapLayer:
         self._viewer = viewer
         self.descriptor = descriptor
         self._map_id = descriptor.slide_id
+        self._last_visible_fovs: Tuple[str, ...] = ()
 
         parsed = []
         for factor in allowed_downsample:
@@ -94,6 +95,7 @@ class VirtualMapLayer:
         xmin_um, xmax_um, ymin_um, ymax_um, ds_factor = self._viewport
 
         visible_tiles = self._collect_visible_tiles(xmin_um, xmax_um, ymin_um, ymax_um)
+        self._last_visible_fovs = tuple(tile.name for tile, _ in visible_tiles)
         if not visible_tiles:
             empty_width = max(
                 1,
@@ -161,6 +163,9 @@ class VirtualMapLayer:
                 remove_keys.append(key)
         for key in remove_keys:
             self._cache.pop(key, None)
+
+    def last_visible_fovs(self) -> Tuple[str, ...]:
+        return self._last_visible_fovs
 
     def map_bounds(self) -> Tuple[float, float, float, float]:
         return self._map_bounds
