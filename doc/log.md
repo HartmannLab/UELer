@@ -1,4 +1,9 @@
 ### v0.3.0-alpha
+**Map mode activation stability (#58)**
+- Replaced the full-resolution placeholder in `_set_map_canvas_dimensions` with a constant 1×1 canvas so selecting large stitched maps no longer allocates 50+ GB arrays and crashes the kernel.
+- Recomputed the stitched-view downsample factor during map activation using `select_downsample_factor`, ensuring the first render starts at the coarsest allowed scale for the slide dimensions.
+- Added `tests/test_map_mode_activation.py` to cover the placeholder shape and downsample recalculation with lightweight dependency stubs.
+- Hardened `image_utils.get_axis_limits_with_padding` so even very coarse downsample factors produce positive viewport bounds, resolving the "Viewport must have positive width and height" regression reported after shipping the crash fix.
 **Map-mode cache integration (#3)**
 - Centralized the stitched tile cache inside `ImageMaskViewer`, wiring image cache evictions to `VirtualMapLayer.invalidate_for_fov` and driving cache keys with the viewer's channel/mask/annotation state so map renders stay in sync with UI changes.
 - Extended `tests/test_virtual_map_layer.py` to assert cache busting when the viewer signature changes, protecting the new integration path.

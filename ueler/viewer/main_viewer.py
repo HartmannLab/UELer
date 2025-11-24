@@ -444,9 +444,9 @@ class ImageMaskViewer:
         display.ax.set_ylim(height_px, 0)
         try:
             display.img_display.set_extent((0, width_px, height_px, 0))
-            blank = np.zeros((height_px, width_px, 3), dtype=np.float32)
-            display.img_display.set_data(blank)
-            display.combined = blank
+            placeholder = np.zeros((1, 1, 3), dtype=np.float32)
+            display.img_display.set_data(placeholder)
+            display.combined = placeholder
         except Exception:
             pass
 
@@ -527,6 +527,15 @@ class ImageMaskViewer:
         if selector is not None:
             selector.disabled = False
         self._set_map_canvas_dimensions(width_px, height_px)
+        try:
+            self.current_downsample_factor = select_downsample_factor(
+                width_px,
+                height_px,
+                allowed_factors=getattr(self, "downsample_factors", DOWNSAMPLE_FACTORS),
+                minimum=1,
+            )
+        except Exception:
+            pass
 
     def _deactivate_map_mode(self) -> None:
         self._map_mode_active = False
