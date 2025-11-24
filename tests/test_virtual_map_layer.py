@@ -116,6 +116,31 @@ class VirtualMapLayerTests(unittest.TestCase):
         layer.render(["DAPI"])
         self.assertGreater(len(viewer.calls), initial_count)
 
+    def test_render_handles_partial_downsample_tiles(self):
+        viewer = DummyViewer()
+        descriptor = _build_descriptor()
+        layer = VirtualMapLayer(viewer, descriptor, allowed_downsample=[1, 2, 4, 8])
+
+        layer.set_viewport(130.0, 270.0, 70.0, 170.0, downsample_factor=8)
+        output = layer.render(["CD4"])
+
+        self.assertEqual(output.shape, (13, 18, 3))
+
+        calls_by_fov = {call[0]: call for call in viewer.calls}
+        self.assertIn("FOV_A", calls_by_fov)
+        self.assertIn("FOV_B", calls_by_fov)
+
+        _, _, _, _, region_ds_a = calls_by_fov["FOV_A"]
+        _, _, _, _, region_ds_b = calls_by_fov["FOV_B"]
+
+        width_a = region_ds_a[1] - region_ds_a[0]
+        height_a = region_ds_a[3] - region_ds_a[2]
+        width_b = region_ds_b[1] - region_ds_b[0]
+        height_b = region_ds_b[3] - region_ds_b[2]
+
+        self.assertEqual((height_a, width_a), (10, 3))
+        self.assertEqual((height_b, width_b), (10, 9))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -102,6 +102,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 ## New Update  
 ### **UELer v0.3.0-alpha Summary**
 - Map mode activation now stays stable even with slide-scale descriptors: the viewer swaps the giant canvas placeholder for a fixed 1×1 tile, recomputes the downsample factor immediately, and ships with regression tests so issue #58 is closed. A follow-up patch guarantees the viewport math always yields positive extents so stitched maps render instead of raising "Viewport must have positive width and height".
+- Zooming stitched maps no longer raises `ValueError: operands could not be broadcast together`—tile bounds now align with coarse downsample strides, and the regression is covered by `tests/test_virtual_map_layer.py`.
 - Translation-only map descriptors can now be scanned (behind the `ENABLE_MAP_MODE` flag). The viewer validates JSON inputs with the new `MapDescriptorLoader`, surfaces descriptor warnings, and keeps single-FOV rendering unchanged while groundwork for issue #3 proceeds.
 - Virtual map stitching is underway: `VirtualMapLayer` now renders stitched viewports via the existing `ImageMaskViewer` pipeline and ships with unit tests covering tile gaps, caching, and invalidation (still behind `ENABLE_MAP_MODE`).
 - Map tile caching now lives in `ImageMaskViewer`, which shares a stitched cache with `VirtualMapLayer`, hooks FOV LRU evictions, and includes UI state in cache keys so map renders reflect channel, mask, and annotation tweaks.

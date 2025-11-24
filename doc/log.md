@@ -4,6 +4,7 @@
 - Recomputed the stitched-view downsample factor during map activation using `select_downsample_factor`, ensuring the first render starts at the coarsest allowed scale for the slide dimensions.
 - Added `tests/test_map_mode_activation.py` to cover the placeholder shape and downsample recalculation with lightweight dependency stubs.
 - Hardened `image_utils.get_axis_limits_with_padding` so even very coarse downsample factors produce positive viewport bounds, resolving the "Viewport must have positive width and height" regression reported after shipping the crash fix.
+- Fixed the zoom-triggered `ValueError: operands could not be broadcast together` by recalculating stitched tile bounds with ceil-based downsample dimensions in `VirtualMapLayer._compute_tile_region`; locked with `tests/test_virtual_map_layer.py::test_render_handles_partial_downsample_tiles`.
 **Map-mode cache integration (#3)**
 - Centralized the stitched tile cache inside `ImageMaskViewer`, wiring image cache evictions to `VirtualMapLayer.invalidate_for_fov` and driving cache keys with the viewer's channel/mask/annotation state so map renders stay in sync with UI changes.
 - Extended `tests/test_virtual_map_layer.py` to assert cache busting when the viewer signature changes, protecting the new integration path.

@@ -289,9 +289,13 @@ class VirtualMapLayer:
 
         ds = max(1, downsample_factor)
         xmin_ds = x_min_px // ds
-        xmax_ds = max(xmin_ds + 1, x_max_px // ds)
         ymin_ds = y_min_px // ds
-        ymax_ds = max(ymin_ds + 1, y_max_px // ds)
+
+        width_ds = max(1, int(math.ceil((x_max_px - x_min_px) / ds)))
+        height_ds = max(1, int(math.ceil((y_max_px - y_min_px) / ds)))
+
+        xmax_ds = xmin_ds + width_ds
+        ymax_ds = ymin_ds + height_ds
 
         region_xy = (x_min_px, x_max_px, y_min_px, y_max_px)
         region_ds = (xmin_ds, xmax_ds, ymin_ds, ymax_ds)
