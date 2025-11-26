@@ -101,6 +101,8 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### **UELer v0.3.0-alpha Summary**
+- Reset-to-original view now honours stitched slide bounds: map mode synchronises the toolbar home view whenever the canvas resizes, so the reset button brings back the full slide instead of reverting to a square FOV and showing a black canvas (issue #59).
+- Switching between stitched maps now renders correctly for descriptors whose coordinates start away from the origin: the viewer offsets map viewports by the descriptor bounds before rendering, eliminating the black canvas reported in issue #59 and keeping contrast/zoom responsive.
 - Map mode activation now stays stable even with slide-scale descriptors: the viewer swaps the giant canvas placeholder for a fixed 1×1 tile, recomputes the downsample factor immediately, and ships with regression tests so issue #58 is closed. A follow-up patch guarantees the viewport math always yields positive extents so stitched maps render instead of raising "Viewport must have positive width and height".
 - Zooming stitched maps no longer raises `ValueError: operands could not be broadcast together`—tile bounds now align with coarse downsample strides, and the regression is covered by `tests/test_virtual_map_layer.py`.
 - Translation-only map descriptors can now be scanned (behind the `ENABLE_MAP_MODE` flag). The viewer validates JSON inputs with the new `MapDescriptorLoader`, surfaces descriptor warnings, and keeps single-FOV rendering unchanged while groundwork for issue #3 proceeds.

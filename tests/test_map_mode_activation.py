@@ -162,7 +162,7 @@ class _FakeImageDisplay:
         self.height = 1
         self.ax = _DummyAxes()
         self.img_display = _DummyImage()
-        self.fig = SimpleNamespace(canvas=SimpleNamespace(draw_idle=lambda: None))
+        self.fig = SimpleNamespace(canvas=SimpleNamespace(draw_idle=lambda: None, toolbar=None))
         self.combined = None
 
 
@@ -170,6 +170,21 @@ class _DummySelector:
     def __init__(self, value=None):
         self.value = value
         self.disabled = False
+
+
+class _DummyNavStack:
+    def __init__(self):
+        self._elements = []
+
+
+class _DummyToolbar:
+    def __init__(self, axes):
+        self._axes = axes
+        self._nav_stack = _DummyNavStack()
+
+    def push_current(self):
+        view = {"xlim": self._axes.get_xlim(), "ylim": self._axes.get_ylim()}
+        self._nav_stack._elements.append({self._axes: (view, ())})
 
 
 class _StubLayer:
@@ -182,6 +197,23 @@ class _StubLayer:
 
     def map_bounds(self):
         return self._bounds_um
+
+
+class _CaptureLayer(_StubLayer):
+    def __init__(self, base_pixel_um, bounds_um):
+        super().__init__(base_pixel_um, bounds_um)
+        self.viewport_args = None
+        self.render_invocations = 0
+
+    def set_viewport(self, xmin_um, xmax_um, ymin_um, ymax_um, *, downsample_factor):
+        self.viewport_args = (xmin_um, xmax_um, ymin_um, ymax_um, downsample_factor)
+
+    def render(self, selected_channels):
+        self.render_invocations += 1
+        return np.ones((1, 1, 3), dtype=np.float32)
+
+    def last_visible_fovs(self):
+        return ("FOV_A",)
 
 
 class MapModeActivationTests(unittest.TestCase):
@@ -226,6 +258,36 @@ class MapModeActivationTests(unittest.TestCase):
             (0, 36_706, 115_751, 0),
         )
 
+    def test_set_map_canvas_dimensions_syncs_toolbar_home_view(self):
+        canvas = self.viewer.image_display.fig.canvas
+        toolbar = _DummyToolbar(self.viewer.image_display.ax)
+        toolbar.push_current()
+        canvas.toolbar = toolbar
+
+        stored_view, stored_bboxes = toolbar._nav_stack._elements[0][self.viewer.image_display.ax]
+        stored_view["token"] = "keep"
+
+        self.viewer._set_map_canvas_dimensions(36_706, 115_751)
+
+        updated_view, updated_bboxes = toolbar._nav_stack._elements[0][self.viewer.image_display.ax]
+        self.assertEqual(updated_view["xlim"], (0, 36_706))
+        self.assertEqual(updated_view["ylim"], (115_751, 0))
+        self.assertEqual(updated_view["token"], "keep")
+        self.assertIs(updated_bboxes, stored_bboxes)
+
+    def test_set_map_canvas_dimensions_seeds_toolbar_when_empty(self):
+        canvas = self.viewer.image_display.fig.canvas
+        canvas.toolbar = _DummyToolbar(self.viewer.image_display.ax)
+
+        self.viewer._set_map_canvas_dimensions(512, 256)
+
+        elements = canvas.toolbar._nav_stack._elements
+        self.assertTrue(elements)
+        updated_view, updated_bboxes = elements[0][self.viewer.image_display.ax]
+        self.assertEqual(updated_view["xlim"], (0, 512))
+        self.assertEqual(updated_view["ylim"], (256, 0))
+        self.assertEqual(updated_bboxes, ())
+
     def test_activate_map_mode_updates_downsample_factor(self):
         layer = _StubLayer(0.5, (0.0, 1_024.0, 0.0, 2_048.0))
         self.viewer._map_descriptors = {"slide-1": object()}
@@ -240,6 +302,25 @@ class MapModeActivationTests(unittest.TestCase):
         self.assertTrue(self.viewer.ui_component.image_selector.disabled)
         self.assertFalse(self.viewer.ui_component.map_selector.disabled)
         self.assertEqual(self.viewer.ui_component.map_selector.value, "slide-1")
+
+    def test_render_map_view_offsets_descriptor_bounds(self):
+        layer = _CaptureLayer(0.5, (1_000.0, 2_000.0, 4_000.0, 6_000.0))
+        self.viewer._map_descriptors = {"slide-1": object()}
+
+        with patch.object(ImageMaskViewer, "_get_map_layer", lambda self, map_id: layer):
+            self.viewer._active_map_id = "slide-1"
+            combined, visible = self.viewer._render_map_view(("CD3",), 1, (0, 512, 0, 256))
+
+        self.assertIsNotNone(layer.viewport_args)
+        xmin_um, xmax_um, ymin_um, ymax_um, downsample = layer.viewport_args
+        self.assertEqual(downsample, 1)
+        self.assertAlmostEqual(xmin_um, 1_000.0)
+        self.assertAlmostEqual(xmax_um, 1_000.0 + 512 * 0.5)
+        self.assertAlmostEqual(ymin_um, 4_000.0)
+        self.assertAlmostEqual(ymax_um, 4_000.0 + 256 * 0.5)
+        self.assertEqual(layer.render_invocations, 1)
+        np.testing.assert_allclose(combined, np.ones((1, 1, 3), dtype=np.float32))
+        self.assertEqual(visible, ("FOV_A",))
 
     def test_update_display_preserves_positive_viewport(self):
         captured = {}

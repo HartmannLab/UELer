@@ -449,6 +449,7 @@ class ImageMaskViewer:
             display.combined = placeholder
         except Exception:
             pass
+        self._sync_navigation_home_view()
 
     def _sync_canvas_to_current_fov(self) -> None:
         selector = getattr(self.ui_component, "image_selector", None)
@@ -468,6 +469,54 @@ class ImageMaskViewer:
             return
         height, width = first_channel.shape
         self._set_map_canvas_dimensions(width, height)
+
+    def _sync_navigation_home_view(self) -> None:
+        display = getattr(self, "image_display", None)
+        if display is None:
+            return
+        ax = getattr(display, "ax", None)
+        if ax is None:
+            return
+        fig = getattr(display, "fig", None)
+        canvas = getattr(fig, "canvas", None) if fig is not None else None
+        toolbar = getattr(canvas, "toolbar", None) if canvas is not None else None
+        if toolbar is None:
+            return
+        nav_stack = getattr(toolbar, "_nav_stack", None)
+        if nav_stack is None and hasattr(toolbar, "push_current"):
+            try:
+                toolbar.push_current()
+            except Exception:
+                nav_stack = None
+            else:
+                nav_stack = getattr(toolbar, "_nav_stack", None)
+        elements = getattr(nav_stack, "_elements", None) if nav_stack is not None else None
+        if (not elements) and hasattr(toolbar, "push_current"):
+            try:
+                toolbar.push_current()
+            except Exception:
+                elements = None
+            else:
+                nav_stack = getattr(toolbar, "_nav_stack", None)
+                elements = getattr(nav_stack, "_elements", None) if nav_stack is not None else None
+        if not elements:
+            return
+        try:
+            nav_entry = elements[0]
+        except Exception:
+            return
+        if not hasattr(nav_entry, "get"):
+            return
+        record = nav_entry.get(ax)
+        if record is None:
+            view_limits = {"xlim": ax.get_xlim(), "ylim": ax.get_ylim()}
+            nav_entry[ax] = (view_limits, ())
+            return
+        existing_view, existing_bboxes = record
+        new_view = dict(existing_view)
+        new_view["xlim"] = ax.get_xlim()
+        new_view["ylim"] = ax.get_ylim()
+        nav_entry[ax] = (new_view, existing_bboxes)
 
     def on_map_mode_toggle(self, change):
         new_value = bool(change.get("new"))
@@ -560,11 +609,19 @@ class ImageMaskViewer:
             return np.zeros((1, 1, 3), dtype=np.float32), ()
         layer = self._get_map_layer(self._active_map_id)
         base_pixel = layer.base_pixel_size_um()
+        bounds = layer.map_bounds()
+        try:
+            bounds_min_x = float(bounds[0])
+            bounds_min_y = float(bounds[2])
+        except (TypeError, ValueError, IndexError):
+            bounds_min_x = 0.0
+            bounds_min_y = 0.0
+
         xmin, xmax, ymin, ymax = viewport_pixels
-        xmin_um = xmin * base_pixel
-        xmax_um = xmax * base_pixel
-        ymin_um = ymin * base_pixel
-        ymax_um = ymax * base_pixel
+        xmin_um = bounds_min_x + xmin * base_pixel
+        xmax_um = bounds_min_x + xmax * base_pixel
+        ymin_um = bounds_min_y + ymin * base_pixel
+        ymax_um = bounds_min_y + ymax * base_pixel
         layer.set_viewport(
             xmin_um,
             xmax_um,

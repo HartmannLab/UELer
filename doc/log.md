@@ -1,4 +1,12 @@
 ### v0.3.0-alpha
+**Map reset alignment (#59)**
+- Refresh the Matplotlib navigation stack whenever map mode resizes the canvas so the reset button now restores the stitched slide bounds instead of the original square FOV, eliminating the post-reset black canvas and zoom failures.
+- Added regression coverage for populated and empty toolbar stacks in `tests/test_map_mode_activation.py` and ran `python -m unittest tests.test_map_mode_activation` to confirm the update.
+
+**Map viewport alignment (#59)**
+- Offset stitched-map viewport coordinates by each descriptor’s minimum X/Y bounds so tiles render correctly when slide coordinates do not originate at zero, resolving the black canvas shown after switching maps.
+- Added regression coverage in `tests/test_map_mode_activation.py::test_render_map_view_offsets_descriptor_bounds` to ensure the viewer now supplies offset-aware viewports to `VirtualMapLayer`.
+
 **Map mode activation stability (#58)**
 - Replaced the full-resolution placeholder in `_set_map_canvas_dimensions` with a constant 1×1 canvas so selecting large stitched maps no longer allocates 50+ GB arrays and crashes the kernel.
 - Recomputed the stitched-view downsample factor during map activation using `select_downsample_factor`, ensuring the first render starts at the coarsest allowed scale for the slide dimensions.
