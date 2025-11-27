@@ -100,14 +100,10 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 - **Wide Plugins**: Enable "Horizontal layout" (for example, in the heatmap plugin) to undock the tool into the footer while keeping the accordion available for other controls.
 
 ## New Update  
-### **UELer v0.3.0-alpha Summary**
-- Reset-to-original view now honours stitched slide bounds: map mode synchronises the toolbar home view whenever the canvas resizes, so the reset button brings back the full slide instead of reverting to a square FOV and showing a black canvas (issue #59).
-- Switching between stitched maps now renders correctly for descriptors whose coordinates start away from the origin: the viewer offsets map viewports by the descriptor bounds before rendering, eliminating the black canvas reported in issue #59 and keeping contrast/zoom responsive.
-- Map mode activation now stays stable even with slide-scale descriptors: the viewer swaps the giant canvas placeholder for a fixed 1×1 tile, recomputes the downsample factor immediately, and ships with regression tests so issue #58 is closed. A follow-up patch guarantees the viewport math always yields positive extents so stitched maps render instead of raising "Viewport must have positive width and height".
-- Zooming stitched maps no longer raises `ValueError: operands could not be broadcast together`—tile bounds now align with coarse downsample strides, and the regression is covered by `tests/test_virtual_map_layer.py`.
-- Translation-only map descriptors can now be scanned (behind the `ENABLE_MAP_MODE` flag). The viewer validates JSON inputs with the new `MapDescriptorLoader`, surfaces descriptor warnings, and keeps single-FOV rendering unchanged while groundwork for issue #3 proceeds.
-- Virtual map stitching is underway: `VirtualMapLayer` now renders stitched viewports via the existing `ImageMaskViewer` pipeline and ships with unit tests covering tile gaps, caching, and invalidation (still behind `ENABLE_MAP_MODE`).
-- Map tile caching now lives in `ImageMaskViewer`, which shares a stitched cache with `VirtualMapLayer`, hooks FOV LRU evictions, and includes UI state in cache keys so map renders reflect channel, mask, and annotation tweaks.
+### **UELer v0.3.0-beta Summary**
+- Cell mask tooltips now honour the viewer’s configurable FOV, label, and mask keys, so datasets with renamed columns once again display channel means and custom tooltip labels instead of falling back to mask IDs.
+- Introduced a cached `resolve_cell_record` helper and expanded tooltip unit tests, ensuring hover events remain responsive while covering default and custom key combinations.
+- Map mode groundwork from v0.3.0-alpha remains available behind `ENABLE_MAP_MODE`, including stitched viewport rendering, descriptor validation, and shared cache management for multi-FOV slides.
 
 ## Earlier Updates  
 

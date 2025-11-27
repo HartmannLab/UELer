@@ -31,6 +31,9 @@ _IPYTHON = "IPython"
 _IPYTHON_DISPLAY = "IPython.display"
 _MATPLOTLIB = "matplotlib"
 _MATPLOTLIB_PYPLOT = "matplotlib.pyplot"
+_SKIMAGE = "skimage"
+_SKIMAGE_SEGMENTATION = "skimage.segmentation"
+_DASK = "dask"
 
 _DEFAULT_POINT_COLOR = (0.2, 0.4, 0.8, 0.85)
 
@@ -726,6 +729,9 @@ def _ensure_matplotlib_stub() -> None:
     pyplot_stub = types.ModuleType(_MATPLOTLIB_PYPLOT)
 
     class _Canvas:
+        def __init__(self):
+            self.callbacks = SimpleNamespace(connect=lambda *_a, **_k: None)
+
         def mpl_connect(self, *_args, **_kwargs):  # pragma: no cover - simple stub
             return None
 
@@ -749,6 +755,9 @@ def _ensure_matplotlib_stub() -> None:
         def __init__(self, figure):
             self.figure = figure
             self.collections = []
+            self._annotation_store = []
+            self._xlim = (0.0, 1.0)
+            self._ylim = (0.0, 1.0)
 
         def hist(self, *_args, **_kwargs):  # pragma: no cover - simple stub
             return None
@@ -761,6 +770,49 @@ def _ensure_matplotlib_stub() -> None:
 
         def axvline(self, *_args, **_kwargs):  # pragma: no cover - simple stub
             return SimpleNamespace(remove=lambda: None)
+
+        def set_xlim(self, left, right):  # pragma: no cover - simple stub
+            self._xlim = (left, right)
+            return None
+
+        def set_ylim(self, bottom, top):  # pragma: no cover - simple stub
+            self._ylim = (bottom, top)
+            return None
+
+        def get_xlim(self):  # pragma: no cover - simple stub
+            return self._xlim
+
+        def get_ylim(self):  # pragma: no cover - simple stub
+            return self._ylim
+
+        def axis(self, *_args, **_kwargs):  # pragma: no cover - simple stub
+            return None
+
+        def imshow(self, *_args, **_kwargs):  # pragma: no cover - simple stub
+            return SimpleNamespace(set_data=lambda *_a, **_k: None, set_extent=lambda *_a, **_k: None)
+
+        class _AnnotationHelper:
+            def __init__(self):
+                self.xy = (0, 0)
+                self._text = ""
+                self._visible = False
+
+            def set_text(self, text):
+                self._text = text
+
+            def get_text(self):
+                return self._text
+
+            def set_visible(self, flag):
+                self._visible = bool(flag)
+
+            def get_visible(self):
+                return self._visible
+
+        def annotate(self, *_args, **_kwargs):  # pragma: no cover - simple stub
+            annotation = self._AnnotationHelper()
+            self._annotation_store.append(annotation)
+            return annotation
 
     def _subplots(*_args, **_kwargs):  # pragma: no cover - simple stub
         figure = _Figure()
@@ -776,6 +828,32 @@ def _ensure_matplotlib_stub() -> None:
     matplotlib_stub.pyplot = pyplot_stub  # type: ignore[attr-defined]
     sys.modules[_MATPLOTLIB] = matplotlib_stub
     sys.modules[_MATPLOTLIB_PYPLOT] = pyplot_stub
+
+    colors_name = f"{_MATPLOTLIB}.colors"
+    colors_stub = types.ModuleType(colors_name)
+
+    def _to_rgb(value):  # pragma: no cover - lightweight helper for tests
+        if isinstance(value, tuple):
+            return tuple(float(component) for component in value)
+        if isinstance(value, str):
+            raw = value.strip().lower()
+            if raw.startswith("#") and len(raw) == 7:
+                try:
+                    r = int(raw[1:3], 16) / 255.0
+                    g = int(raw[3:5], 16) / 255.0
+                    b = int(raw[5:7], 16) / 255.0
+                    return (r, g, b)
+                except ValueError:
+                    return (0.0, 0.0, 0.0)
+            if raw == "white":
+                return (1.0, 1.0, 1.0)
+            if raw == "black":
+                return (0.0, 0.0, 0.0)
+        return (0.0, 0.0, 0.0)
+
+    colors_stub.to_rgb = _to_rgb  # type: ignore[attr-defined]
+    matplotlib_stub.colors = colors_stub  # type: ignore[attr-defined]
+    sys.modules[colors_name] = colors_stub
 
     text_module_name = f"{_MATPLOTLIB}.text"
     text_stub = types.ModuleType(text_module_name)
@@ -903,6 +981,65 @@ def _install_scipy_stub() -> None:
     sys.modules[_SCIPY_HIERARCHY] = hierarchy_module
     sys.modules[_SCIPY_CLUSTER] = cluster_module
     sys.modules[_SCIPY] = scipy_module
+
+
+def _ensure_skimage_stub() -> None:
+    skimage_module = sys.modules.get(_SKIMAGE)
+    if skimage_module is not None and getattr(skimage_module, "__file__", None):
+        _protect_module(_SKIMAGE, skimage_module)
+        segmentation_module = sys.modules.get(_SKIMAGE_SEGMENTATION)
+        if segmentation_module is not None and getattr(segmentation_module, "__file__", None):
+            _protect_module(_SKIMAGE_SEGMENTATION, segmentation_module)
+        return
+
+    sys.modules.pop(_SKIMAGE, None)
+    sys.modules.pop(_SKIMAGE_SEGMENTATION, None)
+
+    skimage_module = types.ModuleType(_SKIMAGE)
+    segmentation_module = types.ModuleType(_SKIMAGE_SEGMENTATION)
+
+    def _find_boundaries(mask, *_args, **_kwargs):  # pragma: no cover - lightweight stub
+        try:
+            import numpy as _np  # type: ignore
+
+            return _np.zeros_like(mask, dtype=bool)
+        except Exception:
+            return mask
+
+    segmentation_module.find_boundaries = _find_boundaries  # type: ignore[attr-defined]
+    segmentation_module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
+    skimage_module.segmentation = segmentation_module  # type: ignore[attr-defined]
+    skimage_module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
+
+    sys.modules[_SKIMAGE_SEGMENTATION] = segmentation_module
+    sys.modules[_SKIMAGE] = skimage_module
+
+
+def _ensure_dask_stub() -> None:
+    dask_module = sys.modules.get(_DASK)
+    if dask_module is not None and getattr(dask_module, "__file__", None):
+        _protect_module(_DASK, dask_module)
+        return
+
+    class _DelayedComputation:
+        def __init__(self, func, args, kwargs):
+            self._func = func
+            self._args = args
+            self._kwargs = kwargs
+
+        def compute(self):  # pragma: no cover - simple stub
+            return self._func(*self._args, **self._kwargs)
+
+    def _delayed(func):  # pragma: no cover - simple stub
+        def _wrapper(*args, **kwargs):
+            return _DelayedComputation(func, args, kwargs)
+
+        return _wrapper
+
+    module = types.ModuleType(_DASK)
+    module.delayed = _delayed  # type: ignore[attr-defined]
+    module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
+    sys.modules[_DASK] = module
 
 
 def _ensure_heatmap_dependency_stubs() -> None:
@@ -1319,6 +1456,8 @@ def initialize():
     _ensure_jscatter_stub()
     _ensure_ipython_display()
     _ensure_matplotlib_stub()
+    _ensure_skimage_stub()
+    _ensure_dask_stub()
     _patch_heatmap_utilities()
     _preload_viewer_plugins()
 

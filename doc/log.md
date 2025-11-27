@@ -1,3 +1,11 @@
+### v0.3.0-beta
+
+**Cell tooltip key alignment (#61)**
+- Reworked `ImageDisplay` hover handling to resolve cell records via the viewer’s configured `fov`, `label`, and optional `mask` keys so datasets with renamed columns now show full channel means and user-selected labels instead of just the mask ID.
+- Added `resolve_cell_record` helper in `ueler/viewer/tooltip_utils.py` with caching and unit coverage for default and custom key combinations, keeping repeated hover events fast while gracefully skipping missing rows.
+- Expanded `tests/test_image_display_tooltip.py` with lightweight table stubs and integration coverage, running `python -m unittest tests.test_image_display_tooltip` to confirm tooltips render the expected values across key configurations.
+
+
 ### v0.3.0-alpha
 **Map reset alignment (#59)**
 - Refresh the Matplotlib navigation stack whenever map mode resizes the canvas so the reset button now restores the stitched slide bounds instead of the original square FOV, eliminating the post-reset black canvas and zoom failures.

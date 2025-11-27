@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 from dataclasses import replace
 from matplotlib.text import Annotation
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
-import matplotlib.font_manager as fm
 from matplotlib.colors import to_rgb
 from ueler.image_utils import (
     calculate_downsample_factor,
@@ -21,7 +20,7 @@ import cv2
 import math
 from matplotlib.backend_bases import MouseButton
 from ueler.viewer.decorators import update_status_bar
-from .tooltip_utils import format_tooltip_value
+from .tooltip_utils import format_tooltip_value, resolve_cell_record
 
 
 class ImageDisplay:
@@ -222,33 +221,57 @@ class ImageDisplay:
 
         mask_id = 0
         found_mask = False
+        current_fov = None
+        image_selector = getattr(self.main_viewer.ui_component, "image_selector", None)
+        if image_selector is not None:
+            current_fov = getattr(image_selector, "value", None)
+
+        cell_table = getattr(self.main_viewer, "cell_table", None)
+        fov_key = getattr(self.main_viewer, "fov_key", "fov")
+        label_key = getattr(self.main_viewer, "label_key", "label")
+        mask_key = getattr(self.main_viewer, "mask_key", None)
 
         # Use a more efficient search method for masks
         for mask_name, label_mask in self.main_viewer.current_label_masks.items():
             if 0 <= iy_ds < label_mask.shape[0] and 0 <= ix_ds < label_mask.shape[1]:
                 mask_id = label_mask[iy_ds, ix_ds].compute()
                 if mask_id != 0:
-                    # Cache the filtered DataFrame
-                    if not hasattr(self, '_cached_cell_data') or self._cached_cell_data_key != (mask_name, mask_id):
-                        self._cached_cell_data = self.main_viewer.cell_table[
-                            (self.main_viewer.cell_table['fov'] == self.main_viewer.ui_component.image_selector.value) &
-                            (self.main_viewer.cell_table['label'] == mask_id)
-                        ]
-                        self._cached_cell_data_key = (mask_name, mask_id)
+                    lookup_key = (current_fov, mask_name, mask_id)
+                    cached_key = getattr(self, "_cached_tooltip_key", None)
+                    if cached_key != lookup_key:
+                        cell_row = resolve_cell_record(
+                            cell_table,
+                            fov_value=current_fov,
+                            mask_name=mask_name,
+                            mask_id=mask_id,
+                            fov_key=fov_key,
+                            label_key=label_key,
+                            mask_key=mask_key,
+                        )
+                        self._cached_tooltip_row = cell_row
+                        self._cached_tooltip_key = lookup_key
+                    else:
+                        cell_row = getattr(self, "_cached_tooltip_row", None)
 
-                    cell_data = self._cached_cell_data
+                    mask_label = mask_name or "Mask"
+                    tooltip_lines = [f"{mask_label} ID: {mask_id}"]
 
-                    # Construct tooltip text
-                    tooltip_text = f"{mask_name} ID: {mask_id}"
-                    if not cell_data.empty:
-                        for channel in self.main_viewer.ui_component.channel_selector.value:
-                            if channel in cell_data.columns:
-                                value = cell_data[channel].iloc[0]
-                                tooltip_text += f"\n{channel}: {format_tooltip_value(value)}"
-                        for label in getattr(self.main_viewer, 'selected_tooltip_labels', []):
-                            if label in cell_data.columns:
-                                value = cell_data[label].iloc[0]
-                                tooltip_text += f"\n{label}: {format_tooltip_value(value)}"
+                    if cell_row is not None:
+                        channel_selector = getattr(self.main_viewer.ui_component, "channel_selector", None)
+                        selected_channels = getattr(channel_selector, "value", ()) if channel_selector else ()
+                        for channel in selected_channels or ():
+                            if channel in cell_row.index:
+                                tooltip_lines.append(
+                                    f"{channel}: {format_tooltip_value(cell_row[channel])}"
+                                )
+
+                        for label in getattr(self.main_viewer, "selected_tooltip_labels", ()):  # type: ignore[attr-defined]
+                            if label in cell_row.index:
+                                tooltip_lines.append(
+                                    f"{label}: {format_tooltip_value(cell_row[label])}"
+                                )
+
+                    tooltip_text = "\n".join(tooltip_lines)
 
                     # Update annotation
                     self.mask_id_annotation.xy = (x, y)
