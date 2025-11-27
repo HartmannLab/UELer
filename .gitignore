@@ -22,9 +22,10 @@ Thumbs.db
 .vscode/
 .idea/
 *.ipynb_checkpoints/
+*.txt
 
 # Project-specific
-dev_note/github_issue.md
+dev_note/github_issues.md
 .binder/
 .github/
 .specify/
