@@ -74,11 +74,14 @@ from ueler.viewer.palette_store import (
     write_palette_file,
 )
 from ueler.viewer.map_descriptor_loader import MapDescriptorLoader
-from .virtual_map_layer import VirtualMapLayer
+from .tooltip_utils import resolve_cell_record
+from .virtual_map_layer import MapPixelHit, VirtualMapLayer
 
 from weakref import WeakKeyDictionary
 
 from skimage.io import imsave
+from skimage.segmentation import find_boundaries
+from ueler.rendering.engine import scale_outline_thickness, thicken_outline
 # from dask.distributed import LocalCluster, Client
 
 # # Create a LocalCluster with a memory limit of 4 GB per worker
@@ -111,6 +114,30 @@ class MapCellPosition:
     x_px: float
     y_px: float
     pixel_scale: float
+
+
+@dataclass(frozen=True)
+class MapPixelLocalization:
+    """Reverse map lookup describing the owning FOV for a map pixel."""
+
+    map_id: str
+    fov_name: str
+    local_x_px: float
+    local_y_px: float
+    pixel_scale: float
+
+
+@dataclass(frozen=True)
+class MaskHit:
+    """Mask lookup result for hover/click interactions."""
+
+    fov_name: str
+    mask_name: str
+    mask_id: int
+    local_x_px: float
+    local_y_px: float
+    map_id: Optional[str] = None
+    cell_record: Optional[pd.Series] = None
 
 
 def _unique_annotation_values(array):
@@ -157,6 +184,7 @@ class ImageMaskViewer:
         self._map_mode_enabled = _MAP_MODE_FLAG
         self._map_mode_messages = []
         self._map_descriptors = {}
+        self._map_fov_lookup: Dict[str, str] = {}
         self._map_tile_cache_capacity = 6
         self._map_tile_cache = OrderedDict()
         self._map_layers = {}
@@ -165,6 +193,7 @@ class ImageMaskViewer:
         self._visible_map_fovs = ()
         self._map_pixel_size_nm = None
         self._map_canvas_size = None
+        self._last_viewport_px: Optional[Tuple[float, float, float, float, int]] = None
 
         # Specifiy the keys for the x, y and label columns in the cell table
         self.x_key = "X"
@@ -334,8 +363,23 @@ class ImageMaskViewer:
         loader = MapDescriptorLoader()
         result = loader.load_from_directory(descriptor_root)
         self._map_descriptors = result.slides
+        self._map_fov_lookup.clear()
         self._map_layers.clear()
         self._map_tile_cache.clear()
+        for map_id, descriptor in self._map_descriptors.items():
+            for spec in getattr(descriptor, "fovs", ()):  # type: ignore[attr-defined]
+                try:
+                    name = str(getattr(spec, "name"))
+                except Exception:
+                    continue
+                if not name:
+                    continue
+                if name in self._map_fov_lookup and self._map_fov_lookup[name] != map_id:
+                    self._record_map_mode_warning(
+                        f"FOV '{name}' appears in multiple map descriptors; using '{self._map_fov_lookup[name]}'"
+                    )
+                    continue
+                self._map_fov_lookup[name] = map_id
         if hasattr(self, "ui_component"):
             self._refresh_map_controls()
 
@@ -441,6 +485,11 @@ class ImageMaskViewer:
         if not self._map_descriptors:
             return None
         return sorted(self._map_descriptors.keys())[0]
+
+    def _map_id_for_fov(self, fov_name: Optional[str]) -> Optional[str]:
+        if not fov_name:
+            return None
+        return self._map_fov_lookup.get(str(fov_name))
 
     def _set_map_canvas_dimensions(self, width_px: int, height_px: int) -> None:
         self.width = width_px
@@ -780,14 +829,18 @@ class ImageMaskViewer:
         fov_name: str,
         x_value: float,
         y_value: float,
+        *,
+        map_id: Optional[str] = None,
     ) -> Optional[MapCellPosition]:
         """Translate FOV-local cell coordinates to stitched-map pixels."""
 
-        if not (self._map_mode_active and self._active_map_id and fov_name):
+        if map_id is None:
+            map_id = self._active_map_id
+        if not (self._map_mode_enabled and map_id and fov_name):
             return None
 
         try:
-            layer = self._get_map_layer(self._active_map_id)
+            layer = self._get_map_layer(map_id)
         except Exception:
             return None
 
@@ -835,20 +888,298 @@ class ImageMaskViewer:
         if not (math.isfinite(x_px) and math.isfinite(y_px)):
             return None
 
-        canvas_width = getattr(self, "width", None)
-        if isinstance(canvas_width, (int, float)) and math.isfinite(canvas_width):
-            x_px = max(0.0, min(x_px, float(canvas_width)))
-
-        canvas_height = getattr(self, "height", None)
-        if isinstance(canvas_height, (int, float)) and math.isfinite(canvas_height):
-            y_px = max(0.0, min(y_px, float(canvas_height)))
-
         pixel_scale = pixel_size_um / base_pixel_um if base_pixel_um > 0 else 1.0
         if not math.isfinite(pixel_scale) or pixel_scale <= 0.0:
             pixel_scale = 1.0
 
         return MapCellPosition(x_px=x_px, y_px=y_px, pixel_scale=pixel_scale)
 
+    def resolve_map_pixel_to_fov(
+        self,
+        x_value: float,
+        y_value: float,
+        *,
+        map_id: Optional[str] = None,
+    ) -> Optional[MapPixelLocalization]:
+        if map_id is None:
+            map_id = self._active_map_id
+        if not (self._map_mode_enabled and map_id):
+            return None
+
+        try:
+            layer = self._get_map_layer(map_id)
+        except Exception:
+            return None
+
+        hit = layer.localize_map_pixel(x_value, y_value)
+        if hit is None:
+            return None
+
+        try:
+            map_id_str = str(map_id)
+            fov_name = str(hit.fov_name)
+            local_x_px = float(hit.local_x_px)
+            local_y_px = float(hit.local_y_px)
+            pixel_scale = float(hit.pixel_scale)
+        except Exception:
+            return None
+
+        return MapPixelLocalization(
+            map_id=map_id_str,
+            fov_name=fov_name,
+            local_x_px=local_x_px,
+            local_y_px=local_y_px,
+            pixel_scale=pixel_scale,
+        )
+
+    def _selected_mask_names(self) -> Tuple[str, ...]:
+        controls = getattr(self.ui_component, "mask_display_controls", {})
+        if not isinstance(controls, dict):
+            return ()
+        selected = []
+        for name, checkbox in controls.items():
+            try:
+                if bool(getattr(checkbox, "value", False)):
+                    selected.append(str(name))
+            except Exception:
+                continue
+        return tuple(selected)
+
+    def _ensure_mask_cache(self, fov_name: str) -> None:
+        if not self.masks_available:
+            return
+        if fov_name in self.mask_cache:
+            return
+        try:
+            self.load_fov(fov_name)
+        except Exception:
+            if self._debug:
+                print(f"[viewer] Failed to prime mask cache for {fov_name}")
+
+    def _get_mask_array(self, fov_name: str, mask_name: str):
+        self._ensure_mask_cache(fov_name)
+        label_entry = self.label_masks_cache.get(fov_name, {}).get(mask_name)
+        mask_candidate = None
+        if isinstance(label_entry, dict):
+            mask_candidate = label_entry.get(1)
+        if mask_candidate is None:
+            mask_candidate = self.mask_cache.get(fov_name, {}).get(mask_name)
+        if mask_candidate is None:
+            return None
+        try:
+            return mask_candidate.compute()
+        except AttributeError:
+            return np.asarray(mask_candidate)
+        except Exception:
+            return None
+
+    def _lookup_mask_hit(
+        self,
+        fov_name: str,
+        local_x: float,
+        local_y: float,
+        *,
+        map_id: Optional[str] = None,
+    ) -> Optional[MaskHit]:
+        if not self.masks_available:
+            return None
+
+        mask_names = self._selected_mask_names()
+        if not mask_names:
+            return None
+
+        try:
+            ix = int(math.floor(local_x))
+            iy = int(math.floor(local_y))
+        except (TypeError, ValueError):
+            return None
+        if ix < 0 or iy < 0:
+            return None
+
+        for mask_name in mask_names:
+            mask_array = self._get_mask_array(fov_name, mask_name)
+            if mask_array is None or mask_array.size == 0:
+                continue
+            if iy >= mask_array.shape[0] or ix >= mask_array.shape[1]:
+                continue
+            try:
+                mask_value = int(mask_array[iy, ix])
+            except Exception:
+                continue
+            if mask_value == 0:
+                continue
+
+            cell_row = None
+            if self.cell_table is not None:
+                try:
+                    cell_row = resolve_cell_record(
+                        self.cell_table,
+                        fov_value=fov_name,
+                        mask_name=mask_name,
+                        mask_id=mask_value,
+                        fov_key=self.fov_key,
+                        label_key=self.label_key,
+                        mask_key=self.mask_key,
+                    )
+                except Exception:
+                    cell_row = None
+
+            return MaskHit(
+                fov_name=str(fov_name),
+                mask_name=str(mask_name),
+                mask_id=int(mask_value),
+                local_x_px=float(local_x),
+                local_y_px=float(local_y),
+                map_id=map_id,
+                cell_record=cell_row,
+            )
+
+        return None
+
+    def resolve_mask_hit_at_viewport(self, x_px: float, y_px: float) -> Optional[MaskHit]:
+        if not self.masks_available:
+            return None
+
+        if self._map_mode_active and self._active_map_id:
+            localization = self.resolve_map_pixel_to_fov(x_px, y_px, map_id=self._active_map_id)
+            if localization is None:
+                return None
+            return self._lookup_mask_hit(
+                localization.fov_name,
+                localization.local_x_px,
+                localization.local_y_px,
+                map_id=localization.map_id,
+            )
+
+        selector = getattr(self.ui_component, "image_selector", None)
+        fov_name = selector.value if selector is not None else None
+        if not fov_name:
+            return None
+        return self._lookup_mask_hit(fov_name, x_px, y_px)
+
+    def _update_map_mask_highlights(self) -> None:
+        display = getattr(self, "image_display", None)
+        if display is None:
+            return
+
+        base_image = display._materialize_combined()
+        if base_image is None:
+            return
+
+        selections = getattr(display, "selected_masks_label", None)
+        if not (self._map_mode_active and self._active_map_id and selections):
+            display.img_display.set_data(base_image)
+            display.fig.canvas.draw_idle()
+            return
+
+        viewport = self._last_viewport_px
+        if viewport is None:
+            display.img_display.set_data(base_image)
+            display.fig.canvas.draw_idle()
+            return
+
+        xmin, xmax, ymin, ymax, downsample = viewport
+        try:
+            downsample = max(1, int(downsample))
+        except Exception:
+            downsample = 1
+
+        try:
+            layer = self._get_map_layer(self._active_map_id)
+        except Exception:
+            display.img_display.set_data(base_image)
+            display.fig.canvas.draw_idle()
+            return
+
+        bounds = layer.map_bounds()
+        try:
+            bounds_min_x = float(bounds[0])
+            bounds_min_y = float(bounds[2])
+        except (TypeError, ValueError, IndexError):
+            bounds_min_x = 0.0
+            bounds_min_y = 0.0
+
+        base_pixel_um = float(layer.base_pixel_size_um())
+        if not math.isfinite(base_pixel_um) or base_pixel_um <= 0.0:
+            display.img_display.set_data(base_image)
+            display.fig.canvas.draw_idle()
+            return
+
+        overlay = np.array(base_image, copy=True)
+        overlay_rows, overlay_cols = overlay.shape[:2]
+        outline_thickness = scale_outline_thickness(
+            getattr(self, "mask_outline_thickness", 1),
+            downsample,
+        )
+
+        for selection in selections:
+            fov_name = getattr(selection, "fov", None)
+            mask_name = getattr(selection, "mask", None)
+            mask_id = getattr(selection, "mask_id", None)
+            if not (fov_name and mask_name and isinstance(mask_id, int)):
+                continue
+
+            geometry = layer.tile_geometry(str(fov_name))
+            if geometry is None:
+                continue
+
+            mask_array = self._get_mask_array(str(fov_name), str(mask_name))
+            if mask_array is None or mask_array.size == 0:
+                continue
+
+            try:
+                mask_binary = mask_array == mask_id
+            except Exception:
+                continue
+            if not np.any(mask_binary):
+                continue
+
+            try:
+                edges = find_boundaries(mask_binary, mode="inner")
+            except Exception:
+                edges = mask_binary
+            if not np.any(edges):
+                edges = mask_binary
+            if outline_thickness > 1:
+                try:
+                    edges = thicken_outline(edges, outline_thickness - 1)
+                except Exception:
+                    pass
+
+            indices = np.argwhere(edges)
+            if indices.size == 0:
+                continue
+
+            pixel_size_um = float(getattr(geometry, "pixel_size_um", 0.0))
+            if not math.isfinite(pixel_size_um) or pixel_size_um <= 0.0:
+                continue
+
+            offset_x_um = float(getattr(geometry, "x_min_um", 0.0)) - bounds_min_x
+            offset_y_um = float(getattr(geometry, "y_min_um", 0.0)) - bounds_min_y
+
+            x_um = offset_x_um + indices[:, 1] * pixel_size_um
+            y_um = offset_y_um + indices[:, 0] * pixel_size_um
+
+            map_x_px = x_um / base_pixel_um
+            map_y_px = y_um / base_pixel_um
+
+            cols = ((map_x_px - xmin) / downsample).astype(int)
+            rows = ((map_y_px - ymin) / downsample).astype(int)
+
+            valid = (
+                (rows >= 0)
+                & (rows < overlay_rows)
+                & (cols >= 0)
+                & (cols < overlay_cols)
+            )
+            rows = rows[valid]
+            cols = cols[valid]
+            if rows.size == 0:
+                continue
+            overlay[rows, cols] = [1.0, 1.0, 1.0]
+
+        display.img_display.set_data(overlay)
+        display.fig.canvas.draw_idle()
     def after_all_plugins_loaded(self):
         # loop through all the attributes of self.SidePlots, call the `after_all_plugins_loaded`` method
         for attr_name in dir(self.SidePlots):
@@ -2337,6 +2668,30 @@ class ImageMaskViewer:
         display = getattr(self, "image_display", None)
         if display is None:
             return
+
+        map_id_for_focus = None
+        map_switched = False
+        target_map_id = self._map_id_for_fov(fov_name) if self._map_mode_enabled else None
+        if self._map_mode_active and target_map_id:
+            if self._active_map_id != target_map_id:
+                try:
+                    self._activate_map_mode(target_map_id)
+                except Exception:
+                    target_map_id = None
+                else:
+                    self._refresh_map_controls()
+                    map_switched = True
+            map_id_for_focus = target_map_id
+        elif self._map_mode_active and self._active_map_id:
+            map_id_for_focus = self._active_map_id
+
+        if map_switched:
+            try:
+                self.update_display(self.current_downsample_factor)
+            except Exception:
+                if self._debug:
+                    print("[viewer] Failed to refresh display after map switch")
+
         ax = getattr(display, "ax", None)
         if ax is None:
             return
@@ -2362,8 +2717,13 @@ class ImageMaskViewer:
 
         radius = max(1.0, float(radius))
 
-        if self._map_mode_active and self._active_map_id:
-            position = self.resolve_cell_map_position(fov_name, x_value, y_value)
+        if map_id_for_focus and self._map_mode_active:
+            position = self.resolve_cell_map_position(
+                fov_name,
+                x_value,
+                y_value,
+                map_id=map_id_for_focus,
+            )
             if position is not None:
                 scale = max(1.0, float(position.pixel_scale))
                 half = max(1.0, radius * scale)
@@ -2766,6 +3126,10 @@ class ImageMaskViewer:
         xym = (xmin, xmax, ymin, ymax)
         xym_r = (xmin, xmax, ymax, ymin)
         xym_ds = (xmin_ds, xmax_ds, ymin_ds, ymax_ds)
+        try:
+            self._last_viewport_px = (float(xmin), float(xmax), float(ymin), float(ymax), int(downsample_factor))
+        except Exception:
+            self._last_viewport_px = None
         
         # Get selected channels
         selected_channels = list(self.ui_component.channel_selector.value)
@@ -2836,6 +3200,12 @@ class ImageMaskViewer:
 
         self.inform_plugins('on_mv_update_display')
         self.update_scale_bar()
+        if self._map_mode_active and self._active_map_id:
+            try:
+                self._update_map_mask_highlights()
+            except Exception:
+                if self._debug:
+                    print("[viewer] Failed to refresh map mask highlights")
 
     # ------------------------------------------------------------------
     # Mask outline controls

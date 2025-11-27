@@ -758,13 +758,16 @@ class InteractionLayer:
         print(f"Highlighted cells from cluster {cluster_label} of {high_level_cluster} in the main viewer.")
 
     def trace_cluster(self, *args):
-        cell_id = self.main_viewer.image_display.selected_masks_label
-        if cell_id is None:
+        selections = self.main_viewer.image_display.selected_masks_label
+        if not selections:
             print("Please select a cell in the main viewer.")
             return
-        cell_id = cell_id.pop()
-        cell_id = cell_id[1]
-        fov = self.main_viewer.ui_component.image_selector.value
+        selection = next(iter(selections))
+        cell_id = getattr(selection, "mask_id", None)
+        if cell_id is None:
+            print("Could not determine selected cell identifier.")
+            return
+        fov = getattr(selection, "fov", None) or self.main_viewer.ui_component.image_selector.value
         cluster_column = self.ui_component.high_level_cluster_dropdown.value
         label_key = self.main_viewer.label_key
         fov_key = self.main_viewer.fov_key

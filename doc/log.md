@@ -1,5 +1,11 @@
 ### v0.3.0-beta
 
+**Map mode stitched interactions (#62 follow-up)**
+- Added a descriptor-driven FOV→map index and updated `focus_on_cell` to activate the correct stitched map before resolving coordinates, preventing cross-slide navigation from landing on stale canvases.
+- Extended `VirtualMapLayer` with viewport metadata and `localize_map_pixel`, and wired `ImageMaskViewer`/`ImageDisplay` hover & click handlers to translate stitched map pixels back into FOV-local mask hits while preserving tooltip data.
+- Introduced the `MaskSelection` structure across viewer plugins so chart and heatmap tracing consume stitched-aware selections, restoring mask highlights in map mode without breaking single-FOV workflows.
+- Expanded regression coverage in `tests/test_map_mode_activation.py` (map switching, reverse localization) and refreshed `tests/test_image_display_tooltip.py`; ran `python -m unittest tests.test_map_mode_activation` and `python -m unittest tests.test_image_display_tooltip`.
+
 **Map mode cell localization (#62)**
 - Extended `VirtualMapLayer` with per-FOV geometry lookups and taught `ImageMaskViewer` to convert FOV-local cell coordinates into stitched-map pixels via the new `resolve_cell_map_position` and `focus_on_cell` helpers, keeping toolbar history intact while navigating.
 - Updated the scatter, heatmap, cell gallery, and Go To plugins to rely on the stitched coordinate helper when map mode is active, preserving legacy behaviour when descriptors omit the target FOV.

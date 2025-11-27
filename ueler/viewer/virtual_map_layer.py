@@ -26,6 +26,29 @@ class MapTileGeometry:
     y_max_um: float
 
 
+@dataclass(frozen=True)
+class MapTileViewport:
+    """Canvas placement metadata captured during the most recent render."""
+
+    name: str
+    dest_x0: int
+    dest_x1: int
+    dest_y0: int
+    dest_y1: int
+    region_ds: Tuple[int, int, int, int]
+    downsample_factor: int
+
+
+@dataclass(frozen=True)
+class MapPixelHit:
+    """Localised hit describing which tile owns a map pixel."""
+
+    fov_name: str
+    local_x_px: float
+    local_y_px: float
+    pixel_scale: float
+
+
 class VirtualMapLayer:
     """Compose stitched RGB tiles for a map descriptor."""
 
@@ -63,6 +86,7 @@ class VirtualMapLayer:
         self._base_pixel_size_um = 1.0
         self._map_bounds = (0.0, 0.0, 0.0, 0.0)
         self._viewport: Optional[Tuple[float, float, float, float, int]] = None
+        self._last_tile_viewports: Dict[str, MapTileViewport] = {}
 
         self._build_tile_index(descriptor.fovs)
 
@@ -97,6 +121,7 @@ class VirtualMapLayer:
 
         visible_tiles = self._collect_visible_tiles(xmin_um, xmax_um, ymin_um, ymax_um)
         self._last_visible_fovs = tuple(tile.name for tile, _ in visible_tiles)
+        self._last_tile_viewports.clear()
         if not visible_tiles:
             empty_width = max(
                 1,
@@ -142,7 +167,18 @@ class VirtualMapLayer:
                     region_ds,
                 )
                 self._cache_store(cache_key, image)
-            self._blit_tile(canvas, image, intersection, xmin_um, ymin_um, ds_factor)
+            mapping = self._blit_tile(
+                canvas,
+                image,
+                intersection,
+                xmin_um,
+                ymin_um,
+                tile.name,
+                region_ds,
+                ds_factor,
+            )
+            if mapping is not None:
+                self._last_tile_viewports[tile.name] = mapping
 
         return canvas
 
@@ -167,6 +203,9 @@ class VirtualMapLayer:
 
     def last_visible_fovs(self) -> Tuple[str, ...]:
         return self._last_visible_fovs
+
+    def last_tile_viewports(self) -> Dict[str, MapTileViewport]:
+        return dict(self._last_tile_viewports)
 
     def map_bounds(self) -> Tuple[float, float, float, float]:
         return self._map_bounds
@@ -310,8 +349,10 @@ class VirtualMapLayer:
         intersection: Tuple[float, float, float, float],
         viewport_xmin_um: float,
         viewport_ymin_um: float,
+        tile_name: str,
+        region_ds: Tuple[int, int, int, int],
         downsample_factor: int,
-    ) -> None:
+    ) -> Optional[MapTileViewport]:
         ix_min, _, iy_min, _ = intersection
         pixel_size_global = self._base_pixel_size_um * downsample_factor
 
@@ -325,7 +366,7 @@ class VirtualMapLayer:
         dest_x1 = min(canvas.shape[1], x_end)
         dest_y1 = min(canvas.shape[0], y_end)
         if dest_x0 >= dest_x1 or dest_y0 >= dest_y1:
-            return
+            return None
 
         src_x0 = dest_x0 - x_start
         src_y0 = dest_y0 - y_start
@@ -333,6 +374,15 @@ class VirtualMapLayer:
         src_y1 = src_y0 + (dest_y1 - dest_y0)
 
         canvas[dest_y0:dest_y1, dest_x0:dest_x1, :] = tile_image[src_y0:src_y1, src_x0:src_x1, :]
+        return MapTileViewport(
+            name=str(tile_name),
+            dest_x0=dest_x0,
+            dest_x1=dest_x1,
+            dest_y0=dest_y0,
+            dest_y1=dest_y1,
+            region_ds=region_ds,
+            downsample_factor=downsample_factor,
+        )
 
     def _cache_lookup(self, key):
         image = self._cache.get(key)
@@ -351,3 +401,46 @@ class VirtualMapLayer:
         """Return stitched-map geometry for a given FOV."""
 
         return self._tile_lookup.get(fov_name)
+
+    def localize_map_pixel(self, x_px: float, y_px: float) -> Optional[MapPixelHit]:
+        """Resolve a map pixel into the owning tile's local coordinates."""
+
+        try:
+            x_value = float(x_px)
+            y_value = float(y_px)
+        except (TypeError, ValueError):
+            return None
+
+        bounds = self.map_bounds()
+        base_pixel = float(self.base_pixel_size_um())
+        if not math.isfinite(base_pixel) or base_pixel <= 0.0:
+            return None
+
+        global_x_um = bounds[0] + x_value * base_pixel
+        global_y_um = bounds[2] + y_value * base_pixel
+
+        for tile in self._tiles:
+            if not (tile.x_min_um <= global_x_um < tile.x_max_um):
+                continue
+            if not (tile.y_min_um <= global_y_um < tile.y_max_um):
+                continue
+            local_x_um = global_x_um - tile.x_min_um
+            local_y_um = global_y_um - tile.y_min_um
+            pixel_size_um = float(tile.pixel_size_um)
+            if not math.isfinite(pixel_size_um) or pixel_size_um <= 0.0:
+                return None
+            local_x_px = local_x_um / pixel_size_um
+            local_y_px = local_y_um / pixel_size_um
+            if not (0.0 <= local_x_px < tile.width_px and 0.0 <= local_y_px < tile.height_px):
+                return None
+            pixel_scale = pixel_size_um / base_pixel if base_pixel > 0 else 1.0
+            if not math.isfinite(pixel_scale) or pixel_scale <= 0.0:
+                pixel_scale = 1.0
+            return MapPixelHit(
+                fov_name=tile.name,
+                local_x_px=local_x_px,
+                local_y_px=local_y_px,
+                pixel_scale=pixel_scale,
+            )
+
+        return None

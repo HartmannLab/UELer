@@ -123,7 +123,7 @@ if "skimage" not in sys.modules:  # pragma: no cover - optional dependency stub
 if "seaborn_image" not in sys.modules:  # pragma: no cover - optional dependency stub
     sys.modules["seaborn_image"] = types.ModuleType("seaborn_image")
 
-from ueler.viewer.main_viewer import ImageMaskViewer
+from ueler.viewer.main_viewer import ImageMaskViewer, MapPixelLocalization
 
 
 class _DummyAxes:
@@ -165,6 +165,11 @@ class _FakeImageDisplay:
         self.fig = SimpleNamespace(canvas=SimpleNamespace(draw_idle=lambda: None, toolbar=None))
         self.combined = None
 
+    def _materialize_combined(self):
+        if self.combined is None:
+            return np.zeros((1, 1, 3), dtype=np.float32)
+        return np.array(self.combined, copy=True)
+
 
 class _DummySelector:
     def __init__(self, value=None):
@@ -205,6 +210,7 @@ class _CaptureLayer(_StubLayer):
         self.viewport_args = None
         self.render_invocations = 0
         self._tile = None
+        self._pixel_hit = None
 
     def set_viewport(self, xmin_um, xmax_um, ymin_um, ymax_um, *, downsample_factor):
         self.viewport_args = (xmin_um, xmax_um, ymin_um, ymax_um, downsample_factor)
@@ -221,6 +227,9 @@ class _CaptureLayer(_StubLayer):
             return self._tile
         return None
 
+    def localize_map_pixel(self, x_px, y_px):  # noqa: D401 - simple stub hook
+        return self._pixel_hit
+
 
 class MapModeActivationTests(unittest.TestCase):
     def setUp(self):
@@ -229,18 +238,28 @@ class MapModeActivationTests(unittest.TestCase):
         self.viewer.downsample_factors = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
         self.viewer._map_tile_cache = OrderedDict()
         self.viewer._map_tile_cache_capacity = 6
-        self.viewer._map_mode_enabled = True
         self.viewer._map_descriptors = {}
+        self.viewer._map_fov_lookup = {}
         self.viewer._map_layers = {}
         self.viewer._map_mode_active = False
+        self.viewer._map_mode_enabled = True
         self.viewer._map_mode_messages = []
         self.viewer._map_pixel_size_nm = None
         self.viewer._map_canvas_size = None
         self.viewer._visible_map_fovs = ()
         self.viewer._active_map_id = None
+        self.viewer._last_viewport_px = None
         self.viewer.current_downsample_factor = 8
         self.viewer.width = 1
         self.viewer.height = 1
+        self.viewer._debug = False
+        self.viewer.cell_table = None
+        self.viewer.fov_key = "fov"
+        self.viewer.label_key = "label"
+        self.viewer.mask_key = "mask"
+        self.viewer.masks_available = False
+        self.viewer.mask_cache = {}
+        self.viewer.label_masks_cache = {}
         self.viewer.ui_component = SimpleNamespace(
             map_selector=_DummySelector(),
             image_selector=_DummySelector(value="FOV_A"),
@@ -345,6 +364,14 @@ class MapModeActivationTests(unittest.TestCase):
         axes.set_ylim(64.5, 63.8)
 
         self.viewer.update_display(downsample_factor=512)
+        self.viewer._map_mode_enabled = True
+        self.viewer.cell_table = None
+        self.viewer.fov_key = "fov"
+        self.viewer.label_key = "label"
+        self.viewer.mask_key = "mask"
+        self.viewer.masks_available = False
+        self.viewer.mask_cache = {}
+        self.viewer.label_masks_cache = {}
 
         viewport = captured.get("viewport")
         self.assertIsNotNone(viewport)
@@ -405,6 +432,122 @@ class MapModeActivationTests(unittest.TestCase):
         self.assertAlmostEqual(axes.get_xlim()[1], 215.0)
         self.assertAlmostEqual(axes.get_ylim()[0], 625.0)
         self.assertAlmostEqual(axes.get_ylim()[1], 615.0)
+
+    def test_focus_on_cell_switches_maps(self):
+        layer_one = _CaptureLayer(0.5, (0.0, 512.0, 0.0, 512.0))
+        layer_one._tile = SimpleNamespace(
+            name="FOV_A",
+            pixel_size_um=0.5,
+            width_px=512,
+            height_px=512,
+            x_min_um=0.0,
+            x_max_um=256.0,
+            y_min_um=0.0,
+            y_max_um=256.0,
+        )
+        layer_two = _CaptureLayer(0.5, (0.0, 1024.0, 0.0, 1024.0))
+        layer_two._tile = SimpleNamespace(
+            name="FOV_B",
+            pixel_size_um=0.5,
+            width_px=512,
+            height_px=512,
+            x_min_um=100.0,
+            x_max_um=356.0,
+            y_min_um=200.0,
+            y_max_um=456.0,
+        )
+
+        self.viewer._map_descriptors = {
+            "slide-1": SimpleNamespace(fovs=("FOV_A",)),
+            "slide-2": SimpleNamespace(fovs=("FOV_B",)),
+        }
+        self.viewer._map_mode_active = True
+        self.viewer._map_mode_enabled = True
+        self.viewer._active_map_id = "slide-1"
+        self.viewer._map_fov_lookup = {"FOV_A": "slide-1", "FOV_B": "slide-2"}
+        self.viewer.update_display = lambda *args, **kwargs: None
+        axes = self.viewer.image_display.ax
+        axes.set_ylim(2048.0, 0.0)
+
+        def _get_layer(instance, map_id):
+            if map_id == "slide-1":
+                return layer_one
+            if map_id == "slide-2":
+                return layer_two
+            raise KeyError(map_id)
+
+        with patch.object(ImageMaskViewer, "_get_map_layer", _get_layer):
+            self.viewer.focus_on_cell("FOV_B", 5.0, 5.0, radius=5.0)
+
+        self.assertEqual(self.viewer._active_map_id, "slide-2")
+
+    def test_resolve_map_pixel_to_fov_returns_localization(self):
+        layer = _CaptureLayer(0.5, (0.0, 512.0, 0.0, 512.0))
+        layer._pixel_hit = SimpleNamespace(
+            fov_name="FOV_A",
+            local_x_px=5.0,
+            local_y_px=7.0,
+            pixel_scale=1.0,
+        )
+        self.viewer._map_descriptors = {"slide-1": object()}
+        self.viewer._map_mode_enabled = True
+        self.viewer._map_mode_active = True
+        self.viewer._active_map_id = "slide-1"
+
+        with patch.object(ImageMaskViewer, "_get_map_layer", lambda self, map_id: layer):
+            localization = self.viewer.resolve_map_pixel_to_fov(12.0, 3.0)
+
+        self.assertIsNotNone(localization)
+        self.assertEqual(localization.fov_name, "FOV_A")
+        self.assertAlmostEqual(localization.local_x_px, 5.0)
+        self.assertAlmostEqual(localization.local_y_px, 7.0)
+
+    def test_resolve_mask_hit_at_viewport_handles_masks(self):
+        mask_array = np.zeros((5, 5), dtype=int)
+        mask_array[2, 2] = 7
+        self.viewer.masks_available = True
+        self.viewer.mask_cache = {"FOV_A": {"cell": mask_array}}
+        self.viewer.label_masks_cache = {"FOV_A": {}}
+        self.viewer._map_mode_active = False
+        self.viewer._map_mode_enabled = False
+        selector = self.viewer.ui_component.image_selector
+        selector.value = "FOV_A"
+        self.viewer.ui_component.mask_display_controls = {"cell": _DummySelector(value=True)}
+
+        hit = self.viewer.resolve_mask_hit_at_viewport(2.0, 2.0)
+
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit.mask_id, 7)
+        self.assertEqual(hit.fov_name, "FOV_A")
+        self.assertIsNone(hit.map_id)
+
+    def test_resolve_mask_hit_uses_map_localization(self):
+        mask_array = np.zeros((5, 5), dtype=int)
+        mask_array[1, 1] = 9
+        self.viewer.masks_available = True
+        self.viewer.mask_cache = {"FOV_A": {"cell": mask_array}}
+        self.viewer.label_masks_cache = {"FOV_A": {}}
+        self.viewer._map_mode_active = True
+        self.viewer._map_mode_enabled = True
+        self.viewer._active_map_id = "slide-1"
+        self.viewer.ui_component.mask_display_controls = {"cell": _DummySelector(value=True)}
+
+        def _fake_localization(_x, _y, map_id=None):
+            return MapPixelLocalization(
+                map_id="slide-1",
+                fov_name="FOV_A",
+                local_x_px=1.0,
+                local_y_px=1.0,
+                pixel_scale=1.0,
+            )
+
+        self.viewer.resolve_map_pixel_to_fov = _fake_localization  # type: ignore[assignment]
+
+        hit = self.viewer.resolve_mask_hit_at_viewport(100.0, 200.0)
+
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit.mask_id, 9)
+        self.assertEqual(hit.map_id, "slide-1")
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -367,7 +367,8 @@ class ChartDisplay(PluginBase):
     # Trace + highlight
     # ------------------------------------------------------------------
     def trace_cells(self, _button) -> None:
-        if not self.main_viewer.image_display.selected_masks_label:
+        selections = list(self.main_viewer.image_display.selected_masks_label)
+        if not selections:
             print("No cells selected.")
             return
         x_col = self.ui_component.x_axis_selector.value
@@ -377,8 +378,9 @@ class ChartDisplay(PluginBase):
             return
         current_fov = self.main_viewer.ui_component.image_selector.value
         mask_ids = [
-            mask_id
-            for _mask_name, mask_id in self.main_viewer.image_display.selected_masks_label
+            selection.mask_id
+            for selection in selections
+            if getattr(selection, "fov", current_fov) == current_fov
         ]
         if not mask_ids:
             print("No cells selected for tracing.")

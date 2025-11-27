@@ -237,6 +237,28 @@ class ImageDisplayTooltipIntegrationTests(unittest.TestCase):
             channel_selector=SimpleNamespace(value=("CD3",)),
         )
 
+        def _resolve_hit(_x, _y):
+            cell_row = resolve_cell_record(
+                viewer.cell_table,
+                fov_value="FOV-1",
+                mask_name="cell",
+                mask_id=11,
+                fov_key=viewer.fov_key,
+                label_key=viewer.label_key,
+                mask_key=viewer.mask_key,
+            )
+            return SimpleNamespace(
+                fov_name="FOV-1",
+                mask_name="cell",
+                mask_id=11,
+                local_x_px=1.0,
+                local_y_px=1.0,
+                map_id=None,
+                cell_record=cell_row,
+            )
+
+        viewer.resolve_mask_hit_at_viewport = _resolve_hit
+
         image_display.main_viewer = viewer
         image_display.last_hover_event = SimpleNamespace(xdata=1.0, ydata=1.0)
 
