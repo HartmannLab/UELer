@@ -361,16 +361,7 @@ class ChartDisplay(PluginBase):
         fov = row[self.main_viewer.fov_key]
         x = row[self.main_viewer.x_key]
         y = row[self.main_viewer.y_key]
-        self.main_viewer.ui_component.image_selector.value = fov
-        ax = getattr(self.main_viewer.image_display, "ax", None)
-        if ax is None:
-            return
-        nav_stack = ax.figure.canvas.toolbar._nav_stack  # type: ignore[attr-defined]
-        current_view = nav_stack()
-        ax.set_xlim(x - 100, x + 100)
-        ax.set_ylim(y - 100, y + 100)
-        nav_stack.push(current_view)
-        ax.figure.canvas.draw_idle()
+        self.main_viewer.focus_on_cell(fov, x, y, radius=100.0)
 
     # ------------------------------------------------------------------
     # Trace + highlight
@@ -475,7 +466,7 @@ class ChartDisplay(PluginBase):
         grid = compose(
             entries,
             cols=cols,
-            sync_selection=True,
+            sync_selection=False,
             sync_hover=True,
             row_height=320,
         )

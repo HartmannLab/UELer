@@ -1,7 +1,9 @@
 import sys
 import types
 import unittest
+from collections import OrderedDict
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import tests.bootstrap  # noqa: F401  # Ensure shared test bootstrap runs
 
@@ -378,6 +380,11 @@ class _DummyScatter:
         return None
 
 
+class _ComposeStubScatter(_DummyScatter):
+    def compose_entry(self):
+        return (SimpleNamespace(), self.state.title)
+
+
 class _StubAdapter:
     def __init__(self, wide=True):
         self._wide = bool(wide)
@@ -538,6 +545,27 @@ class ChartDisplayFooterTests(unittest.TestCase):
         )
         layout = self.chart.wide_panel_layout()
         self.assertIsNone(layout)
+
+    def test_compose_disables_selection_sync(self):
+        scatter_one = _ComposeStubScatter("s1")
+        scatter_two = _ComposeStubScatter("s2")
+        self.chart._scatter_views = OrderedDict(
+            [
+                (scatter_one.identifier, scatter_one),
+                (scatter_two.identifier, scatter_two),
+            ]
+        )
+
+        with patch("ueler.viewer.plugin.chart.compose") as mock_compose:
+            mock_compose.return_value = ("grid",)
+            self.chart._render_scatter_area()
+
+        self.assertEqual(len(self.chart._plot_host.children), 1)
+        self.assertEqual(self.chart._plot_host.children[0], ("grid",))
+        self.assertTrue(mock_compose.called)
+        _args, kwargs = mock_compose.call_args
+        self.assertIn("sync_selection", kwargs)
+        self.assertFalse(kwargs["sync_selection"])
 
 
 class HeatmapFooterPersistenceTests(unittest.TestCase):

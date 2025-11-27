@@ -1,5 +1,11 @@
 ### v0.3.0-beta
 
+**Map mode cell localization (#62)**
+- Extended `VirtualMapLayer` with per-FOV geometry lookups and taught `ImageMaskViewer` to convert FOV-local cell coordinates into stitched-map pixels via the new `resolve_cell_map_position` and `focus_on_cell` helpers, keeping toolbar history intact while navigating.
+- Updated the scatter, heatmap, cell gallery, and Go To plugins to rely on the stitched coordinate helper when map mode is active, preserving legacy behaviour when descriptors omit the target FOV.
+- Added regression coverage in `tests/test_map_mode_activation.py` and expanded `tests/bootstrap.py` stubs for the `skimage` modules so the viewer’s map-navigation paths remain testable without heavy dependencies; ran `python -m unittest tests.test_map_mode_activation` to confirm the fix.
+- Addressed a follow-up `ValueError` raised from `jscatter.compose` by disabling redundant selection syncing in the chart plugin, relying on the existing observer pipeline; added a regression test to ensure the compose integration remains selection-safe.
+
 **Cell tooltip key alignment (#61)**
 - Reworked `ImageDisplay` hover handling to resolve cell records via the viewer’s configured `fov`, `label`, and optional `mask` keys so datasets with renamed columns now show full channel means and user-selected labels instead of just the mask ID.
 - Added `resolve_cell_record` helper in `ueler/viewer/tooltip_utils.py` with caching and unit coverage for default and custom key combinations, keeping repeated hover events fast while gracefully skipping missing rows.

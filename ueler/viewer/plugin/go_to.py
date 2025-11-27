@@ -109,12 +109,7 @@ class goTo(PluginBase):  # NOSONAR - legacy class name kept for backwards compat
         x = x_vals.iloc[0]
         y = y_vals.iloc[0]
         fov = self.ui_component.fov_dropdown.value
-        self.main_viewer.ui_component.image_selector.value = fov
-        self.main_viewer.image_display.ax.set_xlim(x - crop_width / 2, x + crop_width / 2)
-        self.main_viewer.image_display.ax.set_ylim(y - crop_width / 2, y + crop_width / 2)
-
-        self.main_viewer.image_display.ax.figure.canvas.draw()
-        self.main_viewer.image_display.update_display()
+        self.main_viewer.focus_on_cell(fov, x, y, radius=crop_width / 2)
 
     def initiate_ui(self):
         controls = VBox(

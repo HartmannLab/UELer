@@ -240,20 +240,16 @@ class CellGalleryDisplay(PluginBase):
                     image_selector = getattr(
                         self.main_viewer.ui_component, "image_selector", None
                     )
-                    if image_selector is None:
-                        return
-
-                    prior_fov = getattr(image_selector, "value", None)
-                    should_skip_refresh = prior_fov != fov
+                    prior_fov = getattr(image_selector, "value", None) if image_selector is not None else None
+                    should_skip_refresh = image_selector is not None and prior_fov != fov
                     self._skip_next_fov_refresh = should_skip_refresh
 
                     try:
-                        image_selector.value = fov
-                        self.main_viewer.image_display.ax.set_xlim(
-                            x - crop_width / 2, x + crop_width / 2
-                        )
-                        self.main_viewer.image_display.ax.set_ylim(
-                            y - crop_width / 2, y + crop_width / 2
+                        self.main_viewer.focus_on_cell(
+                            fov,
+                            x,
+                            y,
+                            radius=crop_width / 2,
                         )
                     finally:
                         if not should_skip_refresh:

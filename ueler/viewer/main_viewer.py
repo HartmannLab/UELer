@@ -3,6 +3,7 @@
 import logging
 import math
 import os
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
@@ -101,6 +102,15 @@ ANNOTATION_PALETTE_FOLDER_NAME = "pixel_annotation_palettes"
 
 MAP_DESCRIPTOR_RELATIVE_PATH = Path(".UELer") / "maps"
 _MAP_MODE_FLAG = os.getenv("ENABLE_MAP_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+@dataclass(frozen=True)
+class MapCellPosition:
+    """Stitched-map coordinates for a single cell."""
+
+    x_px: float
+    y_px: float
+    pixel_scale: float
 
 
 def _unique_annotation_values(array):
@@ -765,6 +775,80 @@ class ImageMaskViewer:
             painter_signature,
         )
     
+    def resolve_cell_map_position(
+        self,
+        fov_name: str,
+        x_value: float,
+        y_value: float,
+    ) -> Optional[MapCellPosition]:
+        """Translate FOV-local cell coordinates to stitched-map pixels."""
+
+        if not (self._map_mode_active and self._active_map_id and fov_name):
+            return None
+
+        try:
+            layer = self._get_map_layer(self._active_map_id)
+        except Exception:
+            return None
+
+        geometry_getter = getattr(layer, "tile_geometry", None)
+        if not callable(geometry_getter):
+            return None
+
+        tile = geometry_getter(str(fov_name))
+        if tile is None:
+            return None
+
+        base_pixel_um = float(layer.base_pixel_size_um())
+        if not math.isfinite(base_pixel_um) or base_pixel_um <= 0.0:
+            return None
+
+        try:
+            pixel_size_um = float(tile.pixel_size_um)
+        except Exception:
+            return None
+        if not math.isfinite(pixel_size_um) or pixel_size_um <= 0.0:
+            return None
+
+        try:
+            bounds = layer.map_bounds()
+            bounds_min_x = float(bounds[0])
+            bounds_min_y = float(bounds[2])
+        except (TypeError, ValueError, IndexError):
+            bounds_min_x = 0.0
+            bounds_min_y = 0.0
+
+        try:
+            local_x = float(x_value)
+            local_y = float(y_value)
+        except (TypeError, ValueError):
+            return None
+
+        offset_x_um = float(getattr(tile, "x_min_um", 0.0)) - bounds_min_x
+        offset_y_um = float(getattr(tile, "y_min_um", 0.0)) - bounds_min_y
+
+        map_x_um = offset_x_um + local_x * pixel_size_um
+        map_y_um = offset_y_um + local_y * pixel_size_um
+
+        x_px = map_x_um / base_pixel_um
+        y_px = map_y_um / base_pixel_um
+        if not (math.isfinite(x_px) and math.isfinite(y_px)):
+            return None
+
+        canvas_width = getattr(self, "width", None)
+        if isinstance(canvas_width, (int, float)) and math.isfinite(canvas_width):
+            x_px = max(0.0, min(x_px, float(canvas_width)))
+
+        canvas_height = getattr(self, "height", None)
+        if isinstance(canvas_height, (int, float)) and math.isfinite(canvas_height):
+            y_px = max(0.0, min(y_px, float(canvas_height)))
+
+        pixel_scale = pixel_size_um / base_pixel_um if base_pixel_um > 0 else 1.0
+        if not math.isfinite(pixel_scale) or pixel_scale <= 0.0:
+            pixel_scale = 1.0
+
+        return MapCellPosition(x_px=x_px, y_px=y_px, pixel_scale=pixel_scale)
+
     def after_all_plugins_loaded(self):
         # loop through all the attributes of self.SidePlots, call the `after_all_plugins_loaded`` method
         for attr_name in dir(self.SidePlots):
@@ -2239,6 +2323,97 @@ class ImageMaskViewer:
         ax.set_ylim(y_max, y_min)
         self.image_display.fig.canvas.draw_idle()
         self.update_display(self.current_downsample_factor)
+
+    def focus_on_cell(
+        self,
+        fov_name: str,
+        x_value: float,
+        y_value: float,
+        *,
+        radius: float = 100.0,
+    ) -> None:
+        """Center the viewer on a cell, respecting stitched map offsets."""
+
+        display = getattr(self, "image_display", None)
+        if display is None:
+            return
+        ax = getattr(display, "ax", None)
+        if ax is None:
+            return
+
+        fig = getattr(display, "fig", None)
+        canvas = getattr(fig, "canvas", None) if fig is not None else None
+        toolbar = getattr(canvas, "toolbar", None) if canvas is not None else None
+        nav_stack = getattr(toolbar, "_nav_stack", None) if toolbar is not None else None
+
+        previous_view = None
+        if nav_stack is not None:
+            try:
+                previous_view = nav_stack()
+            except Exception:
+                previous_view = None
+
+        inverted_axes = False
+        try:
+            y_limits = ax.get_ylim()
+            inverted_axes = y_limits[0] > y_limits[1]
+        except Exception:
+            inverted_axes = False
+
+        radius = max(1.0, float(radius))
+
+        if self._map_mode_active and self._active_map_id:
+            position = self.resolve_cell_map_position(fov_name, x_value, y_value)
+            if position is not None:
+                scale = max(1.0, float(position.pixel_scale))
+                half = max(1.0, radius * scale)
+                center_x = float(position.x_px)
+                center_y = float(position.y_px)
+                ax.set_xlim(center_x - half, center_x + half)
+                if inverted_axes:
+                    ax.set_ylim(center_y + half, center_y - half)
+                else:
+                    ax.set_ylim(center_y - half, center_y + half)
+                if nav_stack is not None and previous_view is not None:
+                    try:
+                        nav_stack.push(previous_view)
+                    except Exception:
+                        pass
+                if canvas is not None:
+                    try:
+                        canvas.draw_idle()
+                    except Exception:
+                        pass
+                return
+
+        image_selector = getattr(self.ui_component, "image_selector", None)
+        if image_selector is not None and fov_name and image_selector.value != fov_name:
+            image_selector.value = fov_name
+
+        try:
+            center_x = float(x_value)
+            center_y = float(y_value)
+        except (TypeError, ValueError):
+            return
+
+        half = radius
+        ax.set_xlim(center_x - half, center_x + half)
+        if inverted_axes:
+            ax.set_ylim(center_y + half, center_y - half)
+        else:
+            ax.set_ylim(center_y - half, center_y + half)
+
+        if nav_stack is not None and previous_view is not None:
+            try:
+                nav_stack.push(previous_view)
+            except Exception:
+                pass
+
+        if canvas is not None:
+            try:
+                canvas.draw_idle()
+            except Exception:
+                pass
 
     def _compose_fov_image(
         self,

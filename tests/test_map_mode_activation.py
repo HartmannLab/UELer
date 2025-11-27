@@ -204,6 +204,7 @@ class _CaptureLayer(_StubLayer):
         super().__init__(base_pixel_um, bounds_um)
         self.viewport_args = None
         self.render_invocations = 0
+        self._tile = None
 
     def set_viewport(self, xmin_um, xmax_um, ymin_um, ymax_um, *, downsample_factor):
         self.viewport_args = (xmin_um, xmax_um, ymin_um, ymax_um, downsample_factor)
@@ -214,6 +215,11 @@ class _CaptureLayer(_StubLayer):
 
     def last_visible_fovs(self):
         return ("FOV_A",)
+
+    def tile_geometry(self, fov_name):  # noqa: D401 - simple stub hook
+        if self._tile is not None and getattr(self._tile, "name", None) == fov_name:
+            return self._tile
+        return None
 
 
 class MapModeActivationTests(unittest.TestCase):
@@ -345,6 +351,60 @@ class MapModeActivationTests(unittest.TestCase):
         xmin, xmax, ymin, ymax = viewport
         self.assertLess(xmin, xmax)
         self.assertLess(ymin, ymax)
+
+    def test_resolve_cell_map_position_handles_offsets(self):
+        layer = _CaptureLayer(0.5, (1_000.0, 2_000.0, 4_000.0, 6_000.0))
+        layer._tile = SimpleNamespace(
+            name="FOV_A",
+            pixel_size_um=0.5,
+            width_px=512,
+            height_px=512,
+            x_min_um=1_100.0,
+            x_max_um=1_356.0,
+            y_min_um=4_300.0,
+            y_max_um=4_556.0,
+        )
+        self.viewer._map_descriptors = {"slide-1": object()}
+        self.viewer._active_map_id = "slide-1"
+        self.viewer._map_mode_active = True
+        self.viewer.width = 4096
+        self.viewer.height = 2048
+
+        with patch.object(ImageMaskViewer, "_get_map_layer", lambda self, map_id: layer):
+            position = self.viewer.resolve_cell_map_position("FOV_A", 10.0, 20.0)
+
+        self.assertIsNotNone(position)
+        self.assertAlmostEqual(position.x_px, 210.0)
+        self.assertAlmostEqual(position.y_px, 620.0)
+        self.assertAlmostEqual(position.pixel_scale, 1.0)
+
+    def test_focus_on_cell_respects_stitched_coordinates(self):
+        layer = _CaptureLayer(0.5, (1_000.0, 2_000.0, 4_000.0, 6_000.0))
+        layer._tile = SimpleNamespace(
+            name="FOV_A",
+            pixel_size_um=0.5,
+            width_px=512,
+            height_px=512,
+            x_min_um=1_100.0,
+            x_max_um=1_356.0,
+            y_min_um=4_300.0,
+            y_max_um=4_556.0,
+        )
+        self.viewer._map_descriptors = {"slide-1": object()}
+        self.viewer._active_map_id = "slide-1"
+        self.viewer._map_mode_active = True
+        self.viewer.width = 4096
+        self.viewer.height = 2048
+        axes = self.viewer.image_display.ax
+        axes.set_ylim(2048.0, 0.0)
+
+        with patch.object(ImageMaskViewer, "_get_map_layer", lambda self, map_id: layer):
+            self.viewer.focus_on_cell("FOV_A", 10.0, 20.0, radius=5.0)
+
+        self.assertAlmostEqual(axes.get_xlim()[0], 205.0)
+        self.assertAlmostEqual(axes.get_xlim()[1], 215.0)
+        self.assertAlmostEqual(axes.get_ylim()[0], 625.0)
+        self.assertAlmostEqual(axes.get_ylim()[1], 615.0)
 
 
 if __name__ == "__main__":  # pragma: no cover

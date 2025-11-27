@@ -997,6 +997,12 @@ def _ensure_skimage_stub() -> None:
 
     skimage_module = types.ModuleType(_SKIMAGE)
     segmentation_module = types.ModuleType(_SKIMAGE_SEGMENTATION)
+    io_module = types.ModuleType(f"{_SKIMAGE}.io")
+    exposure_module = types.ModuleType(f"{_SKIMAGE}.exposure")
+    transform_module = types.ModuleType(f"{_SKIMAGE}.transform")
+    color_module = types.ModuleType(f"{_SKIMAGE}.color")
+    measure_module = types.ModuleType(f"{_SKIMAGE}.measure")
+    draw_module = types.ModuleType(f"{_SKIMAGE}.draw")
 
     def _find_boundaries(mask, *_args, **_kwargs):  # pragma: no cover - lightweight stub
         try:
@@ -1009,10 +1015,109 @@ def _ensure_skimage_stub() -> None:
     segmentation_module.find_boundaries = _find_boundaries  # type: ignore[attr-defined]
     segmentation_module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
     skimage_module.segmentation = segmentation_module  # type: ignore[attr-defined]
+    skimage_module.io = io_module  # type: ignore[attr-defined]
+    skimage_module.exposure = exposure_module  # type: ignore[attr-defined]
+    skimage_module.transform = transform_module  # type: ignore[attr-defined]
+    skimage_module.color = color_module  # type: ignore[attr-defined]
+    skimage_module.measure = measure_module  # type: ignore[attr-defined]
+    skimage_module.draw = draw_module  # type: ignore[attr-defined]
     skimage_module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
+
+    def _noop_loader(*_args, **_kwargs):  # pragma: no cover - simple stub
+        return None
+
+    io_module.imread = _noop_loader  # type: ignore[attr-defined]
+    io_module.imsave = _noop_loader  # type: ignore[attr-defined]
+    io_module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
+
+    try:
+        import numpy as _np  # type: ignore
+    except Exception:  # pragma: no cover - fallback when numpy unavailable
+        _np = None
+
+    def _adjust_gamma(image, gamma=1.0, gain=1.0):  # pragma: no cover - simple stub
+        if _np is None:
+            return image
+        gamma = float(gamma) if gamma not in (None, 0) else 1.0
+        gain = float(gain) if gain is not None else 1.0
+        try:
+            image = _np.asarray(image, dtype=float)
+            gamma = max(gamma, 1e-6)
+            adjusted = gain * _np.power(_np.maximum(image, 0.0), 1.0 / gamma)
+            return adjusted
+        except Exception:
+            return image
+
+    def _resize(image, output_shape, **_kwargs):  # pragma: no cover - simple stub
+        if _np is None:
+            return image
+        try:
+            result = _np.zeros(output_shape, dtype=getattr(image, "dtype", float))
+        except Exception:
+            result = image
+        return result
+
+    exposure_module.adjust_gamma = _adjust_gamma  # type: ignore[attr-defined]
+    exposure_module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
+
+    transform_module.resize = _resize  # type: ignore[attr-defined]
+    transform_module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
+
+    def _gray2rgb(image):  # pragma: no cover - simple stub
+        if _np is None:
+            return image
+        array = _np.asarray(image)
+        if array.ndim == 3 and array.shape[-1] == 3:
+            return array
+        return _np.stack([array, array, array], axis=-1)
+
+    def _rgb2gray(image):  # pragma: no cover - simple stub
+        if _np is None:
+            return image
+        array = _np.asarray(image)
+        if array.ndim == 2:
+            return array
+        weights = _np.array([0.2126, 0.7152, 0.0722])
+        try:
+            return _np.tensordot(array, weights, axes=([-1], [0]))
+        except Exception:
+            return array[..., 0]
+
+    color_module.gray2rgb = _gray2rgb  # type: ignore[attr-defined]
+    color_module.rgb2gray = _rgb2gray  # type: ignore[attr-defined]
+    color_module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
+
+    def _noop_regionprops(*_args, **_kwargs):  # pragma: no cover - simple stub
+        return []
+
+    measure_module.regionprops = _noop_regionprops  # type: ignore[attr-defined]
+    measure_module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
+
+    def _circle_perimeter(r, c, radius, *, shape=None):  # pragma: no cover - simple stub
+        if _np is None:
+            return ([int(r)],), ([int(c)],)
+        radius = max(int(radius), 0)
+        if radius == 0:
+            return _np.array([int(r)]), _np.array([int(c)])
+        theta = _np.linspace(0.0, 2.0 * _np.pi, num=max(8, radius * 8), endpoint=False)
+        rr = _np.round(r + radius * _np.sin(theta)).astype(int)
+        cc = _np.round(c + radius * _np.cos(theta)).astype(int)
+        if shape is not None and len(shape) >= 2:
+            rr = _np.clip(rr, 0, shape[0] - 1)
+            cc = _np.clip(cc, 0, shape[1] - 1)
+        return rr, cc
+
+    draw_module.circle_perimeter = _circle_perimeter  # type: ignore[attr-defined]
+    draw_module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
 
     sys.modules[_SKIMAGE_SEGMENTATION] = segmentation_module
     sys.modules[_SKIMAGE] = skimage_module
+    sys.modules[f"{_SKIMAGE}.io"] = io_module
+    sys.modules[f"{_SKIMAGE}.exposure"] = exposure_module
+    sys.modules[f"{_SKIMAGE}.transform"] = transform_module
+    sys.modules[f"{_SKIMAGE}.color"] = color_module
+    sys.modules[f"{_SKIMAGE}.measure"] = measure_module
+    sys.modules[f"{_SKIMAGE}.draw"] = draw_module
 
 
 def _ensure_dask_stub() -> None:

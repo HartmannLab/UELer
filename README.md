@@ -101,6 +101,8 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### **UELer v0.3.0-beta Summary**
+- Map mode navigation now converts FOV-local cell coordinates into stitched-map pixels via `ImageMaskViewer.resolve_cell_map_position`, letting scatter, heatmap, gallery, and Go To plugins centre precisely on cells without mutating the underlying table.
+- Chart scatter compose now relies on the viewer’s existing selection observers instead of `jscatter.compose` sync hooks, preventing the ValueError triggered when multiple plots are active.
 - Cell mask tooltips now honour the viewer’s configurable FOV, label, and mask keys, so datasets with renamed columns once again display channel means and custom tooltip labels instead of falling back to mask IDs.
 - Introduced a cached `resolve_cell_record` helper and expanded tooltip unit tests, ensuring hover events remain responsive while covering default and custom key combinations.
 - Map mode groundwork from v0.3.0-alpha remains available behind `ENABLE_MAP_MODE`, including stitched viewport rendering, descriptor validation, and shared cache management for multi-FOV slides.

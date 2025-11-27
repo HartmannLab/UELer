@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Iterable, MutableMapping, Optional, Sequence, Tuple
+from typing import Dict, Iterable, MutableMapping, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -13,7 +13,7 @@ from .map_descriptor_loader import MapFOVSpec, SlideDescriptor
 
 
 @dataclass(frozen=True)
-class _Tile:
+class MapTileGeometry:
     """Viewport-aligned metadata for an individual FOV tile."""
 
     name: str
@@ -58,7 +58,8 @@ class VirtualMapLayer:
         self._cache = cache if cache is not None else OrderedDict()
         self._cache_capacity = max(1, int(cache_capacity))
 
-        self._tiles = []
+        self._tiles: list[MapTileGeometry] = []
+        self._tile_lookup: Dict[str, MapTileGeometry] = {}
         self._base_pixel_size_um = 1.0
         self._map_bounds = (0.0, 0.0, 0.0, 0.0)
         self._viewport: Optional[Tuple[float, float, float, float, int]] = None
@@ -174,7 +175,7 @@ class VirtualMapLayer:
         return self._base_pixel_size_um
 
     def _build_tile_index(self, entries: Sequence[MapFOVSpec]) -> None:
-        tiles = []
+        tiles: list[MapTileGeometry] = []
         base_pixel_size: Optional[float] = None
         x_values = []
         y_values = []
@@ -193,6 +194,7 @@ class VirtualMapLayer:
         if base_pixel_size is not None:
             self._base_pixel_size_um = base_pixel_size
         self._tiles = tiles
+        self._tile_lookup = {tile.name: tile for tile in tiles}
         if x_values and y_values:
             self._map_bounds = (
                 min(x_values),
@@ -205,7 +207,7 @@ class VirtualMapLayer:
         self,
         spec: MapFOVSpec,
         base_pixel_size: Optional[float],
-    ) -> Optional[Tuple[_Tile, float]]:
+    ) -> Optional[Tuple[MapTileGeometry, float]]:
         if spec.fov_size_um is None:
             return None
 
@@ -228,7 +230,7 @@ class VirtualMapLayer:
         half_width_um = pixel_size_um * width_px * 0.5
         half_height_um = pixel_size_um * height_px * 0.5
         x_center, y_center = spec.center_um
-        tile = _Tile(
+        tile = MapTileGeometry(
             name=spec.name,
             pixel_size_um=pixel_size_um,
             width_px=width_px,
@@ -246,7 +248,7 @@ class VirtualMapLayer:
         xmax_um: float,
         ymin_um: float,
         ymax_um: float,
-    ) -> Sequence[Tuple[_Tile, Tuple[float, float, float, float]]]:
+    ) -> Sequence[Tuple[MapTileGeometry, Tuple[float, float, float, float]]]:
         visible = []
         for tile in self._tiles:
             ix_min = max(xmin_um, tile.x_min_um)
@@ -273,7 +275,7 @@ class VirtualMapLayer:
 
     def _compute_tile_region(
         self,
-        tile: _Tile,
+        tile: MapTileGeometry,
         intersection: Tuple[float, float, float, float],
         downsample_factor: int,
     ) -> Optional[Tuple[Tuple[int, int, int, int], Tuple[int, int, int, int]]]:
@@ -344,3 +346,8 @@ class VirtualMapLayer:
             self._cache.move_to_end(key)
             while len(self._cache) > self._cache_capacity:
                 self._cache.popitem(last=False)
+
+    def tile_geometry(self, fov_name: str) -> Optional[MapTileGeometry]:
+        """Return stitched-map geometry for a given FOV."""
+
+        return self._tile_lookup.get(fov_name)
