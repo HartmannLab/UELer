@@ -351,14 +351,39 @@ class ImageDisplay:
                     edge_mask = thicken_outline(edge_mask, outline_thickness - 1)
                 
                 if do_not_reset:
-                    combined = self.img_display.get_array().copy()
+                    combined = np.array(self.img_display.get_array(), copy=True)
                 else:
                     combined = self._materialize_combined()
                     if combined is None:
                         return
+                    combined = np.array(combined, copy=True)
 
-                # Highlight selected cells in white
-                combined[edge_mask] = [1, 1, 1]
+                combined_height, combined_width = combined.shape[:2]
+                region_height_expected = max(0, int(ymax_ds - ymin_ds))
+                region_width_expected = max(0, int(xmax_ds - xmin_ds))
+
+                rows, cols = np.nonzero(edge_mask)
+                if combined_height == region_height_expected and combined_width == region_width_expected:
+                    mapped_rows = rows
+                    mapped_cols = cols
+                else:
+                    mapped_rows = rows + int(ymin_ds)
+                    mapped_cols = cols + int(xmin_ds)
+
+                valid = (
+                    (mapped_rows >= 0)
+                    & (mapped_rows < combined_height)
+                    & (mapped_cols >= 0)
+                    & (mapped_cols < combined_width)
+                )
+                mapped_rows = mapped_rows[valid]
+                mapped_cols = mapped_cols[valid]
+                if mapped_rows.size == 0:
+                    self.img_display.set_data(combined)
+                    self.fig.canvas.draw_idle()
+                    return
+
+                combined[mapped_rows, mapped_cols] = [1, 1, 1]
                 self.img_display.set_data(combined)
 
                 if self.main_viewer._debug:

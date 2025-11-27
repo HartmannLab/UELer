@@ -1,4 +1,5 @@
 import unittest
+import types
 from collections import OrderedDict
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -124,6 +125,8 @@ if "seaborn_image" not in sys.modules:  # pragma: no cover - optional dependency
     sys.modules["seaborn_image"] = types.ModuleType("seaborn_image")
 
 from ueler.viewer.main_viewer import ImageMaskViewer, MapPixelLocalization
+from ueler.viewer.image_display import MaskSelection
+from ueler.viewer.virtual_map_layer import MapTileViewport
 
 
 class _DummyAxes:
@@ -378,6 +381,64 @@ class MapModeActivationTests(unittest.TestCase):
         xmin, xmax, ymin, ymax = viewport
         self.assertLess(xmin, xmax)
         self.assertLess(ymin, ymax)
+
+    def test_update_map_mask_highlights_uses_tile_viewport(self):
+        self.viewer.masks_available = True
+        self.viewer._map_mode_active = True
+        self.viewer._map_mode_enabled = True
+        self.viewer._active_map_id = "slide-1"
+        self.viewer.image_display.combined = np.zeros((3, 3, 3), dtype=np.float32)
+        self.viewer.image_display.img_display.set_data(self.viewer.image_display.combined)
+        selection = MaskSelection(fov="FOV_A", mask="nuclei", mask_id=7)
+        self.viewer.image_display.selected_masks_label = {selection}
+
+        mask_array = np.full((6, 6), 7, dtype=np.int32)
+
+        def _mask_array_stub(_self, fov_name, mask_name):
+            return mask_array
+
+        self.viewer._get_mask_array = types.MethodType(_mask_array_stub, self.viewer)
+
+        viewport = MapTileViewport(
+            name="FOV_A",
+            dest_x0=0,
+            dest_x1=3,
+            dest_y0=0,
+            dest_y1=3,
+            region_xy=(0, 6, 0, 6),
+            region_ds=(0, 3, 0, 3),
+            downsample_factor=2,
+        )
+
+        class _ViewportLayer:
+            def __init__(self, vp):
+                self._vp = vp
+
+            def last_tile_viewports(self):
+                return {"FOV_A": self._vp}
+
+        layer = _ViewportLayer(viewport)
+
+        def _get_map_layer_stub(_self, map_id):
+            return layer
+
+        self.viewer._get_map_layer = types.MethodType(_get_map_layer_stub, self.viewer)
+
+        def _mock_boundaries(array, mode=None):
+            diagonal = np.zeros_like(array, dtype=bool)
+            np.fill_diagonal(diagonal, True)
+            return diagonal
+
+        with patch("ueler.viewer.main_viewer.find_boundaries", side_effect=_mock_boundaries):
+            self.viewer._update_map_mask_highlights()
+
+        result = self.viewer.image_display.img_display.data
+        self.assertIsNotNone(result)
+        self.assertEqual(result.shape, (3, 3, 3))
+        diag_pixels = result[np.arange(3), np.arange(3)]
+        self.assertTrue(np.allclose(diag_pixels, np.ones((3, 3))))
+        self.assertTrue(np.allclose(result[0, 1], np.zeros(3)))
+        self.assertTrue(np.allclose(self.viewer.image_display.combined, 0.0))
 
     def test_resolve_cell_map_position_handles_offsets(self):
         layer = _CaptureLayer(0.5, (1_000.0, 2_000.0, 4_000.0, 6_000.0))

@@ -56,3 +56,18 @@
 - Reworked `ImageDisplay` hover and click pipelines to rely on the viewer’s stitched resolvers, introducing the `MaskSelection` structure so tooltips, chart tracing, and mask highlighting stay consistent across map and single-FOV modes.
 - Added stitched highlight rendering that maps mask outlines onto the combined canvas when map mode is active, keeping selection visuals intact after the coordinate translation.
 - Expanded `tests/test_map_mode_activation.py` with coverage for map switching, pixel reverse lookups, and map-aware mask hits; updated tooltip integration tests to exercise the new resolver API; ran `python -m unittest tests.test_map_mode_activation tests.test_image_display_tooltip`.
+
+## Status — 2025-12-01
+
+- `_update_map_mask_highlights` now consumes `MapTileViewport.region_xy` bounds to place stitched outlines without drift, backed by the new `tests/test_map_mode_activation.py::test_update_map_mask_highlights_uses_tile_viewport` regression.
+- `ImageDisplay.update_patches` translates contour indices with viewport offsets, preventing the Reply (3) zoom-level `IndexError` and covered by `tests/test_image_display_tooltip.py::UpdatePatchesTests::test_update_patches_aligns_with_viewport_offsets`.
+- Verified fixes with `python -m unittest tests.test_map_mode_activation tests.test_image_display_tooltip`.
+
+## Follow-up Plan (2025-12-01)
+
+1. **Stitched highlight alignment**
+   - Persist the tile crop bounds (`region_xy`) in each `MapTileViewport` record and drive `_update_map_mask_highlights` from viewport metadata rather than reprojection math to eliminate the multi-pixel offset.
+2. **Single-FOV mask patch safety**
+   - Rework `ImageDisplay.update_patches` so outline placement uses viewport-aligned offsets, preventing shape mismatches when the downsampled viewport dimensions diverge from the cached base image at specific zoom levels.
+3. **Regression coverage**
+   - Extend `tests/test_map_mode_activation.py` with a stitched-highlight alignment assertion and add a focused unit test covering `ImageDisplay.update_patches` multi-select behaviour to guard against the reported IndexError.

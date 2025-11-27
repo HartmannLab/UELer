@@ -2,6 +2,7 @@ from types import SimpleNamespace
 import types
 import sys
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -35,7 +36,7 @@ if "cv2" not in sys.modules:
     sys.modules["cv2"] = types.ModuleType("cv2")
 
 
-from ueler.viewer.image_display import ImageDisplay
+from ueler.viewer.image_display import ImageDisplay, MaskSelection
 from ueler.viewer.tooltip_utils import format_tooltip_value, resolve_cell_record
 
 
@@ -187,6 +188,74 @@ class ResolveCellRecordTests(unittest.TestCase):
             label_key="label",
         )
         self.assertIsNone(record)
+
+
+class UpdatePatchesTests(unittest.TestCase):
+    def test_update_patches_aligns_with_viewport_offsets(self) -> None:
+        display = ImageDisplay(width=256, height=256)
+
+        class _CaptureImage:
+            def __init__(self):
+                self._array = None
+
+            def set_data(self, array):
+                self._array = np.array(array, copy=True)
+
+            def get_array(self):
+                if self._array is None:
+                    return np.zeros((0, 0, 3), dtype=np.float32)
+                return self._array
+
+            def set_extent(self, *_args, **_kwargs):
+                return None
+
+        capture = _CaptureImage()
+        display.img_display = capture
+
+        mask_array = np.zeros((256, 256), dtype=np.int32)
+        mask_array[48:112, 32:96] = 5
+
+        viewer = SimpleNamespace(
+            _map_mode_active=False,
+            _active_map_id=None,
+            current_downsample_factor=4,
+            ui_component=SimpleNamespace(image_selector=SimpleNamespace(value="FOV_A")),
+            full_resolution_label_masks={"CellMask": mask_array},
+            _debug=False,
+        )
+        viewer.image_display = display
+        viewer.width = 256
+        viewer.height = 256
+        display.main_viewer = viewer
+        display.selected_masks_label = {MaskSelection(fov="FOV_A", mask="CellMask", mask_id=5)}
+
+        base_image = np.zeros((64, 64, 3), dtype=np.float32)
+        display.combined = base_image.copy()
+        display.img_display.set_data(base_image)
+
+        limits = (32, 96, 48, 112, 8, 24, 12, 28)
+
+        def _fake_find_boundaries(array, mode=None):
+            mask = np.zeros_like(array, dtype=bool)
+            if mask.size:
+                mask[0, 0] = True
+            return mask
+
+        with patch("ueler.viewer.image_display.get_axis_limits_with_padding", return_value=limits), patch(
+            "ueler.viewer.image_display.find_boundaries",
+            side_effect=_fake_find_boundaries,
+        ):
+            display.update_patches(do_not_reset=False)
+
+        highlighted = capture.get_array()
+        self.assertTrue(np.allclose(highlighted[12, 8], np.ones(3)))
+        self.assertTrue(np.allclose(highlighted.sum(axis=-1).sum(), 3.0))
+        self.assertTrue(np.allclose(display.combined, base_image))
+
+        # Close the Matplotlib figure to avoid resource leaks during the test suite
+        import matplotlib.pyplot as plt
+
+        plt.close(display.fig)
 
 
 class FakeMaskArray:

@@ -35,6 +35,7 @@ class MapTileViewport:
     dest_x1: int
     dest_y0: int
     dest_y1: int
+    region_xy: Tuple[int, int, int, int]
     region_ds: Tuple[int, int, int, int]
     downsample_factor: int
 
@@ -174,6 +175,7 @@ class VirtualMapLayer:
                 xmin_um,
                 ymin_um,
                 tile.name,
+                region_xy,
                 region_ds,
                 ds_factor,
             )
@@ -350,6 +352,7 @@ class VirtualMapLayer:
         viewport_xmin_um: float,
         viewport_ymin_um: float,
         tile_name: str,
+        region_xy: Tuple[int, int, int, int],
         region_ds: Tuple[int, int, int, int],
         downsample_factor: int,
     ) -> Optional[MapTileViewport]:
@@ -380,6 +383,7 @@ class VirtualMapLayer:
             dest_x1=dest_x1,
             dest_y0=dest_y0,
             dest_y1=dest_y1,
+            region_xy=region_xy,
             region_ds=region_ds,
             downsample_factor=downsample_factor,
         )

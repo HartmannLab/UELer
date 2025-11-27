@@ -1072,18 +1072,6 @@ class ImageMaskViewer:
             display.fig.canvas.draw_idle()
             return
 
-        viewport = self._last_viewport_px
-        if viewport is None:
-            display.img_display.set_data(base_image)
-            display.fig.canvas.draw_idle()
-            return
-
-        xmin, xmax, ymin, ymax, downsample = viewport
-        try:
-            downsample = max(1, int(downsample))
-        except Exception:
-            downsample = 1
-
         try:
             layer = self._get_map_layer(self._active_map_id)
         except Exception:
@@ -1091,26 +1079,14 @@ class ImageMaskViewer:
             display.fig.canvas.draw_idle()
             return
 
-        bounds = layer.map_bounds()
-        try:
-            bounds_min_x = float(bounds[0])
-            bounds_min_y = float(bounds[2])
-        except (TypeError, ValueError, IndexError):
-            bounds_min_x = 0.0
-            bounds_min_y = 0.0
-
-        base_pixel_um = float(layer.base_pixel_size_um())
-        if not math.isfinite(base_pixel_um) or base_pixel_um <= 0.0:
+        tile_viewports = layer.last_tile_viewports()
+        if not tile_viewports:
             display.img_display.set_data(base_image)
             display.fig.canvas.draw_idle()
             return
 
         overlay = np.array(base_image, copy=True)
-        overlay_rows, overlay_cols = overlay.shape[:2]
-        outline_thickness = scale_outline_thickness(
-            getattr(self, "mask_outline_thickness", 1),
-            downsample,
-        )
+        applied = False
 
         for selection in selections:
             fov_name = getattr(selection, "fov", None)
@@ -1119,8 +1095,13 @@ class ImageMaskViewer:
             if not (fov_name and mask_name and isinstance(mask_id, int)):
                 continue
 
-            geometry = layer.tile_geometry(str(fov_name))
-            if geometry is None:
+            viewport_info = tile_viewports.get(str(fov_name))
+            if viewport_info is None:
+                continue
+
+            region_xy = getattr(viewport_info, "region_xy", None)
+            region_ds = getattr(viewport_info, "region_ds", None)
+            if region_xy is None or region_ds is None:
                 continue
 
             mask_array = self._get_mask_array(str(fov_name), str(mask_name))
@@ -1128,7 +1109,27 @@ class ImageMaskViewer:
                 continue
 
             try:
-                mask_binary = mask_array == mask_id
+                x_min_px, x_max_px, y_min_px, y_max_px = (int(region_xy[0]), int(region_xy[1]), int(region_xy[2]), int(region_xy[3]))
+            except Exception:
+                continue
+
+            if x_min_px >= x_max_px or y_min_px >= y_max_px:
+                continue
+
+            try:
+                mask_region = mask_array[y_min_px:y_max_px, x_min_px:x_max_px]
+            except Exception:
+                continue
+            if mask_region.size == 0:
+                continue
+
+            downsample = max(1, int(getattr(viewport_info, "downsample_factor", 1)))
+            mask_region = mask_region[::downsample, ::downsample]
+            if mask_region.size == 0:
+                continue
+
+            try:
+                mask_binary = mask_region == mask_id
             except Exception:
                 continue
             if not np.any(mask_binary):
@@ -1140,45 +1141,44 @@ class ImageMaskViewer:
                 edges = mask_binary
             if not np.any(edges):
                 edges = mask_binary
+
+            outline_thickness = scale_outline_thickness(
+                getattr(self, "mask_outline_thickness", 1),
+                downsample,
+            )
             if outline_thickness > 1:
                 try:
                     edges = thicken_outline(edges, outline_thickness - 1)
                 except Exception:
                     pass
 
-            indices = np.argwhere(edges)
-            if indices.size == 0:
+            dest_x0 = max(0, int(getattr(viewport_info, "dest_x0", 0)))
+            dest_x1 = max(dest_x0, int(getattr(viewport_info, "dest_x1", dest_x0)))
+            dest_y0 = max(0, int(getattr(viewport_info, "dest_y0", 0)))
+            dest_y1 = max(dest_y0, int(getattr(viewport_info, "dest_y1", dest_y0)))
+
+            if dest_x0 >= dest_x1 or dest_y0 >= dest_y1:
                 continue
 
-            pixel_size_um = float(getattr(geometry, "pixel_size_um", 0.0))
-            if not math.isfinite(pixel_size_um) or pixel_size_um <= 0.0:
+            section_view = overlay[dest_y0:dest_y1, dest_x0:dest_x1]
+            if section_view.size == 0:
                 continue
 
-            offset_x_um = float(getattr(geometry, "x_min_um", 0.0)) - bounds_min_x
-            offset_y_um = float(getattr(geometry, "y_min_um", 0.0)) - bounds_min_y
+            if section_view.shape[0] != edges.shape[0] or section_view.shape[1] != edges.shape[1]:
+                rows = min(section_view.shape[0], edges.shape[0])
+                cols = min(section_view.shape[1], edges.shape[1])
+                if rows <= 0 or cols <= 0:
+                    continue
+                section_view = section_view[:rows, :cols]
+                edges = edges[:rows, :cols]
 
-            x_um = offset_x_um + indices[:, 1] * pixel_size_um
-            y_um = offset_y_um + indices[:, 0] * pixel_size_um
+            section_view[edges] = [1.0, 1.0, 1.0]
+            applied = True
 
-            map_x_px = x_um / base_pixel_um
-            map_y_px = y_um / base_pixel_um
-
-            cols = ((map_x_px - xmin) / downsample).astype(int)
-            rows = ((map_y_px - ymin) / downsample).astype(int)
-
-            valid = (
-                (rows >= 0)
-                & (rows < overlay_rows)
-                & (cols >= 0)
-                & (cols < overlay_cols)
-            )
-            rows = rows[valid]
-            cols = cols[valid]
-            if rows.size == 0:
-                continue
-            overlay[rows, cols] = [1.0, 1.0, 1.0]
-
-        display.img_display.set_data(overlay)
+        if applied:
+            display.img_display.set_data(overlay)
+        else:
+            display.img_display.set_data(base_image)
         display.fig.canvas.draw_idle()
     def after_all_plugins_loaded(self):
         # loop through all the attributes of self.SidePlots, call the `after_all_plugins_loaded`` method
