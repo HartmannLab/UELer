@@ -1,5 +1,13 @@
 ### v0.3.0-beta (OME-TIFF support)
 
+**OME-TIFF Memory Crash Fix (#60 follow-up)**
+- Fixed a critical memory crash in `ImageDisplay` initialization where full-resolution OME-TIFF dimensions caused massive buffer allocation (e.g., 23GB for 44k images). The viewer now initializes with a minimal buffer while maintaining correct full-resolution coordinate systems for zooming and panning.
+
+
+**OME-TIFF Memory Optimization (#60 follow-up)**
+- Resolved memory maxout issues when loading large multi-channel OME-TIFF files by switching from eager to lazy channel statistics computation.
+- `ImageMaskViewer` now computes channel max intensity only when a channel is selected for display, significantly reducing startup time and memory footprint for datasets with many channels.
+
 **OME-TIFF Rendering Fixes (#60 follow-up)**
 - Fixed view drift when switching pyramid levels in OME-TIFF files by correctly inferring the full-resolution image dimensions from the OME metadata wrapper instead of the downsampled dask array.
 - Resolved `ValueError` when zooming out to lower resolution levels by handling shape mismatches between the downsampled OME-TIFF array and the expected canvas size, ensuring robust rendering even when pyramid levels have slightly different dimensions due to rounding.

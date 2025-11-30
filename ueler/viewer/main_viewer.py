@@ -300,10 +300,30 @@ class ImageMaskViewer:
         self.load_status_images()
 
         # Load the first FOV and set image dimensions
-        self.load_fov(self.available_fovs[0])
-        fov_images = self.image_cache[self.available_fovs[0]]
-        first_channel_image = next(iter(fov_images.values()))
-        self.height, self.width = first_channel_image.shape
+        initial_fov = self.available_fovs[0]
+        self.load_fov(initial_fov)
+        fov_images = self.image_cache[initial_fov]
+        if isinstance(fov_images, OMEFovWrapper):
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "[viewer] Using OME metadata for %s dimensions; reported shape=%s",
+                    initial_fov,
+                    fov_images.shape,
+                )
+            self.height, self.width = fov_images.shape  # full-res Y/X from OME metadata
+        else:
+            try:
+                first_channel_name, first_channel_image = next(iter(fov_images.items()))
+            except StopIteration as exc:
+                raise ValueError(f"No channel data found for FOV '{initial_fov}'.") from exc
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "[viewer] Sampling channel %s for %s dimensions; this loads data with shape=%s",
+                    first_channel_name,
+                    initial_fov,
+                    getattr(first_channel_image, "shape", None),
+                )
+            self.height, self.width = first_channel_image.shape
 
         # Calculate the downsample factor based on image size
         initial_factor = select_downsample_factor(
@@ -1303,6 +1323,31 @@ class ImageMaskViewer:
             self.annotation_label_cache.pop(removed_fov, None)
             print(f"Removed FOV '{removed_fov}' from annotation cache due to cache size limit.")
 
+    def _ensure_channel_max_computed(self, fov_name, channel_name):
+        if channel_name in self.channel_max_values:
+            return
+
+        fov_images = self.image_cache.get(fov_name)
+        if isinstance(fov_images, OMEFovWrapper):
+            arr = fov_images[channel_name]
+            if arr is None:
+                return
+            try:
+                ch_max = arr.max().compute()
+            except Exception:
+                ch_max = 0
+            
+            dtype = getattr(arr, "dtype", None)
+            if dtype is not None and np.issubdtype(dtype, np.integer):
+                dtype_limit = float(np.iinfo(dtype).max)
+            elif dtype is not None and np.issubdtype(dtype, np.floating):
+                dtype_limit = float(np.finfo(dtype).max)
+            else:
+                dtype_limit = float(ch_max) if ch_max is not None else 65535.0
+            
+            display_max = float(ch_max)
+            merge_channel_max(channel_name, self.channel_max_values, display_max, dtype_limit)
+
     def load_fov(self, fov_name, requested_channels=None):
         """Load images and masks for a FOV into the cache."""
         
@@ -1313,23 +1358,8 @@ class ImageMaskViewer:
                  wrapper = OMEFovWrapper(path, ds_factor=self.current_downsample_factor)
                  self.image_cache[fov_name] = wrapper
                  
-                 for ch_name in wrapper.get_channel_names():
-                     arr = wrapper[ch_name]
-                     try:
-                         ch_max = arr.max().compute()
-                     except Exception:
-                         ch_max = 0
-                     
-                     dtype = getattr(arr, "dtype", None)
-                     if dtype is not None and np.issubdtype(dtype, np.integer):
-                        dtype_limit = float(np.iinfo(dtype).max)
-                     elif dtype is not None and np.issubdtype(dtype, np.floating):
-                        dtype_limit = float(np.finfo(dtype).max)
-                     else:
-                        dtype_limit = float(ch_max) if ch_max is not None else 65535.0
-                     
-                     display_max = float(ch_max)
-                     merge_channel_max(ch_name, self.channel_max_values, display_max, dtype_limit)
+                 # We do NOT compute max for all channels here anymore to avoid memory spikes.
+                 # Instead, we compute it on demand in _ensure_channel_max_computed.
                  
                  self.image_cache.move_to_end(fov_name)
 
@@ -1346,8 +1376,10 @@ class ImageMaskViewer:
             requested_channels = (channel_list[0],)
 
         for ch in requested_channels:
+            if isinstance(self.image_cache[fov_name], OMEFovWrapper):
+                self._ensure_channel_max_computed(fov_name, ch)
             # for self.image_cache[fov_name][ch] is None, load the image
-            if self.image_cache[fov_name][ch] is None:
+            elif self.image_cache[fov_name][ch] is None:
                 # Load images for FOV
                 self.image_cache[fov_name][ch] = load_one_channel_fov(fov_name, self.base_folder, self.channel_max_values, ch)
                 self._sync_channel_controls(ch)
@@ -1468,9 +1500,29 @@ class ImageMaskViewer:
         self.load_fov(self.ui_component.image_selector.value)
 
         # Update image dimensions
-        fov_images = self.image_cache[self.ui_component.image_selector.value]
-        first_channel_image = next(iter(fov_images.values()))
-        self.height, self.width = first_channel_image.shape
+        fov_name = self.ui_component.image_selector.value
+        fov_images = self.image_cache[fov_name]
+        if isinstance(fov_images, OMEFovWrapper):
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "[viewer] Using OME metadata for %s dimensions on image change; reported shape=%s",
+                    fov_name,
+                    fov_images.shape,
+                )
+            self.height, self.width = fov_images.shape
+        else:
+            try:
+                first_channel_name, first_channel_image = next(iter(fov_images.items()))
+            except StopIteration as exc:
+                raise ValueError(f"No channel data found for FOV '{fov_name}'.") from exc
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "[viewer] Sampling channel %s for %s dimensions during image change; shape=%s",
+                    first_channel_name,
+                    fov_name,
+                    getattr(first_channel_image, "shape", None),
+                )
+            self.height, self.width = first_channel_image.shape
         self.image_display.height = self.height
         self.image_display.width = self.width
 
@@ -1831,6 +1883,11 @@ class ImageMaskViewer:
     def update_controls(self, change):
         """Create widgets dynamically based on selected channels and masks, and attach update callbacks."""
         channel_widgets = []
+
+        # Ensure max values are computed for selected channels
+        fov_name = self.ui_component.image_selector.value
+        for channel in self.ui_component.channel_selector.value:
+            self._ensure_channel_max_computed(fov_name, channel)
 
         for channel in self.ui_component.channel_selector.value:
             max_value, _ = self._get_channel_stats(channel)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import glob
+import logging
 import math
 import os
 import xml.etree.ElementTree as ET
@@ -12,6 +13,9 @@ import numpy as np
 
 TIFF_PATTERNS: Tuple[str, ...] = ("*.tiff", "*.tif")
 _CHUNK_SIZE = (1024, 1024)
+
+
+logger = logging.getLogger(__name__)
 
 
 def _list_tiff_files(folder: str) -> List[str]:
@@ -507,6 +511,13 @@ class OMEFovWrapper:
             return cached
         _, da = _ensure_dask()
         level_param = level["level_index"] if self._level_count > 1 else None
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "[OMEFovWrapper] materializing pyramid level %s (scale=%s) for %s",
+                level.get("level_index"),
+                level.get("scale"),
+                self.path,
+            )
         store = self._series.aszarr(level=level_param)
         array = da.from_zarr(store)
         level["array"] = array
@@ -567,11 +578,25 @@ class OMEFovWrapper:
 
         level, residual = self._select_level(self.ds_factor)
         idx = self._name_to_index[channel_name]
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "[OMEFovWrapper] slicing channel %s (ds=%s, level_scale=%s) for %s",
+                channel_name,
+                self.ds_factor,
+                level.get("scale"),
+                self.path,
+            )
         sliced = self._slice_channel(level, idx, residual)
         self._channel_cache[cache_key] = sliced
         return sliced
 
     def values(self):
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "[OMEFovWrapper] values() requested for %s (%d channels); this may materialize arrays",
+                self.path,
+                len(self.channel_names),
+            )
         return [self[name] for name in self.channel_names]
 
     def items(self):
