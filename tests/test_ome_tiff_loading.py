@@ -62,13 +62,11 @@ class TestOMETiffLoading(unittest.TestCase):
             mock_arr = MagicMock()
             mock_arr.shape = (2, 100, 100)
             mock_arr.ndim = 3
-            mock_arr.chunks = ((1, 1), (100,), (100,))
-            mock_arr.rechunk.return_value = mock_arr
             
             # Mock slicing
             def getitem(key):
                 # key is tuple of slices
-                # We expect (idx)
+                # We expect (idx, slice, slice)
                 return "sliced_array"
             
             mock_arr.__getitem__.side_effect = getitem
@@ -77,22 +75,21 @@ class TestOMETiffLoading(unittest.TestCase):
             
             wrapper = OMEFovWrapper("dummy.ome.tif", ds_factor=2)
             
-            # Verify rechunk called
-            mock_arr.rechunk.assert_called_with({-1: 1024, -2: 1024})
-            
             self.assertEqual(wrapper.get_channel_names(), ["DAPI", "CD4"])
             self.assertIn("DAPI", wrapper)
             self.assertIn("CD4", wrapper)
             
             # Test __getitem__
-            # wrapper["DAPI"] should call mock_arr[0] (no downsampling)
+            # wrapper["DAPI"] should call mock_arr[0, ::2, ::2]
             res = wrapper["DAPI"]
             self.assertEqual(res, "sliced_array")
             
             # Verify call args
-            # mock_arr.__getitem__ called with (0)
+            # mock_arr.__getitem__ called with (0, slice(None, None, 2), slice(None, None, 2))
             args = mock_arr.__getitem__.call_args[0][0]
-            self.assertEqual(args, 0)
+            self.assertEqual(args[0], 0)
+            self.assertEqual(args[1], slice(None, None, 2))
+            self.assertEqual(args[2], slice(None, None, 2))
 
 if __name__ == "__main__":
     unittest.main()

@@ -1281,8 +1281,27 @@ class ImageMaskViewer:
              candidates = glob.glob(os.path.join(self.base_folder, f"{fov_name}.ome.tif*"))
              if candidates:
                  path = candidates[0]
-                 wrapper = OMEFovWrapper(path)
+                 wrapper = OMEFovWrapper(path, ds_factor=self.current_downsample_factor)
                  self.image_cache[fov_name] = wrapper
+                 
+                 for ch_name in wrapper.get_channel_names():
+                     arr = wrapper[ch_name]
+                     try:
+                         ch_max = arr.max().compute()
+                     except Exception:
+                         ch_max = 0
+                     
+                     dtype = getattr(arr, "dtype", None)
+                     if dtype is not None and np.issubdtype(dtype, np.integer):
+                        dtype_limit = float(np.iinfo(dtype).max)
+                     elif dtype is not None and np.issubdtype(dtype, np.floating):
+                        dtype_limit = float(np.finfo(dtype).max)
+                     else:
+                        dtype_limit = float(ch_max) if ch_max is not None else 65535.0
+                     
+                     display_max = float(ch_max)
+                     merge_channel_max(ch_name, self.channel_max_values, display_max, dtype_limit)
+                 
                  self.image_cache.move_to_end(fov_name)
 
         # Load images if not in cache
@@ -1298,26 +1317,6 @@ class ImageMaskViewer:
             requested_channels = (channel_list[0],)
 
         for ch in requested_channels:
-            # OME-TIFF: Compute max intensity lazily for requested channels only
-            if ch not in self.channel_max_values and isinstance(self.image_cache[fov_name], OMEFovWrapper):
-                wrapper = self.image_cache[fov_name]
-                arr = wrapper[ch]
-                
-                # Use the optimized estimation method
-                ch_max = wrapper.compute_max_intensity(ch)
-                
-                dtype = getattr(arr, "dtype", None)
-                if dtype is not None and np.issubdtype(dtype, np.integer):
-                    dtype_limit = float(np.iinfo(dtype).max)
-                elif dtype is not None and np.issubdtype(dtype, np.floating):
-                    dtype_limit = float(np.finfo(dtype).max)
-                else:
-                    dtype_limit = float(ch_max) if ch_max is not None else 65535.0
-                
-                display_max = float(ch_max)
-                merge_channel_max(ch, self.channel_max_values, display_max, dtype_limit)
-                self._sync_channel_controls(ch)
-
             # for self.image_cache[fov_name][ch] is None, load the image
             if self.image_cache[fov_name][ch] is None:
                 # Load images for FOV
