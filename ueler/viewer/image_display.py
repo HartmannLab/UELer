@@ -169,7 +169,7 @@ class ImageDisplay:
             new_downsample_factor = 8
 
         if new_downsample_factor != self.main_viewer.current_downsample_factor:
-            self.main_viewer.current_downsample_factor = new_downsample_factor
+            self.main_viewer.on_downsample_factor_changed(new_downsample_factor)
         
         if self.main_viewer.initialized:
             self.main_viewer.update_display(self.main_viewer.current_downsample_factor)

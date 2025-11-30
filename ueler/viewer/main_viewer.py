@@ -306,12 +306,13 @@ class ImageMaskViewer:
         self.height, self.width = first_channel_image.shape
 
         # Calculate the downsample factor based on image size
-        self.current_downsample_factor = select_downsample_factor(
+        initial_factor = select_downsample_factor(
             self.width,
             self.height,
             max_dimension=512,
             allowed_factors=self.downsample_factors,
         )
+        self.on_downsample_factor_changed(initial_factor)
 
         # Initialize image output and image display
         self.image_output = Output()
@@ -668,12 +669,13 @@ class ImageMaskViewer:
             selector.disabled = False
         self._set_map_canvas_dimensions(width_px, height_px)
         try:
-            self.current_downsample_factor = select_downsample_factor(
+            factor = select_downsample_factor(
                 width_px,
                 height_px,
                 allowed_factors=getattr(self, "downsample_factors", DOWNSAMPLE_FACTORS),
                 minimum=1,
             )
+            self.on_downsample_factor_changed(factor)
         except Exception:
             pass
 
@@ -1252,6 +1254,32 @@ class ImageMaskViewer:
         # Handle cache size changes
         self.ui_component.cache_size_input.observe(self.on_cache_size_change, names='value')
 
+    def on_downsample_factor_changed(self, new_factor: int) -> None:
+        try:
+            factor = max(1, int(new_factor))
+        except (TypeError, ValueError):
+            factor = 1
+
+        if factor == getattr(self, "current_downsample_factor", factor):
+            self.current_downsample_factor = factor
+            return
+
+        self.current_downsample_factor = factor
+        if self._fov_mode != "ome-tiff":
+            return
+
+        for resource in self.image_cache.values():
+            if isinstance(resource, OMEFovWrapper):
+                resource.set_downsample_factor(factor)
+
+    def _close_image_resource(self, resource) -> None:
+        close_fn = getattr(resource, "close", None)
+        if callable(close_fn):
+            try:
+                close_fn()
+            except Exception:
+                if self._debug:
+                    print(f"[viewer] Failed to close image resource: {resource}")
 
     def on_cache_size_change(self, change):
         """Handle changes to the cache size input."""
@@ -1260,7 +1288,8 @@ class ImageMaskViewer:
 
         # Trim caches if necessary
         while len(self.image_cache) > self.max_cache_size:
-            removed_fov, _ = self.image_cache.popitem(last=False)
+            removed_fov, resource = self.image_cache.popitem(last=False)
+            self._close_image_resource(resource)
             print(f"Removed FOV '{removed_fov}' from image cache due to cache size limit.")
 
         while len(self.mask_cache) > self.max_cache_size:
@@ -1327,7 +1356,8 @@ class ImageMaskViewer:
 
         # Remove least recently used if cache exceeds max size
         while len(self.image_cache) > self.max_cache_size:
-            removed_fov, _ = self.image_cache.popitem(last=False)
+            removed_fov, resource = self.image_cache.popitem(last=False)
+            self._close_image_resource(resource)
             print(f"Removed FOV '{removed_fov}' from image cache.")
             self._invalidate_map_tiles_for_fov(removed_fov)
 

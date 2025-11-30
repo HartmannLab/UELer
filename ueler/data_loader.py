@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import glob
+import math
 import os
 import xml.etree.ElementTree as ET
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -341,65 +342,177 @@ def open_ome_tiff_as_dask(path: str):
 class OMEFovWrapper:
     def __init__(self, path: str, ds_factor: int):
         self.path = path
-        self.ds_factor = ds_factor
-        self._dask_arr = open_ome_tiff_as_dask(path)
-        self.channel_names = extract_ome_channel_names(path)
-        
-        shape = self._dask_arr.shape
-        if len(shape) == 2: # (Y, X) -> 1 channel
-            n_channels = 1
-        elif len(shape) == 3: # (C, Y, X) or (Z, Y, X) or (T, Y, X)
-            n_channels = shape[0]
-        elif len(shape) >= 4:
-            n_channels = shape[1] # Assume (T, C, Y, X)
-        else:
-            n_channels = 1
+        self.ds_factor = max(1, int(ds_factor) or 1)
+        self._channel_cache: Dict[Tuple[str, int], object] = {}
+        self._level_specs: List[Dict[str, object]] = []
+        self._level_count = 0
+        self._series_index = 0
+        self._closed = False
 
+        tifffile = _ensure_tifffile()
+        self._tif = tifffile.TiffFile(path)
+        self._series = self._tif.series[self._series_index]
+        self._init_levels()
+
+        self.channel_names = extract_ome_channel_names(path)
+        n_channels = self._infer_channel_count()
         if not self.channel_names or len(self.channel_names) != n_channels:
-             self.channel_names = [f"Channel_{i}" for i in range(n_channels)]
-        
-        if len(self.channel_names) > n_channels:
+            self.channel_names = [f"Channel_{i}" for i in range(n_channels)]
+        elif len(self.channel_names) > n_channels:
             self.channel_names = self.channel_names[:n_channels]
         elif len(self.channel_names) < n_channels:
-            self.channel_names.extend([f"Channel_{i}" for i in range(len(self.channel_names), n_channels)])
+            self.channel_names.extend(
+                f"Channel_{i}" for i in range(len(self.channel_names), n_channels)
+            )
 
-        self._name_to_index = {
-            name: idx for idx, name in enumerate(self.channel_names)
-        }
+        self._name_to_index = {name: idx for idx, name in enumerate(self.channel_names)}
+
+    def _init_levels(self) -> None:
+        levels = list(getattr(self._series, "levels", ()))
+        if not levels:
+            levels = [self._series]
+        base_axes = getattr(levels[0], "axes", getattr(self._series, "axes", ""))
+        base_shape = getattr(levels[0], "shape", self._series.shape)
+        base_y = self._axis_size(base_shape, base_axes, "Y") or 1
+
+        for idx, level in enumerate(levels):
+            axes = getattr(level, "axes", base_axes)
+            shape = tuple(int(dim) for dim in getattr(level, "shape", base_shape))
+            level_y = self._axis_size(shape, axes, "Y") or base_y
+            scale = max(1, int(round(base_y / level_y)))
+            self._level_specs.append(
+                {
+                    "level_index": idx,
+                    "axes": axes,
+                    "shape": shape,
+                    "scale": scale,
+                    "array": None,
+                }
+            )
+
+        self._level_count = len(self._level_specs)
+
+    @staticmethod
+    def _axis_size(shape: Tuple[int, ...], axes: str, label: str) -> Optional[int]:
+        try:
+            idx = axes.index(label)
+        except ValueError:
+            return None
+        return int(shape[idx]) if 0 <= idx < len(shape) else None
+
+    def _infer_channel_count(self) -> int:
+        if not self._level_specs:
+            return 1
+        axes = self._level_specs[0]["axes"]
+        shape = self._level_specs[0]["shape"]
+        idx = self._axis_index(axes, "C")
+        if idx is not None:
+            return int(shape[idx])
+        if len(shape) == 2:
+            return 1
+        return int(shape[0])
+
+    @staticmethod
+    def _axis_index(axes: str, label: str) -> Optional[int]:
+        try:
+            return axes.index(label)
+        except ValueError:
+            return None
 
     def get_channel_names(self) -> List[str]:
         return self.channel_names
-    
+
+    def set_downsample_factor(self, ds_factor: int) -> None:
+        ds = max(1, int(ds_factor) or 1)
+        if ds != self.ds_factor:
+            self.ds_factor = ds
+            self._channel_cache.clear()
+
+    def _select_level(self, ds_factor: int) -> Tuple[Dict[str, object], int]:
+        ds = max(1, int(ds_factor) or 1)
+        best = self._level_specs[0]
+        for level in self._level_specs:
+            if level["scale"] <= ds and level["scale"] >= best["scale"]:
+                best = level
+        residual = max(1, int(math.ceil(ds / best["scale"])))
+        return best, residual
+
+    def _get_level_array(self, level: Dict[str, object]):
+        cached = level.get("array")
+        if cached is not None:
+            return cached
+        _, da = _ensure_dask()
+        level_param = level["level_index"] if self._level_count > 1 else None
+        store = self._series.aszarr(level=level_param)
+        array = da.from_zarr(store)
+        level["array"] = array
+        return array
+
+    def _slice_channel(self, level: Dict[str, object], channel_idx: int, residual: int):
+        arr = self._get_level_array(level)
+        axes = level["axes"]
+        slices = []
+        for axis in axes:
+            if axis == "C":
+                slices.append(channel_idx)
+            elif axis == "Y":
+                slices.append(slice(None, None, residual))
+            elif axis == "X":
+                slices.append(slice(None, None, residual))
+            elif axis in {"Z", "T", "S"}:
+                slices.append(0)
+            else:
+                slices.append(slice(None))
+
+        if "C" not in axes and arr.ndim >= 3:
+            slices[0] = channel_idx
+
+        return arr[tuple(slices)]
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._channel_cache.clear()
+        for level in self._level_specs:
+            level["array"] = None
+        try:
+            self._tif.close()
+        except Exception:
+            pass
+        self._closed = True
+
+    def __del__(self):
+        self.close()
+
     def get(self, key, default=None):
         if key in self._name_to_index:
             return self[key]
         return default
-    
+
     def keys(self):
         return self.channel_names
 
     def __getitem__(self, channel_name: str):
         if channel_name not in self._name_to_index:
-             return None
-        
+            return None
+
+        cache_key = (channel_name, self.ds_factor)
+        cached = self._channel_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        level, residual = self._select_level(self.ds_factor)
         idx = self._name_to_index[channel_name]
-        arr = self._dask_arr
-        
-        if arr.ndim == 2:
-            return arr[::self.ds_factor, ::self.ds_factor]
-        elif arr.ndim == 3:
-            return arr[idx, ::self.ds_factor, ::self.ds_factor]
-        elif arr.ndim == 4:
-             return arr[0, idx, ::self.ds_factor, ::self.ds_factor]
-        else:
-             return arr[0, 0, idx, ::self.ds_factor, ::self.ds_factor]
+        sliced = self._slice_channel(level, idx, residual)
+        self._channel_cache[cache_key] = sliced
+        return sliced
 
     def values(self):
         return [self[name] for name in self.channel_names]
 
     def items(self):
         return [(name, self[name]) for name in self.channel_names]
-        
+
     def __contains__(self, key):
         return key in self._name_to_index
 
