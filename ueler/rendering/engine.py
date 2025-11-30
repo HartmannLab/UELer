@@ -106,6 +106,12 @@ class OverlaySnapshot:
 
 
 def _infer_region(channel_arrays: Mapping[str, object], selected: Sequence[str]) -> Region:
+    # Check if the container itself knows the shape (e.g. OMEFovWrapper)
+    if hasattr(channel_arrays, "shape") and hasattr(channel_arrays, "is_ome_tiff"):
+        shape = channel_arrays.shape
+        if len(shape) >= 2:
+            return (0, shape[1], 0, shape[0])
+
     for channel in selected:
         candidate = channel_arrays.get(channel)
         if candidate is None:
@@ -328,15 +334,22 @@ def _composite_channels(
     region_xy: Region,
     downsample_factor: int,
     canvas_shape: Tuple[int, int],
+    region_ds: Optional[Region] = None,
 ) -> np.ndarray:
     composite = np.zeros((canvas_shape[0], canvas_shape[1], 3), dtype=np.float32)
+
+    is_ome_tiff = hasattr(channel_arrays, "is_ome_tiff") and channel_arrays.is_ome_tiff
 
     for channel in selected_channels:
         settings = channel_settings.get(channel)
         if settings is None:
             raise KeyError(f"Missing render settings for channel '{channel}'")
 
-        region_array = _slice_and_materialise(channel_arrays[channel], region_xy, downsample_factor)
+        if is_ome_tiff and region_ds is not None:
+            region_array = _slice_downsampled(channel_arrays[channel], region_ds)
+        else:
+            region_array = _slice_and_materialise(channel_arrays[channel], region_xy, downsample_factor)
+        
         min_val = float(settings.contrast_min)
         max_val = float(settings.contrast_max)
         if not np.isfinite(min_val):
@@ -345,7 +358,17 @@ def _composite_channels(
             max_val = min_val + 1.0
         scale = max(max_val - min_val, np.finfo(np.float32).eps)
         normalised = np.clip((region_array - min_val) / scale, 0.0, 1.0)
-        composite += normalised[..., np.newaxis] * _normalise_color(settings.color)
+        
+        # Handle potential shape mismatch (e.g. due to rounding differences in downsampling)
+        h_reg, w_reg = normalised.shape[:2]
+        h_comp, w_comp = composite.shape[:2]
+        
+        if h_reg != h_comp or w_reg != w_comp:
+            h_common = min(h_reg, h_comp)
+            w_common = min(w_reg, w_comp)
+            composite[:h_common, :w_common] += normalised[:h_common, :w_common, np.newaxis] * _normalise_color(settings.color)
+        else:
+            composite += normalised[..., np.newaxis] * _normalise_color(settings.color)
 
     return np.clip(composite, 0.0, 1.0)
 
@@ -438,6 +461,7 @@ def render_fov_to_array(
         region_xy,
         downsample_factor,
         (height, width),
+        region_ds=region_ds,
     )
     composite = _apply_annotation_overlay(composite, annotation, region_ds)
     composite = _apply_mask_overlays(composite, masks, region_ds)

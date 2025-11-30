@@ -343,6 +343,7 @@ class OMEFovWrapper:
     def __init__(self, path: str, ds_factor: int):
         self.path = path
         self.ds_factor = max(1, int(ds_factor) or 1)
+        self.is_ome_tiff = True
         self._channel_cache: Dict[Tuple[str, int], object] = {}
         self._level_specs: List[Dict[str, object]] = []
         self._level_count = 0
@@ -418,6 +419,27 @@ class OMEFovWrapper:
             return axes.index(label)
         except ValueError:
             return None
+
+    @property
+    def shape(self) -> Tuple[int, int]:
+        if not self._level_specs:
+            return (0, 0)
+        level0 = self._level_specs[0]
+        shape = level0["shape"]
+        axes = level0["axes"]
+
+        y_idx = self._axis_index(axes, "Y")
+        x_idx = self._axis_index(axes, "X")
+
+        # Fallback if axes not found (assume Y, X order if 2D, or similar)
+        if y_idx is None:
+            y_idx = 0 if len(shape) >= 2 else 0
+        if x_idx is None:
+            x_idx = 1 if len(shape) >= 2 else 0
+
+        h = int(shape[y_idx]) if y_idx < len(shape) else 0
+        w = int(shape[x_idx]) if x_idx < len(shape) else 0
+        return (h, w)
 
     def get_channel_names(self) -> List[str]:
         return self.channel_names

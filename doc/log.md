@@ -1,5 +1,10 @@
 ### v0.3.0-beta (OME-TIFF support)
 
+**OME-TIFF Rendering Fixes (#60 follow-up)**
+- Fixed view drift when switching pyramid levels in OME-TIFF files by correctly inferring the full-resolution image dimensions from the OME metadata wrapper instead of the downsampled dask array.
+- Resolved `ValueError` when zooming out to lower resolution levels by handling shape mismatches between the downsampled OME-TIFF array and the expected canvas size, ensuring robust rendering even when pyramid levels have slightly different dimensions due to rounding.
+- Added regression tests in `tests/test_ome_rendering_fix.py` to verify correct shape inference and rendering stability across zoom levels.
+
 **OME-TIFF Loading Support (#60)**
 - Implemented native support for loading OME-TIFF files (`.ome.tif`, `.ome.tiff`) directly in UELer.
 - Added `OMEFovWrapper` in `ueler.data_loader` to handle lazy loading of OME-TIFFs using `dask-image` and `tifffile`, ensuring memory efficiency by respecting the viewer's downsampling factor.
