@@ -40,7 +40,7 @@ class ImageDisplay:
         self.ax.set_xlim(0, self.width)
         # self.ax.set_ylim(self.height, 0)  # Invert y-axis for image orientation
         self.img_display = self.ax.imshow(
-            np.zeros((self.height, self.width, 3), dtype=np.float32),
+            np.zeros((1, 1, 3), dtype=np.float32),
             extent=(0, self.width, 0, self.height),
             origin='upper'
         )
