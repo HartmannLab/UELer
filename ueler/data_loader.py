@@ -452,12 +452,54 @@ class OMEFovWrapper:
 
     def _select_level(self, ds_factor: int) -> Tuple[Dict[str, object], int]:
         ds = max(1, int(ds_factor) or 1)
-        best = self._level_specs[0]
-        for level in self._level_specs:
-            if level["scale"] <= ds and level["scale"] >= best["scale"]:
-                best = level
-        residual = max(1, int(math.ceil(ds / best["scale"])))
-        return best, residual
+        
+        # Helper to get dimensions
+        def get_dims(level):
+            shape = level["shape"]
+            axes = level["axes"]
+            h = self._axis_size(shape, axes, "Y")
+            w = self._axis_size(shape, axes, "X")
+            # Fallback if axes missing
+            if h is None: h = shape[0] if len(shape) >= 2 else 1
+            if w is None: w = shape[1] if len(shape) >= 2 else 1
+            return h, w
+
+        base_level = self._level_specs[0]
+        base_h, base_w = get_dims(base_level)
+        
+        expected_h = math.ceil(base_h / ds)
+        expected_w = math.ceil(base_w / ds)
+
+        # Strategy: Try levels from smallest (largest scale) to largest (scale 1)
+        # Prefer exact divisors, but also accept non-exact if they cover the area.
+        
+        # Sort levels by scale descending
+        candidates = sorted(self._level_specs, key=lambda l: l["scale"], reverse=True)
+        
+        # First pass: Exact divisors only
+        for level in candidates:
+            if ds % level["scale"] == 0:
+                residual = ds // level["scale"]
+                h, w = get_dims(level)
+                actual_h = math.ceil(h / residual)
+                actual_w = math.ceil(w / residual)
+                
+                if actual_h >= expected_h and actual_w >= expected_w:
+                    return level, residual
+
+        # Second pass: Any level with scale <= ds
+        for level in candidates:
+            if level["scale"] <= ds:
+                residual = max(1, int(math.ceil(ds / level["scale"])))
+                h, w = get_dims(level)
+                actual_h = math.ceil(h / residual)
+                actual_w = math.ceil(w / residual)
+                
+                if actual_h >= expected_h and actual_w >= expected_w:
+                    return level, residual
+
+        # Fallback to base level
+        return base_level, ds
 
     def _get_level_array(self, level: Dict[str, object]):
         cached = level.get("array")
