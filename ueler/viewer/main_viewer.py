@@ -3,6 +3,7 @@
 import logging
 import math
 import os
+import glob
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,6 +28,7 @@ from ueler.data_loader import (
     load_masks_for_fov,
     load_one_channel_fov,
     merge_channel_max,
+    OMEFovWrapper,
 )
 from ueler.image_utils import (
     calculate_downsample_factor,
@@ -205,8 +207,38 @@ class ImageMaskViewer:
         self._debug = False
 
         # Initialize variables
-        self.available_fovs = [fov for fov in os.listdir(self.base_folder)
-                               if os.path.isdir(os.path.join(self.base_folder, fov)) and self._has_tiff_files(fov)]
+        self._fov_mode = "folder"
+        
+        # Get potential FOV directories (excluding hidden ones like .UELer)
+        subdirs = [d for d in os.listdir(self.base_folder) 
+                   if os.path.isdir(os.path.join(self.base_folder, d)) 
+                   and not d.startswith(".")]
+        
+        # Check which of these are actually valid FOVs
+        valid_fov_folders = [fov for fov in subdirs if self._has_tiff_files(fov)]
+        valid_fov_folders.sort()
+
+        ome_files = glob.glob(os.path.join(self.base_folder, "*.ome.tif")) + glob.glob(os.path.join(self.base_folder, "*.ome.tiff"))
+        
+        if valid_fov_folders:
+             self._fov_mode = "folder"
+             self.available_fovs = valid_fov_folders
+        elif ome_files:
+             self._fov_mode = "ome-tiff"
+             self.available_fovs = []
+             for f in ome_files:
+                 name = os.path.basename(f)
+                 if name.endswith(".ome.tif"):
+                     name = name[:-8]
+                 elif name.endswith(".ome.tiff"):
+                     name = name[:-9]
+                 else:
+                     name = os.path.splitext(name)[0]
+                 self.available_fovs.append(name)
+             self.available_fovs.sort()
+        else:
+             self.available_fovs = []
+
         if not self.available_fovs:
             raise ValueError("No FOVs found in the base folder.")
 
@@ -268,8 +300,8 @@ class ImageMaskViewer:
         self.load_status_images()
 
         # Load the first FOV and set image dimensions
-        self.load_fov(self.available_fovs[1])
-        fov_images = self.image_cache[self.available_fovs[1]]
+        self.load_fov(self.available_fovs[0])
+        fov_images = self.image_cache[self.available_fovs[0]]
         first_channel_image = next(iter(fov_images.values()))
         self.height, self.width = first_channel_image.shape
 
@@ -1244,6 +1276,15 @@ class ImageMaskViewer:
 
     def load_fov(self, fov_name, requested_channels=None):
         """Load images and masks for a FOV into the cache."""
+        
+        if self._fov_mode == "ome-tiff" and fov_name not in self.image_cache:
+             candidates = glob.glob(os.path.join(self.base_folder, f"{fov_name}.ome.tif*"))
+             if candidates:
+                 path = candidates[0]
+                 wrapper = OMEFovWrapper(path)
+                 self.image_cache[fov_name] = wrapper
+                 self.image_cache.move_to_end(fov_name)
+
         # Load images if not in cache
         if fov_name not in self.image_cache:
             # Load channel structures
@@ -1257,6 +1298,26 @@ class ImageMaskViewer:
             requested_channels = (channel_list[0],)
 
         for ch in requested_channels:
+            # OME-TIFF: Compute max intensity lazily for requested channels only
+            if ch not in self.channel_max_values and isinstance(self.image_cache[fov_name], OMEFovWrapper):
+                wrapper = self.image_cache[fov_name]
+                arr = wrapper[ch]
+                
+                # Use the optimized estimation method
+                ch_max = wrapper.compute_max_intensity(ch)
+                
+                dtype = getattr(arr, "dtype", None)
+                if dtype is not None and np.issubdtype(dtype, np.integer):
+                    dtype_limit = float(np.iinfo(dtype).max)
+                elif dtype is not None and np.issubdtype(dtype, np.floating):
+                    dtype_limit = float(np.finfo(dtype).max)
+                else:
+                    dtype_limit = float(ch_max) if ch_max is not None else 65535.0
+                
+                display_max = float(ch_max)
+                merge_channel_max(ch, self.channel_max_values, display_max, dtype_limit)
+                self._sync_channel_controls(ch)
+
             # for self.image_cache[fov_name][ch] is None, load the image
             if self.image_cache[fov_name][ch] is None:
                 # Load images for FOV

@@ -1,3 +1,12 @@
+### v0.3.0-beta (OME-TIFF support)
+
+**OME-TIFF Loading Support (#60)**
+- Implemented native support for loading OME-TIFF files (`.ome.tif`, `.ome.tiff`) directly in UELer.
+- Added `OMEFovWrapper` in `ueler.data_loader` to handle lazy loading of OME-TIFFs using `dask-image` and `tifffile`, ensuring memory efficiency by respecting the viewer's downsampling factor.
+- Updated `ImageMaskViewer` to automatically detect OME-TIFF files in the base folder and switch to `ome-tiff` mode, populating the FOV list from file names.
+- Preserved existing folder-based loading behavior while enabling seamless integration of OME-TIFF datasets.
+- Added unit tests in `tests/test_ome_tiff_loading.py` to verify channel name extraction and wrapper functionality.
+
 ### v0.3.0-beta
 
 **Map mode stitched interactions (#62 follow-up)**

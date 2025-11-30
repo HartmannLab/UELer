@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import glob
 import os
+import xml.etree.ElementTree as ET
 from typing import Dict, List, Tuple
 
 import numpy as np
@@ -289,3 +290,278 @@ def load_annotations_for_fov(fov_name, annotations_folder, annotation_names_set)
         annotation_names_set.add(annotation_name)
 
     return annotation_dict
+
+
+def _ensure_tifffile():
+    try:
+        import tifffile  # type: ignore
+    except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
+        raise ImportError(
+            "tifffile is required to read OME-TIFF metadata for UELer."
+        ) from exc
+    return tifffile
+
+
+def extract_ome_channel_names(path: str) -> List[str]:
+    tifffile = _ensure_tifffile()
+    try:
+        with tifffile.TiffFile(path) as tif:
+            xml_str = tif.ome_metadata
+    except Exception:
+        return []
+
+    if not xml_str:
+        return []
+
+    try:
+        root = ET.fromstring(xml_str)
+        # Try standard OME namespace
+        ns = {"ome": "http://www.openmicroscopy.org/Schemas/OME/2016-06"}
+        channels = root.findall(".//ome:Channel", ns)
+        if not channels:
+             # Try without namespace or older
+             channels = [elem for elem in root.iter() if elem.tag.endswith("Channel")]
+        
+        channel_names = []
+        for i, ch in enumerate(channels):
+            name = ch.attrib.get("Name")
+            if not name:
+                name = ch.attrib.get("ID", f"Channel_{i}")
+            channel_names.append(name)
+        return channel_names
+    except Exception:
+        return []
+
+
+def open_ome_tiff_as_dask(path: str):
+    imread = _ensure_imread()
+    arr = imread(path)
+    
+    # Check for dangerous chunking (large single chunks)
+    # If the last two dimensions (Y, X) are large and chunked as one block
+    if arr.ndim >= 2:
+        y_chunk = arr.chunks[-2]
+        x_chunk = arr.chunks[-1]
+        # Check if any chunk in Y or X is huge (> 4000 pixels)
+        if max(y_chunk) > 4000 or max(x_chunk) > 4000:
+            print(f"DEBUG: Detected large chunks {arr.chunks}. Attempting memory mapping to avoid crash.")
+            try:
+                import tifffile
+                import dask.array as da
+                # tifffile.memmap creates a memory-mapped array. 
+                # If the file is compressed, it might create a temporary file.
+                mm = tifffile.memmap(path, mode='r')
+                
+                # Determine chunks: 1 for non-spatial, 1024 for spatial
+                # mm.shape should match arr.shape usually
+                chunks = []
+                for dim in range(mm.ndim - 2):
+                    chunks.append(1)
+                chunks.append(1024) # Y
+                chunks.append(1024) # X
+                
+                # Create dask array from memmap
+                arr_mm = da.from_array(mm, chunks=tuple(chunks))
+                
+                # Verify shape match
+                if arr_mm.shape == arr.shape:
+                    print(f"DEBUG: Successfully memory mapped. New chunks: {arr_mm.chunks}")
+                    return arr_mm
+                else:
+                    print(f"DEBUG: Memmap shape {arr_mm.shape} mismatch with imread {arr.shape}. Fallback.")
+            except Exception as e:
+                print(f"DEBUG: Memory mapping failed: {e}. Fallback to original array.")
+
+    return arr
+
+
+class OMEFovWrapper:
+    def __init__(self, path: str, ds_factor: int = 1):
+        self.path = path
+        # ds_factor is ignored to prevent double downsampling. 
+        # We rely on dask slicing in the renderer for efficient loading.
+        self._dask_arr = open_ome_tiff_as_dask(path)
+        print(f"DEBUG: Loaded OME-TIFF {path}. Shape: {self._dask_arr.shape}, Chunks: {self._dask_arr.chunks}")
+        self._raw_dask_arr = self._dask_arr # Keep reference to raw array for stats
+        
+        # Rechunking is removed to prevent memory spikes on large stripped TIFFs.
+        # Dask's rechunking can force reading all strips to build tiles, which is
+        # expensive for full-image views. We rely on the original chunks (strips).
+        # if self._dask_arr.ndim >= 2:
+        #     self._dask_arr = self._dask_arr.rechunk({-1: 1024, -2: 1024})
+
+        self.channel_names = extract_ome_channel_names(path)
+        
+        shape = self._dask_arr.shape
+        if len(shape) == 2: # (Y, X) -> 1 channel
+            n_channels = 1
+        elif len(shape) == 3: # (C, Y, X) or (Z, Y, X) or (T, Y, X)
+            n_channels = shape[0]
+        elif len(shape) >= 4:
+            n_channels = shape[1] # Assume (T, C, Y, X)
+        else:
+            n_channels = 1
+
+        if not self.channel_names or len(self.channel_names) != n_channels:
+             self.channel_names = [f"Channel_{i}" for i in range(n_channels)]
+        
+        if len(self.channel_names) > n_channels:
+            self.channel_names = self.channel_names[:n_channels]
+        elif len(self.channel_names) < n_channels:
+            self.channel_names.extend([f"Channel_{i}" for i in range(len(self.channel_names), n_channels)])
+
+        self._name_to_index = {
+            name: idx for idx, name in enumerate(self.channel_names)
+        }
+
+    def compute_max_intensity(self, channel_name: str):
+        """Estimate max intensity using strided sampling on the raw array."""
+        if channel_name not in self._name_to_index:
+            return 0
+        idx = self._name_to_index[channel_name]
+        
+        # Optimization: Try to use tifffile directly to avoid reading full image if chunks are large
+        try:
+            import tifffile
+            import numpy as np
+            with tifffile.TiffFile(self.path) as tif:
+                # Strategy 0: Check TIFF tags for pre-computed stats
+                try:
+                    if idx < len(tif.pages):
+                        page = tif.pages[idx]
+                        # MaxSampleValue is tag 281
+                        if 'MaxSampleValue' in page.tags:
+                            val = page.tags['MaxSampleValue'].value
+                            if isinstance(val, (tuple, list, np.ndarray)):
+                                val = val[0]
+                            print(f"DEBUG: Found MaxSampleValue tag: {val}")
+                            return float(val)
+                except Exception as e:
+                    print(f"DEBUG: Metadata strategy failed: {e}")
+
+                # Strategy 1: Zarr Interface (if zarr is installed)
+                # tifffile supports zarr-style slicing which is efficient
+                try:
+                    import zarr
+                    # aszarr() returns a store that zarr can open
+                    store = tif.series[0].aszarr()
+                    z = zarr.open(store, mode='r')
+                    
+                    # z is a zarr array, supports slicing!
+                    # We need to construct the slice for the channel
+                    # z shape matches series shape
+                    
+                    # Construct slice object
+                    slices = [slice(None)] * z.ndim
+                    
+                    # Assume standard OME dimension order or match dask
+                    # If dask is (C, Y, X), z likely is too.
+                    if z.ndim == 3:
+                        slices[0] = idx
+                    elif z.ndim == 4:
+                        slices[0] = 0
+                        slices[1] = idx
+                    elif z.ndim == 2 and idx == 0:
+                        pass # No channel dim
+                    
+                    # Add striding for Y and X
+                    h, w = z.shape[-2], z.shape[-1]
+                    stride = max(1, min(h, w) // 50)
+                    slices[-2] = slice(0, h, stride)
+                    slices[-1] = slice(0, w, stride)
+                    
+                    print(f"DEBUG: Reading max from zarr interface with stride {stride}")
+                    subset = z[tuple(slices)]
+                    return float(subset.max())
+                except ImportError:
+                    pass # zarr not installed
+                except Exception as e:
+                    print(f"DEBUG: Zarr interface failed: {e}")
+
+                # Strategy 2: Pyramid (Sub-resolutions) - DISABLED due to crashes
+                # The low-res series read caused hard crashes on some systems.
+                # We skip it to ensure stability.
+                # series = tif.series[0]
+                # if len(series.levels) > 1:
+                #    ...
+
+                # Strategy 3: Direct Page Access (if small enough or sliceable)
+                if idx < len(tif.pages):
+                    page = tif.pages[idx]
+                    h, w = page.shape
+                    
+                    # Check if page is sliceable (newer tifffile)
+                    # We try-except this access
+                    try:
+                        stride = max(1, min(h, w) // 50)
+                        # This throws TypeError on older tifffile
+                        data = page[::stride, ::stride]
+                        print(f"DEBUG: Reading max from page slice with stride {stride}")
+                        return float(data.max())
+                    except TypeError:
+                        # Page not subscriptable
+                        pass
+
+                    # Strategy 4: Safety Check - Skip if too large
+                    # If we are here, we can't slice and no pyramid.
+                    # Reading the whole page is dangerous if it's huge.
+                    limit_pixels = 10000 * 10000 # 100MP ~ 100MB-200MB
+                    if h * w > limit_pixels:
+                        print(f"DEBUG: Image too large ({h}x{w}) for full read. Returning dtype max.")
+                        dtype = page.dtype
+                        if np.issubdtype(dtype, np.integer):
+                            return float(np.iinfo(dtype).max)
+                        return 65535.0 # Default fallback
+
+                    # If small enough, read full page
+                    print(f"DEBUG: Reading full page ({h}x{w}) for stats...")
+                    data = page.asarray()
+                    return float(data.max())
+
+        except Exception as e:
+            print(f"DEBUG: tifffile direct read failed: {e}")
+
+        # Dask Fallback
+        # Only use this if we haven't returned yet.
+        # But if the image is huge, this WILL crash.
+        # We should probably avoid this fallback for OME-TIFFs that failed above.
+        print("DEBUG: Skipping Dask fallback to prevent memory crash.")
+        return 65535.0 # Safe default
+
+
+    def get_channel_names(self) -> List[str]:
+        return self.channel_names
+    
+    def get(self, key, default=None):
+        if key in self._name_to_index:
+            return self[key]
+        return default
+    
+    def keys(self):
+        return self.channel_names
+
+    def __getitem__(self, channel_name: str):
+        if channel_name not in self._name_to_index:
+             return None
+        
+        idx = self._name_to_index[channel_name]
+        arr = self._dask_arr
+        
+        if arr.ndim == 2:
+            return arr
+        elif arr.ndim == 3:
+            return arr[idx]
+        elif arr.ndim == 4:
+             return arr[0, idx]
+        else:
+             return arr[0, 0, idx]
+
+    def values(self):
+        return [self[name] for name in self.channel_names]
+
+    def items(self):
+        return [(name, self[name]) for name in self.channel_names]
+        
+    def __contains__(self, key):
+        return key in self._name_to_index
+
