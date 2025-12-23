@@ -343,6 +343,51 @@ def open_ome_tiff_as_dask(path: str):
     return imread(path)
 
 
+def find_ome_tiff_files(base_folder: str) -> List[str]:
+    """Return TIFF files in base_folder that contain OME metadata.
+
+    Matches conventional `.ome.tif(f)` names first, then inspects other `.tif(f)`
+    files via `tifffile` to see if they advertise OME metadata. Files are
+    returned as absolute paths, sorted for stable ordering.
+    """
+
+    tifffile = _ensure_tifffile()
+    seen = set()
+    ome_paths: List[str] = []
+
+    patterns = ("*.ome.tif", "*.ome.tiff", "*.tif", "*.tiff")
+    for pattern in patterns:
+        for path in glob.glob(os.path.join(base_folder, pattern)):
+            if os.path.isdir(path):
+                continue
+            if path in seen:
+                continue
+
+            # Treat standard OME suffixes as OME without extra I/O.
+            if pattern.startswith("*.ome"):
+                ome_paths.append(path)
+                seen.add(path)
+                continue
+
+            try:
+                with tifffile.TiffFile(path) as tif:
+                    if getattr(tif, "is_ome", False):
+                        ome_paths.append(path)
+                        seen.add(path)
+                        continue
+                    ome_xml = getattr(tif, "ome_metadata", None)
+                    if ome_xml:
+                        ome_paths.append(path)
+                        seen.add(path)
+                        continue
+            except Exception:
+                # Non-OME or unreadable; ignore silently to avoid blocking other files.
+                continue
+
+    ome_paths.sort()
+    return ome_paths
+
+
 class OMEFovWrapper:
     def __init__(self, path: str, ds_factor: int):
         self.path = path

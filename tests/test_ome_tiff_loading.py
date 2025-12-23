@@ -1,10 +1,11 @@
 import unittest
+import os
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 
-from ueler.data_loader import OMEFovWrapper, extract_ome_channel_names
+from ueler.data_loader import OMEFovWrapper, extract_ome_channel_names, find_ome_tiff_files
 
 
 class _FakeReduction:
@@ -229,6 +230,38 @@ class TestOMETiffLoading(unittest.TestCase):
             self.assertIs(wrapper._series, series)
             self.assertFalse(wrapper._tif.is_ome)
             self.assertEqual(tifffile_module.TiffFile.call_count, 2)
+
+    def test_find_ome_tiff_files_detects_suffixless(self):
+        base_folder = "/tmp/base"
+        plain_tiff = os.path.join(base_folder, "sample_plain.tiff")
+        xml_tif = os.path.join(base_folder, "metadata.tif")
+        non_ome = os.path.join(base_folder, "regular.tif")
+
+        class DummyTif:
+            def __init__(self, path):
+                self.path = path
+                self.is_ome = path == plain_tiff
+                self.ome_metadata = "<OME></OME>" if path == xml_tif else None
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        tifffile_module = MagicMock()
+        tifffile_module.TiffFile.side_effect = lambda p: DummyTif(p)
+
+        def _fake_glob(pattern):
+            if pattern.endswith("*.ome.tif") or pattern.endswith("*.ome.tiff"):
+                return []
+            return [plain_tiff, xml_tif, non_ome]
+
+        with patch("ueler.data_loader._ensure_tifffile", return_value=tifffile_module), \
+             patch("glob.glob", side_effect=_fake_glob), \
+             patch("os.path.isdir", return_value=False):
+            detected = find_ome_tiff_files(base_folder)
+            self.assertEqual(set(detected), {plain_tiff, xml_tif})
 
 if __name__ == "__main__":
     unittest.main()

@@ -29,6 +29,7 @@ from ueler.data_loader import (
     load_one_channel_fov,
     merge_channel_max,
     OMEFovWrapper,
+    find_ome_tiff_files,
 )
 from ueler.image_utils import (
     calculate_downsample_factor,
@@ -223,7 +224,7 @@ class ImageMaskViewer:
         valid_fov_folders = [fov for fov in subdirs if self._has_tiff_files(fov)]
         valid_fov_folders.sort()
 
-        ome_files = glob.glob(os.path.join(self.base_folder, "*.ome.tif")) + glob.glob(os.path.join(self.base_folder, "*.ome.tiff"))
+        ome_files = find_ome_tiff_files(self.base_folder)
         
         if valid_fov_folders:
              self._fov_mode = "folder"
@@ -1361,9 +1362,25 @@ class ImageMaskViewer:
         )
 
         if self._fov_mode == "ome-tiff" and fov_name not in self.image_cache:
-            candidates = glob.glob(os.path.join(self.base_folder, f"{fov_name}.ome.tif*"))
-            if candidates:
-                path = candidates[0]
+            candidates: List[str] = []
+            for pattern in (
+                f"{fov_name}.ome.tif*",
+                f"{fov_name}.ome.tiff*",
+                f"{fov_name}.tif",
+                f"{fov_name}.tiff",
+            ):
+                candidates.extend(glob.glob(os.path.join(self.base_folder, pattern)))
+
+            dedup = []
+            seen_candidates = set()
+            for path in candidates:
+                if path in seen_candidates:
+                    continue
+                dedup.append(path)
+                seen_candidates.add(path)
+
+            if dedup:
+                path = dedup[0]
                 wrapper = OMEFovWrapper(path, ds_factor=self.current_downsample_factor)
                 wrapper.set_frame_index(target_frame_index)
                 self.image_cache[fov_name] = wrapper
