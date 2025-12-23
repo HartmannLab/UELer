@@ -200,5 +200,35 @@ class TestOMETiffLoading(unittest.TestCase):
             wrapper.close()
             self.assertTrue(fake_tif.closed)
 
+    def test_incompatible_keyframe_retries_without_ome_series(self):
+        arrays = self._pyramid_arrays()
+        series = FakeSeries(arrays)
+
+        class FailingTiffFile:
+            def __init__(self, _path, is_ome=True):
+                self.is_ome = is_ome
+                if is_ome:
+                    raise RuntimeError("incompatible keyframe")
+                self.series = [series]
+                self.closed = False
+
+            def close(self):  # pragma: no cover - simple setter
+                self.closed = True
+
+        tifffile_module = MagicMock()
+        tifffile_module.TiffFile.side_effect = FailingTiffFile
+
+        fake_da_module = MagicMock()
+        fake_da_module.from_zarr.side_effect = lambda store: store
+
+        with patch("ueler.data_loader._ensure_tifffile", return_value=tifffile_module), \
+             patch("ueler.data_loader._ensure_dask", return_value=(MagicMock(), fake_da_module)), \
+             patch("ueler.data_loader.extract_ome_channel_names", return_value=["DAPI", "CD4"]), \
+             patch.object(OMEFovWrapper, "_init_levels", return_value=None):
+            wrapper = OMEFovWrapper("dummy.ome.tif", ds_factor=2)
+            self.assertIs(wrapper._series, series)
+            self.assertFalse(wrapper._tif.is_ome)
+            self.assertEqual(tifffile_module.TiffFile.call_count, 2)
+
 if __name__ == "__main__":
     unittest.main()

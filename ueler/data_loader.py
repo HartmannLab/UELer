@@ -359,8 +359,41 @@ class OMEFovWrapper:
         self.current_frame_index: int = 0
 
         tifffile = _ensure_tifffile()
-        self._tif = tifffile.TiffFile(path)
-        self._series = self._tif.series[self._series_index]
+        self._tif = None
+        self._series = None
+        open_errors: List[BaseException] = []
+
+        for attempt in ({}, {"is_ome": False}):
+            tif = None
+            try:
+                tif = tifffile.TiffFile(path, **attempt)
+                series = tif.series[self._series_index]
+                self._tif = tif
+                self._series = series
+                if attempt:
+                    logger.warning(
+                        "[OMEFovWrapper] falling back to non-OME series parsing for %s after error: %s",
+                        path,
+                        open_errors[0] if open_errors else "",
+                    )
+                break
+            except RuntimeError as exc:
+                open_errors.append(exc)
+                if tif is not None:
+                    try:
+                        tif.close()
+                    except Exception:
+                        pass
+                # Retry without OME parsing when keyframe metadata is incompatible
+                if "incompatible keyframe" in str(exc):
+                    continue
+                raise
+
+        if self._series is None or self._tif is None:
+            last_error = open_errors[-1] if open_errors else RuntimeError(
+                f"Failed to open OME series for {path}"
+            )
+            raise last_error
         self._init_levels()
 
         self.channel_names = extract_ome_channel_names(path)

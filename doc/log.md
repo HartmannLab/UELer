@@ -1,5 +1,9 @@
 ### v0.3.0-beta (OME-TIFF support)
 
+**OME-TIFF keyframe compatibility (#63 follow-up)**
+- Added a tolerant OME reader fallback that retries series discovery without OME parsing when tifffile raises `RuntimeError: incompatible keyframe`, letting stacked TIFFs with mismatched keyframes load instead of crashing the viewer.
+- Introduced regression coverage in `tests/test_ome_tiff_loading.py::test_incompatible_keyframe_retries_without_ome_series` and ran `python -m unittest tests.test_ome_tiff_loading` to validate the fallback path.
+
 **OME-TIFF frame-aware lazy loading (#63)**
 - Added frame-aware slicing to `OMEFovWrapper`, including frame metadata, cache keys keyed by frame, and a setter for active frame index to keep stacked TIFF reads lazy via Dask.
 - Adjusted pyramid level selection to prefer the coarsest level that meets floor-based downsample expectations, avoiding over-fetching while satisfying irregular pyramids.
