@@ -206,6 +206,11 @@ class ImageMaskViewer:
 
         self._debug = False
 
+        # Frame selection for stacked imagery (OME-TIFF)
+        self.current_frame_index: int = 0
+        self.frame_index_by_fov: Dict[str, int] = {}
+        self.ome_fov_metadata: Dict[str, Mapping[str, object]] = {}
+
         # Initialize variables
         self._fov_mode = "folder"
         
@@ -1348,20 +1353,27 @@ class ImageMaskViewer:
             display_max = float(ch_max)
             merge_channel_max(channel_name, self.channel_max_values, display_max, dtype_limit)
 
-    def load_fov(self, fov_name, requested_channels=None):
+    def load_fov(self, fov_name, requested_channels=None, frame_index=None):
         """Load images and masks for a FOV into the cache."""
-        
+        target_frame_index = self.frame_index_by_fov.get(
+            fov_name,
+            self.current_frame_index if frame_index is None else frame_index,
+        )
+
         if self._fov_mode == "ome-tiff" and fov_name not in self.image_cache:
-             candidates = glob.glob(os.path.join(self.base_folder, f"{fov_name}.ome.tif*"))
-             if candidates:
-                 path = candidates[0]
-                 wrapper = OMEFovWrapper(path, ds_factor=self.current_downsample_factor)
-                 self.image_cache[fov_name] = wrapper
-                 
-                 # We do NOT compute max for all channels here anymore to avoid memory spikes.
-                 # Instead, we compute it on demand in _ensure_channel_max_computed.
-                 
-                 self.image_cache.move_to_end(fov_name)
+            candidates = glob.glob(os.path.join(self.base_folder, f"{fov_name}.ome.tif*"))
+            if candidates:
+                path = candidates[0]
+                wrapper = OMEFovWrapper(path, ds_factor=self.current_downsample_factor)
+                wrapper.set_frame_index(target_frame_index)
+                self.image_cache[fov_name] = wrapper
+                self.frame_index_by_fov[fov_name] = wrapper.current_frame_index
+                self.ome_fov_metadata[fov_name] = wrapper.metadata
+                
+                # We do NOT compute max for all channels here anymore to avoid memory spikes.
+                # Instead, we compute it on demand in _ensure_channel_max_computed.
+                
+                self.image_cache.move_to_end(fov_name)
 
         # Load images if not in cache
         if fov_name not in self.image_cache:
@@ -1369,6 +1381,12 @@ class ImageMaskViewer:
             channels = load_channel_struct_fov(fov_name, self.base_folder)
             # Add to cache
             self.image_cache[fov_name] = channels
+
+        if isinstance(self.image_cache[fov_name], OMEFovWrapper):
+            wrapper = self.image_cache[fov_name]
+            wrapper.set_frame_index(target_frame_index)
+            self.frame_index_by_fov[fov_name] = wrapper.current_frame_index
+            self.ome_fov_metadata[fov_name] = wrapper.metadata
 
         # If the requested channels are not provided, take the first channel
         if requested_channels is None:

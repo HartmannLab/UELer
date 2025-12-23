@@ -348,11 +348,15 @@ class OMEFovWrapper:
         self.path = path
         self.ds_factor = max(1, int(ds_factor) or 1)
         self.is_ome_tiff = True
-        self._channel_cache: Dict[Tuple[str, int], object] = {}
+        self._channel_cache: Dict[Tuple[str, int, int], object] = {}
         self._level_specs: List[Dict[str, object]] = []
         self._level_count = 0
         self._series_index = 0
         self._closed = False
+        self.axes: str = ""
+        self.frame_axis: Optional[str] = None
+        self.frame_count: int = 1
+        self.current_frame_index: int = 0
 
         tifffile = _ensure_tifffile()
         self._tif = tifffile.TiffFile(path)
@@ -379,6 +383,7 @@ class OMEFovWrapper:
         base_axes = getattr(levels[0], "axes", getattr(self._series, "axes", ""))
         base_shape = getattr(levels[0], "shape", self._series.shape)
         base_y = self._axis_size(base_shape, base_axes, "Y") or 1
+        self.axes = base_axes or ""
 
         for idx, level in enumerate(levels):
             axes = getattr(level, "axes", base_axes)
@@ -396,6 +401,9 @@ class OMEFovWrapper:
             )
 
         self._level_count = len(self._level_specs)
+        frame_axis, frame_count = self._detect_frame_axis(base_axes, base_shape)
+        self.frame_axis = frame_axis
+        self.frame_count = max(1, frame_count)
 
     @staticmethod
     def _axis_size(shape: Tuple[int, ...], axes: str, label: str) -> Optional[int]:
@@ -424,6 +432,14 @@ class OMEFovWrapper:
         except ValueError:
             return None
 
+    def _detect_frame_axis(self, axes: str, shape: Tuple[int, ...]) -> Tuple[Optional[str], int]:
+        for candidate in ("T", "Z", "S"):
+            idx = self._axis_index(axes, candidate)
+            if idx is not None:
+                size = self._axis_size(shape, axes, candidate)
+                return candidate, int(size or 0)
+        return None, 1
+
     @property
     def shape(self) -> Tuple[int, int]:
         if not self._level_specs:
@@ -445,6 +461,16 @@ class OMEFovWrapper:
         w = int(shape[x_idx]) if x_idx < len(shape) else 0
         return (h, w)
 
+    @property
+    def metadata(self) -> Dict[str, object]:
+        return {
+            "axes": self.axes,
+            "channel_names": list(self.channel_names),
+            "frame_axis": self.frame_axis,
+            "frame_count": self.frame_count,
+            "shape": self.shape,
+        }
+
     def get_channel_names(self) -> List[str]:
         return self.channel_names
 
@@ -452,6 +478,18 @@ class OMEFovWrapper:
         ds = max(1, int(ds_factor) or 1)
         if ds != self.ds_factor:
             self.ds_factor = ds
+            self._channel_cache.clear()
+
+    def set_frame_index(self, frame_index: int) -> None:
+        if self.frame_axis is None:
+            return
+        try:
+            idx = int(frame_index)
+        except (TypeError, ValueError):
+            idx = 0
+        idx = max(0, min(idx, max(0, self.frame_count - 1)))
+        if idx != self.current_frame_index:
+            self.current_frame_index = idx
             self._channel_cache.clear()
 
     def _select_level(self, ds_factor: int) -> Tuple[Dict[str, object], int]:
@@ -471,38 +509,21 @@ class OMEFovWrapper:
         base_level = self._level_specs[0]
         base_h, base_w = get_dims(base_level)
         
-        expected_h = math.ceil(base_h / ds)
-        expected_w = math.ceil(base_w / ds)
+        expected_h = max(1, base_h // ds)
+        expected_w = max(1, base_w // ds)
 
-        # Strategy: Try levels from smallest (largest scale) to largest (scale 1)
-        # Prefer exact divisors, but also accept non-exact if they cover the area.
-        
-        # Sort levels by scale descending
         candidates = sorted(self._level_specs, key=lambda l: l["scale"], reverse=True)
-        
-        # First pass: Exact divisors only
-        for level in candidates:
-            if ds % level["scale"] == 0:
-                residual = ds // level["scale"]
-                h, w = get_dims(level)
-                actual_h = math.ceil(h / residual)
-                actual_w = math.ceil(w / residual)
-                
-                if actual_h >= expected_h and actual_w >= expected_w:
-                    return level, residual
 
-        # Second pass: Any level with scale <= ds
         for level in candidates:
-            if level["scale"] <= ds:
-                residual = max(1, int(math.ceil(ds / level["scale"])))
-                h, w = get_dims(level)
-                actual_h = math.ceil(h / residual)
-                actual_w = math.ceil(w / residual)
-                
-                if actual_h >= expected_h and actual_w >= expected_w:
-                    return level, residual
+            level_scale = max(1, int(level.get("scale", 1)))
+            residual = max(1, int(math.ceil(ds / level_scale)))
+            h, w = get_dims(level)
+            actual_h = math.ceil(h / residual)
+            actual_w = math.ceil(w / residual)
 
-        # Fallback to base level
+            if actual_h >= expected_h and actual_w >= expected_w:
+                return level, residual
+
         return base_level, ds
 
     def _get_level_array(self, level: Dict[str, object]):
@@ -535,7 +556,10 @@ class OMEFovWrapper:
             elif axis == "X":
                 slices.append(slice(None, None, residual))
             elif axis in {"Z", "T", "S"}:
-                slices.append(0)
+                if axis == self.frame_axis:
+                    slices.append(self.current_frame_index)
+                else:
+                    slices.append(0)
             else:
                 slices.append(slice(None))
 
@@ -571,7 +595,8 @@ class OMEFovWrapper:
         if channel_name not in self._name_to_index:
             return None
 
-        cache_key = (channel_name, self.ds_factor)
+        frame_idx = self.current_frame_index if self.frame_axis is not None else 0
+        cache_key = (channel_name, self.ds_factor, frame_idx)
         cached = self._channel_cache.get(cache_key)
         if cached is not None:
             return cached

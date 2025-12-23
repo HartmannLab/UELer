@@ -140,6 +140,31 @@ class TestOMETiffLoading(unittest.TestCase):
             wrapper._channel_cache.clear()
             yield wrapper, fake_tif_handle
 
+    @contextmanager
+    def _patched_wrapper_with_frames(self, ds_factor=1):
+        base = np.stack(
+            [
+                np.ones((4, 4), dtype=np.uint16),
+                np.full((4, 4), 2, dtype=np.uint16),
+            ],
+            axis=0,
+        )
+        base = base[:, None, :, :]  # T, C, Y, X
+        series = FakeSeries([base], axes="TCYX")
+        fake_tif_handle = DummyTifHandle(series)
+
+        tifffile_module = MagicMock()
+        tifffile_module.TiffFile.return_value = fake_tif_handle
+
+        fake_da_module = MagicMock()
+        fake_da_module.from_zarr.side_effect = lambda store: store
+
+        with patch("ueler.data_loader._ensure_tifffile", return_value=tifffile_module), \
+             patch("ueler.data_loader._ensure_dask", return_value=(MagicMock(), fake_da_module)), \
+             patch("ueler.data_loader.extract_ome_channel_names", return_value=["DAPI"]):
+            wrapper = OMEFovWrapper("dummy_with_frames.ome.tif", ds_factor=ds_factor)
+            yield wrapper, fake_tif_handle
+
     def test_ome_wrapper_uses_pyramid_level(self):
         with self._patched_wrapper(ds_factor=4) as (wrapper, _):
             tile = wrapper["DAPI"].compute()
@@ -157,6 +182,18 @@ class TestOMETiffLoading(unittest.TestCase):
             wrapper.set_downsample_factor(1)
             fine = wrapper["DAPI"].compute()
             self.assertEqual(fine.shape, (8, 8))
+
+    def test_frame_index_changes_slice(self):
+        with self._patched_wrapper_with_frames(ds_factor=2) as (wrapper, _):
+            self.assertEqual(wrapper.frame_axis, "T")
+            self.assertEqual(wrapper.frame_count, 2)
+
+            first = wrapper["DAPI"].compute()
+            wrapper.set_frame_index(1)
+            second = wrapper["DAPI"].compute()
+
+            self.assertEqual(first.shape, second.shape)
+            self.assertNotEqual(first[0, 0], second[0, 0])
 
     def test_wrapper_close_closes_underlying_file(self):
         with self._patched_wrapper(ds_factor=2) as (wrapper, fake_tif):

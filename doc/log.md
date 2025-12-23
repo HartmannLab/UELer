@@ -1,5 +1,11 @@
 ### v0.3.0-beta (OME-TIFF support)
 
+**OME-TIFF frame-aware lazy loading (#63)**
+- Added frame-aware slicing to `OMEFovWrapper`, including frame metadata, cache keys keyed by frame, and a setter for active frame index to keep stacked TIFF reads lazy via Dask.
+- Adjusted pyramid level selection to prefer the coarsest level that meets floor-based downsample expectations, avoiding over-fetching while satisfying irregular pyramids.
+- Plumbed frame selection and metadata through `ImageMaskViewer.load_fov`, storing per-FOV OME info for downstream UI/diagnostics.
+- Extended `tests/test_ome_tiff_loading.py` with frame-selection coverage; ran `python -m unittest tests.test_ome_tiff_loading tests.test_ome_rendering_fix`.
+
 **OME-TIFF Memory Crash Fix (#60 follow-up)**
 - Fixed a critical memory crash in `ImageDisplay` initialization where full-resolution OME-TIFF dimensions caused massive buffer allocation (e.g., 23GB for 44k images). The viewer now initializes with a minimal buffer while maintaining correct full-resolution coordinate systems for zooming and panning.
 
