@@ -7,7 +7,7 @@ import glob
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -1253,13 +1253,16 @@ class ImageMaskViewer:
                     print(f"Skipping {attr_name}")
 
 
-    def dynamically_load_plugins(self):
+    def dynamically_load_plugins(self, allow_plugins: Optional[Iterable[str]] = None):
         plugin_dir = os.path.join(os.path.dirname(__file__), 'plugin')
+        allowed = set(allow_plugins) if allow_plugins is not None else None
         for filename in os.listdir(plugin_dir):
             if filename.endswith('.py') and not filename.startswith('_'):
                 if self._debug:
                     print(f"Loading plugin: {filename}")
                 module_name = filename[:-3]
+                if allowed is not None and module_name not in allowed:
+                    continue
                 module_path = f"ueler.viewer.plugin.{module_name}"
                 module = importlib.import_module(module_path)
 

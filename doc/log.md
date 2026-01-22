@@ -1,8 +1,19 @@
 ### v0.3.0-beta (OME-TIFF support)
 
+**ROI manager without cell table (#65)**
+- Enabled the SidePlots accordion to render even when `cell_table` is missing by loading only the ROI manager plugin in that case, keeping ROI capture and persistence available for raw-image-only sessions.
+- Preserved the full plugin set when the cell table is present, avoiding regressions for existing workflows.
+
+**VS Code scatter fallback (#64)**
+- Added a VS Code–aware scatter backend selector so notebooks running under VS Code (or when `UELER_SCATTER_BACKEND=static`) fall back to a static Matplotlib scatter with an inline notice, preventing blank outputs when the jupyter-scatter/anywidget frontend fails to hydrate. Users can force the interactive widget backend via `UELER_SCATTER_BACKEND=widget` after enabling widget support. [ueler/viewer/plugin/chart.py#L90-L110](ueler/viewer/plugin/chart.py#L90-L110) [ueler/viewer/plugin/chart.py#L262-L280](ueler/viewer/plugin/chart.py#L262-L280) [ueler/viewer/plugin/chart.py#L500-L528](ueler/viewer/plugin/chart.py#L500-L528)
+
 **OME-TIFF keyframe compatibility (#63 follow-up)**
 - Added a tolerant OME reader fallback that retries series discovery without OME parsing when tifffile raises `RuntimeError: incompatible keyframe`, letting stacked TIFFs with mismatched keyframes load instead of crashing the viewer.
 - Introduced regression coverage in `tests/test_ome_tiff_loading.py::test_incompatible_keyframe_retries_without_ome_series` and ran `python -m unittest tests.test_ome_tiff_loading` to validate the fallback path.
+
+**OME-TIFF suffix-less detection (#63 follow-up)**
+- Detect OME-TIFF files that lack the `.ome.tif(f)` suffix by inspecting TIFF metadata, enabling valid OME stacks named with plain `.tif`/`.tiff` extensions to load and appear in the FOV list.
+- Added regression coverage in `tests/test_ome_tiff_loading.py::test_find_ome_tiff_files_detects_suffixless` and re-ran `python -m unittest tests.test_ome_tiff_loading`.
 
 **OME-TIFF frame-aware lazy loading (#63)**
 - Added frame-aware slicing to `OMEFovWrapper`, including frame metadata, cache keys keyed by frame, and a setter for active frame index to keep stacked TIFF reads lazy via Dask.

@@ -714,7 +714,17 @@ def _ensure_ipython_display() -> None:
     def _display(*_args, **_kwargs):  # pragma: no cover - simple stub
         return None
 
+    class _HTML:  # pragma: no cover - lightweight stub
+        def __init__(self, data=None, **_kwargs):
+            self.data = data
+
+    class _Javascript:  # pragma: no cover - lightweight stub
+        def __init__(self, data=None, **_kwargs):
+            self.data = data
+
     display_module.display = _display  # type: ignore[attr-defined]
+    display_module.HTML = _HTML  # type: ignore[attr-defined]
+    display_module.Javascript = _Javascript  # type: ignore[attr-defined]
     ipython.display = display_module  # type: ignore[attr-defined]
     sys.modules[_IPYTHON] = ipython
     sys.modules[_IPYTHON_DISPLAY] = display_module

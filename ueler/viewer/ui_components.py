@@ -281,29 +281,31 @@ def display_ui(viewer):
     """Display the main UI."""
     # Add a new output widget for charts
     viewer.BottomPlots = BottomPlots()
+    viewer.SidePlots = SidePlots()
+    allow_plugins = None
     if viewer.cell_table is not None:
-        viewer.SidePlots = SidePlots()
-        viewer.SidePlots.annotation_display_output = AnnotationDisplay(viewer,6,3)
-        viewer.dynamically_load_plugins()
-        if hasattr(viewer, "setup_attr_observers"):
-            viewer.setup_attr_observers()
-
-        # Dynamically create Accordion children
-        accordion_children = []
-        for attr_name in dir(viewer.SidePlots):
-            attr = getattr(viewer.SidePlots, attr_name)
-            if hasattr(attr, 'ui') and hasattr(attr, 'displayed_name'):
-                accordion_children.append(
-                    Accordion(
-                        children=[attr.ui],
-                        titles=(attr.displayed_name,),
-                        layout=Layout(width='6in')
-                    )
-                )
-
-        viewer.side_plot = VBox(accordion_children)
+        viewer.SidePlots.annotation_display_output = AnnotationDisplay(viewer, 6, 3)
     else:
-        viewer.side_plot = Output()
+        allow_plugins = {"roi_manager_plugin"}
+
+    viewer.dynamically_load_plugins(allow_plugins=allow_plugins)
+    if hasattr(viewer, "setup_attr_observers"):
+        viewer.setup_attr_observers()
+
+    # Dynamically create Accordion children
+    accordion_children = []
+    for attr_name in dir(viewer.SidePlots):
+        attr = getattr(viewer.SidePlots, attr_name)
+        if hasattr(attr, 'ui') and hasattr(attr, 'displayed_name'):
+            accordion_children.append(
+                Accordion(
+                    children=[attr.ui],
+                    titles=(attr.displayed_name,),
+                    layout=Layout(width='6in')
+                )
+            )
+
+    viewer.side_plot = VBox(accordion_children) if accordion_children else Output()
 
     viewer.wide_plugin_tab = Tab(children=[], layout=Layout(width='100%'))
     viewer.wide_plugin_panel = VBox(

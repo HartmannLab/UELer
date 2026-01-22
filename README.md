@@ -104,8 +104,10 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 - **OME-TIFF Support**: Added native support for loading OME-TIFF files (`.ome.tif`, `.ome.tiff`). The viewer now automatically detects OME-TIFF datasets and handles multi-channel lazy loading via `dask-image`, preserving memory efficiency.
 - Map mode navigation now converts FOV-local cell coordinates into stitched-map pixels via `ImageMaskViewer.resolve_cell_map_position`, letting scatter, heatmap, gallery, and Go To plugins centre precisely on cells without mutating the underlying table.
 - Chart scatter compose now relies on the viewer’s existing selection observers instead of `jscatter.compose` sync hooks, preventing the ValueError triggered when multiple plots are active.
+- VS Code notebooks now auto-fallback to a static Matplotlib scatter when widget front-ends fail (detected via `VSCODE_PID` or `UELER_SCATTER_BACKEND=static`), with an inline notice and an override flag to force the interactive widget backend. See [ueler/viewer/plugin/chart.py#L90-L110](ueler/viewer/plugin/chart.py#L90-L110).
 - Cell mask tooltips now honour the viewer’s configurable FOV, label, and mask keys, so datasets with renamed columns once again display channel means and custom tooltip labels instead of falling back to mask IDs.
 - Introduced a cached `resolve_cell_record` helper and expanded tooltip unit tests, ensuring hover events remain responsive while covering default and custom key combinations.
+- ROI Manager now remains available when only `base_folder` is configured (no masks or cell table), so ROIs can still be captured and persisted to `<base_folder>/.UELer/roi_manager.csv` during raw-image-only sessions.
 - Map mode groundwork from v0.3.0-alpha remains available behind `ENABLE_MAP_MODE`, including stitched viewport rendering, descriptor validation, and shared cache management for multi-FOV slides.
 
 ## Earlier Updates  
