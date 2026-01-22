@@ -674,6 +674,7 @@ class uicomponents:
         self.color_controls = {}
         self.contrast_min_controls = {}
         self.contrast_max_controls = {}
+        self.channel_visibility_controls = {}
         self.mask_color_controls = {}
         self.mask_display_controls = {}
 

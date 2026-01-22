@@ -1588,6 +1588,8 @@ class ImageMaskViewer:
             del self.ui_component.color_controls[ch]
             del self.ui_component.contrast_min_controls[ch]
             del self.ui_component.contrast_max_controls[ch]
+            if ch in self.ui_component.channel_visibility_controls:
+                del self.ui_component.channel_visibility_controls[ch]
 
         # Update mask controls only if masks are available
         if self.masks_available:
@@ -1918,6 +1920,25 @@ class ImageMaskViewer:
         if merge_channel_max(channel, self.channel_max_values, display_value, dtype_value) and sync:
             self._sync_channel_controls(channel)
 
+    def _get_visible_channels(self, selected_channels: Sequence[str]) -> Tuple[str, ...]:
+        if not selected_channels:
+            return tuple()
+        controls = getattr(self.ui_component, "channel_visibility_controls", None)
+        if not isinstance(controls, dict):
+            return tuple(selected_channels)
+        visible = []
+        for channel in selected_channels:
+            checkbox = controls.get(channel)
+            if checkbox is None:
+                visible.append(channel)
+                continue
+            try:
+                if bool(getattr(checkbox, "value", True)):
+                    visible.append(channel)
+            except Exception:
+                visible.append(channel)
+        return tuple(visible)
+
     def update_controls(self, change):
         """Create widgets dynamically based on selected channels and masks, and attach update callbacks."""
         channel_widgets = []
@@ -1944,6 +1965,18 @@ class ImageMaskViewer:
                 )
                 color_dropdown.observe(lambda change, ch=channel: self.update_display(self.current_downsample_factor), names='value')
                 self.ui_component.color_controls[channel] = color_dropdown
+
+            if channel in self.ui_component.channel_visibility_controls:
+                visibility_checkbox = self.ui_component.channel_visibility_controls[channel]
+            else:
+                visibility_checkbox = Checkbox(
+                    value=True,
+                    description="",
+                    disabled=False,
+                    layout=Layout(width='20px')
+                )
+                visibility_checkbox.observe(lambda change, ch=channel: self.update_display(self.current_downsample_factor), names='value')
+                self.ui_component.channel_visibility_controls[channel] = visibility_checkbox
 
             if channel in self.ui_component.contrast_min_controls:
                 contrast_min_slider = self.ui_component.contrast_min_controls[channel]
@@ -1983,7 +2016,18 @@ class ImageMaskViewer:
                 contrast_max_slider.observe(lambda change, ch=channel: self.update_display(self.current_downsample_factor), names='value')
                 self.ui_component.contrast_max_controls[channel] = contrast_max_slider
 
-            channel_widgets.extend([color_dropdown, contrast_min_slider, contrast_max_slider])
+            channel_header = HBox(
+                [visibility_checkbox, color_dropdown],
+                layout=Layout(
+                    display='flex',
+                    align_items='center',
+                    justify_content='flex-start',
+                    gap='6px',
+                    min_height='30px',
+                    overflow='hidden'
+                )
+            )
+            channel_widgets.extend([channel_header, contrast_min_slider, contrast_max_slider])
 
         if channel_widgets:
             self.ui_component.channel_controls_box.children = tuple(channel_widgets)
@@ -3318,9 +3362,10 @@ class ImageMaskViewer:
         
         # Get selected channels
         selected_channels = list(self.ui_component.channel_selector.value)
-        channel_tuple = tuple(selected_channels)
+        visible_channels = list(self._get_visible_channels(selected_channels))
+        channel_tuple = tuple(visible_channels)
 
-        if not selected_channels:
+        if not visible_channels:
             # If no channels selected, display black image sized to the current viewport
             viewport_height = max(1, int(xym_ds[3] - xym_ds[2]))
             viewport_width = max(1, int(xym_ds[1] - xym_ds[0]))
@@ -3342,7 +3387,7 @@ class ImageMaskViewer:
             self.full_resolution_label_masks = {}
         else:
             combined = self.render_image(
-                selected_channels,
+                visible_channels,
                 downsample_factor,
                 xym,
                 xym_ds,

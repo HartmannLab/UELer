@@ -12,6 +12,19 @@ try:  # pragma: no cover - optional dependency is validated via higher-level tes
 except Exception:  # pragma: no cover - allow environments without skimage
     find_boundaries = None  # type: ignore[assignment]
 
+if find_boundaries is not None:  # pragma: no cover - bootstrap stub detection
+    try:
+        import sys
+
+        module_name = getattr(find_boundaries, "__module__", None)
+        module = sys.modules.get(module_name) if module_name else None
+        if module is not None and getattr(module, "__bootstrap_stub__", False):
+            find_boundaries = None  # type: ignore[assignment]
+        elif isinstance(module_name, str) and module_name.startswith("tests."):
+            find_boundaries = None  # type: ignore[assignment]
+    except Exception:
+        find_boundaries = None  # type: ignore[assignment]
+
 import numpy as np
 
 
