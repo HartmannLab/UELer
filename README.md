@@ -9,7 +9,7 @@ You can try UELer without installation by launching it on [Binder](https://mybin
 
 ### 1. Set up the environment
 
-You can create a compatible environment using the `environment.yml` file provided in this repository.
+You can create a compatible environment using the `env/environment.yml` file provided in this repository.
 
 1. Download the `environment.yml` file to your preferred folder.
 2. Change your current directory to that folder.
