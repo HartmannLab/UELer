@@ -1297,6 +1297,7 @@ class ImageMaskViewer:
         plugin = CellAnnotationPlugin(self)
         setattr(self, CellAnnotationPlugin.REGISTRY_KEY, plugin)
         plugin.on_dataset_opened(self.base_folder)
+        plugin.register_loaded_providers(self.SidePlots)
         if self._debug:
             print(f"[CellAnnotation] plugin registered: {plugin.store and plugin.store.store_path}")
                         

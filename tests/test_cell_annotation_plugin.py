@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
-import json
 import importlib.util
+import json
+import inspect
 import os
 import sys
 import tempfile
 import types
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from ueler.viewer.interfaces import FlowsomParamsProvider, HeatmapStateProvider, SelectionSpec
 from ueler.viewer.plugin.cell_annotation.manifest import Manifest
 from ueler.viewer.plugin.cell_annotation.plugin import CellAnnotationPlugin, _flag_enabled
 from ueler.viewer.plugin.cell_annotation.selection_spec import MaterializedSelectionSpec
@@ -214,6 +217,31 @@ class TestSelectionSpec(unittest.TestCase):
             left.union(right)
 
 
+class TestCrossPluginInterfaces(unittest.TestCase):
+    def test_compatibility_interfaces_are_importable(self):
+        compatibility_module = importlib.import_module("viewer.interfaces")
+
+        self.assertIs(compatibility_module.SelectionSpec, SelectionSpec)
+        self.assertTrue(hasattr(SelectionSpec, "cardinality"))
+        self.assertTrue(hasattr(HeatmapStateProvider, "export_heatmap_state"))
+        self.assertTrue(hasattr(FlowsomParamsProvider, "run_flowsom"))
+
+    def test_flowsom_protocol_exposes_expected_signature(self):
+        signature = inspect.signature(FlowsomParamsProvider.run_flowsom)
+        self.assertEqual(
+            list(signature.parameters),
+            [
+                "self",
+                "selection",
+                "params",
+                "training_markers",
+                "extra_markers",
+                "imputation",
+                "projection",
+            ],
+        )
+
+
 class TestFeatureFlagAndPluginLifecycle(unittest.TestCase):
     def test_flag_defaults_to_disabled(self):
         with patch.dict(os.environ, {}, clear=True):
@@ -287,8 +315,73 @@ class TestFeatureFlagAndPluginLifecycle(unittest.TestCase):
             )
             self.assertTrue(plugin.manifest.path.exists())
 
+    def test_register_loaded_providers_logs_each_provider_once(self):
+        plugin = CellAnnotationPlugin(MagicMock())
+        heatmap = MagicMock(name="heatmap")
+        flowsom = MagicMock(name="flowsom")
+        side_plots = SimpleNamespace(
+            heatmap_output=SimpleNamespace(_register_cell_annotation_provider=lambda: plugin.register_heatmap(heatmap)),
+            flowsom_output=SimpleNamespace(_register_cell_annotation_provider=lambda: plugin.register_flowsom(flowsom)),
+        )
+
+        with self.assertLogs("ueler.viewer.plugin.cell_annotation.plugin", level="INFO") as logs:
+            plugin.register_loaded_providers(side_plots)
+            plugin.register_loaded_providers(side_plots)
+
+        self.assertIs(plugin.heatmap_provider, heatmap)
+        self.assertIs(plugin.flowsom_provider, flowsom)
+        self.assertEqual(sum("registered Heatmap provider" in message for message in logs.output), 1)
+        self.assertEqual(sum("registered FlowSOM provider" in message for message in logs.output), 1)
+
+    def test_register_loaded_providers_allows_missing_flowsom(self):
+        plugin = CellAnnotationPlugin(MagicMock())
+        heatmap = MagicMock(name="heatmap")
+        side_plots = SimpleNamespace(
+            heatmap_output=SimpleNamespace(_register_cell_annotation_provider=lambda: plugin.register_heatmap(heatmap)),
+            other_output=object(),
+        )
+
+        plugin.register_loaded_providers(side_plots)
+
+        self.assertIs(plugin.heatmap_provider, heatmap)
+        self.assertIsNone(plugin.flowsom_provider)
+
 
 class TestProviderStubMethods(unittest.TestCase):
+    def test_heatmap_provider_registration_calls_cell_annotation_hook(self):
+        heatmap = types.SimpleNamespace()
+        register_heatmap = MagicMock()
+        heatmap.main_viewer = types.SimpleNamespace(
+            cell_annotation_plugin=types.SimpleNamespace(register_heatmap=register_heatmap)
+        )
+
+        heatmap_stubs = {
+            "ipywidgets": _widget_module(),
+            "pandas": types.ModuleType("pandas"),
+            "scipy.cluster.hierarchy": types.SimpleNamespace(dendrogram=lambda *_a, **_k: None),
+            "ueler.viewer.observable": types.SimpleNamespace(Observable=object),
+            "ueler.viewer.plugin.plugin_base": types.SimpleNamespace(
+                PluginBase=type("PluginBase", (), {"__init__": lambda self, *_args, **_kwargs: None})
+            ),
+            "ueler.viewer.plugin.heatmap_adapter": types.SimpleNamespace(
+                HeatmapModeAdapter=type("HeatmapModeAdapter", (), {"__init__": lambda self, *_args, **_kwargs: None})
+            ),
+            "ueler.viewer.plugin.heatmap_layers": types.SimpleNamespace(
+                DataLayer=type("DataLayer", (), {}),
+                InteractionLayer=type("InteractionLayer", (), {}),
+                DisplayLayer=type("DisplayLayer", (), {}),
+            ),
+        }
+        module = _load_module_from_file(
+            "test_heatmap_module_registration",
+            REPO_ROOT / "ueler/viewer/plugin/heatmap.py",
+            heatmap_stubs,
+        )
+
+        module.HeatmapDisplay._register_cell_annotation_provider(heatmap)
+
+        register_heatmap.assert_called_once_with(heatmap)
+
     def test_heatmap_import_stub_records_last_path(self):
         heatmap_stubs = {
             "ipywidgets": _widget_module(),
@@ -360,6 +453,53 @@ class TestProviderStubMethods(unittest.TestCase):
         module.RunFlowsom.set_selection_context(flowsom, selection)
 
         self.assertIs(flowsom._selection_context, selection)
+
+    def test_flowsom_provider_registration_calls_cell_annotation_hook(self):
+        flowsom = types.SimpleNamespace()
+        register_flowsom = MagicMock()
+        flowsom.main_viewer = types.SimpleNamespace(
+            cell_annotation_plugin=types.SimpleNamespace(register_flowsom=register_flowsom)
+        )
+
+        numpy_stub = types.ModuleType("numpy")
+        numpy_stub.inf = float("inf")
+        flowsom_stubs = {
+            "numpy": numpy_stub,
+            "pandas": types.ModuleType("pandas"),
+            "seaborn": types.ModuleType("seaborn"),
+            "ipywidgets": _widget_module(),
+            "matplotlib.font_manager": types.ModuleType("matplotlib.font_manager"),
+            "matplotlib.pyplot": types.ModuleType("matplotlib.pyplot"),
+            "matplotlib.backend_bases": types.SimpleNamespace(MouseButton=object),
+            "matplotlib.text": types.SimpleNamespace(Annotation=object),
+            "IPython.display": types.SimpleNamespace(display=lambda *_a, **_k: None),
+            "mpl_toolkits.axes_grid1": types.SimpleNamespace(make_axes_locatable=lambda *_a, **_k: None),
+            "mpl_toolkits.axes_grid1.anchored_artists": types.SimpleNamespace(AnchoredSizeBar=object),
+            "scipy.cluster.hierarchy": types.SimpleNamespace(
+                cut_tree=lambda *_a, **_k: None,
+                dendrogram=lambda *_a, **_k: None,
+                linkage=lambda *_a, **_k: None,
+            ),
+            "ueler.image_utils": types.SimpleNamespace(
+                color_one_image=lambda *_a, **_k: None,
+                estimate_color_range=lambda *_a, **_k: None,
+                process_single_crop=lambda *_a, **_k: None,
+            ),
+            "ueler.viewer.decorators": types.SimpleNamespace(update_status_bar=lambda func: func),
+            "ueler.viewer.observable": types.SimpleNamespace(Observable=object),
+            "ueler.viewer.plugin.plugin_base": types.SimpleNamespace(
+                PluginBase=type("PluginBase", (), {"__init__": lambda self, *_args, **_kwargs: None})
+            ),
+        }
+        module = _load_module_from_file(
+            "test_flowsom_module_registration",
+            REPO_ROOT / "ueler/viewer/plugin/run_flowsom.py",
+            flowsom_stubs,
+        )
+
+        module.RunFlowsom._register_cell_annotation_provider(flowsom)
+
+        register_flowsom.assert_called_once_with(flowsom)
 
 
 if __name__ == "__main__":  # pragma: no cover

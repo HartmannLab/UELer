@@ -62,7 +62,23 @@ class CellAnnotationPlugin:
         self._manifest = None
 
     def register_heatmap(self, provider: HeatmapStateProvider) -> None:
+        if self._heatmap_provider is provider:
+            return
         self._heatmap_provider = provider
+        logger.info("[CellAnnotation] registered Heatmap provider: %s", type(provider).__name__)
 
     def register_flowsom(self, provider: FlowsomParamsProvider) -> None:
+        if self._flowsom_provider is provider:
+            return
         self._flowsom_provider = provider
+        logger.info("[CellAnnotation] registered FlowSOM provider: %s", type(provider).__name__)
+
+    def register_loaded_providers(self, side_plots: object) -> None:
+        """Replay provider self-registration for already-instantiated side-plot plugins."""
+        for attr_name in dir(side_plots):
+            if attr_name.startswith("_"):
+                continue
+            provider = getattr(side_plots, attr_name, None)
+            register = getattr(provider, "_register_cell_annotation_provider", None)
+            if callable(register):
+                register()

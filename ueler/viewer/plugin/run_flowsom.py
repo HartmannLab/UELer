@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import pickle
 from collections import OrderedDict
+from collections.abc import Sequence
+from typing import Any, Mapping
 
 import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
@@ -90,8 +92,30 @@ class RunFlowsom(PluginBase):
         self.ui_component.channel_selector.allowed_tags = self.main_viewer.cell_table.columns.tolist()
         self.ui_component.subset_on_dropdown.options = self.main_viewer.cell_table.select_dtypes(include=['int', 'int64', 'object']).columns.tolist()
 
+    def _run_flowsom_button_click(self, _button) -> None:
+        self.run_flowsom(
+            selection=self._selection_context,
+            params=None,
+            training_markers=None,
+            extra_markers=None,
+            imputation=None,
+            projection=None,
+        )
+
     @update_status_bar
-    def run_flowsom(self, b):
+    def run_flowsom(
+        self,
+        selection: SelectionSpec | None,
+        params: Mapping[str, Any] | None,
+        training_markers: Sequence[str] | None,
+        extra_markers: Sequence[str] | None,
+        imputation: Any,
+        projection: Any,
+    ) -> Mapping[str, Any]:
+        if selection is not None:
+            self.set_selection_context(selection)
+        if params is not None:
+            self.import_flowsom_params(params)
         # First, subset the data based on the selected high-level clusters
         subset_on = self.ui_component.subset_on_dropdown.value
         subset = list(self.ui_component.subset_selector.value)
@@ -134,6 +158,17 @@ class RunFlowsom(PluginBase):
         self.main_viewer.inform_plugins("on_cell_table_change")
 
         print(f"FlowSOM clustering completed. The labels are saved in the column {column_name_text}")
+        selected_markers = list(self.ui_component.channel_selector.value or ())
+        resolved_training_markers = selected_markers if training_markers is None else list(training_markers)
+        return {
+            "column_name": column_name_text,
+            "params": self.export_flowsom_params(),
+            "selection": self._selection_context,
+            "training_markers": resolved_training_markers,
+            "extra_markers": list(extra_markers or ()),
+            "imputation": imputation,
+            "projection": projection,
+        }
 
     def _register_cell_annotation_provider(self) -> None:
         plugin = getattr(self.main_viewer, "cell_annotation_plugin", None)
@@ -159,7 +194,7 @@ class RunFlowsom(PluginBase):
             "seed": self.ui_component.seed_input.value,
         }
 
-    def import_flowsom_params(self, params):
+    def import_flowsom_params(self, params: Mapping[str, Any]) -> None:
         mapping = {
             "subset_on": self.ui_component.subset_on_dropdown,
             "column_name": self.ui_component.column_name_text,
@@ -312,7 +347,7 @@ class UiComponent:
             tooltip='Run FlowSOM clustering',
             icon='play'
         )
-        self.run_button.on_click(parent.run_flowsom)
+        self.run_button.on_click(parent._run_flowsom_button_click)
 
 class Data:
     def __init__(self):
