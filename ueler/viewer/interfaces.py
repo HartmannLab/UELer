@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, Mapping, Protocol, runtime_checkable
 
 
@@ -51,3 +52,13 @@ class FlowsomParamsProvider(Protocol):
     def set_selection_context(self, selection: SelectionSpec) -> None:
         """Constrain the FlowSOM plugin to a Cell Annotation selection."""
 
+    def run_flowsom(
+        self,
+        selection: SelectionSpec | None,
+        params: Mapping[str, Any] | None,
+        training_markers: Sequence[str] | None,
+        extra_markers: Sequence[str] | None,
+        imputation: Any,
+        projection: Any,
+    ) -> Mapping[str, Any]:
+        """Run FlowSOM for the current selection and return execution metadata."""

@@ -1,5 +1,3 @@
-# viewer/cell_gallery.py
-
 from ipywidgets import (SelectMultiple, FloatSlider, Dropdown, VBox, Output, TagsInput,
                         Checkbox, IntText, Text, Button, HBox, Layout, IntSlider, Tab, RadioButtons, HTML)
 from scipy.cluster.hierarchy import dendrogram
