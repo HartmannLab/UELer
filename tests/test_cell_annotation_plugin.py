@@ -144,12 +144,44 @@ class TestManifest(unittest.TestCase):
             manifest.save_atomic()
             self.assertEqual(Manifest(root).load(), {"checkpoints": []})
 
-    def test_manifest_rebuild_stub_resets_to_empty_dict(self):
+    def test_manifest_rebuild_discovers_checkpoint_artifacts_and_persists_manifest(self):
         with tempfile.TemporaryDirectory() as root:
             manifest = Manifest(root)
-            manifest.data["checkpoints"] = ["stale"]
-            self.assertEqual(manifest.rebuild_from_disk(), {})
-            self.assertEqual(manifest.data, {})
+            checkpoints_dir = Path(root) / "checkpoints"
+            thumbnails_dir = Path(root) / "thumbnails"
+            selections_dir = Path(root) / "selections"
+            checkpoints_dir.mkdir()
+            thumbnails_dir.mkdir()
+            selections_dir.mkdir()
+
+            (checkpoints_dir / "abc123.json").write_text(
+                json.dumps({"id": "abc123", "parents": ["root"], "op": "save"}),
+                encoding="utf-8",
+            )
+            (checkpoints_dir / "ignored.partial.json").write_text("{}", encoding="utf-8")
+            (thumbnails_dir / "abc123.png").write_text("png", encoding="utf-8")
+            (selections_dir / "abc123.parquet").write_text("parquet", encoding="utf-8")
+
+            rebuilt = manifest.rebuild_from_disk()
+
+            self.assertEqual(
+                rebuilt,
+                {
+                    "checkpoints": [
+                        {
+                            "id": "abc123",
+                            "parents": ["root"],
+                            "op": "save",
+                            "artifacts": {
+                                "checkpoint": "checkpoints/abc123.json",
+                                "thumbnail": "thumbnails/abc123.png",
+                                "selection": "selections/abc123.parquet",
+                            },
+                        }
+                    ]
+                },
+            )
+            self.assertEqual(json.loads(manifest.path.read_text(encoding="utf-8")), rebuilt)
 
 
 class TestSelectionSpec(unittest.TestCase):
@@ -202,6 +234,33 @@ class TestFeatureFlagAndPluginLifecycle(unittest.TestCase):
 
         self.assertIsNone(plugin.store)
         self.assertIsNone(plugin.manifest)
+
+    def test_plugin_rebuilds_manifest_when_missing(self):
+        plugin = CellAnnotationPlugin(MagicMock())
+
+        with tempfile.TemporaryDirectory() as dataset_root:
+            store = DatasetStore(dataset_root)
+            store.ensure_dirs()
+            (store.subdir("checkpoints") / "checkpoint-a.json").write_text(
+                json.dumps({"op": "save"}),
+                encoding="utf-8",
+            )
+
+            plugin.on_dataset_opened(dataset_root)
+
+            self.assertEqual(
+                plugin.manifest.data,
+                {
+                    "checkpoints": [
+                        {
+                            "id": "checkpoint-a",
+                            "op": "save",
+                            "artifacts": {"checkpoint": "checkpoints/checkpoint-a.json"},
+                        }
+                    ]
+                },
+            )
+            self.assertTrue(plugin.manifest.path.exists())
 
 
 class TestProviderStubMethods(unittest.TestCase):

@@ -50,7 +50,8 @@ class CellAnnotationPlugin:
         self._store = DatasetStore(base_folder)
         self._store.ensure_dirs()
         self._manifest = Manifest(self._store.store_path)
-        self._manifest.load()
+        if self._manifest.load() is None:
+            self._manifest.rebuild_from_disk()
 
     def on_dataset_closed(self) -> None:
         self._store = None
