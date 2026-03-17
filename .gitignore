@@ -28,6 +28,9 @@ Thumbs.db
 dev_note/github_issues.md
 .binder/
 .github/
+!.github/
+!.github/workflows/
+!.github/workflows/*.yml
 .specify/
 specs/
 

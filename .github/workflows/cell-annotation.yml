@@ -1,0 +1,36 @@
+name: Cell Annotation
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - cell_annotation
+      - copilot/**
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install package
+        run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+      - name: Run Cell Annotation unit tests
+        run: python -m unittest tests.test_cell_annotation_plugin
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install package
+        run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+      - name: Run Cell Annotation integration tests
+        env:
+          ENABLE_CELL_ANNOTATION: "1"
+        run: python -m unittest tests.test_cell_annotation_integration

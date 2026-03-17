@@ -52,6 +52,7 @@ from ueler.image_utils import (  # type: ignore[import]
 )
 from ueler.viewer.decorators import update_status_bar
 from ueler.viewer.observable import Observable
+from ueler.viewer.interfaces import SelectionSpec
 from ueler.viewer.plugin.plugin_base import PluginBase
 
 class RunFlowsom(PluginBase):
@@ -76,6 +77,8 @@ class RunFlowsom(PluginBase):
         # Always run this at the end of __init__
         # self.load_widget_states(os.path.join(self.main_viewer.base_folder, ".UELer", f'{self.displayed_name}_widget_states.json'))
         self.initialized = True
+        self._selection_context = None
+        self._register_cell_annotation_provider()
 
     # def after_all_plugins_loaded(self):
     #     # Add observer to monitor changes to selected_indices
@@ -130,6 +133,51 @@ class RunFlowsom(PluginBase):
         self.main_viewer.inform_plugins("on_cell_table_change")
 
         print(f"FlowSOM clustering completed. The labels are saved in the column {column_name_text}")
+
+    def _register_cell_annotation_provider(self) -> None:
+        plugin = getattr(self.main_viewer, "cell_annotation_plugin", None)
+        register = getattr(plugin, "register_flowsom", None)
+        if callable(register):
+            register(self)
+
+    def export_flowsom_params(self) -> dict:
+        channels = self.ui_component.channel_selector.value
+        if isinstance(channels, str):
+            selected_channels = [channels]
+        else:
+            selected_channels = list(channels or [])
+
+        return {
+            "channels": selected_channels,
+            "subset_on": self.ui_component.subset_on_dropdown.value,
+            "subset": list(self.ui_component.subset_selector.value or ()),
+            "column_name": self.ui_component.column_name_text.value,
+            "xdim": self.ui_component.xdim_input.value,
+            "ydim": self.ui_component.ydim_input.value,
+            "rlen": self.ui_component.rlen_input.value,
+            "seed": self.ui_component.seed_input.value,
+        }
+
+    def import_flowsom_params(self, params):
+        mapping = {
+            "subset_on": self.ui_component.subset_on_dropdown,
+            "column_name": self.ui_component.column_name_text,
+            "xdim": self.ui_component.xdim_input,
+            "ydim": self.ui_component.ydim_input,
+            "rlen": self.ui_component.rlen_input,
+            "seed": self.ui_component.seed_input,
+        }
+        for key, widget in mapping.items():
+            if key in params:
+                widget.value = params[key]
+
+        if "channels" in params:
+            self.ui_component.channel_selector.value = tuple(params["channels"])
+        if "subset" in params:
+            self.ui_component.subset_selector.value = tuple(params["subset"])
+
+    def set_selection_context(self, selection: SelectionSpec) -> None:
+        self._selection_context = selection
     
     def on_subset_on_dropdown_change(self, change):
         selected_clusters = change['new']  # Get the selected clusters
