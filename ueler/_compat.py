@@ -29,6 +29,7 @@ VIEWER_PLUGIN_ALIASES: Dict[str, str] = {
 	"ueler.viewer.plugin.plugin_base": "viewer.plugin.plugin_base",
 	"ueler.viewer.plugin.cell_gallery": "viewer.plugin.cell_gallery",
 	"ueler.viewer.plugin.region_annotation": "viewer.plugin.region_annotation",
+	"ueler.viewer.plugin.cell_annotation": "viewer.plugin.cell_annotation",
 }
 
 LEGACY_VIEWER_ALIASES: Dict[str, str] = {
