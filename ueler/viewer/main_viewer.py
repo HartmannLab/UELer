@@ -1277,6 +1277,28 @@ class ImageMaskViewer:
                         self.SidePlots.__dict__[f"{module_name}_output"] = instance
                         if module_name == 'roi_manager_plugin':
                             self.roi_plugin = instance
+        self._register_cell_annotation_plugin()
+
+    def _register_cell_annotation_plugin(self) -> None:
+        """Register the Cell Annotation plugin when the feature flag is enabled."""
+        try:
+            from ueler.viewer.plugin.cell_annotation.plugin import (
+                CellAnnotationPlugin,
+                _flag_enabled,
+            )
+        except Exception as exc:  # pragma: no cover - optional plugin guard
+            if self._debug:
+                print(f"[CellAnnotation] failed to import plugin: {exc}")
+            return
+
+        if not _flag_enabled():
+            return
+
+        plugin = CellAnnotationPlugin(self)
+        setattr(self, CellAnnotationPlugin.REGISTRY_KEY, plugin)
+        plugin.on_dataset_opened(self.base_folder)
+        if self._debug:
+            print(f"[CellAnnotation] plugin registered: {plugin.store and plugin.store.store_path}")
                         
 
     def setup_event_connections(self):

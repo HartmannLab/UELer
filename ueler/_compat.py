@@ -23,12 +23,14 @@ VIEWER_CORE_ALIASES: Dict[str, str] = {
 	"ueler.viewer.annotation_display": "viewer.annotation_display",
 	"ueler.viewer.roi_manager": "viewer.roi_manager",
 	"ueler.viewer.color_palettes": "viewer.color_palettes",
+	"ueler.viewer.interfaces": "viewer.interfaces",
 }
 
 VIEWER_PLUGIN_ALIASES: Dict[str, str] = {
 	"ueler.viewer.plugin.plugin_base": "viewer.plugin.plugin_base",
 	"ueler.viewer.plugin.cell_gallery": "viewer.plugin.cell_gallery",
 	"ueler.viewer.plugin.region_annotation": "viewer.plugin.region_annotation",
+	"ueler.viewer.plugin.cell_annotation": "viewer.plugin.cell_annotation",
 }
 
 LEGACY_VIEWER_ALIASES: Dict[str, str] = {
@@ -38,6 +40,7 @@ LEGACY_VIEWER_ALIASES: Dict[str, str] = {
 	"viewer.observable": "ueler.viewer.observable",
 	"viewer.annotation_palette_editor": "ueler.viewer.annotation_palette_editor",
 	"viewer.annotation_display": "ueler.viewer.annotation_display",
+	"viewer.interfaces": "ueler.viewer.interfaces",
 	"viewer.roi_manager": "ueler.viewer.roi_manager",
 	"viewer.main_viewer": "ueler.viewer.main_viewer",
 }

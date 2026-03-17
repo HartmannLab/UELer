@@ -5,6 +5,7 @@ from ipywidgets import (SelectMultiple, FloatSlider, Dropdown, VBox, Output, Tag
 from scipy.cluster.hierarchy import dendrogram
 import pandas as pd
 from ueler.viewer.observable import Observable
+from ueler.viewer.interfaces import HeatmapStateProvider
 from ueler.viewer.plugin.plugin_base import PluginBase
 from ueler.viewer.plugin.heatmap_adapter import HeatmapModeAdapter
 from ueler.viewer.plugin.heatmap_layers import DataLayer, InteractionLayer, DisplayLayer
@@ -25,6 +26,7 @@ class HeatmapDisplay(DataLayer, InteractionLayer, DisplayLayer, PluginBase):
         self._cutoff_lock_reason = None
         self._lock_override_requested = False
         self._suppress_lock_observer = False
+        self._last_imported_heatmap_state_path = None
         # Keep Assign tab controls in sync with current cluster selection state.
         self.data.current_clusters["index"].add_observer(self.update_ui_components)
         self.ui_component.lock_cutoff_button.observe(self._on_lock_cutoff_change, names='value')
@@ -52,6 +54,7 @@ class HeatmapDisplay(DataLayer, InteractionLayer, DisplayLayer, PluginBase):
         self.initialized = True
         # Ensure layout reflects the starting orientation before observers fire.
         self._sync_panel_location()
+        self._register_cell_annotation_provider()
 
     def _on_lock_cutoff_change(self, change):
         if self._suppress_lock_observer:
@@ -88,6 +91,38 @@ class HeatmapDisplay(DataLayer, InteractionLayer, DisplayLayer, PluginBase):
         self.ui_component.lock_override_button.disabled = True
         print("Unlock request accepted. You may adjust the dendrogram until it relocks.")
         self.ui_component.lock_cutoff_button.value = False
+
+    def _register_cell_annotation_provider(self) -> None:
+        plugin = getattr(self.main_viewer, "cell_annotation_plugin", None)
+        register = getattr(plugin, "register_heatmap", None)
+        if callable(register):
+            register(self)
+
+    def export_heatmap_state(
+        self,
+        *,
+        include_embeddings: bool,
+        include_raw_medians: bool,
+        extra_obs_cols: list[str] | None,
+    ) -> dict:
+        channels = self.ui_component.channel_selector.value
+        if isinstance(channels, str):
+            selected_channels = [channels]
+        else:
+            selected_channels = list(channels or [])
+
+        return {
+            "selected_channels": selected_channels,
+            "orientation": dict(self.orientation_state),
+            "include_embeddings": include_embeddings,
+            "include_raw_medians": include_raw_medians,
+            "extra_obs_cols": list(extra_obs_cols or []),
+        }
+
+    def import_heatmap_state(self, adata_path: str) -> None:
+        """Record the requested checkpoint path until checkpoint restore lands."""
+        # TODO: replace this bookkeeping-only stub with full checkpoint restoration.
+        self._last_imported_heatmap_state_path = adata_path
 
 class UiComponent:
     def __init__(self, parent):
