@@ -1956,12 +1956,17 @@ class ImageMaskViewer:
             # Reuse existing controls if they exist
             if channel in self.ui_component.color_controls:
                 color_dropdown = self.ui_component.color_controls[channel]
+                color_dropdown.description = "Color"
+                color_dropdown.style = {'description_width': '50px'}
+                color_dropdown.layout = Layout(width='auto', min_width='0px', flex='1 1 auto')
             else:
                 color_dropdown = Dropdown(
                     options=list(self.predefined_colors.keys()),
                     value="Red",
-                    description=f"Color {channel}",
-                    disabled=False
+                    description="Color",
+                    disabled=False,
+                    layout=Layout(width='auto', min_width='0px', flex='1 1 auto'),
+                    style={'description_width': '50px'}
                 )
                 color_dropdown.observe(lambda change, ch=channel: self.update_display(self.current_downsample_factor), names='value')
                 self.ui_component.color_controls[channel] = color_dropdown
@@ -1973,7 +1978,8 @@ class ImageMaskViewer:
                     value=True,
                     description="",
                     disabled=False,
-                    layout=Layout(width='20px')
+                    indent=False,
+                    layout=Layout(width='28px', min_width='28px', max_width='28px', margin='0 4px 0 0')
                 )
                 visibility_checkbox.observe(lambda change, ch=channel: self.update_display(self.current_downsample_factor), names='value')
                 self.ui_component.channel_visibility_controls[channel] = visibility_checkbox
@@ -2024,7 +2030,8 @@ class ImageMaskViewer:
                     justify_content='flex-start',
                     gap='6px',
                     min_height='30px',
-                    overflow='hidden'
+                    overflow='visible',
+                    width='100%'
                 )
             )
             channel_widgets.extend([channel_header, contrast_min_slider, contrast_max_slider])

@@ -3,6 +3,7 @@
 **Per-channel visibility toggles (#66)**
 - Added a per-channel on/off checkbox in the channel controls so users can temporarily hide individual channels without altering the channel selection list.
 - Rendering now filters by visibility state, preserving existing color and contrast settings when channels are re-enabled.
+- Tightened the per-channel color dropdown sizing to keep the visibility checkbox visible alongside long channel labels.
 
 **ROI manager without cell table (#65)**
 - Enabled the SidePlots accordion to render even when `cell_table` is missing by loading only the ROI manager plugin in that case, keeping ROI capture and persistence available for raw-image-only sessions.
