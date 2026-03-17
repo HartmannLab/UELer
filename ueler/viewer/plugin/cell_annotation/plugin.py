@@ -74,6 +74,7 @@ class CellAnnotationPlugin:
         logger.info("[CellAnnotation] registered FlowSOM provider: %s", type(provider).__name__)
 
     def register_loaded_providers(self, side_plots: object) -> None:
+        """Replay provider self-registration for already-instantiated side-plot plugins."""
         for attr_name in dir(side_plots):
             if attr_name.startswith("_"):
                 continue

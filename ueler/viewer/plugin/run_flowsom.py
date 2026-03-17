@@ -158,11 +158,13 @@ class RunFlowsom(PluginBase):
         self.main_viewer.inform_plugins("on_cell_table_change")
 
         print(f"FlowSOM clustering completed. The labels are saved in the column {column_name_text}")
+        selected_markers = list(self.ui_component.channel_selector.value or ())
+        resolved_training_markers = selected_markers if training_markers is None else list(training_markers)
         return {
             "column_name": column_name_text,
             "params": self.export_flowsom_params(),
             "selection": self._selection_context,
-            "training_markers": list(training_markers or ()),
+            "training_markers": resolved_training_markers,
             "extra_markers": list(extra_markers or ()),
             "imputation": imputation,
             "projection": projection,

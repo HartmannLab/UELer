@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import importlib.util
+import json
 import inspect
 import os
 import sys
@@ -14,7 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from viewer.interfaces import FlowsomParamsProvider, HeatmapStateProvider, SelectionSpec
+from ueler.viewer.interfaces import FlowsomParamsProvider, HeatmapStateProvider, SelectionSpec
 from ueler.viewer.plugin.cell_annotation.manifest import Manifest
 from ueler.viewer.plugin.cell_annotation.plugin import CellAnnotationPlugin, _flag_enabled
 from ueler.viewer.plugin.cell_annotation.selection_spec import MaterializedSelectionSpec
@@ -219,6 +219,9 @@ class TestSelectionSpec(unittest.TestCase):
 
 class TestCrossPluginInterfaces(unittest.TestCase):
     def test_compatibility_interfaces_are_importable(self):
+        compatibility_module = importlib.import_module("viewer.interfaces")
+
+        self.assertIs(compatibility_module.SelectionSpec, SelectionSpec)
         self.assertTrue(hasattr(SelectionSpec, "cardinality"))
         self.assertTrue(hasattr(HeatmapStateProvider, "export_heatmap_state"))
         self.assertTrue(hasattr(FlowsomParamsProvider, "run_flowsom"))
