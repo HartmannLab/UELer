@@ -113,6 +113,7 @@ class TestAtomicHelpers(unittest.TestCase):
             atomic_write_json(target, {"version": 1})
             atomic_write_json(target, {"version": 2})
             self.assertEqual(json.loads(target.read_text()), {"version": 2})
+            self.assertEqual(list(Path(root).glob(".*.tmp*")), [])
 
     def test_atomic_write_json_removes_partial_file_on_failure(self):
         class Unserializable:
@@ -134,6 +135,18 @@ class TestAtomicHelpers(unittest.TestCase):
             atomic_replace(src, dst)
             self.assertFalse(src.exists())
             self.assertEqual(json.loads(dst.read_text()), {"ok": True})
+
+    def test_atomic_replace_fsyncs_source_and_target_directories(self):
+        with tempfile.TemporaryDirectory() as root:
+            src = Path(root) / "src.json"
+            dst = Path(root) / "deep" / "dst.json"
+            src.write_text('{"ok": true}')
+
+            with patch("ueler.viewer.plugin.cell_annotation.store._fsync_dir") as mock_fsync_dir:
+                atomic_replace(src, dst)
+
+            mock_fsync_dir.assert_any_call(Path(root))
+            mock_fsync_dir.assert_any_call(dst.parent)
 
 
 class TestManifest(unittest.TestCase):
@@ -207,7 +220,7 @@ class TestFeatureFlagAndPluginLifecycle(unittest.TestCase):
             self.assertFalse(_flag_enabled())
 
     def test_truthy_feature_flag_values_enable_plugin(self):
-        for value in ("1", "true", "TRUE", "yes"):
+        for value in ("1", "true", "TRUE", "yes", "on"):
             with self.subTest(value=value), patch.dict(os.environ, {"ENABLE_CELL_ANNOTATION": value}, clear=True):
                 self.assertTrue(_flag_enabled())
 
@@ -234,6 +247,18 @@ class TestFeatureFlagAndPluginLifecycle(unittest.TestCase):
 
         self.assertIsNone(plugin.store)
         self.assertIsNone(plugin.manifest)
+
+    def test_plugin_logs_store_path_on_dataset_opened(self):
+        plugin = CellAnnotationPlugin(MagicMock())
+
+        with tempfile.TemporaryDirectory() as dataset_root:
+            with self.assertLogs("ueler.viewer.plugin.cell_annotation.plugin", level="INFO") as logs:
+                plugin.on_dataset_opened(dataset_root)
+
+        self.assertTrue(
+            any("dataset store ready" in message and ".UELer" in message for message in logs.output),
+            logs.output,
+        )
 
     def test_plugin_rebuilds_manifest_when_missing(self):
         plugin = CellAnnotationPlugin(MagicMock())

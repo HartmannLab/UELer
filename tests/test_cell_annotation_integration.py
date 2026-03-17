@@ -27,6 +27,5 @@ class TestCellAnnotationCompatibility(unittest.TestCase):
             self.assertTrue((plugin.store.store_path / "selections").is_dir())
             self.assertEqual(plugin.manifest.path, Path(plugin.store.store_path) / "manifest.json")
 
-
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
