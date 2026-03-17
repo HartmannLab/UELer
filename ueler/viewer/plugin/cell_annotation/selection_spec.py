@@ -31,6 +31,7 @@ class MaterializedSelectionSpec:
         return MaterializedSelectionSpec(self.dataset_id, self.cells | other.cells)
 
     def to_payload(self) -> dict[str, object]:
+        """Serialize this materialized selection for manifest/checkpoint metadata."""
         ordered = sorted(self.cells)
         return {
             "type": "materialized",

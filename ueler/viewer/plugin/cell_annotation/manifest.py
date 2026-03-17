@@ -36,7 +36,12 @@ class Manifest:
         atomic_write_json(self._path, self._data)
 
     def rebuild_from_disk(self) -> dict[str, Any]:
-        """Stub manifest rebuild used until checkpoint scanning lands."""
+        """Stub manifest rebuild used until checkpoint scanning lands.
+
+        TODO: replace this with a directory walk that scans checkpoint, thumbnail,
+        and selection artifacts, ignores ``*.partial`` files, and rebuilds the
+        persisted DAG metadata in ``manifest.json``.
+        """
 
         self._data = {}
         return self._data

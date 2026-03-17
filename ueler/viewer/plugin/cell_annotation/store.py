@@ -12,10 +12,10 @@ STORE_SUBDIRS = ("checkpoints", "thumbnails", "selections")
 
 
 def _dataset_id(dataset_root: str | Path) -> str:
-    """Return a short, stable identifier for *dataset_root*."""
+    """Return a stable identifier derived from the dataset root path."""
 
     resolved = str(Path(dataset_root).resolve())
-    return hashlib.sha256(resolved.encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha256(resolved.encode("utf-8")).hexdigest()[:32]
 
 
 class DatasetStore:

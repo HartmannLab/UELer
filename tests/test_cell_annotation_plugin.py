@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import os
+import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -20,13 +23,73 @@ from ueler.viewer.plugin.cell_annotation.store import (
     atomic_write_json,
 )
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _load_module_from_file(module_name: str, file_path: Path, stubs: dict[str, types.ModuleType]):
+    original_modules = {name: sys.modules.get(name) for name in stubs}
+    try:
+        sys.modules.update(stubs)
+        spec = importlib.util.spec_from_file_location(module_name, file_path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        assert spec and spec.loader
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        sys.modules.pop(module_name, None)
+        for name, original in original_modules.items():
+            if original is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = original
+
+
+def _widget_module() -> types.ModuleType:
+    module = types.ModuleType("ipywidgets")
+
+    class _Widget:
+        def __init__(self, *args, **kwargs):
+            self.value = kwargs.get("value")
+            self.options = kwargs.get("options", [])
+            self.allowed_tags = kwargs.get("allowed_tags", [])
+            self.children = tuple(kwargs.get("children", ()))
+
+        def observe(self, *_args, **_kwargs):
+            return None
+
+        def on_click(self, *_args, **_kwargs):
+            return None
+
+    for name in (
+        "SelectMultiple",
+        "FloatSlider",
+        "Dropdown",
+        "VBox",
+        "Output",
+        "TagsInput",
+        "Checkbox",
+        "IntText",
+        "Text",
+        "Button",
+        "HBox",
+        "Layout",
+        "IntSlider",
+        "Tab",
+        "RadioButtons",
+        "HTML",
+    ):
+        setattr(module, name, _Widget)
+    module.Widget = _Widget
+    return module
+
 
 class TestDatasetStore(unittest.TestCase):
     def test_dataset_id_is_stable_and_short(self):
         with tempfile.TemporaryDirectory() as dataset_root:
             value = _dataset_id(dataset_root)
             self.assertEqual(value, _dataset_id(dataset_root))
-            self.assertEqual(len(value), 16)
+            self.assertEqual(len(value), 32)
             self.assertTrue(all(char in "0123456789abcdef" for char in value))
 
     def test_ensure_dirs_creates_expected_tree(self):
@@ -139,6 +202,80 @@ class TestFeatureFlagAndPluginLifecycle(unittest.TestCase):
 
         self.assertIsNone(plugin.store)
         self.assertIsNone(plugin.manifest)
+
+
+class TestProviderStubMethods(unittest.TestCase):
+    def test_heatmap_import_stub_records_last_path(self):
+        heatmap_stubs = {
+            "ipywidgets": _widget_module(),
+            "pandas": types.ModuleType("pandas"),
+            "scipy.cluster.hierarchy": types.SimpleNamespace(dendrogram=lambda *_a, **_k: None),
+            "ueler.viewer.observable": types.SimpleNamespace(Observable=object),
+            "ueler.viewer.plugin.plugin_base": types.SimpleNamespace(
+                PluginBase=type("PluginBase", (), {"__init__": lambda self, *_args, **_kwargs: None})
+            ),
+            "ueler.viewer.plugin.heatmap_adapter": types.SimpleNamespace(
+                HeatmapModeAdapter=type("HeatmapModeAdapter", (), {"__init__": lambda self, *_args, **_kwargs: None})
+            ),
+            "ueler.viewer.plugin.heatmap_layers": types.SimpleNamespace(
+                DataLayer=type("DataLayer", (), {}),
+                InteractionLayer=type("InteractionLayer", (), {}),
+                DisplayLayer=type("DisplayLayer", (), {}),
+            ),
+        }
+        module = _load_module_from_file(
+            "test_heatmap_module",
+            REPO_ROOT / "ueler/viewer/plugin/heatmap.py",
+            heatmap_stubs,
+        )
+        heatmap = module.HeatmapDisplay.__new__(module.HeatmapDisplay)
+
+        module.HeatmapDisplay.import_heatmap_state(heatmap, "/tmp/checkpoint.h5ad")
+
+        self.assertEqual(heatmap._last_imported_heatmap_state_path, "/tmp/checkpoint.h5ad")
+
+    def test_flowsom_selection_context_stub_is_stored(self):
+        numpy_stub = types.ModuleType("numpy")
+        numpy_stub.inf = float("inf")
+        flowsom_stubs = {
+            "numpy": numpy_stub,
+            "pandas": types.ModuleType("pandas"),
+            "seaborn": types.ModuleType("seaborn"),
+            "ipywidgets": _widget_module(),
+            "matplotlib.font_manager": types.ModuleType("matplotlib.font_manager"),
+            "matplotlib.pyplot": types.ModuleType("matplotlib.pyplot"),
+            "matplotlib.backend_bases": types.SimpleNamespace(MouseButton=object),
+            "matplotlib.text": types.SimpleNamespace(Annotation=object),
+            "IPython.display": types.SimpleNamespace(display=lambda *_a, **_k: None),
+            "mpl_toolkits.axes_grid1": types.SimpleNamespace(make_axes_locatable=lambda *_a, **_k: None),
+            "mpl_toolkits.axes_grid1.anchored_artists": types.SimpleNamespace(AnchoredSizeBar=object),
+            "scipy.cluster.hierarchy": types.SimpleNamespace(
+                cut_tree=lambda *_a, **_k: None,
+                dendrogram=lambda *_a, **_k: None,
+                linkage=lambda *_a, **_k: None,
+            ),
+            "ueler.image_utils": types.SimpleNamespace(
+                color_one_image=lambda *_a, **_k: None,
+                estimate_color_range=lambda *_a, **_k: None,
+                process_single_crop=lambda *_a, **_k: None,
+            ),
+            "ueler.viewer.decorators": types.SimpleNamespace(update_status_bar=lambda func: func),
+            "ueler.viewer.observable": types.SimpleNamespace(Observable=object),
+            "ueler.viewer.plugin.plugin_base": types.SimpleNamespace(
+                PluginBase=type("PluginBase", (), {"__init__": lambda self, *_args, **_kwargs: None})
+            ),
+        }
+        module = _load_module_from_file(
+            "test_flowsom_module",
+            REPO_ROOT / "ueler/viewer/plugin/run_flowsom.py",
+            flowsom_stubs,
+        )
+        flowsom = module.RunFlowsom.__new__(module.RunFlowsom)
+        selection = MaterializedSelectionSpec.from_cells("dataset_a", [("fov1", 1)])
+
+        module.RunFlowsom.set_selection_context(flowsom, selection)
+
+        self.assertIs(flowsom._selection_context, selection)
 
 
 if __name__ == "__main__":  # pragma: no cover

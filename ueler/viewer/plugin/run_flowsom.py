@@ -77,6 +77,7 @@ class RunFlowsom(PluginBase):
         # Always run this at the end of __init__
         # self.load_widget_states(os.path.join(self.main_viewer.base_folder, ".UELer", f'{self.displayed_name}_widget_states.json'))
         self.initialized = True
+        # Stores the active Cell Annotation selection for future subset-aware runs.
         self._selection_context = None
         self._register_cell_annotation_provider()
 
@@ -177,6 +178,7 @@ class RunFlowsom(PluginBase):
             self.ui_component.subset_selector.value = tuple(params["subset"])
 
     def set_selection_context(self, selection: SelectionSpec) -> None:
+        """Persist the active Cell Annotation selection for future subset-aware runs."""
         self._selection_context = selection
     
     def on_subset_on_dropdown_change(self, change):

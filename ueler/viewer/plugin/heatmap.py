@@ -26,6 +26,7 @@ class HeatmapDisplay(DataLayer, InteractionLayer, DisplayLayer, PluginBase):
         self._cutoff_lock_reason = None
         self._lock_override_requested = False
         self._suppress_lock_observer = False
+        self._last_imported_heatmap_state_path = None
         # Keep Assign tab controls in sync with current cluster selection state.
         self.data.current_clusters["index"].add_observer(self.update_ui_components)
         self.ui_component.lock_cutoff_button.observe(self._on_lock_cutoff_change, names='value')
@@ -119,6 +120,8 @@ class HeatmapDisplay(DataLayer, InteractionLayer, DisplayLayer, PluginBase):
         }
 
     def import_heatmap_state(self, adata_path: str) -> None:
+        """Record the requested checkpoint path until checkpoint restore lands."""
+        # TODO: replace this bookkeeping-only stub with full checkpoint restoration.
         self._last_imported_heatmap_state_path = adata_path
 
 class UiComponent:
