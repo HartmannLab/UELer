@@ -6,6 +6,7 @@ import html
 import os
 import pickle
 import inspect
+import sys
 from typing import Iterable, List, Sequence, Set
 
 import matplotlib.pyplot as plt
@@ -17,6 +18,11 @@ from matplotlib.patches import Rectangle
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import seaborn as sns
 from scipy.cluster.hierarchy import cut_tree, linkage
+try:
+    from IPython.display import display
+except Exception:  # pragma: no cover - optional in non-notebook contexts
+    def display(*_args, **_kwargs):
+        return None
 
 from ueler.viewer.decorators import update_status_bar
 from ipywidgets import HBox, HTML, Layout, Tab, VBox
@@ -325,7 +331,8 @@ class DataLayer:
         if palette_by_id is None:
             palette_by_id = {}
 
-        seen_ids = [self._normalize_meta_cluster_id(value) for value in list(meta_cluster_ids or [])]
+        incoming_ids = [] if meta_cluster_ids is None else list(meta_cluster_ids)
+        seen_ids = [self._normalize_meta_cluster_id(value) for value in incoming_ids]
 
         if hasattr(self, 'heatmap_data') and self.heatmap_data is not None:
             color_column = 'meta_cluster_revised' if 'meta_cluster_revised' in self.heatmap_data.columns else 'meta_cluster'
@@ -1363,6 +1370,9 @@ class DisplayLayer:
         with self.plot_output:
             self.plot_output.clear_output(wait=True)
             self.generate_heatmap()
+
+        if self.adapter.is_wide() and not self._plot_output_has_widget_view():
+            self.restore_footer_canvas()
         if debug_enabled:
             mode = 'wide' if self.adapter.is_wide() else 'vertical'
             print(f'[heatmap] plot refreshed in {mode} mode')
@@ -1445,6 +1455,49 @@ class DisplayLayer:
                 canvas.draw_idle()
             except Exception:
                 pass
+
+    def _plot_output_has_widget_view(self):
+        plot_output = getattr(self, 'plot_output', None)
+        outputs = getattr(plot_output, 'outputs', ()) if plot_output is not None else ()
+        for output in outputs or ():
+            if not isinstance(output, dict):
+                continue
+            data = output.get('data')
+            if isinstance(data, dict) and 'application/vnd.jupyter.widget-view+json' in data:
+                return True
+        return False
+
+    def redraw_cached_footer_canvas(self):
+        artifacts = getattr(self, '_cached_footer_artifacts', None)
+        if not artifacts:
+            return False
+
+        fig = artifacts.get('fig') if isinstance(artifacts, dict) else None
+        canvas = artifacts.get('canvas') if isinstance(artifacts, dict) else None
+
+        if canvas is not None and hasattr(canvas, 'draw_idle'):
+            try:
+                canvas.draw_idle()
+            except Exception:
+                pass
+
+        if self._plot_output_has_widget_view():
+            return True
+
+        with self.plot_output:
+            self.plot_output.clear_output(wait=True)
+            display_func = display
+            shim_module = sys.modules.get('viewer.plugin.heatmap_layers')
+            if shim_module is not None:
+                display_func = getattr(shim_module, 'display', display)
+
+            # Prefer replaying the ipympl canvas widget to preserve interactivity.
+            if canvas is not None and hasattr(canvas, 'model_id'):
+                display_func(canvas)
+            elif fig is not None:
+                display_func(fig)
+
+        return True
 
     @update_status_bar
     def generate_heatmap(self):
@@ -1594,6 +1647,28 @@ class DisplayLayer:
         plt.tight_layout()
         plt.show()
 
+        self._cached_footer_artifacts = {
+            'fig': g.fig,
+            'canvas': getattr(g.fig, 'canvas', None),
+            'axes': {
+                'heatmap': getattr(g, 'ax_heatmap', None),
+                'row_colors': getattr(g, 'ax_row_colors', None),
+                'row_dendrogram': getattr(g, 'ax_row_dendrogram', None),
+                'col_dendrogram': getattr(g, 'ax_col_dendrogram', None),
+            },
+        }
+
+        if self.adapter.is_wide() and not self._plot_output_has_widget_view():
+            canvas = self._cached_footer_artifacts.get('canvas')
+            display_func = display
+            shim_module = sys.modules.get('viewer.plugin.heatmap_layers')
+            if shim_module is not None:
+                display_func = getattr(shim_module, 'display', display)
+            if canvas is not None and hasattr(canvas, 'model_id'):
+                display_func(canvas)
+            else:
+                display_func(g.fig)
+
         self.display_row_colors_as_patches()
 
         g.fig.canvas.header_visible = False
@@ -1730,3 +1805,5 @@ class DisplayLayer:
         with self.plot_output:
             self.plot_output.clear_output(wait=True)
             self.generate_heatmap()
+        if self.adapter.is_wide() and not self._plot_output_has_widget_view():
+            self.restore_footer_canvas()

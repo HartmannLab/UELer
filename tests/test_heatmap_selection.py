@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import tests.bootstrap  # noqa: F401  # Ensure shared test bootstrap runs
 
+import numpy as np
 import pandas as pd
 
 
@@ -688,6 +689,14 @@ class HeatmapMetaClusterManagementTests(unittest.TestCase):
         self.assertNotIn(2, heatmap.data.meta_cluster_names)
         self.assertEqual(heatmap.ui_component.rename_cluster_dropdown.value, -1)
         self.assertEqual(heatmap.ui_component.cluster_id_dropdown.value, -1)
+
+    def test_sync_registry_accepts_numpy_array_ids(self):
+        heatmap = self._build_heatmap()
+
+        heatmap._sync_meta_cluster_registry(np.array([1, 2]))
+
+        self.assertIn(1, heatmap.data.meta_cluster_names)
+        self.assertIn(2, heatmap.data.meta_cluster_names)
 
 
 if __name__ == "__main__":

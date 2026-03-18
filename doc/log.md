@@ -1,5 +1,14 @@
 ### v0.3.0-beta (OME-TIFF support)
 
+**Heatmap horizontal-layout footer replay fix (#73 follow-up)**
+- Fixed a wide-layout rendering issue where heatmaps could be generated but the footer panel remained blank after pressing `Plot`.
+- Added cached figure/canvas replay and a wide-mode post-plot restore hook in `DisplayLayer` so the footer panel reliably re-renders the latest heatmap.
+
+**Heatmap meta-cluster registry sync fix (#73 follow-up)**
+- Fixed a runtime crash in `DataLayer._sync_meta_cluster_registry` caused by boolean evaluation of numpy arrays (`meta_cluster_ids or []`) during heatmap regeneration.
+- Updated the sync path to guard only for `None`, preserving numpy array inputs from `np.unique(meta_cluster_labels)`.
+- Added regression coverage in `tests/test_heatmap_selection.py` to verify numpy-array IDs are handled safely.
+
 **Heatmap meta-cluster management tab (#73)**
 - Added a new `Rename` tab to the Heatmap plugin with meta-cluster rename/add/remove controls and a color-aware registry preview.
 - Replaced free-text meta-cluster assignment in the `Assign` tab with a dropdown fed by user-defined meta-cluster labels.
