@@ -22,12 +22,15 @@ if _dask_stub is not None and getattr(_dask_stub, "__spec__", None) is None:  # 
     _dask_stub.__spec__ = importlib.machinery.ModuleSpec("dask", loader=None)
 if _dask_stub is not None and not hasattr(_dask_stub, "__path__"):  # pragma: no cover - test bootstrap quirk
     _dask_stub.__path__ = []
-if _dask_stub is not None and "dask.array" not in sys.modules:  # pragma: no cover - test bootstrap quirk
+_dask_array_stub = sys.modules.get("dask.array")
+if _dask_array_stub is None and _dask_stub is not None:  # pragma: no cover - test bootstrap quirk
     dask_array_stub = types.ModuleType("dask.array")
-    dask_array_stub.Array = type("Array", (), {})
     dask_array_stub.__spec__ = importlib.machinery.ModuleSpec("dask.array", loader=None)
     sys.modules["dask.array"] = dask_array_stub
     _dask_stub.array = dask_array_stub
+    _dask_array_stub = dask_array_stub
+if _dask_array_stub is not None and not hasattr(_dask_array_stub, "Array"):  # pragma: no cover - test bootstrap quirk
+    _dask_array_stub.Array = type("Array", (), {})
 
 import anndata as ad
 import numpy as np
