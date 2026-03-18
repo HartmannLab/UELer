@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import os
 import pickle
 import inspect
@@ -10,6 +11,7 @@ from typing import Iterable, List, Sequence, Set
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib import colors as mcolors
 from matplotlib.backend_bases import MouseButton
 from matplotlib.patches import Rectangle
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -21,6 +23,9 @@ from ipywidgets import HBox, HTML, Layout, Tab, VBox
 
 
 NO_CLUSTER_SELECTED_MSG = "No cluster selected."
+UNASSIGNED_META_CLUSTER_ID = -1
+UNASSIGNED_META_CLUSTER_NAME = "Unassigned"
+UNASSIGNED_META_CLUSTER_COLOR = "#9e9e9e"
 
 
 def _remove_patches(patches):
@@ -173,6 +178,179 @@ class DataLayer:
     def _reset_selection_cache(self):
         self._last_scatter_selection = None
         self._last_highlighted_clusters = None
+
+    @staticmethod
+    def _normalize_meta_cluster_id(meta_cluster_id):
+        if isinstance(meta_cluster_id, np.generic):
+            return meta_cluster_id.item()
+        return meta_cluster_id
+
+    @staticmethod
+    def _sort_meta_cluster_key(meta_cluster_id):
+        value = DataLayer._normalize_meta_cluster_id(meta_cluster_id)
+        if value == UNASSIGNED_META_CLUSTER_ID:
+            return (0, 0)
+        if isinstance(value, (int, np.integer)):
+            return (1, int(value))
+        return (2, str(value))
+
+    @staticmethod
+    def _as_hex_color(color_value):
+        if color_value is None:
+            return UNASSIGNED_META_CLUSTER_COLOR
+        try:
+            return mcolors.to_hex(color_value)
+        except Exception:
+            return str(color_value)
+
+    def _meta_cluster_display_name(self, meta_cluster_id):
+        names = getattr(self.data, 'meta_cluster_names', {}) or {}
+        normalized = self._normalize_meta_cluster_id(meta_cluster_id)
+        if normalized in names:
+            return str(names[normalized])
+        if normalized == UNASSIGNED_META_CLUSTER_ID:
+            return UNASSIGNED_META_CLUSTER_NAME
+        return f"Meta-cluster {normalized}"
+
+    def _next_available_meta_cluster_id(self):
+        names = getattr(self.data, 'meta_cluster_names', {}) or {}
+        used = {
+            int(key)
+            for key in names
+            if isinstance(key, (int, np.integer)) and int(key) >= 0
+        }
+        candidate = int(getattr(self.data, 'next_meta_cluster_id', 0) or 0)
+        while candidate in used:
+            candidate += 1
+        self.data.next_meta_cluster_id = candidate + 1
+        return candidate
+
+    def _generate_meta_cluster_color(self, meta_cluster_id):
+        if meta_cluster_id == UNASSIGNED_META_CLUSTER_ID:
+            return UNASSIGNED_META_CLUSTER_COLOR
+        palette_size = max(8, int(meta_cluster_id) + 2) if isinstance(meta_cluster_id, int) else 8
+        palette = sns.color_palette('husl', palette_size)
+        if not palette:
+            palette = [
+                "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
+                "#9467bd", "#8c564b", "#e377c2", "#7f7f7f",
+            ]
+        color = palette[int(meta_cluster_id) % len(palette)] if isinstance(meta_cluster_id, int) else palette[0]
+        return self._as_hex_color(color)
+
+    def _meta_cluster_dropdown_options(self):
+        names = getattr(self.data, 'meta_cluster_names', {}) or {}
+        colors = getattr(self.data, 'meta_cluster_colors', {}) or {}
+        options = []
+        for meta_cluster_id in sorted(names.keys(), key=self._sort_meta_cluster_key):
+            color_hex = self._as_hex_color(colors.get(meta_cluster_id))
+            display_name = self._meta_cluster_display_name(meta_cluster_id)
+            label = f"[{color_hex}] {display_name} ({meta_cluster_id})"
+            options.append((label, meta_cluster_id))
+        return options
+
+    def _refresh_meta_cluster_registry_preview(self):
+        container = getattr(self.ui_component, 'meta_cluster_registry_box', None)
+        if container is None:
+            return
+
+        names = getattr(self.data, 'meta_cluster_names', {}) or {}
+        colors = getattr(self.data, 'meta_cluster_colors', {}) or {}
+        rows = []
+        for meta_cluster_id in sorted(names.keys(), key=self._sort_meta_cluster_key):
+            color_hex = self._as_hex_color(colors.get(meta_cluster_id))
+            display_name = html.escape(self._meta_cluster_display_name(meta_cluster_id))
+            label_html = HTML(value=f"<span style='font-family:monospace;'>[{color_hex}]</span> {display_name} ({meta_cluster_id})")
+            swatch_html = HTML(
+                value=(
+                    "<span style='display:inline-block;width:12px;height:12px;"
+                    f"border:1px solid #555;background:{color_hex};margin-right:6px;'></span>"
+                )
+            )
+            rows.append(HBox([swatch_html, label_html], layout=Layout(align_items='center')))
+        container.children = tuple(rows)
+
+    def _refresh_meta_cluster_controls(self):
+        if not hasattr(self, 'ui_component'):
+            return
+
+        options = self._meta_cluster_dropdown_options()
+
+        assign_dropdown = getattr(self.ui_component, 'cluster_id_dropdown', None)
+        rename_dropdown = getattr(self.ui_component, 'rename_cluster_dropdown', None)
+
+        for dropdown in (assign_dropdown, rename_dropdown):
+            if dropdown is None:
+                continue
+            previous_value = getattr(dropdown, 'value', None)
+            dropdown.options = options
+            available_values = [value for _, value in options]
+            if previous_value in available_values:
+                dropdown.value = previous_value
+            elif available_values:
+                preferred = UNASSIGNED_META_CLUSTER_ID if UNASSIGNED_META_CLUSTER_ID in available_values else available_values[0]
+                dropdown.value = preferred
+            else:
+                dropdown.value = None
+
+        self._refresh_meta_cluster_registry_preview()
+        if rename_dropdown is not None:
+            self.on_rename_cluster_selection_change({'new': rename_dropdown.value})
+
+    def _initialize_meta_cluster_registry(self):
+        if not hasattr(self.data, 'meta_cluster_names') or self.data.meta_cluster_names is None:
+            self.data.meta_cluster_names = {}
+        if not hasattr(self.data, 'meta_cluster_colors') or self.data.meta_cluster_colors is None:
+            self.data.meta_cluster_colors = {}
+
+        self.data.meta_cluster_names[UNASSIGNED_META_CLUSTER_ID] = UNASSIGNED_META_CLUSTER_NAME
+        self.data.meta_cluster_colors.setdefault(UNASSIGNED_META_CLUSTER_ID, UNASSIGNED_META_CLUSTER_COLOR)
+        self.data.next_meta_cluster_id = int(getattr(self.data, 'next_meta_cluster_id', 0) or 0)
+        self._refresh_meta_cluster_controls()
+
+    def _ensure_meta_cluster_entry(self, meta_cluster_id):
+        normalized = self._normalize_meta_cluster_id(meta_cluster_id)
+        if normalized == UNASSIGNED_META_CLUSTER_ID:
+            self.data.meta_cluster_names[normalized] = UNASSIGNED_META_CLUSTER_NAME
+            self.data.meta_cluster_colors.setdefault(normalized, UNASSIGNED_META_CLUSTER_COLOR)
+            return
+
+        self.data.meta_cluster_names.setdefault(normalized, f"Meta-cluster {normalized}")
+        if normalized not in self.data.meta_cluster_colors:
+            self.data.meta_cluster_colors[normalized] = self._generate_meta_cluster_color(normalized)
+
+    def _sync_meta_cluster_registry(self, meta_cluster_ids, palette_by_id=None):
+        self._initialize_meta_cluster_registry()
+
+        if palette_by_id is None:
+            palette_by_id = {}
+
+        seen_ids = [self._normalize_meta_cluster_id(value) for value in list(meta_cluster_ids or [])]
+
+        if hasattr(self, 'heatmap_data') and self.heatmap_data is not None:
+            color_column = 'meta_cluster_revised' if 'meta_cluster_revised' in self.heatmap_data.columns else 'meta_cluster'
+            if color_column in self.heatmap_data.columns:
+                revised_values = self.heatmap_data[color_column].dropna().tolist()
+                seen_ids.extend(self._normalize_meta_cluster_id(value) for value in revised_values)
+
+        for meta_cluster_id in seen_ids:
+            self._ensure_meta_cluster_entry(meta_cluster_id)
+
+            if meta_cluster_id in palette_by_id:
+                self.data.meta_cluster_colors[meta_cluster_id] = self._as_hex_color(palette_by_id[meta_cluster_id])
+
+        int_ids = [
+            int(meta_cluster_id)
+            for meta_cluster_id in self.data.meta_cluster_names
+            if isinstance(meta_cluster_id, (int, np.integer)) and int(meta_cluster_id) >= 0
+        ]
+        next_id = (max(int_ids) + 1) if int_ids else 0
+        self.data.next_meta_cluster_id = max(int(getattr(self.data, 'next_meta_cluster_id', 0) or 0), next_id)
+        self._refresh_meta_cluster_controls()
+
+    def _ensure_meta_cluster_revised_column(self):
+        if 'meta_cluster_revised' not in self.heatmap_data.columns:
+            self.heatmap_data['meta_cluster_revised'] = self.heatmap_data['meta_cluster']
 
     def _update_orientation_state(self):
         if not hasattr(self, "heatmap_data") or self.heatmap_data is None:
@@ -891,15 +1069,23 @@ class InteractionLayer:
             self.ui_component.subset_selector.options = []
 
     def update_ui_components(self, indices):
-        is_enabled = bool(indices)
-        self.ui_component.cluster_id_text.disabled = not is_enabled
+        has_options = bool(getattr(self.ui_component.cluster_id_dropdown, 'options', []))
+        is_enabled = bool(indices) and has_options
+        self.ui_component.cluster_id_dropdown.disabled = not is_enabled
         self.ui_component.cluster_id_apply_button.disabled = not is_enabled
 
+    def on_rename_cluster_selection_change(self, change):
+        selected_id = change.get('new') if isinstance(change, dict) else None
+        if selected_id is None:
+            self.ui_component.rename_cluster_name.value = ""
+            return
+        self.ui_component.rename_cluster_name.value = self._meta_cluster_display_name(selected_id)
+
     def apply_new_cluster_id(self, *args):
-        new_cluster_id = self.ui_component.cluster_id_text.value
+        new_cluster_id = self.ui_component.cluster_id_dropdown.value
         selected_indices = list(self.data.current_clusters["index"].value or [])
         if new_cluster_id is None:
-            print("Please enter a valid cluster ID.")
+            print("Please select a meta-cluster.")
             return
         if not selected_indices:
             print("No clusters selected to update.")
@@ -910,8 +1096,9 @@ class InteractionLayer:
             print("No cluster ordering available.")
             return
 
-        if 'meta_cluster_revised' not in self.heatmap_data.columns:
-            self.heatmap_data['meta_cluster_revised'] = self.heatmap_data['meta_cluster']
+        self._ensure_meta_cluster_revised_column()
+        self._ensure_meta_cluster_entry(new_cluster_id)
+        self._refresh_meta_cluster_controls()
 
         cluster_index = self._cluster_index_labels()
         if cluster_index is None:
@@ -929,7 +1116,78 @@ class InteractionLayer:
             self.update_text_labels()
 
         self._engage_cutoff_lock("Cutoff locked after meta-cluster reassignment")
-        print(f"New cluster ID {new_cluster_id} applied to selected rows.")
+        print(f"Assigned selected clusters to {self._meta_cluster_display_name(new_cluster_id)} ({new_cluster_id}).")
+
+    def rename_meta_cluster(self, *args):
+        selected_id = self.ui_component.rename_cluster_dropdown.value
+        new_name = (self.ui_component.rename_cluster_name.value or "").strip()
+        if selected_id is None:
+            print("Please select a meta-cluster to rename.")
+            return
+        if not new_name:
+            print("Please enter a non-empty name.")
+            return
+
+        self.data.meta_cluster_names[selected_id] = new_name
+        self._refresh_meta_cluster_controls()
+        self.ui_component.rename_cluster_dropdown.value = selected_id
+        self.ui_component.cluster_id_dropdown.value = selected_id
+        print(f"Renamed meta-cluster {selected_id} to '{new_name}'.")
+
+    def add_meta_cluster(self, *args):
+        new_id = self._next_available_meta_cluster_id()
+        requested_name = (self.ui_component.new_cluster_name.value or "").strip()
+        new_name = requested_name if requested_name else f"Meta-cluster {new_id}"
+
+        self.data.meta_cluster_names[new_id] = new_name
+        self.data.meta_cluster_colors[new_id] = self._generate_meta_cluster_color(new_id)
+        self.ui_component.new_cluster_name.value = ""
+
+        self._refresh_meta_cluster_controls()
+        self.ui_component.rename_cluster_dropdown.value = new_id
+        self.ui_component.cluster_id_dropdown.value = new_id
+        print(f"Added meta-cluster {new_id} ({new_name}).")
+
+    def remove_meta_cluster(self, *args):
+        selected_id = self.ui_component.rename_cluster_dropdown.value
+        if selected_id is None:
+            print("Please select a meta-cluster to remove.")
+            return
+        if selected_id == UNASSIGNED_META_CLUSTER_ID:
+            print("The unassigned meta-cluster cannot be removed.")
+            return
+
+        if hasattr(self, 'heatmap_data') and self.heatmap_data is not None:
+            self._ensure_meta_cluster_revised_column()
+            column = 'meta_cluster_revised'
+            data_store = getattr(self.heatmap_data, '_data', None)
+            if isinstance(data_store, dict) and column in data_store:
+                data_store[column] = [
+                    UNASSIGNED_META_CLUSTER_ID if value == selected_id else value
+                    for value in data_store[column]
+                ]
+            else:
+                self.heatmap_data.loc[
+                    self.heatmap_data[column] == selected_id,
+                    column,
+                ] = UNASSIGNED_META_CLUSTER_ID
+
+        self.data.meta_cluster_names.pop(selected_id, None)
+        self.data.meta_cluster_colors.pop(selected_id, None)
+        self._ensure_meta_cluster_entry(UNASSIGNED_META_CLUSTER_ID)
+        self._refresh_meta_cluster_controls()
+        self.ui_component.rename_cluster_dropdown.value = UNASSIGNED_META_CLUSTER_ID
+        self.ui_component.cluster_id_dropdown.value = UNASSIGNED_META_CLUSTER_ID
+
+        self.display_row_colors_as_patches()
+        if not self.adapter.is_wide():
+            self.update_text_labels()
+
+        self._engage_cutoff_lock("Cutoff locked after meta-cluster removal")
+        print(
+            f"Removed meta-cluster {selected_id}. Existing assignments were moved to "
+            f"{UNASSIGNED_META_CLUSTER_NAME} ({UNASSIGNED_META_CLUSTER_ID})."
+        )
 
 
 class DisplayLayer:
@@ -984,9 +1242,17 @@ class DisplayLayer:
                 self.ui_component.lock_cutoff_button,
                 self.ui_component.lock_override_button
             ], layout=Layout(gap='8px')),
-            HBox([self.ui_component.cluster_id_text,
+            HBox([self.ui_component.cluster_id_dropdown,
                 self.ui_component.cluster_id_apply_button])
         ])
+
+        rename = VBox([
+            HBox([self.ui_component.rename_cluster_dropdown]),
+            HBox([self.ui_component.rename_cluster_name, self.ui_component.rename_cluster_apply_button]),
+            HBox([self.ui_component.new_cluster_name, self.ui_component.add_cluster_button]),
+            HBox([self.ui_component.remove_cluster_button]),
+            self.ui_component.meta_cluster_registry_box,
+        ], layout=Layout(gap='6px'))
 
         link = VBox([
             HBox([self.ui_component.main_viewer_checkbox]),
@@ -1006,8 +1272,8 @@ class DisplayLayer:
         ])
 
         self.controls_tab = Tab(
-            children=[setup, edit, trace, link, save],
-            titles=('Setup', 'Assign', 'Trace', 'Linked plugins', 'Save')
+            children=[setup, edit, rename, trace, link, save],
+            titles=('Setup', 'Assign', 'Rename', 'Trace', 'Linked plugins', 'Save')
         )
 
         self.controls_section = VBox([self.controls_tab], layout=Layout(width='100%', gap='8px'))
@@ -1218,7 +1484,7 @@ class DisplayLayer:
         cluster_colors_series = cluster_labels.map(cluster_colors)
 
         self.data.cluster_colors = cluster_colors_series.to_dict()
-        self.data.meta_cluster_colors = dict(cluster_colors)
+        self._sync_meta_cluster_registry(np.unique(meta_cluster_labels), dict(cluster_colors))
 
         sns.set_context('notebook')
 

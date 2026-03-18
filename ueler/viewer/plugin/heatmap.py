@@ -1,7 +1,7 @@
 # viewer/cell_gallery.py
 
 from ipywidgets import (SelectMultiple, FloatSlider, Dropdown, VBox, Output, TagsInput,
-                        Checkbox, IntText, Text, Button, HBox, Layout, IntSlider, Tab, RadioButtons, HTML)
+                        Checkbox, Text, Button, HBox, Layout, IntSlider, Tab, RadioButtons, HTML)
 from scipy.cluster.hierarchy import dendrogram
 import pandas as pd
 from ueler.viewer.observable import Observable
@@ -45,6 +45,7 @@ class HeatmapDisplay(DataLayer, InteractionLayer, DisplayLayer, PluginBase):
         }
 
         self.initiate_ui()
+        self._initialize_meta_cluster_registry()
         self.setup_widget_observers()
         # Prime the Assign tab controls to reflect any restored selection state.
         self.update_ui_components(self.data.current_clusters["index"].value)
@@ -166,13 +167,13 @@ class UiComponent:
             icon='unlock'
         )
 
-        self.cluster_id_text = IntText(
+        self.cluster_id_dropdown = Dropdown(
+            options=[],
             value=None,
-            description='Meta-cluster ID:',
+            description='Meta-cluster:',
             disabled=True,
             style={'description_width': 'auto'}
         )
-        # self.cluster_id_text.observe(self.on_cluster_id_change, names='value')
 
         self.cluster_id_apply_button = Button(
             description='Apply',
@@ -183,6 +184,64 @@ class UiComponent:
         )
 
         self.cluster_id_apply_button.on_click(parent.apply_new_cluster_id)
+
+        self.rename_cluster_dropdown = Dropdown(
+            options=[],
+            value=None,
+            description='Meta-cluster:',
+            disabled=False,
+            style={'description_width': 'auto'},
+            layout=Layout(width='99%')
+        )
+        self.rename_cluster_dropdown.observe(parent.on_rename_cluster_selection_change, names='value')
+
+        self.rename_cluster_name = Text(
+            value='',
+            description='Label:',
+            placeholder='Enter display name',
+            style={'description_width': 'auto'},
+            layout=Layout(width='99%')
+        )
+
+        self.rename_cluster_apply_button = Button(
+            description='Rename',
+            disabled=False,
+            button_style='',
+            tooltip='Rename selected meta-cluster',
+            icon='edit'
+        )
+        self.rename_cluster_apply_button.on_click(parent.rename_meta_cluster)
+
+        self.new_cluster_name = Text(
+            value='',
+            description='New label:',
+            placeholder='Optional display name',
+            style={'description_width': 'auto'},
+            layout=Layout(width='99%')
+        )
+
+        self.add_cluster_button = Button(
+            description='Add meta-cluster',
+            disabled=False,
+            button_style='',
+            tooltip='Create a new meta-cluster option',
+            icon='plus'
+        )
+        self.add_cluster_button.on_click(parent.add_meta_cluster)
+
+        self.remove_cluster_button = Button(
+            description='Remove selected',
+            disabled=False,
+            button_style='',
+            tooltip='Remove selected meta-cluster and reassign to unassigned',
+            icon='trash'
+        )
+        self.remove_cluster_button.on_click(parent.remove_meta_cluster)
+
+        self.meta_cluster_registry_box = VBox(
+            [],
+            layout=Layout(max_height='220px', overflow_y='auto', width='99%')
+        )
 
         self.main_viewer_checkbox = Checkbox(
             value=False,
@@ -264,6 +323,8 @@ class Data:
         }
         self.cluster_colors = {}
         self.meta_cluster_colors = {}
+        self.meta_cluster_names = {}
+        self.next_meta_cluster_id = 0
         self.g = None
 
 class linked_controls:

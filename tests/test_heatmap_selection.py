@@ -615,5 +615,80 @@ class HeatmapCanvasRestoreTests(unittest.TestCase):
         self.assertFalse(canvas.draw_idle_called)
 
 
+class HeatmapMetaClusterManagementTests(unittest.TestCase):
+    def _build_heatmap(self):
+        heatmap = HeatmapDisplay.__new__(HeatmapDisplay)
+        heatmap.data = Data()
+        heatmap.data.current_clusters["index"].value = [0]
+        heatmap.data.meta_cluster_names = {
+            -1: "Unassigned",
+            1: "Meta-cluster 1",
+            2: "Meta-cluster 2",
+        }
+        heatmap.data.meta_cluster_colors = {
+            -1: "#9e9e9e",
+            1: "#111111",
+            2: "#222222",
+        }
+        heatmap.data.next_meta_cluster_id = 3
+        heatmap.orientation_state = {
+            "cluster_order_positions": [0, 1],
+            "cluster_index": pd.Index(["A", "B"]),
+        }
+        heatmap.heatmap_data = pd.DataFrame(
+            {
+                "meta_cluster": [1, 2],
+                "meta_cluster_revised": [1, 2],
+            },
+            index=["A", "B"],
+        )
+        heatmap.adapter = SimpleNamespace(is_wide=lambda: False)
+        heatmap.display_row_colors_as_patches = MagicMock()
+        heatmap.update_text_labels = MagicMock()
+        heatmap._engage_cutoff_lock = MagicMock()
+        heatmap.ui_component = SimpleNamespace(
+            cluster_id_dropdown=SimpleNamespace(value=2, options=[]),
+            cluster_id_apply_button=SimpleNamespace(disabled=False),
+            rename_cluster_dropdown=SimpleNamespace(value=2, options=[]),
+            rename_cluster_name=SimpleNamespace(value="Meta-cluster 2"),
+            new_cluster_name=SimpleNamespace(value=""),
+            meta_cluster_registry_box=SimpleNamespace(children=()),
+        )
+        return heatmap
+
+    def test_assign_uses_dropdown_value(self):
+        heatmap = self._build_heatmap()
+        heatmap.ui_component.cluster_id_dropdown.value = 5
+
+        heatmap.apply_new_cluster_id()
+
+        self.assertEqual(heatmap.heatmap_data.loc["A", "meta_cluster_revised"], 5)
+        self.assertIn(5, heatmap.data.meta_cluster_names)
+        self.assertTrue(heatmap.display_row_colors_as_patches.called)
+
+    def test_add_meta_cluster_registers_new_option(self):
+        heatmap = self._build_heatmap()
+        heatmap.ui_component.new_cluster_name.value = "Immune"
+
+        heatmap.add_meta_cluster()
+
+        new_id = heatmap.ui_component.rename_cluster_dropdown.value
+        self.assertIn(new_id, heatmap.data.meta_cluster_names)
+        self.assertEqual(heatmap.data.meta_cluster_names[new_id], "Immune")
+        self.assertTrue(any(option[1] == new_id for option in heatmap.ui_component.cluster_id_dropdown.options))
+
+    def test_remove_meta_cluster_reassigns_to_unassigned(self):
+        heatmap = self._build_heatmap()
+        heatmap.ui_component.rename_cluster_dropdown.value = 2
+        heatmap.ui_component.cluster_id_dropdown.value = 2
+
+        heatmap.remove_meta_cluster()
+
+        self.assertEqual(heatmap.heatmap_data.loc["B", "meta_cluster_revised"], -1)
+        self.assertNotIn(2, heatmap.data.meta_cluster_names)
+        self.assertEqual(heatmap.ui_component.rename_cluster_dropdown.value, -1)
+        self.assertEqual(heatmap.ui_component.cluster_id_dropdown.value, -1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,11 @@
 ### v0.3.0-beta (OME-TIFF support)
 
+**Heatmap meta-cluster management tab (#73)**
+- Added a new `Rename` tab to the Heatmap plugin with meta-cluster rename/add/remove controls and a color-aware registry preview.
+- Replaced free-text meta-cluster assignment in the `Assign` tab with a dropdown fed by user-defined meta-cluster labels.
+- Removing a meta-cluster now reassigns any existing rows to the default unassigned meta-cluster (`-1`) to avoid invalid assignments.
+- Added focused regression coverage in `tests/test_heatmap_selection.py` for dropdown assignment, new meta-cluster creation, and remove+reassign behavior.
+
 **Per-channel visibility toggles (#66)**
 - Added a per-channel on/off checkbox in the channel controls so users can temporarily hide individual channels without altering the channel selection list.
 - Rendering now filters by visibility state, preserving existing color and contrast settings when channels are re-enabled.

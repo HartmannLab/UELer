@@ -103,6 +103,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 ### **UELer v0.3.0-beta Summary**
 - **OME-TIFF Support**: Added native support for loading OME-TIFF files (`.ome.tif`, `.ome.tiff`). The viewer now automatically detects OME-TIFF datasets and handles multi-channel lazy loading via `dask-image`, preserving memory efficiency.
 - Added per-channel visibility checkboxes in the channel controls so you can temporarily hide individual channels without removing them from the active selection.
+- Heatmap plugin now includes a dedicated `Rename` tab for meta-cluster management (rename/add/remove with color preview), and the `Assign` tab now uses a dropdown populated from user-defined meta-cluster labels.
 - Map mode navigation now converts FOV-local cell coordinates into stitched-map pixels via `ImageMaskViewer.resolve_cell_map_position`, letting scatter, heatmap, gallery, and Go To plugins centre precisely on cells without mutating the underlying table.
 - Chart scatter compose now relies on the viewer’s existing selection observers instead of `jscatter.compose` sync hooks, preventing the ValueError triggered when multiple plots are active.
 - VS Code notebooks now auto-fallback to a static Matplotlib scatter when widget front-ends fail (detected via `VSCODE_PID` or `UELER_SCATTER_BACKEND=static`), with an inline notice and an override flag to force the interactive widget backend. See [ueler/viewer/plugin/chart.py#L90-L110](ueler/viewer/plugin/chart.py#L90-L110).
