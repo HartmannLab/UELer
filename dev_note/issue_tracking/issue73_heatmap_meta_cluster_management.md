@@ -101,3 +101,70 @@ python -m unittest tests.test_heatmap_selection
 python -m unittest tests.test_heatmap_adapter tests.test_heatmap_selection
 ```
 - ✅ All tests passed (`Ran 19 tests ... OK`)
+
+## Follow-up Fix (2026-03-19, save-to-cell-table label output)
+### Problem
+- Heatmap `Save to Cell Table` was storing numeric meta-cluster IDs in the newly requested output column.
+- After users renamed meta-clusters in the `Rename` tab, exported columns still contained IDs instead of the renamed labels.
+
+### Resolution
+- Updated `save_to_cell_table` to map saved values through the meta-cluster registry display-name resolver.
+- The requested output column now stores display labels (including renamed labels), sourced from revised assignments when available.
+- Preserved revised numeric IDs in `<column_name>_revised` when the revised assignment column exists.
+
+### Validation
+```bash
+python -m unittest tests.test_heatmap_selection tests.test_heatmap_adapter
+```
+- ✅ All tests passed (`Ran 20 tests ... OK`)
+
+## Follow-up Fix (2026-03-19, revised export column label output)
+### Problem
+- The companion `<column_name>_revised` export column still contained numeric IDs after the first label-export fix.
+- Users expected the revised export column to show renamed labels too.
+
+### Resolution
+- Updated `save_to_cell_table` to map `<column_name>_revised` through the same meta-cluster display-name resolver.
+- Both exported columns now save labels instead of numeric IDs.
+
+### Validation
+```bash
+python -m unittest tests.test_heatmap_selection tests.test_heatmap_adapter
+```
+- ✅ All tests passed (`Ran 20 tests ... OK`)
+
+## Follow-up Fix (2026-03-19, z-score across markers option)
+### Problem
+- Heatmap normalization supported only marker-wise z-scoring across classes.
+- Users needed an option to z-score across markers (within each class) for alternate pattern interpretation.
+
+### Resolution
+- Added a new setup checkbox, `Z-score across markers`, in the Heatmap controls.
+- Updated `prepare_heatmap_data` to switch normalization axis:
+	- unchecked: default per-marker z-score across classes,
+	- checked: per-class z-score across selected markers.
+- Added focused tests for both modes in `tests/test_heatmap_selection.py`.
+
+### Validation
+```bash
+python -m unittest tests.test_heatmap_selection tests.test_heatmap_adapter
+```
+- ✅ All tests passed (`Ran 22 tests ... OK`, `skipped=2`)
+
+## Follow-up Fix (2026-03-19, z-score/non-zscore color palettes)
+### Problem
+- Heatmap colormap did not clearly encode signed z-score values and looked similar across normalization contexts.
+- Users requested a diverging signed palette for z-score mode and a red-ish palette when z-scoring is not active.
+
+### Resolution
+- Added mode-aware colormap selection in heatmap rendering:
+	- z-score mode: `bwr` with `center=0` (red positive, blue negative, white near zero),
+	- non-zscore mode: `Reds` sequential palette.
+- Extended `HeatmapModeAdapter.build_clustermap_kwargs` to accept explicit `cmap` and `center` kwargs.
+- Added focused tests for palette selection and adapter kwargs forwarding.
+
+### Validation
+```bash
+python -m unittest tests.test_heatmap_selection tests.test_heatmap_adapter
+```
+- ✅ All tests passed (`Ran 25 tests ... OK`, `skipped=2`)

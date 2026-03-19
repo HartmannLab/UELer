@@ -1,8 +1,10 @@
 import unittest
+from types import SimpleNamespace
 
 import tests.bootstrap  # noqa: F401
 
 from ueler.viewer.plugin.heatmap_adapter import HeatmapModeAdapter
+from ueler.viewer.plugin.heatmap import HeatmapDisplay
 
 
 class HeatmapModeAdapterTests(unittest.TestCase):
@@ -49,6 +51,47 @@ class HeatmapModeAdapterTests(unittest.TestCase):
 
         self.assertEqual(kwargs["figsize"][0], 5.4)
         self.assertEqual(kwargs["figsize"][1], 3.0)
+
+    def test_custom_cmap_and_center_are_forwarded(self):
+        adapter = HeatmapModeAdapter(mode="vertical")
+
+        kwargs = adapter.build_clustermap_kwargs(
+            plot_data=[[1.0]],
+            dendrogram=object(),
+            meta_cluster_labels=list(range(5)),
+            width=6,
+            height=8,
+            cluster_colors_series=["#000000"],
+            cmap="bwr",
+            center=0,
+        )
+
+        self.assertEqual(kwargs["cmap"], "bwr")
+        self.assertEqual(kwargs["center"], 0)
+
+
+class HeatmapColormapSelectionTests(unittest.TestCase):
+    def test_zscore_toggle_uses_diverging_palette(self):
+        heatmap = HeatmapDisplay.__new__(HeatmapDisplay)
+        heatmap.ui_component = SimpleNamespace(
+            zscore_across_markers_checkbox=SimpleNamespace(value=True)
+        )
+
+        settings = heatmap._heatmap_colormap_settings()
+
+        self.assertEqual(settings["cmap"], "bwr")
+        self.assertEqual(settings["center"], 0)
+
+    def test_non_zscore_uses_reds_palette(self):
+        heatmap = HeatmapDisplay.__new__(HeatmapDisplay)
+        heatmap.ui_component = SimpleNamespace(
+            zscore_across_markers_checkbox=SimpleNamespace(value=False)
+        )
+
+        settings = heatmap._heatmap_colormap_settings()
+
+        self.assertEqual(settings["cmap"], "Reds")
+        self.assertIsNone(settings["center"])
 
 
 if __name__ == "__main__":

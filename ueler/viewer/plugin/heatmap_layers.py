@@ -461,24 +461,42 @@ class DataLayer:
 
     def prepare_heatmap_data(self):
         df = self.main_viewer.cell_table
-        cluster = [self.ui_component.high_level_cluster_dropdown.value]
+        cluster_column = self.ui_component.high_level_cluster_dropdown.value
         subset_on = self.ui_component.subset_on_dropdown.value
 
-        channel = list(self.ui_component.channel_selector.value) + cluster
+        marker_columns = list(self.ui_component.channel_selector.value)
+        channel = marker_columns + [cluster_column]
 
         print(f"Preparing heatmap data for channels: {channel}")
-        print(f"Using cluster: {cluster}")
+        print(f"Using cluster: {[cluster_column]}")
 
         subset = list(self.ui_component.subset_selector.value)
         if subset:
             in_subset = df[subset_on].isin(subset)
             df = df[in_subset]
-        if df[cluster].nunique().values[0] > 300:
+        cluster_values = df[cluster_column]
+        try:
+            cluster_count = int(cluster_values.nunique())
+        except Exception:
+            cluster_count = len(pd.unique(cluster_values))
+        if cluster_count > 300:
             print("The number of classes is too large to display. Please select a smaller number of classes.")
             return
 
-        df_grouped = df[channel].groupby(cluster).median()
-        df_grouped = (df_grouped - df_grouped.mean()) / df_grouped.std()
+        df_grouped = df.groupby(cluster_column)[marker_columns].median()
+
+        zscore_across_markers = bool(
+            getattr(self.ui_component, 'zscore_across_markers_checkbox', None)
+            and self.ui_component.zscore_across_markers_checkbox.value
+        )
+        if zscore_across_markers:
+            row_means = df_grouped.mean(axis=1)
+            row_stds = df_grouped.std(axis=1).replace(0, np.nan)
+            df_grouped = df_grouped.sub(row_means, axis=0).div(row_stds, axis=0).fillna(0)
+        else:
+            col_means = df_grouped.mean(axis=0)
+            col_stds = df_grouped.std(axis=0).replace(0, np.nan)
+            df_grouped = df_grouped.sub(col_means, axis=1).div(col_stds, axis=1).fillna(0)
 
         self.heatmap_data = df_grouped
         self._update_orientation_state()
@@ -518,10 +536,12 @@ class DataLayer:
 
         high_level_cluster = self.ui_component.high_level_cluster_dropdown.value
 
-        if 'meta_cluster_revised' not in self.heatmap_data.columns:
-            heatmap_data = self.heatmap_data[['meta_cluster']].copy()
-        else:
-            heatmap_data = self.heatmap_data[['meta_cluster', 'meta_cluster_revised']].copy()
+        heatmap_data = pd.DataFrame(
+            {'meta_cluster': self.heatmap_data['meta_cluster']},
+            index=self.heatmap_data.index,
+        )
+        if 'meta_cluster_revised' in self.heatmap_data.columns:
+            heatmap_data['meta_cluster_revised'] = self.heatmap_data['meta_cluster_revised']
 
         heatmap_data.index.name = high_level_cluster
         heatmap_data.reset_index(inplace=True)
@@ -542,6 +562,21 @@ class DataLayer:
             self.main_viewer.cell_table.rename(
                 columns={'meta_cluster_revised': f"{column_name}_revised"}, inplace=True
             )
+
+        label_source_column = (
+            f"{column_name}_revised"
+            if f"{column_name}_revised" in self.main_viewer.cell_table.columns
+            else column_name
+        )
+        self.main_viewer.cell_table[column_name] = self.main_viewer.cell_table[label_source_column].map(
+            self._meta_cluster_display_name
+        )
+
+        revised_label_column = f"{column_name}_revised"
+        if revised_label_column in self.main_viewer.cell_table.columns:
+            self.main_viewer.cell_table[revised_label_column] = self.main_viewer.cell_table[
+                revised_label_column
+            ].map(self._meta_cluster_display_name)
 
         cluster_columns = self.main_viewer.cell_table.select_dtypes(include=['int', 'int64', 'object']).columns.tolist()
         print(cluster_columns)
@@ -1239,7 +1274,8 @@ class DisplayLayer:
             HBox([
                 self.ui_component.cluster_method_dropdown,
                 self.ui_component.distance_metric_dropdown,
-                self.ui_component.horizontal_layout_checkbox
+                self.ui_component.horizontal_layout_checkbox,
+                self.ui_component.zscore_across_markers_checkbox,
             ], layout=Layout(gap='8px')),
             HBox([self.ui_component.plot_button])
         ])
@@ -1467,6 +1503,15 @@ class DisplayLayer:
                 return True
         return False
 
+    def _heatmap_colormap_settings(self):
+        zscore_toggle = bool(
+            getattr(self.ui_component, 'zscore_across_markers_checkbox', None)
+            and self.ui_component.zscore_across_markers_checkbox.value
+        )
+        if zscore_toggle:
+            return {"cmap": "bwr", "center": 0}
+        return {"cmap": "Reds", "center": None}
+
     def redraw_cached_footer_canvas(self):
         artifacts = getattr(self, '_cached_footer_artifacts', None)
         if not artifacts:
@@ -1567,6 +1612,7 @@ class DisplayLayer:
             self.width,
             self.height,
             cluster_colors_series,
+            **self._heatmap_colormap_settings(),
         )
 
         g = sns.clustermap(**clustermap_kwargs)

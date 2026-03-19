@@ -1,5 +1,23 @@
 ### v0.3.0-beta (OME-TIFF support)
 
+**Heatmap z-score color palette toggle (#73 follow-up)**
+- Updated heatmap coloring to follow normalization mode:
+  - z-score mode uses a diverging palette (`bwr`) with white centered at `0`, blue for negative values, and red for positive values,
+  - non-zscore mode uses a red sequential palette (`Reds`).
+- Added test coverage for palette selection and clustermap kwargs forwarding in `tests/test_heatmap_adapter.py`.
+- Validated with: `python -m unittest tests.test_heatmap_selection tests.test_heatmap_adapter` (`Ran 25 tests ... OK`, `skipped=2`).
+
+**Heatmap z-score across markers option (#73 follow-up)**
+- Added a new Heatmap setup toggle, `Z-score across markers`, to normalize each class across selected markers.
+- Preserved existing default behavior (marker-wise z-score across classes) when the new toggle is off.
+- Added focused tests for both normalization modes in `tests/test_heatmap_selection.py` (auto-skipped under bootstrap pandas stubs).
+- Validated with: `python -m unittest tests.test_heatmap_selection tests.test_heatmap_adapter` (`Ran 22 tests ... OK`, `skipped=2`).
+
+**Heatmap Save to Cell Table uses renamed labels (#73 follow-up)**
+- Updated Heatmap `Save to Cell Table` so the requested output column stores meta-cluster display labels (including user-renamed labels) instead of raw numeric meta-cluster IDs.
+- Updated the companion `<column_name>_revised` column to store display labels as well, so both exported columns are label-based.
+- Confirmed compatibility by running focused heatmap suites: `python -m unittest tests.test_heatmap_selection tests.test_heatmap_adapter` (`Ran 20 tests ... OK`).
+
 **Heatmap horizontal-layout width clamp (#73 follow-up)**
 - Limited wide-layout heatmap figure width to the plugin width budget so rendered heatmaps no longer overflow the Heatmap footer tab in horizontal layout.
 - Kept data-driven sizing for smaller cluster counts while capping large cluster sets to prevent tab-width overrun.

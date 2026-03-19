@@ -66,28 +66,36 @@ class HeatmapModeAdapter:
         width,
         height,
         cluster_colors_series,
+        cmap="Purples",
+        center=None,
     ):
         """Return keyword arguments for seaborn.clustermap respecting orientation."""
         if self.is_wide():
             fig_width = self._wide_fig_width(meta_cluster_labels, width)
-            return {
+            kwargs = {
                 "data": plot_data,
                 "row_cluster": False,
                 "col_cluster": True,
                 "col_linkage": dendrogram,
                 "dendrogram_ratio": (0, 0.2),
-                "cmap": "Purples",
+                "cmap": cmap,
                 "figsize": (fig_width, height * 0.9),
                 "col_colors": cluster_colors_series,
             }
+            if center is not None:
+                kwargs["center"] = center
+            return kwargs
 
-        return {
+        kwargs = {
             "data": plot_data,
             "row_cluster": True,
             "col_cluster": False,
             "row_linkage": dendrogram,
             "dendrogram_ratio": (0.2, 0),
-            "cmap": "Purples",
+            "cmap": cmap,
             "figsize": (width * 0.9, len(meta_cluster_labels) * 0.3),
             "row_colors": cluster_colors_series,
         }
+        if center is not None:
+            kwargs["center"] = center
+        return kwargs

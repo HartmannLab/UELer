@@ -698,6 +698,69 @@ class HeatmapMetaClusterManagementTests(unittest.TestCase):
         self.assertIn(1, heatmap.data.meta_cluster_names)
         self.assertIn(2, heatmap.data.meta_cluster_names)
 
+    def test_meta_cluster_display_name_prefers_renamed_label(self):
+        heatmap = self._build_heatmap()
+        heatmap.data.meta_cluster_names[2] = "Immune-rich"
+
+        display_name = heatmap._meta_cluster_display_name(2)
+
+        self.assertEqual(display_name, "Immune-rich")
+
+
+class HeatmapZScoreModeTests(unittest.TestCase):
+    def _build_heatmap(self, zscore_across_markers):
+        heatmap = HeatmapDisplay.__new__(HeatmapDisplay)
+        heatmap.main_viewer = SimpleNamespace(
+            cell_table=pd.DataFrame(
+                {
+                    "cluster": ["A", "A", "B", "B"],
+                    "m1": [0.0, 2.0, 4.0, 6.0],
+                    "m2": [2.0, 6.0, 7.0, 9.0],
+                    "m3": [8.0, 10.0, 9.0, 11.0],
+                }
+            )
+        )
+        heatmap.ui_component = SimpleNamespace(
+            high_level_cluster_dropdown=SimpleNamespace(value="cluster"),
+            subset_on_dropdown=SimpleNamespace(value="cluster"),
+            subset_selector=SimpleNamespace(value=()),
+            channel_selector=SimpleNamespace(value=("m1", "m2", "m3")),
+            zscore_across_markers_checkbox=SimpleNamespace(value=zscore_across_markers),
+        )
+        heatmap.orientation_state = {
+            "horizontal": False,
+            "view": None,
+            "cluster_axis": 0,
+            "marker_axis": 1,
+            "cluster_index": None,
+            "marker_index": None,
+            "cluster_order_positions": [],
+            "marker_order_positions": [],
+            "cluster_leaves": [],
+            "marker_leaves": [],
+        }
+        return heatmap
+
+    @unittest.skipIf(getattr(pd, "__bootstrap_stub__", False), "requires pandas groupby/nunique support")
+    def test_default_zscore_is_per_marker_across_clusters(self):
+        heatmap = self._build_heatmap(zscore_across_markers=False)
+
+        heatmap.prepare_heatmap_data()
+
+        self.assertAlmostEqual(float(heatmap.heatmap_data.loc["A", "m1"]), -0.70710678, places=6)
+        self.assertAlmostEqual(float(heatmap.heatmap_data.loc["A", "m2"]), -0.70710678, places=6)
+        self.assertAlmostEqual(float(heatmap.heatmap_data.loc["A", "m3"]), -0.70710678, places=6)
+
+    @unittest.skipIf(getattr(pd, "__bootstrap_stub__", False), "requires pandas groupby/nunique support")
+    def test_optional_zscore_across_markers_changes_axis(self):
+        heatmap = self._build_heatmap(zscore_across_markers=True)
+
+        heatmap.prepare_heatmap_data()
+
+        self.assertAlmostEqual(float(heatmap.heatmap_data.loc["A", "m1"]), -0.87287156, places=6)
+        self.assertAlmostEqual(float(heatmap.heatmap_data.loc["A", "m2"]), -0.21821789, places=6)
+        self.assertAlmostEqual(float(heatmap.heatmap_data.loc["A", "m3"]), 1.09108945, places=6)
+
 
 if __name__ == "__main__":
     unittest.main()

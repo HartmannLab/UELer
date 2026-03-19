@@ -143,6 +143,13 @@ class UiComponent:
             indent=False
         )
         self.horizontal_layout_checkbox.observe(parent.on_orientation_toggle, names='value')
+        self.zscore_across_markers_checkbox = Checkbox(
+            value=False,
+            description='Z-score across markers',
+            disabled=False,
+            indent=False,
+            tooltip='Normalize each class across selected markers instead of per-marker across classes'
+        )
         self.plot_button = Button(
             description='Plot',
             disabled=False,

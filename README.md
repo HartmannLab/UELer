@@ -104,6 +104,9 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 - **OME-TIFF Support**: Added native support for loading OME-TIFF files (`.ome.tif`, `.ome.tiff`). The viewer now automatically detects OME-TIFF datasets and handles multi-channel lazy loading via `dask-image`, preserving memory efficiency.
 - Added per-channel visibility checkboxes in the channel controls so you can temporarily hide individual channels without removing them from the active selection.
 - Heatmap plugin now includes a dedicated `Rename` tab for meta-cluster management (rename/add/remove with color preview), and the `Assign` tab now uses a dropdown populated from user-defined meta-cluster labels.
+- Heatmap setup now includes a `Z-score across markers` toggle so users can normalize each class across selected markers; default behavior remains per-marker z-scoring across classes.
+- Heatmap color mapping now adapts to normalization mode: z-score mode uses a diverging red-white-blue palette centered at 0, while non-zscore mode uses a red sequential palette.
+- Heatmap `Save to Cell Table` now stores renamed meta-cluster labels in both the requested output column and the companion `<column_name>_revised` column (when revised assignments exist), instead of numeric IDs.
 - Fixed a #73 follow-up crash during heatmap regeneration by handling numpy array meta-cluster IDs safely in registry sync (avoids ambiguous truth-value evaluation in `_sync_meta_cluster_registry`).
 - Fixed a #73 follow-up rendering issue in horizontal layout where the footer area could remain blank after plotting; heatmap figures are now reliably replayed into the footer pane.
 - Fixed a #73 follow-up layout issue in horizontal mode where wide heatmaps could exceed the Heatmap footer tab width; heatmap width now clamps to the tab/plugin width budget.
