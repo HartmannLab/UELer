@@ -1,5 +1,10 @@
 ### v0.3.0-beta (OME-TIFF support)
 
+**Heatmap horizontal-layout width clamp (#73 follow-up)**
+- Limited wide-layout heatmap figure width to the plugin width budget so rendered heatmaps no longer overflow the Heatmap footer tab in horizontal layout.
+- Kept data-driven sizing for smaller cluster counts while capping large cluster sets to prevent tab-width overrun.
+- Added regression coverage in `tests/test_heatmap_adapter.py` for wide-mode clamping and unchanged vertical sizing.
+
 **Heatmap horizontal-layout footer replay fix (#73 follow-up)**
 - Fixed a wide-layout rendering issue where heatmaps could be generated but the footer panel remained blank after pressing `Plot`.
 - Added cached figure/canvas replay and a wide-mode post-plot restore hook in `DisplayLayer` so the footer panel reliably re-renders the latest heatmap.

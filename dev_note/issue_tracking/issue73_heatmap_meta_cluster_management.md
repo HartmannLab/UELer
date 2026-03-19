@@ -79,3 +79,25 @@ python -m unittest tests.test_heatmap_selection
 python -m unittest tests.test_heatmap_selection
 ```
 - ✅ All tests passed (`Ran 16 tests ... OK`)
+
+## Follow-up Fix (2026-03-19, horizontal layout width overflow)
+### Problem
+- In wide/horizontal layout, heatmap width was computed as `len(meta_cluster_labels) * 0.3` inches.
+- Large cluster counts could produce figures wider than the Heatmap footer tab, causing overflow in the horizontal tab pane.
+
+### Resolution
+- Added a wide-mode width clamp in `HeatmapModeAdapter.build_clustermap_kwargs`:
+	- Keep data-driven width for smaller heatmaps.
+	- Cap width to the plugin width budget (`width * 0.9`, with safe fallbacks) so rendered figures stay within tab width.
+
+### Regression Coverage
+- Added `tests/test_heatmap_adapter.py` with focused assertions for:
+	- wide-mode width clamping when cluster count is large,
+	- unchanged wide-mode sizing when under the cap,
+	- unchanged vertical-layout sizing behavior.
+
+### Validation
+```bash
+python -m unittest tests.test_heatmap_adapter tests.test_heatmap_selection
+```
+- ✅ All tests passed (`Ran 19 tests ... OK`)
