@@ -1760,6 +1760,14 @@ class DisplayLayer:
             if pd.isna(meta_value):
                 return None
 
+            # Always honor explicit registry colors first. This keeps colors stable
+            # for user-added meta-clusters that may not exist in the cutoff palette.
+            if meta_value in meta_palette:
+                return meta_palette[meta_value]
+
+            if cluster_label in cluster_palette:
+                return cluster_palette[cluster_label]
+
             if cmap is not None:
                 mapped_value = meta_value
                 if norm is not None and hasattr(norm, '__call__'):
@@ -1771,12 +1779,6 @@ class DisplayLayer:
                     return cmap(mapped_value)
                 except Exception:
                     pass
-
-            if meta_value in meta_palette:
-                return meta_palette[meta_value]
-
-            if cluster_label in cluster_palette:
-                return cluster_palette[cluster_label]
 
             return None
 

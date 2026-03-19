@@ -706,6 +706,24 @@ class HeatmapMetaClusterManagementTests(unittest.TestCase):
 
         self.assertEqual(display_name, "Immune-rich")
 
+    def test_cluster_color_resolver_prefers_registered_meta_cluster_colors(self):
+        heatmap = self._build_heatmap()
+        heatmap.data.meta_cluster_colors[9] = "#abcdef"
+        heatmap.data.cluster_colors = {"A": "#101010", "B": "#202020"}
+
+        color_axis = SimpleNamespace(
+            collections=[
+                SimpleNamespace(
+                    get_cmap=lambda: (lambda value: f"cmap-{value}"),
+                    norm=None,
+                )
+            ]
+        )
+
+        resolver = heatmap._build_cluster_color_resolver(color_axis)
+
+        self.assertEqual(resolver(9, "A"), "#abcdef")
+
 
 class HeatmapZScoreModeTests(unittest.TestCase):
     def _build_heatmap(self, zscore_across_markers):

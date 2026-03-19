@@ -1,5 +1,11 @@
 ### v0.3.0-beta (OME-TIFF support)
 
+**Heatmap meta-cluster colors beyond cutoff (#74)**
+- Fixed heatmap row-color resolution so explicit meta-cluster registry colors are applied before cutoff-derived colormap sampling.
+- This ensures user-added/revised meta-cluster IDs beyond the original dendrogram cutoff keep their intended colors in plot displays.
+- Added regression coverage in `tests/test_heatmap_selection.py`.
+- Validated with: `python -m unittest tests.test_heatmap_selection tests.test_heatmap_adapter` (`Ran 26 tests ... OK`, `skipped=2`).
+
 **Heatmap z-score color palette toggle (#73 follow-up)**
 - Updated heatmap coloring to follow normalization mode:
   - z-score mode uses a diverging palette (`bwr`) with white centered at `0`, blue for negative values, and red for positive values,
