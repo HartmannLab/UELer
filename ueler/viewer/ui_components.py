@@ -445,6 +445,24 @@ class uicomponents:
                 max_height='320px'
             )
         )
+
+        self.show_channel_legend_checkbox = Checkbox(
+            value=True,
+            description='Show channel legend',
+            disabled=False,
+            style={'description_width': 'auto'}
+        )
+        self.show_channel_legend_checkbox.observe(viewer.on_channel_legend_toggle, names='value')
+
+        self.channel_legend_box = HTML(
+            value='',
+            layout=Layout(width='100%', display='none')
+        )
+
+        self.channel_legend_panel = VBox(
+            children=(self.show_channel_legend_checkbox, self.channel_legend_box),
+            layout=Layout(width='100%', gap='4px', padding='4px 0')
+        )
         self.mask_controls_box = VBox(
             layout=Layout(
                 width='100%',
@@ -575,6 +593,7 @@ class uicomponents:
                 self.channel_selection_panel,
                 self.marker_set_controls_panel,
                 self.channel_controls_box,
+                self.channel_legend_panel,
             ),
             layout=Layout(width='100%', gap='10px')
         )

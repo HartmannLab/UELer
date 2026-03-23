@@ -22,6 +22,7 @@ _PANDAS_IMPORT_ERROR: str | None = None
 _PANDAS = "pandas"
 _NUMPY = "numpy"
 _SEABORN = "seaborn"
+_SEABORN_IMAGE = "seaborn_image"
 _SCIPY = "scipy"
 _SCIPY_CLUSTER = "scipy.cluster"
 _SCIPY_HIERARCHY = "scipy.cluster.hierarchy"
@@ -34,6 +35,7 @@ _MATPLOTLIB_PYPLOT = "matplotlib.pyplot"
 _SKIMAGE = "skimage"
 _SKIMAGE_SEGMENTATION = "skimage.segmentation"
 _DASK = "dask"
+_CV2 = "cv2"
 
 _DEFAULT_POINT_COLOR = (0.2, 0.4, 0.8, 0.85)
 
@@ -967,6 +969,13 @@ def _install_seaborn_stub() -> None:
     sys.modules[_SEABORN] = seaborn_stub
 
 
+def _install_seaborn_image_stub() -> None:
+    sys.modules.pop(_SEABORN_IMAGE, None)
+    seaborn_image_stub = types.ModuleType(_SEABORN_IMAGE)
+    seaborn_image_stub.__bootstrap_stub__ = True  # type: ignore[attr-defined]
+    sys.modules[_SEABORN_IMAGE] = seaborn_image_stub
+
+
 def _install_scipy_stub() -> None:
     for name in (_SCIPY_HIERARCHY, _SCIPY_CLUSTER, _SCIPY):
         sys.modules.pop(name, None)
@@ -1155,6 +1164,14 @@ def _ensure_dask_stub() -> None:
     module.delayed = _delayed  # type: ignore[attr-defined]
     module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
     sys.modules[_DASK] = module
+
+
+def _ensure_cv2_stub() -> None:
+    if _CV2 in sys.modules:
+        return
+    cv2_stub = types.ModuleType(_CV2)
+    cv2_stub.__bootstrap_stub__ = True  # type: ignore[attr-defined]
+    sys.modules[_CV2] = cv2_stub
 
 
 def _ensure_heatmap_dependency_stubs() -> None:
@@ -1567,12 +1584,14 @@ def initialize():
     _ensure_pandas()
     _ensure_ipywidgets_stub()
     _ensure_heatmap_dependency_stubs()
+    _install_seaborn_image_stub()
     _ensure_anywidget_stub()
     _ensure_jscatter_stub()
     _ensure_ipython_display()
     _ensure_matplotlib_stub()
     _ensure_skimage_stub()
     _ensure_dask_stub()
+    _ensure_cv2_stub()
     _patch_heatmap_utilities()
     _preload_viewer_plugins()
 

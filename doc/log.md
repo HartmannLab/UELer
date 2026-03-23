@@ -1,5 +1,11 @@
 ### v0.3.0-beta (OME-TIFF support)
 
+**Channel color legend (#75)**
+- Added a per-channel color legend with an on-image overlay and adjacent UI legend that mirrors the rendered channel colors.
+- Legend entries reflect only currently visible channels and can be toggled on/off via a new viewer control.
+- Added unit coverage in `tests/test_channel_legend.py`.
+- Validated with: `python -m unittest tests.test_channel_legend`.
+
 **Heatmap meta-cluster colors beyond cutoff (#74)**
 - Fixed heatmap row-color resolution so explicit meta-cluster registry colors are applied before cutoff-derived colormap sampling.
 - This ensures user-added/revised meta-cluster IDs beyond the original dendrogram cutoff keep their intended colors in plot displays.

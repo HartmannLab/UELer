@@ -4,6 +4,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 from dataclasses import dataclass, replace
 from matplotlib.text import Annotation
+try:  # pragma: no cover - optional import in stubbed environments
+    from matplotlib.offsetbox import AnchoredOffsetbox, TextArea, VPacker
+except Exception:  # pragma: no cover - handled in update_channel_legend
+    AnchoredOffsetbox = None
+    TextArea = None
+    VPacker = None
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
 from matplotlib.colors import to_rgb
 from ueler.image_utils import (
@@ -46,6 +52,7 @@ class ImageDisplay:
         )
         self.ax.axis("off")
         self.scalebar = None
+        self.channel_legend_box = None
         self.mask_id_annotation = self._create_annotation()
         self._setup_event_connections()
         self.selected_masks_label: set[MaskSelection] = set()
@@ -123,6 +130,61 @@ class ImageDisplay:
             )
         except Exception:  # pragma: no cover - fallback when Matplotlib back-end is mocked
             self.scalebar = None
+        self.fig.canvas.draw_idle()
+
+    def update_channel_legend(
+        self,
+        entries,
+        *,
+        enabled: bool = True,
+        location: str = "upper right",
+    ) -> None:
+        if self.channel_legend_box is not None:
+            try:
+                self.channel_legend_box.remove()
+            except Exception:  # pragma: no cover - defensive cleanup
+                pass
+            self.channel_legend_box = None
+
+        if not enabled or not entries:
+            self.fig.canvas.draw_idle()
+            return
+
+        if AnchoredOffsetbox is None or TextArea is None or VPacker is None:
+            self.fig.canvas.draw_idle()
+            return
+
+        try:
+            text_areas = []
+            for name, rgb in entries:
+                text_areas.append(
+                    TextArea(
+                        str(name),
+                        textprops={
+                            "color": rgb,
+                            "fontsize": 10,
+                            "fontweight": "bold",
+                        },
+                    )
+                )
+
+            pack = VPacker(children=text_areas, align="left", pad=0, sep=2)
+            box = AnchoredOffsetbox(
+                loc=location,
+                child=pack,
+                pad=0.3,
+                frameon=True,
+                bbox_to_anchor=(1.0, 1.0),
+                bbox_transform=self.ax.transAxes,
+                borderpad=0.6,
+            )
+            box.patch.set_facecolor((1.0, 1.0, 1.0, 0.85))
+            box.patch.set_edgecolor((0.2, 0.2, 0.2, 0.4))
+            self.ax.add_artist(box)
+            self.channel_legend_box = box
+        except Exception:  # pragma: no cover - best effort for legend rendering
+            self.channel_legend_box = None
+
         self.fig.canvas.draw_idle()
 
     def _create_annotation(self):

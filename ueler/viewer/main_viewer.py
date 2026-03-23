@@ -1,6 +1,7 @@
 # viewer.py
 
 import logging
+import html as html_lib
 import math
 import os
 import glob
@@ -1939,6 +1940,78 @@ class ImageMaskViewer:
                 visible.append(channel)
         return tuple(visible)
 
+    def _get_channel_legend_entries(self, visible_channels: Sequence[str]) -> Tuple[Tuple[str, Tuple[float, float, float]], ...]:
+        entries: List[Tuple[str, Tuple[float, float, float]]] = []
+        if not visible_channels:
+            return tuple(entries)
+
+        controls = getattr(self.ui_component, "color_controls", {})
+        for channel in visible_channels:
+            dropdown = controls.get(channel)
+            color_name = getattr(dropdown, "value", "White") if dropdown is not None else "White"
+            try:
+                color_value = self.predefined_colors.get(color_name, color_name)
+                rgb = to_rgb(color_value)
+            except Exception:
+                rgb = (1.0, 1.0, 1.0)
+            entries.append((str(channel), (float(rgb[0]), float(rgb[1]), float(rgb[2]))))
+        return tuple(entries)
+
+    @staticmethod
+    def _build_channel_legend_html(entries: Sequence[Tuple[str, Tuple[float, float, float]]]) -> str:
+        if not entries:
+            return ""
+
+        lines = []
+        for name, rgb in entries:
+            safe_name = html_lib.escape(str(name))
+            r = int(max(0, min(255, round(rgb[0] * 255))))
+            g = int(max(0, min(255, round(rgb[1] * 255))))
+            b = int(max(0, min(255, round(rgb[2] * 255))))
+            lines.append(
+                f"<div style=\"color: rgb({r}, {g}, {b}); font-weight: 600;\">{safe_name}</div>"
+            )
+
+        return (
+            "<div style=\"background: rgba(255, 255, 255, 0.85); "
+            "border: 1px solid #cccccc; border-radius: 4px; padding: 6px; "
+            "font-size: 12px; line-height: 1.2;\">"
+            + "".join(lines)
+            + "</div>"
+        )
+
+    def _refresh_channel_legend(self, visible_channels: Optional[Sequence[str]] = None) -> None:
+        if not hasattr(self, "ui_component"):
+            return
+
+        checkbox = getattr(self.ui_component, "show_channel_legend_checkbox", None)
+        enabled = bool(getattr(checkbox, "value", False)) if checkbox is not None else False
+
+        if visible_channels is None:
+            selected = list(getattr(self.ui_component.channel_selector, "value", ()))
+            visible_channels = self._get_visible_channels(selected)
+
+        entries = self._get_channel_legend_entries(visible_channels)
+
+        legend_box = getattr(self.ui_component, "channel_legend_box", None)
+        if legend_box is not None:
+            if enabled and entries:
+                legend_box.value = self._build_channel_legend_html(entries)
+                legend_box.layout.display = ""
+            else:
+                legend_box.value = ""
+                legend_box.layout.display = "none"
+
+        if hasattr(self, "image_display"):
+            try:
+                self.image_display.update_channel_legend(entries, enabled=enabled)
+            except Exception:
+                if self._debug:
+                    print("[viewer] Failed to update channel legend overlay")
+
+    def on_channel_legend_toggle(self, change) -> None:
+        self._refresh_channel_legend()
+
     def update_controls(self, change):
         """Create widgets dynamically based on selected channels and masks, and attach update callbacks."""
         channel_widgets = []
@@ -3371,6 +3444,8 @@ class ImageMaskViewer:
         selected_channels = list(self.ui_component.channel_selector.value)
         visible_channels = list(self._get_visible_channels(selected_channels))
         channel_tuple = tuple(visible_channels)
+
+        self._refresh_channel_legend(visible_channels)
 
         if not visible_channels:
             # If no channels selected, display black image sized to the current viewport
