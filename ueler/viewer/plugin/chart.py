@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import itertools
+import os
 from collections import OrderedDict
 from typing import Iterable, Mapping, Optional, Sequence, Set, Tuple, Union
 
@@ -90,6 +91,21 @@ class ChartDisplay(PluginBase):
         self._section_location = "vertical"
 
         self.single_point_click_state = 0
+        backend_env = os.environ.get("UELER_SCATTER_BACKEND")
+        default_backend = "static" if os.environ.get("VSCODE_PID") else "widget"
+        backend = (backend_env or default_backend).lower()
+        if backend not in {"widget", "static"}:
+            backend = default_backend
+        self._scatter_backend = backend
+        self._scatter_fallback_notice = HTML(
+            value=(
+                "<b>Scatter fallback active.</b> Interactive scatter widgets are disabled in this "
+                "environment; showing a static Matplotlib plot instead. Set "
+                "<code>UELER_SCATTER_BACKEND=widget</code> (after enabling widget support) to "
+                "force the interactive scatter backend."
+            ),
+            layout=Layout(width="100%"),
+        )
 
         self._wire_events()
         self._build_layout()
@@ -244,6 +260,10 @@ class ChartDisplay(PluginBase):
             self._plot_host.children = [HTML("<i>No rows match the current filters.</i>")]
             return
 
+        if self._scatter_backend == "static":
+            self._render_scatter_matplotlib(data, x_col, y_col, c_col)
+            return
+
         scatter_id = f"scatter-{next(self._id_counter)}"
         scatter = ScatterPlotWidget(
             identifier=scatter_id,
@@ -361,22 +381,14 @@ class ChartDisplay(PluginBase):
         fov = row[self.main_viewer.fov_key]
         x = row[self.main_viewer.x_key]
         y = row[self.main_viewer.y_key]
-        self.main_viewer.ui_component.image_selector.value = fov
-        ax = getattr(self.main_viewer.image_display, "ax", None)
-        if ax is None:
-            return
-        nav_stack = ax.figure.canvas.toolbar._nav_stack  # type: ignore[attr-defined]
-        current_view = nav_stack()
-        ax.set_xlim(x - 100, x + 100)
-        ax.set_ylim(y - 100, y + 100)
-        nav_stack.push(current_view)
-        ax.figure.canvas.draw_idle()
+        self.main_viewer.focus_on_cell(fov, x, y, radius=100.0)
 
     # ------------------------------------------------------------------
     # Trace + highlight
     # ------------------------------------------------------------------
     def trace_cells(self, _button) -> None:
-        if not self.main_viewer.image_display.selected_masks_label:
+        selections = list(self.main_viewer.image_display.selected_masks_label)
+        if not selections:
             print("No cells selected.")
             return
         x_col = self.ui_component.x_axis_selector.value
@@ -386,8 +398,9 @@ class ChartDisplay(PluginBase):
             return
         current_fov = self.main_viewer.ui_component.image_selector.value
         mask_ids = [
-            mask_id
-            for _mask_name, mask_id in self.main_viewer.image_display.selected_masks_label
+            selection.mask_id
+            for selection in selections
+            if getattr(selection, "fov", current_fov) == current_fov
         ]
         if not mask_ids:
             print("No cells selected for tracing.")
@@ -475,11 +488,39 @@ class ChartDisplay(PluginBase):
         grid = compose(
             entries,
             cols=cols,
-            sync_selection=True,
+            sync_selection=False,
             sync_hover=True,
             row_height=320,
         )
         self._plot_host.children = [grid]
+
+    def _render_scatter_matplotlib(
+        self, data: pd.DataFrame, x_col: str, y_col: str, c_col: Optional[str]
+    ) -> None:
+        scatter_kwargs = {}
+        color_values = None
+        if c_col and c_col != "None" and c_col in data.columns:
+            color_values = data[c_col]
+            scatter_kwargs["c"] = color_values
+        out = Output(layout=Layout(width="100%"))
+        with out:
+            fig, ax = plt.subplots(figsize=(self.width * 0.9, self.height))
+            ax.scatter(data[x_col], data[y_col], s=self.point_size, **scatter_kwargs)
+            ax.set_xlabel(x_col)
+            ax.set_ylabel(y_col)
+            if color_values is not None:
+                try:
+                    fig.colorbar(ax.collections[0], ax=ax)
+                except Exception:
+                    pass
+            fig.tight_layout()
+            plt.show(fig)
+        self._scatter_views.clear()
+        self._update_scatter_controls()
+        if self._scatter_backend == "static":
+            self._plot_host.children = [self._scatter_fallback_notice, out]
+        else:
+            self._plot_host.children = [out]
 
     def _update_scatter_controls(self, selected_id: Optional[str] = None) -> None:
         options = [

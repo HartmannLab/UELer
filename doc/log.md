@@ -1,3 +1,161 @@
+### v0.3.1
+
+**Dev note topic summaries**
+- Added topic-oriented summaries in `dev_note/` to consolidate project notes by area (viewer runtime, map mode, OME-TIFF, heatmap/FlowSOM, ROI, exports, and packaging).
+- Added `dev_note/index.md` to map original notes and issue-tracking files into the new summary topics.
+- Removed `dev_note/issue_tracking/` after distilling its contents into the topic summaries and related issue links.
+
+### v0.3.0-beta
+
+**Channel color legend (#75)**
+- Added a per-channel color legend with an on-image overlay and adjacent UI legend that mirrors the rendered channel colors.
+- Legend entries reflect only currently visible channels and can be toggled on/off via a new viewer control.
+- Added unit coverage in `tests/test_channel_legend.py`.
+- Validated with: `python -m unittest tests.test_channel_legend`.
+
+**Heatmap meta-cluster colors beyond cutoff (#74)**
+- Fixed heatmap row-color resolution so explicit meta-cluster registry colors are applied before cutoff-derived colormap sampling.
+- This ensures user-added/revised meta-cluster IDs beyond the original dendrogram cutoff keep their intended colors in plot displays.
+- Added regression coverage in `tests/test_heatmap_selection.py`.
+- Validated with: `python -m unittest tests.test_heatmap_selection tests.test_heatmap_adapter` (`Ran 26 tests ... OK`, `skipped=2`).
+
+**Heatmap z-score color palette toggle (#73 follow-up)**
+- Updated heatmap coloring to follow normalization mode:
+  - z-score mode uses a diverging palette (`bwr`) with white centered at `0`, blue for negative values, and red for positive values,
+  - non-zscore mode uses a red sequential palette (`Reds`).
+- Added test coverage for palette selection and clustermap kwargs forwarding in `tests/test_heatmap_adapter.py`.
+- Validated with: `python -m unittest tests.test_heatmap_selection tests.test_heatmap_adapter` (`Ran 25 tests ... OK`, `skipped=2`).
+
+**Heatmap z-score across markers option (#73 follow-up)**
+- Added a new Heatmap setup toggle, `Z-score across markers`, to normalize each class across selected markers.
+- Preserved existing default behavior (marker-wise z-score across classes) when the new toggle is off.
+- Added focused tests for both normalization modes in `tests/test_heatmap_selection.py` (auto-skipped under bootstrap pandas stubs).
+- Validated with: `python -m unittest tests.test_heatmap_selection tests.test_heatmap_adapter` (`Ran 22 tests ... OK`, `skipped=2`).
+
+**Heatmap Save to Cell Table uses renamed labels (#73 follow-up)**
+- Updated Heatmap `Save to Cell Table` so the requested output column stores meta-cluster display labels (including user-renamed labels) instead of raw numeric meta-cluster IDs.
+- Updated the companion `<column_name>_revised` column to store display labels as well, so both exported columns are label-based.
+- Confirmed compatibility by running focused heatmap suites: `python -m unittest tests.test_heatmap_selection tests.test_heatmap_adapter` (`Ran 20 tests ... OK`).
+
+**Heatmap horizontal-layout width clamp (#73 follow-up)**
+- Limited wide-layout heatmap figure width to the plugin width budget so rendered heatmaps no longer overflow the Heatmap footer tab in horizontal layout.
+- Kept data-driven sizing for smaller cluster counts while capping large cluster sets to prevent tab-width overrun.
+- Added regression coverage in `tests/test_heatmap_adapter.py` for wide-mode clamping and unchanged vertical sizing.
+
+**Heatmap horizontal-layout footer replay fix (#73 follow-up)**
+- Fixed a wide-layout rendering issue where heatmaps could be generated but the footer panel remained blank after pressing `Plot`.
+- Added cached figure/canvas replay and a wide-mode post-plot restore hook in `DisplayLayer` so the footer panel reliably re-renders the latest heatmap.
+
+**Heatmap meta-cluster registry sync fix (#73 follow-up)**
+- Fixed a runtime crash in `DataLayer._sync_meta_cluster_registry` caused by boolean evaluation of numpy arrays (`meta_cluster_ids or []`) during heatmap regeneration.
+- Updated the sync path to guard only for `None`, preserving numpy array inputs from `np.unique(meta_cluster_labels)`.
+- Added regression coverage in `tests/test_heatmap_selection.py` to verify numpy-array IDs are handled safely.
+
+**Heatmap meta-cluster management tab (#73)**
+- Added a new `Rename` tab to the Heatmap plugin with meta-cluster rename/add/remove controls and a color-aware registry preview.
+- Replaced free-text meta-cluster assignment in the `Assign` tab with a dropdown fed by user-defined meta-cluster labels.
+- Removing a meta-cluster now reassigns any existing rows to the default unassigned meta-cluster (`-1`) to avoid invalid assignments.
+- Added focused regression coverage in `tests/test_heatmap_selection.py` for dropdown assignment, new meta-cluster creation, and remove+reassign behavior.
+
+**Per-channel visibility toggles (#66)**
+- Added a per-channel on/off checkbox in the channel controls so users can temporarily hide individual channels without altering the channel selection list.
+- Rendering now filters by visibility state, preserving existing color and contrast settings when channels are re-enabled.
+- Tightened the per-channel color dropdown sizing to keep the visibility checkbox visible alongside long channel labels.
+
+**ROI manager without cell table (#65)**
+- Enabled the SidePlots accordion to render even when `cell_table` is missing by loading only the ROI manager plugin in that case, keeping ROI capture and persistence available for raw-image-only sessions.
+- Preserved the full plugin set when the cell table is present, avoiding regressions for existing workflows.
+
+**VS Code scatter fallback (#64)**
+- Added a VS Code–aware scatter backend selector so notebooks running under VS Code (or when `UELER_SCATTER_BACKEND=static`) fall back to a static Matplotlib scatter with an inline notice, preventing blank outputs when the jupyter-scatter/anywidget frontend fails to hydrate. Users can force the interactive widget backend via `UELER_SCATTER_BACKEND=widget` after enabling widget support. [ueler/viewer/plugin/chart.py#L90-L110](ueler/viewer/plugin/chart.py#L90-L110) [ueler/viewer/plugin/chart.py#L262-L280](ueler/viewer/plugin/chart.py#L262-L280) [ueler/viewer/plugin/chart.py#L500-L528](ueler/viewer/plugin/chart.py#L500-L528)
+
+**OME-TIFF keyframe compatibility (#63 follow-up)**
+- Added a tolerant OME reader fallback that retries series discovery without OME parsing when tifffile raises `RuntimeError: incompatible keyframe`, letting stacked TIFFs with mismatched keyframes load instead of crashing the viewer.
+- Introduced regression coverage in `tests/test_ome_tiff_loading.py::test_incompatible_keyframe_retries_without_ome_series` and ran `python -m unittest tests.test_ome_tiff_loading` to validate the fallback path.
+
+**OME-TIFF suffix-less detection (#63 follow-up)**
+- Detect OME-TIFF files that lack the `.ome.tif(f)` suffix by inspecting TIFF metadata, enabling valid OME stacks named with plain `.tif`/`.tiff` extensions to load and appear in the FOV list.
+- Added regression coverage in `tests/test_ome_tiff_loading.py::test_find_ome_tiff_files_detects_suffixless` and re-ran `python -m unittest tests.test_ome_tiff_loading`.
+
+**OME-TIFF frame-aware lazy loading (#63)**
+- Added frame-aware slicing to `OMEFovWrapper`, including frame metadata, cache keys keyed by frame, and a setter for active frame index to keep stacked TIFF reads lazy via Dask.
+- Adjusted pyramid level selection to prefer the coarsest level that meets floor-based downsample expectations, avoiding over-fetching while satisfying irregular pyramids.
+- Plumbed frame selection and metadata through `ImageMaskViewer.load_fov`, storing per-FOV OME info for downstream UI/diagnostics.
+- Extended `tests/test_ome_tiff_loading.py` with frame-selection coverage; ran `python -m unittest tests.test_ome_tiff_loading tests.test_ome_rendering_fix`.
+
+**OME-TIFF Memory Crash Fix (#60 follow-up)**
+- Fixed a critical memory crash in `ImageDisplay` initialization where full-resolution OME-TIFF dimensions caused massive buffer allocation (e.g., 23GB for 44k images). The viewer now initializes with a minimal buffer while maintaining correct full-resolution coordinate systems for zooming and panning.
+
+
+**OME-TIFF Memory Optimization (#60 follow-up)**
+- Resolved memory maxout issues when loading large multi-channel OME-TIFF files by switching from eager to lazy channel statistics computation.
+- `ImageMaskViewer` now computes channel max intensity only when a channel is selected for display, significantly reducing startup time and memory footprint for datasets with many channels.
+
+**OME-TIFF Rendering Fixes (#60 follow-up)**
+- Fixed view drift when switching pyramid levels in OME-TIFF files by correctly inferring the full-resolution image dimensions from the OME metadata wrapper instead of the downsampled dask array.
+- Resolved `ValueError` when zooming out to lower resolution levels by handling shape mismatches between the downsampled OME-TIFF array and the expected canvas size, ensuring robust rendering even when pyramid levels have slightly different dimensions due to rounding.
+- Fixed an issue where zooming out fully would not show the entire image due to aggressive downsampling level selection; the viewer now prioritizes pyramid levels that are exact divisors of the requested factor and validates that the selected level covers the full image extent, preventing incomplete display when pyramid levels have irregular dimensions.
+- Added regression tests in `tests/test_ome_rendering_fix.py` and `tests/test_ome_level_selection_fix.py` to verify correct shape inference, rendering stability, and downsample level selection.
+
+**OME-TIFF Loading Support (#60)**
+- Implemented native support for loading OME-TIFF files (`.ome.tif`, `.ome.tiff`) directly in UELer.
+- Added `OMEFovWrapper` in `ueler.data_loader` to handle lazy loading of OME-TIFFs using `dask-image` and `tifffile`, ensuring memory efficiency by respecting the viewer's downsampling factor.
+- Updated `ImageMaskViewer` to automatically detect OME-TIFF files in the base folder and switch to `ome-tiff` mode, populating the FOV list from file names.
+- Preserved existing folder-based loading behavior while enabling seamless integration of OME-TIFF datasets.
+- Added unit tests in `tests/test_ome_tiff_loading.py` to verify channel name extraction and wrapper functionality.
+
+**Map mode stitched interactions (#62 follow-up)**
+- Reworked stitched mask highlight overlays to pull tile placement from `MapTileViewport` metadata and aligned single-FOV contour drawing with viewport offsets, resolving the Reply (3) highlight drift and `IndexError` when zoomed.
+- Added a descriptor-driven FOV→map index and updated `focus_on_cell` to activate the correct stitched map before resolving coordinates, preventing cross-slide navigation from landing on stale canvases.
+- Extended `VirtualMapLayer` with viewport metadata and `localize_map_pixel`, and wired `ImageMaskViewer`/`ImageDisplay` hover & click handlers to translate stitched map pixels back into FOV-local mask hits while preserving tooltip data.
+- Introduced the `MaskSelection` structure across viewer plugins so chart and heatmap tracing consume stitched-aware selections, restoring mask highlights in map mode without breaking single-FOV workflows.
+- Expanded regression coverage in `tests/test_map_mode_activation.py` (map switching, reverse localization, stitched highlight alignment) and `tests/test_image_display_tooltip.py` (viewport-aware patch updates); ran `python -m unittest tests.test_map_mode_activation` and `python -m unittest tests.test_image_display_tooltip`.
+
+**Map mode cell localization (#62)**
+- Extended `VirtualMapLayer` with per-FOV geometry lookups and taught `ImageMaskViewer` to convert FOV-local cell coordinates into stitched-map pixels via the new `resolve_cell_map_position` and `focus_on_cell` helpers, keeping toolbar history intact while navigating.
+- Updated the scatter, heatmap, cell gallery, and Go To plugins to rely on the stitched coordinate helper when map mode is active, preserving legacy behaviour when descriptors omit the target FOV.
+- Added regression coverage in `tests/test_map_mode_activation.py` and expanded `tests/bootstrap.py` stubs for the `skimage` modules so the viewer’s map-navigation paths remain testable without heavy dependencies; ran `python -m unittest tests.test_map_mode_activation` to confirm the fix.
+- Addressed a follow-up `ValueError` raised from `jscatter.compose` by disabling redundant selection syncing in the chart plugin, relying on the existing observer pipeline; added a regression test to ensure the compose integration remains selection-safe.
+
+**Cell tooltip key alignment (#61)**
+- Reworked `ImageDisplay` hover handling to resolve cell records via the viewer’s configured `fov`, `label`, and optional `mask` keys so datasets with renamed columns now show full channel means and user-selected labels instead of just the mask ID.
+- Added `resolve_cell_record` helper in `ueler/viewer/tooltip_utils.py` with caching and unit coverage for default and custom key combinations, keeping repeated hover events fast while gracefully skipping missing rows.
+- Expanded `tests/test_image_display_tooltip.py` with lightweight table stubs and integration coverage, running `python -m unittest tests.test_image_display_tooltip` to confirm tooltips render the expected values across key configurations.
+
+
+### v0.3.0-alpha
+**Map reset alignment (#59)**
+- Refresh the Matplotlib navigation stack whenever map mode resizes the canvas so the reset button now restores the stitched slide bounds instead of the original square FOV, eliminating the post-reset black canvas and zoom failures.
+- Added regression coverage for populated and empty toolbar stacks in `tests/test_map_mode_activation.py` and ran `python -m unittest tests.test_map_mode_activation` to confirm the update.
+
+**Map viewport alignment (#59)**
+- Offset stitched-map viewport coordinates by each descriptor’s minimum X/Y bounds so tiles render correctly when slide coordinates do not originate at zero, resolving the black canvas shown after switching maps.
+- Added regression coverage in `tests/test_map_mode_activation.py::test_render_map_view_offsets_descriptor_bounds` to ensure the viewer now supplies offset-aware viewports to `VirtualMapLayer`.
+
+**Map mode activation stability (#58)**
+- Replaced the full-resolution placeholder in `_set_map_canvas_dimensions` with a constant 1×1 canvas so selecting large stitched maps no longer allocates 50+ GB arrays and crashes the kernel.
+- Recomputed the stitched-view downsample factor during map activation using `select_downsample_factor`, ensuring the first render starts at the coarsest allowed scale for the slide dimensions.
+- Added `tests/test_map_mode_activation.py` to cover the placeholder shape and downsample recalculation with lightweight dependency stubs.
+- Hardened `image_utils.get_axis_limits_with_padding` so even very coarse downsample factors produce positive viewport bounds, resolving the "Viewport must have positive width and height" regression reported after shipping the crash fix.
+- Fixed the zoom-triggered `ValueError: operands could not be broadcast together` by recalculating stitched tile bounds with ceil-based downsample dimensions in `VirtualMapLayer._compute_tile_region`; locked with `tests/test_virtual_map_layer.py::test_render_handles_partial_downsample_tiles`.
+**Map-mode cache integration (#3)**
+- Centralized the stitched tile cache inside `ImageMaskViewer`, wiring image cache evictions to `VirtualMapLayer.invalidate_for_fov` and driving cache keys with the viewer's channel/mask/annotation state so map renders stay in sync with UI changes.
+- Extended `tests/test_virtual_map_layer.py` to assert cache busting when the viewer signature changes, protecting the new integration path.
+
+**FOV load cycle documentation (map mode)**
+- Expanded `dev_note/FOV_load_cycle.md` with the current map mode scaffolding, covering the `ENABLE_MAP_MODE` flag, descriptor ingestion via `MapDescriptorLoader`, and how `VirtualMapLayer` reuses `_render_fov_region` for stitched viewport renders.
+- Documented the region-level cache keys and geometry helpers exposed by `VirtualMapLayer`, plus the pending invalidation wiring so backend groundwork is visible ahead of UI integration.
+
+**VirtualMapLayer core groundwork (#3)**
+- Introduced `VirtualMapLayer` to stitch slide descriptors into viewport-sized composites, including per-tile caching and viewport intersection logic.
+- Refactored `ImageMaskViewer` rendering into a reusable `_compose_fov_image` helper and exposed `_render_fov_region` so map mode can reuse existing channel, annotation, and mask pipelines.
+- Added `tests/test_virtual_map_layer.py` to verify gap handling, cache reuse, and invalidation semantics for the new layer.
+
+**Map descriptor loader groundwork (#3)**
+- Added `MapDescriptorLoader` to validate translation-only slide descriptors, reject mixed-unit inputs, and surface duplicate FOV warnings in preparation for map-based tiled mode.
+- Wired the loader into `ImageMaskViewer` behind the `ENABLE_MAP_MODE` feature flag so descriptor parsing feedback reaches users without affecting existing single-FOV workflows.
+- Introduced unit fixtures covering valid, mixed-unit, and malformed descriptors to guarantee deterministic slide/FOV registries during ingest.
+
 ### v0.2.1
 **Mask painter performance patch**
 - Fixed performance regression introduced in v0.2.0 where using the mask painter across multiple FOVs caused slowdowns due to expensive global color registration and unnecessary cell gallery regeneration on FOV changes.

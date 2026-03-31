@@ -1,5 +1,7 @@
 # image_utils.py
 
+import math
+
 from skimage.segmentation import find_boundaries
 from dask import delayed
 
@@ -781,76 +783,54 @@ def plot_color_palette(color_palette, title):
     return(fig)
 
 def get_axis_limits_with_padding(self, downsample_factor):
-    """
-    Calculate the axis limits with padding and adjust for downsampling.
+    """Return padded axis limits aligned to the requested downsample factor."""
 
-    This function retrieves the current axis limits from the image display,
-    ensures they are within the bounds of the image dimensions, adds minimal
-    padding to ensure at least a minimal area is displayed, and adjusts the
-    limits according to the specified downsample factor.
+    width = max(1, int(getattr(self, "width", 1)))
+    height = max(1, int(getattr(self, "height", 1)))
+    ds = max(1, int(downsample_factor or 1))
 
-    Parameters:
-    self (object): The instance of the class containing image display and dimensions.
-    downsample_factor (int): The factor by which the image is downsampled.
+    ax = getattr(self.image_display, "ax", None)
+    if ax is None:
+        return 0, width, 0, height, 0, math.ceil(width / ds), 0, math.ceil(height / ds)
 
-    Returns:
-    tuple: A tuple containing the following values:
-        - xmin (int): The minimum x-axis limit.
-        - xmax (int): The maximum x-axis limit.
-        - ymin (int): The minimum y-axis limit.
-        - ymax (int): The maximum y-axis limit.
-        - xmin_ds (int): The minimum x-axis limit adjusted for downsampling.
-        - xmax_ds (int): The maximum x-axis limit adjusted for downsampling.
-        - ymin_ds (int): The minimum y-axis limit adjusted for downsampling.
-        - ymax_ds (int): The maximum y-axis limit adjusted for downsampling.
-    """
-    # Get current axis limits
-    xlim = self.image_display.ax.get_xlim()
-    ylim = self.image_display.ax.get_ylim()
-    xmin, xmax = int(max(xlim[0], 0)), int(min(xlim[1], self.width))
-    ymin, ymax = int(max(ylim[0], 0)), int(min(ylim[1], self.height))
+    xlim = getattr(ax, "get_xlim", lambda: (0.0, float(width)))()
+    ylim = getattr(ax, "get_ylim", lambda: (0.0, float(height)))()
 
-    # Correct for inverted y-axis in images
-    if ymin > ymax:
-        ymin, ymax = ymax, ymin
-    if xmin > xmax:
-        xmin, xmax = xmax, xmin
+    xmin_raw, xmax_raw = float(min(xlim)), float(max(xlim))
+    ymin_raw, ymax_raw = float(min(ylim)), float(max(ylim))
 
-    # Add padding to ensure at least a minimal area is displayed
-    if xmax - xmin < 1:
-        xmax = xmin + 1
-    if ymax - ymin < 1:
-        ymax = ymin + 1
+    xmin = max(0, math.floor(xmin_raw))
+    xmax = min(width, math.ceil(xmax_raw))
+    if xmax <= xmin:
+        xmax = min(width, xmin + 1)
 
-    
+    ymin = max(0, math.floor(ymin_raw))
+    ymax = min(height, math.ceil(ymax_raw))
+    if ymax <= ymin:
+        ymax = min(height, ymin + 1)
 
-    # Adjust for downsample factor
-    xmin_ds = xmin // downsample_factor
-    xmin = xmin_ds * downsample_factor
-    xmax_ = range(xmin,xmax,downsample_factor)[-1]
-    xmax_ds = xmax_ // downsample_factor +1
-    
-    ymin_ds = ymin // downsample_factor
-    ymin = ymin_ds * downsample_factor
-    ymax_ = range(ymin,ymax,downsample_factor)[-1]
-    ymax_ds = ymax_ // downsample_factor +1
+    xmin_ds = max(0, xmin // ds)
+    xmax_ds = math.ceil(xmax / ds)
+    width_ds = max(1, math.ceil(width / ds))
+    xmax_ds = min(width_ds, max(xmin_ds + 1, xmax_ds))
 
-    # Ensure indices are within bounds
-    xmin = max(0, xmin)
-    xmax = min(self.width, xmax)
-    ymin = max(0, ymin)
-    ymax = min(self.height, ymax)
+    ymin_ds = max(0, ymin // ds)
+    ymax_ds = math.ceil(ymax / ds)
+    height_ds = max(1, math.ceil(height / ds))
+    ymax_ds = min(height_ds, max(ymin_ds + 1, ymax_ds))
 
-    # Downsampled image dimensions
-    img_ds_shape = (self.height // downsample_factor, self.width // downsample_factor)
-    xmin_ds = max(0, xmin_ds)
-    xmax_ds = min(img_ds_shape[1], xmax_ds)
-    xmax_ds = range(xmin_ds,xmax_ds,downsample_factor)[-1]
-    ymin_ds = max(0, ymin_ds)
-    ymax_ds = min(img_ds_shape[0], ymax_ds)
-    ymax_ds = range(ymin_ds,ymax_ds,downsample_factor)[-1]
+    xmin_aligned = xmin_ds * ds
+    xmax_aligned = min(width, xmax_ds * ds)
+    ymin_aligned = ymin_ds * ds
+    ymax_aligned = min(height, ymax_ds * ds)
 
-    xmax = xmax_ds * downsample_factor
-    ymax = ymax_ds * downsample_factor
-
-    return xmin, xmax, ymin, ymax, xmin_ds, xmax_ds, ymin_ds, ymax_ds
+    return (
+        xmin_aligned,
+        xmax_aligned,
+        ymin_aligned,
+        ymax_aligned,
+        xmin_ds,
+        xmax_ds,
+        ymin_ds,
+        ymax_ds,
+    )

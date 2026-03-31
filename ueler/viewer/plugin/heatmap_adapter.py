@@ -43,6 +43,21 @@ class HeatmapModeAdapter:
         elif hasattr(ui, "place_side"):
             ui.place_side()
 
+    @staticmethod
+    def _wide_fig_width(meta_cluster_labels, width):
+        """Clamp wide-layout figure width so it stays inside the footer tab area."""
+        base_width = len(meta_cluster_labels) * 0.3
+        max_width = 6.0
+        try:
+            if width is not None:
+                max_width = float(width) * 0.9
+        except (TypeError, ValueError):
+            max_width = 6.0
+
+        # Keep a practical minimum while preventing overflow in horizontal layout.
+        max_width = max(4.0, max_width)
+        return min(base_width, max_width)
+
     def build_clustermap_kwargs(
         self,
         plot_data,
@@ -51,27 +66,36 @@ class HeatmapModeAdapter:
         width,
         height,
         cluster_colors_series,
+        cmap="Purples",
+        center=None,
     ):
         """Return keyword arguments for seaborn.clustermap respecting orientation."""
         if self.is_wide():
-            return {
+            fig_width = self._wide_fig_width(meta_cluster_labels, width)
+            kwargs = {
                 "data": plot_data,
                 "row_cluster": False,
                 "col_cluster": True,
                 "col_linkage": dendrogram,
                 "dendrogram_ratio": (0, 0.2),
-                "cmap": "Purples",
-                "figsize": (len(meta_cluster_labels) * 0.3, height * 0.9),
+                "cmap": cmap,
+                "figsize": (fig_width, height * 0.9),
                 "col_colors": cluster_colors_series,
             }
+            if center is not None:
+                kwargs["center"] = center
+            return kwargs
 
-        return {
+        kwargs = {
             "data": plot_data,
             "row_cluster": True,
             "col_cluster": False,
             "row_linkage": dendrogram,
             "dendrogram_ratio": (0.2, 0),
-            "cmap": "Purples",
+            "cmap": cmap,
             "figsize": (width * 0.9, len(meta_cluster_labels) * 0.3),
             "row_colors": cluster_colors_series,
         }
+        if center is not None:
+            kwargs["center"] = center
+        return kwargs

@@ -1,0 +1,12 @@
+{
+  "exportDateTime": "2024-11-04T12:45:08.914Z",
+  "fovs": [
+    {
+      "name": "FOV_pixels",
+      "slideId": "402",
+      "centerPointMicrons": {"x": 100.0, "y": 200.0},
+      "centerPointPixels": {"x": 10, "y": 20},
+      "frameSizePixels": {"width": 512, "height": 512}
+    }
+  ]
+}

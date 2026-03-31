@@ -2,10 +2,15 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from matplotlib.text import Annotation
+try:  # pragma: no cover - optional import in stubbed environments
+    from matplotlib.offsetbox import AnchoredOffsetbox, TextArea, VPacker
+except Exception:  # pragma: no cover - handled in update_channel_legend
+    AnchoredOffsetbox = None
+    TextArea = None
+    VPacker = None
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
-import matplotlib.font_manager as fm
 from matplotlib.colors import to_rgb
 from ueler.image_utils import (
     calculate_downsample_factor,
@@ -21,7 +26,14 @@ import cv2
 import math
 from matplotlib.backend_bases import MouseButton
 from ueler.viewer.decorators import update_status_bar
-from .tooltip_utils import format_tooltip_value
+from .tooltip_utils import format_tooltip_value, resolve_cell_record
+
+
+@dataclass(frozen=True)
+class MaskSelection:
+    fov: str
+    mask: str
+    mask_id: int
 
 
 class ImageDisplay:
@@ -34,15 +46,16 @@ class ImageDisplay:
         self.ax.set_xlim(0, self.width)
         # self.ax.set_ylim(self.height, 0)  # Invert y-axis for image orientation
         self.img_display = self.ax.imshow(
-            np.zeros((self.height, self.width, 3), dtype=np.float32),
+            np.zeros((1, 1, 3), dtype=np.float32),
             extent=(0, self.width, 0, self.height),
             origin='upper'
         )
         self.ax.axis("off")
         self.scalebar = None
+        self.channel_legend_box = None
         self.mask_id_annotation = self._create_annotation()
         self._setup_event_connections()
-        self.selected_masks_label = set() # Set to track selected mask labels
+        self.selected_masks_label: set[MaskSelection] = set()
         self.fig.canvas.header_visible = False
         self.fig.tight_layout()
         self.selected_mask_label = set()  # For storing mask IDs to display
@@ -119,6 +132,61 @@ class ImageDisplay:
             self.scalebar = None
         self.fig.canvas.draw_idle()
 
+    def update_channel_legend(
+        self,
+        entries,
+        *,
+        enabled: bool = True,
+        location: str = "upper right",
+    ) -> None:
+        if self.channel_legend_box is not None:
+            try:
+                self.channel_legend_box.remove()
+            except Exception:  # pragma: no cover - defensive cleanup
+                pass
+            self.channel_legend_box = None
+
+        if not enabled or not entries:
+            self.fig.canvas.draw_idle()
+            return
+
+        if AnchoredOffsetbox is None or TextArea is None or VPacker is None:
+            self.fig.canvas.draw_idle()
+            return
+
+        try:
+            text_areas = []
+            for name, rgb in entries:
+                text_areas.append(
+                    TextArea(
+                        str(name),
+                        textprops={
+                            "color": rgb,
+                            "fontsize": 10,
+                            "fontweight": "bold",
+                        },
+                    )
+                )
+
+            pack = VPacker(children=text_areas, align="left", pad=0, sep=2)
+            box = AnchoredOffsetbox(
+                loc=location,
+                child=pack,
+                pad=0.3,
+                frameon=True,
+                bbox_to_anchor=(1.0, 1.0),
+                bbox_transform=self.ax.transAxes,
+                borderpad=0.6,
+            )
+            box.patch.set_facecolor((1.0, 1.0, 1.0, 0.85))
+            box.patch.set_edgecolor((0.2, 0.2, 0.2, 0.4))
+            self.ax.add_artist(box)
+            self.channel_legend_box = box
+        except Exception:  # pragma: no cover - best effort for legend rendering
+            self.channel_legend_box = None
+
+        self.fig.canvas.draw_idle()
+
     def _create_annotation(self):
         return self.ax.annotate(
             "",
@@ -163,7 +231,7 @@ class ImageDisplay:
             new_downsample_factor = 8
 
         if new_downsample_factor != self.main_viewer.current_downsample_factor:
-            self.main_viewer.current_downsample_factor = new_downsample_factor
+            self.main_viewer.on_downsample_factor_changed(new_downsample_factor)
         
         if self.main_viewer.initialized:
             self.main_viewer.update_display(self.main_viewer.current_downsample_factor)
@@ -196,71 +264,50 @@ class ImageDisplay:
     def process_hover_event(self):
         event = self.last_hover_event
         x, y = event.xdata, event.ydata
-
-        # Convert to integer indices
-        ix = int(x)
-        iy = int(y)
-
-        # Adjust for downsample factor and image extent
-        downsample_factor = self.main_viewer.current_downsample_factor
-        xmin, xmax = self.ax.get_xlim()
-        ymin, ymax = self.ax.get_ylim()
-
-        # Correct for inverted axes
-        if ymin > ymax:
-            ymin, ymax = ymax, ymin
-        if xmin > xmax:
-            xmin, xmax = xmax, xmin
-
-        xmin = int(max(xmin, 0))
-        xmax = int(min(xmax, self.width))
-        ymin = int(max(ymin, 0))
-        ymax = int(min(ymax, self.height))
-
-        ix_ds = (ix - xmin) // downsample_factor
-        iy_ds = (iy - ymin) // downsample_factor
-
-        mask_id = 0
-        found_mask = False
-
-        # Use a more efficient search method for masks
-        for mask_name, label_mask in self.main_viewer.current_label_masks.items():
-            if 0 <= iy_ds < label_mask.shape[0] and 0 <= ix_ds < label_mask.shape[1]:
-                mask_id = label_mask[iy_ds, ix_ds].compute()
-                if mask_id != 0:
-                    # Cache the filtered DataFrame
-                    if not hasattr(self, '_cached_cell_data') or self._cached_cell_data_key != (mask_name, mask_id):
-                        self._cached_cell_data = self.main_viewer.cell_table[
-                            (self.main_viewer.cell_table['fov'] == self.main_viewer.ui_component.image_selector.value) &
-                            (self.main_viewer.cell_table['label'] == mask_id)
-                        ]
-                        self._cached_cell_data_key = (mask_name, mask_id)
-
-                    cell_data = self._cached_cell_data
-
-                    # Construct tooltip text
-                    tooltip_text = f"{mask_name} ID: {mask_id}"
-                    if not cell_data.empty:
-                        for channel in self.main_viewer.ui_component.channel_selector.value:
-                            if channel in cell_data.columns:
-                                value = cell_data[channel].iloc[0]
-                                tooltip_text += f"\n{channel}: {format_tooltip_value(value)}"
-                        for label in getattr(self.main_viewer, 'selected_tooltip_labels', []):
-                            if label in cell_data.columns:
-                                value = cell_data[label].iloc[0]
-                                tooltip_text += f"\n{label}: {format_tooltip_value(value)}"
-
-                    # Update annotation
-                    self.mask_id_annotation.xy = (x, y)
-                    self.mask_id_annotation.set_text(tooltip_text)
-                    self.mask_id_annotation.set_visible(True)
-                    self.fig.canvas.draw_idle()
-                    found_mask = True
-                    break  # Stop after finding the first mask
-
-        if not found_mask:
+        if x is None or y is None:
             self.mask_id_annotation.set_visible(False)
             self.fig.canvas.draw_idle()
+            return
+
+        hit = self.main_viewer.resolve_mask_hit_at_viewport(x, y)
+        if hit is None:
+            self.mask_id_annotation.set_visible(False)
+            self.fig.canvas.draw_idle()
+            return
+
+        lookup_key = (hit.fov_name, hit.mask_name, hit.mask_id)
+        cached_key = getattr(self, "_cached_tooltip_key", None)
+        if cached_key != lookup_key:
+            cell_row = hit.cell_record
+            self._cached_tooltip_row = cell_row
+            self._cached_tooltip_key = lookup_key
+        else:
+            cell_row = getattr(self, "_cached_tooltip_row", None)
+
+        mask_label = hit.mask_name or "Mask"
+        tooltip_lines = [f"{mask_label} ID: {hit.mask_id}"]
+
+        if cell_row is not None:
+            channel_selector = getattr(self.main_viewer.ui_component, "channel_selector", None)
+            selected_channels = getattr(channel_selector, "value", ()) if channel_selector else ()
+            for channel in selected_channels or ():
+                if channel in cell_row.index:
+                    tooltip_lines.append(
+                        f"{channel}: {format_tooltip_value(cell_row[channel])}"
+                    )
+
+            for label in getattr(self.main_viewer, "selected_tooltip_labels", ()):  # type: ignore[attr-defined]
+                if label in cell_row.index:
+                    tooltip_lines.append(
+                        f"{label}: {format_tooltip_value(cell_row[label])}"
+                    )
+
+        tooltip_text = "\n".join(tooltip_lines)
+
+        self.mask_id_annotation.xy = (x, y)
+        self.mask_id_annotation.set_text(tooltip_text)
+        self.mask_id_annotation.set_visible(True)
+        self.fig.canvas.draw_idle()
 
     def on_mouse_click(self, event):
         """Handle mouse click events to select/unselect masks."""
@@ -280,33 +327,24 @@ class ImageDisplay:
             print("Mouse click outside data area")
             return
 
-        # Convert to integer indices
-        ix = int(x)
-        iy = int(y)
+        hit = self.main_viewer.resolve_mask_hit_at_viewport(x, y)
+        if hit is None:
+            print("No mask at click location")
+            self.clear_patches()
+            return
 
-        # Ensure indices are within bounds
-        ix = min(max(ix, 0), self.width - 1)
-        iy = min(max(iy, 0), self.height - 1)
+        selection = MaskSelection(fov=str(hit.fov_name), mask=str(hit.mask_name), mask_id=int(hit.mask_id))
 
-        if event.button == MouseButton.LEFT: # Ctrl + left click
-            if event.key != 'control':
+        if event.button == MouseButton.LEFT:
+            multi_select = event.key == 'control'
+            if not multi_select:
                 self.clear_patches()
-            for mask_name, label_mask_full in self.main_viewer.full_resolution_label_masks.items():
-                if 0 <= iy < self.height and 0 <= ix < self.width:
-                    mask_id = label_mask_full[iy, ix].compute()
-                    if mask_id != 0:
-                        key = (mask_name, mask_id)
-                        if key in self.selected_masks_label:
-                            # Deselect the mask
-                            self.selected_masks_label.discard(key)
-                        else:
-                            # Store the full-resolution binary mask of the selected mask_id
-                            # mask_binary = (label_mask_full == mask_id)
-                            self.selected_masks_label.add(key)
-                        self.update_patches()
-                        break  # Stop after processing the first mask found
-        elif event.button == 3:  # Right click
-            # Clear all selections
+            if selection in self.selected_masks_label:
+                self.selected_masks_label.discard(selection)
+            else:
+                self.selected_masks_label.add(selection)
+            self.update_patches(do_not_reset=multi_select)
+        elif event.button in {MouseButton.RIGHT, 3}:  # Right click fallback to legacy value
             self.clear_patches()
 
     def clear_patches(self):
@@ -319,18 +357,45 @@ class ImageDisplay:
             # Skip updating patches if already handling a draw event
             return
 
+        if self.main_viewer._map_mode_active and self.main_viewer._active_map_id:
+            try:
+                self.main_viewer._update_map_mask_highlights()
+            except Exception:
+                if self.main_viewer._debug:
+                    print("[viewer] Failed to update map mask highlights")
+            return
+
         # Adjust for downsample factor
         downsample_factor = self.main_viewer.current_downsample_factor
 
         xmin, xmax, ymin, ymax, xmin_ds, xmax_ds, ymin_ds, ymax_ds = get_axis_limits_with_padding(self.main_viewer, downsample_factor)
+
+        selector = getattr(self.main_viewer.ui_component, "image_selector", None)
+        current_fov = selector.value if selector is not None else None
+        selections = [sel for sel in self.selected_masks_label if sel.fov == current_fov]
+        if not selections:
+            if not do_not_reset:
+                combined = self._materialize_combined()
+                if combined is not None:
+                    self.img_display.set_data(combined)
+                    self.fig.canvas.draw_idle()
+            return
         
         # Loop through selected masks
         selected_mask_visible_ds = None
         for mask_name, label_mask_full in self.main_viewer.full_resolution_label_masks.items():
-            mask_visible_ds = label_mask_full[ymin:ymax:downsample_factor, xmin:xmax:downsample_factor].compute()
-            selected_mask_visible_ds = np.zeros_like(mask_visible_ds)
-            for mask_name, mask_id in self.selected_masks_label:
-                print(f"Processing mask {mask_name} ID {mask_id}")
+            matching_ids = {sel.mask_id for sel in selections if sel.mask == mask_name}
+            if not matching_ids:
+                continue
+            try:
+                mask_visible_ds = label_mask_full[ymin:ymax:downsample_factor, xmin:xmax:downsample_factor].compute()
+            except AttributeError:
+                mask_visible_ds = np.asarray(
+                    label_mask_full[ymin:ymax:downsample_factor, xmin:xmax:downsample_factor]
+                )
+            if selected_mask_visible_ds is None:
+                selected_mask_visible_ds = np.zeros_like(mask_visible_ds)
+            for mask_id in matching_ids:
                 selected_mask_visible_ds[mask_visible_ds == mask_id] = mask_id
 
         # If selected_mask_full_visible is defined
@@ -348,14 +413,39 @@ class ImageDisplay:
                     edge_mask = thicken_outline(edge_mask, outline_thickness - 1)
                 
                 if do_not_reset:
-                    combined = self.img_display.get_array().copy()
+                    combined = np.array(self.img_display.get_array(), copy=True)
                 else:
                     combined = self._materialize_combined()
                     if combined is None:
                         return
+                    combined = np.array(combined, copy=True)
 
-                # Highlight selected cells in white
-                combined[edge_mask] = [1, 1, 1]
+                combined_height, combined_width = combined.shape[:2]
+                region_height_expected = max(0, int(ymax_ds - ymin_ds))
+                region_width_expected = max(0, int(xmax_ds - xmin_ds))
+
+                rows, cols = np.nonzero(edge_mask)
+                if combined_height == region_height_expected and combined_width == region_width_expected:
+                    mapped_rows = rows
+                    mapped_cols = cols
+                else:
+                    mapped_rows = rows + int(ymin_ds)
+                    mapped_cols = cols + int(xmin_ds)
+
+                valid = (
+                    (mapped_rows >= 0)
+                    & (mapped_rows < combined_height)
+                    & (mapped_cols >= 0)
+                    & (mapped_cols < combined_width)
+                )
+                mapped_rows = mapped_rows[valid]
+                mapped_cols = mapped_cols[valid]
+                if mapped_rows.size == 0:
+                    self.img_display.set_data(combined)
+                    self.fig.canvas.draw_idle()
+                    return
+
+                combined[mapped_rows, mapped_cols] = [1, 1, 1]
                 self.img_display.set_data(combined)
 
                 if self.main_viewer._debug:
@@ -386,12 +476,18 @@ class ImageDisplay:
 
         # Ensure mask_ids is a set of integers
         if isinstance(mask_ids, int):
-            mask_ids = {mask_ids}
+            mask_ids = {int(mask_ids)}
         else:
-            mask_ids = set(mask_ids)
+            mask_ids = {int(mid) for mid in mask_ids}
 
         # Clear previous selections
         self.selected_masks_label.clear()
+
+        selector = getattr(self.main_viewer.ui_component, "image_selector", None)
+        current_fov = selector.value if selector is not None else None
+        if not current_fov:
+            print("No active FOV to apply mask selection.")
+            return
 
         # Get the full-resolution label mask
         label_mask_full = self.main_viewer.full_resolution_label_masks.get(mask_name)
@@ -399,15 +495,20 @@ class ImageDisplay:
             print(f"Mask '{mask_name}' not found.")
             return
 
-        # Select the specified masks
-        unique_label_full = np.unique(label_mask_full).compute()
+        try:
+            full_values = label_mask_full.compute()
+        except AttributeError:
+            full_values = np.asarray(label_mask_full)
+
+        unique_label_full = set(np.unique(full_values).tolist())
         for mask_id in mask_ids:
             if mask_id not in unique_label_full:
                 continue
-            key = (mask_name, mask_id)
-            self.selected_masks_label.add(key)
+            self.selected_masks_label.add(
+                MaskSelection(fov=str(current_fov), mask=str(mask_name), mask_id=int(mask_id))
+            )
 
-        self.update_patches()
+        self.update_patches(do_not_reset=True)
     
     def set_mask_colors_current_fov(self, mask_name, mask_ids, color=None, cummulative = False):
         cdf = self.main_viewer.current_downsample_factor

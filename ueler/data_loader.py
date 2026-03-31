@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import glob
+import logging
+import math
 import os
-from typing import Dict, List, Tuple
+import xml.etree.ElementTree as ET
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
 TIFF_PATTERNS: Tuple[str, ...] = ("*.tiff", "*.tif")
 _CHUNK_SIZE = (1024, 1024)
+
+
+logger = logging.getLogger(__name__)
 
 
 def _list_tiff_files(folder: str) -> List[str]:
@@ -289,3 +295,416 @@ def load_annotations_for_fov(fov_name, annotations_folder, annotation_names_set)
         annotation_names_set.add(annotation_name)
 
     return annotation_dict
+
+
+def _ensure_tifffile():
+    try:
+        import tifffile  # type: ignore
+    except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
+        raise ImportError(
+            "tifffile is required to read OME-TIFF metadata for UELer."
+        ) from exc
+    return tifffile
+
+
+def extract_ome_channel_names(path: str) -> List[str]:
+    tifffile = _ensure_tifffile()
+    try:
+        with tifffile.TiffFile(path) as tif:
+            xml_str = tif.ome_metadata
+    except Exception:
+        return []
+
+    if not xml_str:
+        return []
+
+    try:
+        root = ET.fromstring(xml_str)
+        # Try standard OME namespace
+        ns = {"ome": "http://www.openmicroscopy.org/Schemas/OME/2016-06"}
+        channels = root.findall(".//ome:Channel", ns)
+        if not channels:
+             # Try without namespace or older
+             channels = [elem for elem in root.iter() if elem.tag.endswith("Channel")]
+        
+        channel_names = []
+        for i, ch in enumerate(channels):
+            name = ch.attrib.get("Name")
+            if not name:
+                name = ch.attrib.get("ID", f"Channel_{i}")
+            channel_names.append(name)
+        return channel_names
+    except Exception:
+        return []
+
+
+def open_ome_tiff_as_dask(path: str):
+    imread = _ensure_imread()
+    return imread(path)
+
+
+def find_ome_tiff_files(base_folder: str) -> List[str]:
+    """Return TIFF files in base_folder that contain OME metadata.
+
+    Matches conventional `.ome.tif(f)` names first, then inspects other `.tif(f)`
+    files via `tifffile` to see if they advertise OME metadata. Files are
+    returned as absolute paths, sorted for stable ordering.
+    """
+
+    tifffile = _ensure_tifffile()
+    seen = set()
+    ome_paths: List[str] = []
+
+    patterns = ("*.ome.tif", "*.ome.tiff", "*.tif", "*.tiff")
+    for pattern in patterns:
+        for path in glob.glob(os.path.join(base_folder, pattern)):
+            if os.path.isdir(path):
+                continue
+            if path in seen:
+                continue
+
+            # Treat standard OME suffixes as OME without extra I/O.
+            if pattern.startswith("*.ome"):
+                ome_paths.append(path)
+                seen.add(path)
+                continue
+
+            try:
+                with tifffile.TiffFile(path) as tif:
+                    if getattr(tif, "is_ome", False):
+                        ome_paths.append(path)
+                        seen.add(path)
+                        continue
+                    ome_xml = getattr(tif, "ome_metadata", None)
+                    if ome_xml:
+                        ome_paths.append(path)
+                        seen.add(path)
+                        continue
+            except Exception:
+                # Non-OME or unreadable; ignore silently to avoid blocking other files.
+                continue
+
+    ome_paths.sort()
+    return ome_paths
+
+
+class OMEFovWrapper:
+    def __init__(self, path: str, ds_factor: int):
+        self.path = path
+        self.ds_factor = max(1, int(ds_factor) or 1)
+        self.is_ome_tiff = True
+        self._channel_cache: Dict[Tuple[str, int, int], object] = {}
+        self._level_specs: List[Dict[str, object]] = []
+        self._level_count = 0
+        self._series_index = 0
+        self._closed = False
+        self.axes: str = ""
+        self.frame_axis: Optional[str] = None
+        self.frame_count: int = 1
+        self.current_frame_index: int = 0
+
+        tifffile = _ensure_tifffile()
+        self._tif = None
+        self._series = None
+        open_errors: List[BaseException] = []
+
+        for attempt in ({}, {"is_ome": False}):
+            tif = None
+            try:
+                tif = tifffile.TiffFile(path, **attempt)
+                series = tif.series[self._series_index]
+                self._tif = tif
+                self._series = series
+                if attempt:
+                    logger.warning(
+                        "[OMEFovWrapper] falling back to non-OME series parsing for %s after error: %s",
+                        path,
+                        open_errors[0] if open_errors else "",
+                    )
+                break
+            except RuntimeError as exc:
+                open_errors.append(exc)
+                if tif is not None:
+                    try:
+                        tif.close()
+                    except Exception:
+                        pass
+                # Retry without OME parsing when keyframe metadata is incompatible
+                if "incompatible keyframe" in str(exc):
+                    continue
+                raise
+
+        if self._series is None or self._tif is None:
+            last_error = open_errors[-1] if open_errors else RuntimeError(
+                f"Failed to open OME series for {path}"
+            )
+            raise last_error
+        self._init_levels()
+
+        self.channel_names = extract_ome_channel_names(path)
+        n_channels = self._infer_channel_count()
+        if not self.channel_names or len(self.channel_names) != n_channels:
+            self.channel_names = [f"Channel_{i}" for i in range(n_channels)]
+        elif len(self.channel_names) > n_channels:
+            self.channel_names = self.channel_names[:n_channels]
+        elif len(self.channel_names) < n_channels:
+            self.channel_names.extend(
+                f"Channel_{i}" for i in range(len(self.channel_names), n_channels)
+            )
+
+        self._name_to_index = {name: idx for idx, name in enumerate(self.channel_names)}
+
+    def _init_levels(self) -> None:
+        levels = list(getattr(self._series, "levels", ()))
+        if not levels:
+            levels = [self._series]
+        base_axes = getattr(levels[0], "axes", getattr(self._series, "axes", ""))
+        base_shape = getattr(levels[0], "shape", self._series.shape)
+        base_y = self._axis_size(base_shape, base_axes, "Y") or 1
+        self.axes = base_axes or ""
+
+        for idx, level in enumerate(levels):
+            axes = getattr(level, "axes", base_axes)
+            shape = tuple(int(dim) for dim in getattr(level, "shape", base_shape))
+            level_y = self._axis_size(shape, axes, "Y") or base_y
+            scale = max(1, int(round(base_y / level_y)))
+            self._level_specs.append(
+                {
+                    "level_index": idx,
+                    "axes": axes,
+                    "shape": shape,
+                    "scale": scale,
+                    "array": None,
+                }
+            )
+
+        self._level_count = len(self._level_specs)
+        frame_axis, frame_count = self._detect_frame_axis(base_axes, base_shape)
+        self.frame_axis = frame_axis
+        self.frame_count = max(1, frame_count)
+
+    @staticmethod
+    def _axis_size(shape: Tuple[int, ...], axes: str, label: str) -> Optional[int]:
+        try:
+            idx = axes.index(label)
+        except ValueError:
+            return None
+        return int(shape[idx]) if 0 <= idx < len(shape) else None
+
+    def _infer_channel_count(self) -> int:
+        if not self._level_specs:
+            return 1
+        axes = self._level_specs[0]["axes"]
+        shape = self._level_specs[0]["shape"]
+        idx = self._axis_index(axes, "C")
+        if idx is not None:
+            return int(shape[idx])
+        if len(shape) == 2:
+            return 1
+        return int(shape[0])
+
+    @staticmethod
+    def _axis_index(axes: str, label: str) -> Optional[int]:
+        try:
+            return axes.index(label)
+        except ValueError:
+            return None
+
+    def _detect_frame_axis(self, axes: str, shape: Tuple[int, ...]) -> Tuple[Optional[str], int]:
+        for candidate in ("T", "Z", "S"):
+            idx = self._axis_index(axes, candidate)
+            if idx is not None:
+                size = self._axis_size(shape, axes, candidate)
+                return candidate, int(size or 0)
+        return None, 1
+
+    @property
+    def shape(self) -> Tuple[int, int]:
+        if not self._level_specs:
+            return (0, 0)
+        level0 = self._level_specs[0]
+        shape = level0["shape"]
+        axes = level0["axes"]
+
+        y_idx = self._axis_index(axes, "Y")
+        x_idx = self._axis_index(axes, "X")
+
+        # Fallback if axes not found (assume Y, X order if 2D, or similar)
+        if y_idx is None:
+            y_idx = 0 if len(shape) >= 2 else 0
+        if x_idx is None:
+            x_idx = 1 if len(shape) >= 2 else 0
+
+        h = int(shape[y_idx]) if y_idx < len(shape) else 0
+        w = int(shape[x_idx]) if x_idx < len(shape) else 0
+        return (h, w)
+
+    @property
+    def metadata(self) -> Dict[str, object]:
+        return {
+            "axes": self.axes,
+            "channel_names": list(self.channel_names),
+            "frame_axis": self.frame_axis,
+            "frame_count": self.frame_count,
+            "shape": self.shape,
+        }
+
+    def get_channel_names(self) -> List[str]:
+        return self.channel_names
+
+    def set_downsample_factor(self, ds_factor: int) -> None:
+        ds = max(1, int(ds_factor) or 1)
+        if ds != self.ds_factor:
+            self.ds_factor = ds
+            self._channel_cache.clear()
+
+    def set_frame_index(self, frame_index: int) -> None:
+        if self.frame_axis is None:
+            return
+        try:
+            idx = int(frame_index)
+        except (TypeError, ValueError):
+            idx = 0
+        idx = max(0, min(idx, max(0, self.frame_count - 1)))
+        if idx != self.current_frame_index:
+            self.current_frame_index = idx
+            self._channel_cache.clear()
+
+    def _select_level(self, ds_factor: int) -> Tuple[Dict[str, object], int]:
+        ds = max(1, int(ds_factor) or 1)
+        
+        # Helper to get dimensions
+        def get_dims(level):
+            shape = level["shape"]
+            axes = level["axes"]
+            h = self._axis_size(shape, axes, "Y")
+            w = self._axis_size(shape, axes, "X")
+            # Fallback if axes missing
+            if h is None: h = shape[0] if len(shape) >= 2 else 1
+            if w is None: w = shape[1] if len(shape) >= 2 else 1
+            return h, w
+
+        base_level = self._level_specs[0]
+        base_h, base_w = get_dims(base_level)
+        
+        expected_h = max(1, base_h // ds)
+        expected_w = max(1, base_w // ds)
+
+        candidates = sorted(self._level_specs, key=lambda l: l["scale"], reverse=True)
+
+        for level in candidates:
+            level_scale = max(1, int(level.get("scale", 1)))
+            residual = max(1, int(math.ceil(ds / level_scale)))
+            h, w = get_dims(level)
+            actual_h = math.ceil(h / residual)
+            actual_w = math.ceil(w / residual)
+
+            if actual_h >= expected_h and actual_w >= expected_w:
+                return level, residual
+
+        return base_level, ds
+
+    def _get_level_array(self, level: Dict[str, object]):
+        cached = level.get("array")
+        if cached is not None:
+            return cached
+        _, da = _ensure_dask()
+        level_param = level["level_index"] if self._level_count > 1 else None
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "[OMEFovWrapper] materializing pyramid level %s (scale=%s) for %s",
+                level.get("level_index"),
+                level.get("scale"),
+                self.path,
+            )
+        store = self._series.aszarr(level=level_param)
+        array = da.from_zarr(store)
+        level["array"] = array
+        return array
+
+    def _slice_channel(self, level: Dict[str, object], channel_idx: int, residual: int):
+        arr = self._get_level_array(level)
+        axes = level["axes"]
+        slices = []
+        for axis in axes:
+            if axis == "C":
+                slices.append(channel_idx)
+            elif axis == "Y":
+                slices.append(slice(None, None, residual))
+            elif axis == "X":
+                slices.append(slice(None, None, residual))
+            elif axis in {"Z", "T", "S"}:
+                if axis == self.frame_axis:
+                    slices.append(self.current_frame_index)
+                else:
+                    slices.append(0)
+            else:
+                slices.append(slice(None))
+
+        if "C" not in axes and arr.ndim >= 3:
+            slices[0] = channel_idx
+
+        return arr[tuple(slices)]
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._channel_cache.clear()
+        for level in self._level_specs:
+            level["array"] = None
+        try:
+            self._tif.close()
+        except Exception:
+            pass
+        self._closed = True
+
+    def __del__(self):
+        self.close()
+
+    def get(self, key, default=None):
+        if key in self._name_to_index:
+            return self[key]
+        return default
+
+    def keys(self):
+        return self.channel_names
+
+    def __getitem__(self, channel_name: str):
+        if channel_name not in self._name_to_index:
+            return None
+
+        frame_idx = self.current_frame_index if self.frame_axis is not None else 0
+        cache_key = (channel_name, self.ds_factor, frame_idx)
+        cached = self._channel_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        level, residual = self._select_level(self.ds_factor)
+        idx = self._name_to_index[channel_name]
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "[OMEFovWrapper] slicing channel %s (ds=%s, level_scale=%s) for %s",
+                channel_name,
+                self.ds_factor,
+                level.get("scale"),
+                self.path,
+            )
+        sliced = self._slice_channel(level, idx, residual)
+        self._channel_cache[cache_key] = sliced
+        return sliced
+
+    def values(self):
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "[OMEFovWrapper] values() requested for %s (%d channels); this may materialize arrays",
+                self.path,
+                len(self.channel_names),
+            )
+        return [self[name] for name in self.channel_names]
+
+    def items(self):
+        return [(name, self[name]) for name in self.channel_names]
+
+    def __contains__(self, key):
+        return key in self._name_to_index
+

@@ -281,29 +281,31 @@ def display_ui(viewer):
     """Display the main UI."""
     # Add a new output widget for charts
     viewer.BottomPlots = BottomPlots()
+    viewer.SidePlots = SidePlots()
+    allow_plugins = None
     if viewer.cell_table is not None:
-        viewer.SidePlots = SidePlots()
-        viewer.SidePlots.annotation_display_output = AnnotationDisplay(viewer,6,3)
-        viewer.dynamically_load_plugins()
-        if hasattr(viewer, "setup_attr_observers"):
-            viewer.setup_attr_observers()
-
-        # Dynamically create Accordion children
-        accordion_children = []
-        for attr_name in dir(viewer.SidePlots):
-            attr = getattr(viewer.SidePlots, attr_name)
-            if hasattr(attr, 'ui') and hasattr(attr, 'displayed_name'):
-                accordion_children.append(
-                    Accordion(
-                        children=[attr.ui],
-                        titles=(attr.displayed_name,),
-                        layout=Layout(width='6in')
-                    )
-                )
-
-        viewer.side_plot = VBox(accordion_children)
+        viewer.SidePlots.annotation_display_output = AnnotationDisplay(viewer, 6, 3)
     else:
-        viewer.side_plot = Output()
+        allow_plugins = {"roi_manager_plugin"}
+
+    viewer.dynamically_load_plugins(allow_plugins=allow_plugins)
+    if hasattr(viewer, "setup_attr_observers"):
+        viewer.setup_attr_observers()
+
+    # Dynamically create Accordion children
+    accordion_children = []
+    for attr_name in dir(viewer.SidePlots):
+        attr = getattr(viewer.SidePlots, attr_name)
+        if hasattr(attr, 'ui') and hasattr(attr, 'displayed_name'):
+            accordion_children.append(
+                Accordion(
+                    children=[attr.ui],
+                    titles=(attr.displayed_name,),
+                    layout=Layout(width='6in')
+                )
+            )
+
+    viewer.side_plot = VBox(accordion_children) if accordion_children else Output()
 
     viewer.wide_plugin_tab = Tab(children=[], layout=Layout(width='100%'))
     viewer.wide_plugin_panel = VBox(
@@ -329,6 +331,7 @@ def display_ui(viewer):
     top_part_widgets = VBox(
         [
             viewer.ui_component.image_selector,
+            viewer.ui_component.map_controls_box,
             control_panel_stack,
             VBox([viewer.ui_component.advanced_settings_accordion]),
         ],
@@ -388,6 +391,38 @@ class uicomponents:
         )
         self.image_selector.observe(viewer.on_image_change, names='value')
 
+        map_controls_disabled = not (getattr(viewer, "_map_mode_enabled", False) and getattr(viewer, "_map_descriptors", {}))
+        self.map_mode_toggle = Checkbox(
+            value=False,
+            description='Map mode',
+            disabled=map_controls_disabled,
+            layout=Layout(width='auto'),
+            style={'description_width': 'auto'},
+        )
+        self.map_mode_toggle.observe(viewer.on_map_mode_toggle, names='value')
+
+        self.map_selector = Dropdown(
+            options=[],
+            value=None,
+            description='Select map:',
+            disabled=True,
+            layout=Layout(width='100%'),
+            style={'description_width': 'auto'},
+        )
+        self.map_selector.observe(viewer.on_map_selector_change, names='value')
+
+        self.map_summary = HTML(value='', layout=Layout(width='100%'))
+        self.map_controls_box = VBox(
+            children=(
+                HBox([self.map_mode_toggle], layout=Layout(width='100%')),
+                self.map_selector,
+                self.map_summary,
+            ),
+            layout=Layout(width='100%', gap='4px')
+        )
+        if map_controls_disabled:
+            self.map_controls_box.layout.display = 'none'
+
         self.channel_selector_text = HTML(value='Channels:')
 
         # Initialize channel selector
@@ -409,6 +444,24 @@ class uicomponents:
                 padding='4px 0',
                 max_height='320px'
             )
+        )
+
+        self.show_channel_legend_checkbox = Checkbox(
+            value=True,
+            description='Show channel legend',
+            disabled=False,
+            style={'description_width': 'auto'}
+        )
+        self.show_channel_legend_checkbox.observe(viewer.on_channel_legend_toggle, names='value')
+
+        self.channel_legend_box = HTML(
+            value='',
+            layout=Layout(width='100%', display='none')
+        )
+
+        self.channel_legend_panel = VBox(
+            children=(self.show_channel_legend_checkbox, self.channel_legend_box),
+            layout=Layout(width='100%', gap='4px', padding='4px 0')
         )
         self.mask_controls_box = VBox(
             layout=Layout(
@@ -540,6 +593,7 @@ class uicomponents:
                 self.channel_selection_panel,
                 self.marker_set_controls_panel,
                 self.channel_controls_box,
+                self.channel_legend_panel,
             ),
             layout=Layout(width='100%', gap='10px')
         )
@@ -639,6 +693,7 @@ class uicomponents:
         self.color_controls = {}
         self.contrast_min_controls = {}
         self.contrast_max_controls = {}
+        self.channel_visibility_controls = {}
         self.mask_color_controls = {}
         self.mask_display_controls = {}
 

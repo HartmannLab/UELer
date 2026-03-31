@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import tests.bootstrap  # noqa: F401  # Ensure shared test bootstrap runs
 
+import numpy as np
 import pandas as pd
 
 
@@ -613,6 +614,170 @@ class HeatmapCanvasRestoreTests(unittest.TestCase):
 
         heatmap.redraw_cached_footer_canvas.assert_called_once()
         self.assertFalse(canvas.draw_idle_called)
+
+
+class HeatmapMetaClusterManagementTests(unittest.TestCase):
+    def _build_heatmap(self):
+        heatmap = HeatmapDisplay.__new__(HeatmapDisplay)
+        heatmap.data = Data()
+        heatmap.data.current_clusters["index"].value = [0]
+        heatmap.data.meta_cluster_names = {
+            -1: "Unassigned",
+            1: "Meta-cluster 1",
+            2: "Meta-cluster 2",
+        }
+        heatmap.data.meta_cluster_colors = {
+            -1: "#9e9e9e",
+            1: "#111111",
+            2: "#222222",
+        }
+        heatmap.data.next_meta_cluster_id = 3
+        heatmap.orientation_state = {
+            "cluster_order_positions": [0, 1],
+            "cluster_index": pd.Index(["A", "B"]),
+        }
+        heatmap.heatmap_data = pd.DataFrame(
+            {
+                "meta_cluster": [1, 2],
+                "meta_cluster_revised": [1, 2],
+            },
+            index=["A", "B"],
+        )
+        heatmap.adapter = SimpleNamespace(is_wide=lambda: False)
+        heatmap.display_row_colors_as_patches = MagicMock()
+        heatmap.update_text_labels = MagicMock()
+        heatmap._engage_cutoff_lock = MagicMock()
+        heatmap.ui_component = SimpleNamespace(
+            cluster_id_dropdown=SimpleNamespace(value=2, options=[]),
+            cluster_id_apply_button=SimpleNamespace(disabled=False),
+            rename_cluster_dropdown=SimpleNamespace(value=2, options=[]),
+            rename_cluster_name=SimpleNamespace(value="Meta-cluster 2"),
+            new_cluster_name=SimpleNamespace(value=""),
+            meta_cluster_registry_box=SimpleNamespace(children=()),
+        )
+        return heatmap
+
+    def test_assign_uses_dropdown_value(self):
+        heatmap = self._build_heatmap()
+        heatmap.ui_component.cluster_id_dropdown.value = 5
+
+        heatmap.apply_new_cluster_id()
+
+        self.assertEqual(heatmap.heatmap_data.loc["A", "meta_cluster_revised"], 5)
+        self.assertIn(5, heatmap.data.meta_cluster_names)
+        self.assertTrue(heatmap.display_row_colors_as_patches.called)
+
+    def test_add_meta_cluster_registers_new_option(self):
+        heatmap = self._build_heatmap()
+        heatmap.ui_component.new_cluster_name.value = "Immune"
+
+        heatmap.add_meta_cluster()
+
+        new_id = heatmap.ui_component.rename_cluster_dropdown.value
+        self.assertIn(new_id, heatmap.data.meta_cluster_names)
+        self.assertEqual(heatmap.data.meta_cluster_names[new_id], "Immune")
+        self.assertTrue(any(option[1] == new_id for option in heatmap.ui_component.cluster_id_dropdown.options))
+
+    def test_remove_meta_cluster_reassigns_to_unassigned(self):
+        heatmap = self._build_heatmap()
+        heatmap.ui_component.rename_cluster_dropdown.value = 2
+        heatmap.ui_component.cluster_id_dropdown.value = 2
+
+        heatmap.remove_meta_cluster()
+
+        self.assertEqual(heatmap.heatmap_data.loc["B", "meta_cluster_revised"], -1)
+        self.assertNotIn(2, heatmap.data.meta_cluster_names)
+        self.assertEqual(heatmap.ui_component.rename_cluster_dropdown.value, -1)
+        self.assertEqual(heatmap.ui_component.cluster_id_dropdown.value, -1)
+
+    def test_sync_registry_accepts_numpy_array_ids(self):
+        heatmap = self._build_heatmap()
+
+        heatmap._sync_meta_cluster_registry(np.array([1, 2]))
+
+        self.assertIn(1, heatmap.data.meta_cluster_names)
+        self.assertIn(2, heatmap.data.meta_cluster_names)
+
+    def test_meta_cluster_display_name_prefers_renamed_label(self):
+        heatmap = self._build_heatmap()
+        heatmap.data.meta_cluster_names[2] = "Immune-rich"
+
+        display_name = heatmap._meta_cluster_display_name(2)
+
+        self.assertEqual(display_name, "Immune-rich")
+
+    def test_cluster_color_resolver_prefers_registered_meta_cluster_colors(self):
+        heatmap = self._build_heatmap()
+        heatmap.data.meta_cluster_colors[9] = "#abcdef"
+        heatmap.data.cluster_colors = {"A": "#101010", "B": "#202020"}
+
+        color_axis = SimpleNamespace(
+            collections=[
+                SimpleNamespace(
+                    get_cmap=lambda: (lambda value: f"cmap-{value}"),
+                    norm=None,
+                )
+            ]
+        )
+
+        resolver = heatmap._build_cluster_color_resolver(color_axis)
+
+        self.assertEqual(resolver(9, "A"), "#abcdef")
+
+
+class HeatmapZScoreModeTests(unittest.TestCase):
+    def _build_heatmap(self, zscore_across_markers):
+        heatmap = HeatmapDisplay.__new__(HeatmapDisplay)
+        heatmap.main_viewer = SimpleNamespace(
+            cell_table=pd.DataFrame(
+                {
+                    "cluster": ["A", "A", "B", "B"],
+                    "m1": [0.0, 2.0, 4.0, 6.0],
+                    "m2": [2.0, 6.0, 7.0, 9.0],
+                    "m3": [8.0, 10.0, 9.0, 11.0],
+                }
+            )
+        )
+        heatmap.ui_component = SimpleNamespace(
+            high_level_cluster_dropdown=SimpleNamespace(value="cluster"),
+            subset_on_dropdown=SimpleNamespace(value="cluster"),
+            subset_selector=SimpleNamespace(value=()),
+            channel_selector=SimpleNamespace(value=("m1", "m2", "m3")),
+            zscore_across_markers_checkbox=SimpleNamespace(value=zscore_across_markers),
+        )
+        heatmap.orientation_state = {
+            "horizontal": False,
+            "view": None,
+            "cluster_axis": 0,
+            "marker_axis": 1,
+            "cluster_index": None,
+            "marker_index": None,
+            "cluster_order_positions": [],
+            "marker_order_positions": [],
+            "cluster_leaves": [],
+            "marker_leaves": [],
+        }
+        return heatmap
+
+    @unittest.skipIf(getattr(pd, "__bootstrap_stub__", False), "requires pandas groupby/nunique support")
+    def test_default_zscore_is_per_marker_across_clusters(self):
+        heatmap = self._build_heatmap(zscore_across_markers=False)
+
+        heatmap.prepare_heatmap_data()
+
+        self.assertAlmostEqual(float(heatmap.heatmap_data.loc["A", "m1"]), -0.70710678, places=6)
+        self.assertAlmostEqual(float(heatmap.heatmap_data.loc["A", "m2"]), -0.70710678, places=6)
+        self.assertAlmostEqual(float(heatmap.heatmap_data.loc["A", "m3"]), -0.70710678, places=6)
+
+    @unittest.skipIf(getattr(pd, "__bootstrap_stub__", False), "requires pandas groupby/nunique support")
+    def test_optional_zscore_across_markers_changes_axis(self):
+        heatmap = self._build_heatmap(zscore_across_markers=True)
+
+        heatmap.prepare_heatmap_data()
+
+        self.assertAlmostEqual(float(heatmap.heatmap_data.loc["A", "m1"]), -0.87287156, places=6)
+        self.assertAlmostEqual(float(heatmap.heatmap_data.loc["A", "m2"]), -0.21821789, places=6)
+        self.assertAlmostEqual(float(heatmap.heatmap_data.loc["A", "m3"]), 1.09108945, places=6)
 
 
 if __name__ == "__main__":

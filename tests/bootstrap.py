@@ -22,6 +22,7 @@ _PANDAS_IMPORT_ERROR: str | None = None
 _PANDAS = "pandas"
 _NUMPY = "numpy"
 _SEABORN = "seaborn"
+_SEABORN_IMAGE = "seaborn_image"
 _SCIPY = "scipy"
 _SCIPY_CLUSTER = "scipy.cluster"
 _SCIPY_HIERARCHY = "scipy.cluster.hierarchy"
@@ -31,6 +32,10 @@ _IPYTHON = "IPython"
 _IPYTHON_DISPLAY = "IPython.display"
 _MATPLOTLIB = "matplotlib"
 _MATPLOTLIB_PYPLOT = "matplotlib.pyplot"
+_SKIMAGE = "skimage"
+_SKIMAGE_SEGMENTATION = "skimage.segmentation"
+_DASK = "dask"
+_CV2 = "cv2"
 
 _DEFAULT_POINT_COLOR = (0.2, 0.4, 0.8, 0.85)
 
@@ -711,7 +716,17 @@ def _ensure_ipython_display() -> None:
     def _display(*_args, **_kwargs):  # pragma: no cover - simple stub
         return None
 
+    class _HTML:  # pragma: no cover - lightweight stub
+        def __init__(self, data=None, **_kwargs):
+            self.data = data
+
+    class _Javascript:  # pragma: no cover - lightweight stub
+        def __init__(self, data=None, **_kwargs):
+            self.data = data
+
     display_module.display = _display  # type: ignore[attr-defined]
+    display_module.HTML = _HTML  # type: ignore[attr-defined]
+    display_module.Javascript = _Javascript  # type: ignore[attr-defined]
     ipython.display = display_module  # type: ignore[attr-defined]
     sys.modules[_IPYTHON] = ipython
     sys.modules[_IPYTHON_DISPLAY] = display_module
@@ -726,6 +741,9 @@ def _ensure_matplotlib_stub() -> None:
     pyplot_stub = types.ModuleType(_MATPLOTLIB_PYPLOT)
 
     class _Canvas:
+        def __init__(self):
+            self.callbacks = SimpleNamespace(connect=lambda *_a, **_k: None)
+
         def mpl_connect(self, *_args, **_kwargs):  # pragma: no cover - simple stub
             return None
 
@@ -749,6 +767,9 @@ def _ensure_matplotlib_stub() -> None:
         def __init__(self, figure):
             self.figure = figure
             self.collections = []
+            self._annotation_store = []
+            self._xlim = (0.0, 1.0)
+            self._ylim = (0.0, 1.0)
 
         def hist(self, *_args, **_kwargs):  # pragma: no cover - simple stub
             return None
@@ -761,6 +782,49 @@ def _ensure_matplotlib_stub() -> None:
 
         def axvline(self, *_args, **_kwargs):  # pragma: no cover - simple stub
             return SimpleNamespace(remove=lambda: None)
+
+        def set_xlim(self, left, right):  # pragma: no cover - simple stub
+            self._xlim = (left, right)
+            return None
+
+        def set_ylim(self, bottom, top):  # pragma: no cover - simple stub
+            self._ylim = (bottom, top)
+            return None
+
+        def get_xlim(self):  # pragma: no cover - simple stub
+            return self._xlim
+
+        def get_ylim(self):  # pragma: no cover - simple stub
+            return self._ylim
+
+        def axis(self, *_args, **_kwargs):  # pragma: no cover - simple stub
+            return None
+
+        def imshow(self, *_args, **_kwargs):  # pragma: no cover - simple stub
+            return SimpleNamespace(set_data=lambda *_a, **_k: None, set_extent=lambda *_a, **_k: None)
+
+        class _AnnotationHelper:
+            def __init__(self):
+                self.xy = (0, 0)
+                self._text = ""
+                self._visible = False
+
+            def set_text(self, text):
+                self._text = text
+
+            def get_text(self):
+                return self._text
+
+            def set_visible(self, flag):
+                self._visible = bool(flag)
+
+            def get_visible(self):
+                return self._visible
+
+        def annotate(self, *_args, **_kwargs):  # pragma: no cover - simple stub
+            annotation = self._AnnotationHelper()
+            self._annotation_store.append(annotation)
+            return annotation
 
     def _subplots(*_args, **_kwargs):  # pragma: no cover - simple stub
         figure = _Figure()
@@ -776,6 +840,32 @@ def _ensure_matplotlib_stub() -> None:
     matplotlib_stub.pyplot = pyplot_stub  # type: ignore[attr-defined]
     sys.modules[_MATPLOTLIB] = matplotlib_stub
     sys.modules[_MATPLOTLIB_PYPLOT] = pyplot_stub
+
+    colors_name = f"{_MATPLOTLIB}.colors"
+    colors_stub = types.ModuleType(colors_name)
+
+    def _to_rgb(value):  # pragma: no cover - lightweight helper for tests
+        if isinstance(value, tuple):
+            return tuple(float(component) for component in value)
+        if isinstance(value, str):
+            raw = value.strip().lower()
+            if raw.startswith("#") and len(raw) == 7:
+                try:
+                    r = int(raw[1:3], 16) / 255.0
+                    g = int(raw[3:5], 16) / 255.0
+                    b = int(raw[5:7], 16) / 255.0
+                    return (r, g, b)
+                except ValueError:
+                    return (0.0, 0.0, 0.0)
+            if raw == "white":
+                return (1.0, 1.0, 1.0)
+            if raw == "black":
+                return (0.0, 0.0, 0.0)
+        return (0.0, 0.0, 0.0)
+
+    colors_stub.to_rgb = _to_rgb  # type: ignore[attr-defined]
+    matplotlib_stub.colors = colors_stub  # type: ignore[attr-defined]
+    sys.modules[colors_name] = colors_stub
 
     text_module_name = f"{_MATPLOTLIB}.text"
     text_stub = types.ModuleType(text_module_name)
@@ -879,6 +969,13 @@ def _install_seaborn_stub() -> None:
     sys.modules[_SEABORN] = seaborn_stub
 
 
+def _install_seaborn_image_stub() -> None:
+    sys.modules.pop(_SEABORN_IMAGE, None)
+    seaborn_image_stub = types.ModuleType(_SEABORN_IMAGE)
+    seaborn_image_stub.__bootstrap_stub__ = True  # type: ignore[attr-defined]
+    sys.modules[_SEABORN_IMAGE] = seaborn_image_stub
+
+
 def _install_scipy_stub() -> None:
     for name in (_SCIPY_HIERARCHY, _SCIPY_CLUSTER, _SCIPY):
         sys.modules.pop(name, None)
@@ -903,6 +1000,178 @@ def _install_scipy_stub() -> None:
     sys.modules[_SCIPY_HIERARCHY] = hierarchy_module
     sys.modules[_SCIPY_CLUSTER] = cluster_module
     sys.modules[_SCIPY] = scipy_module
+
+
+def _ensure_skimage_stub() -> None:
+    skimage_module = sys.modules.get(_SKIMAGE)
+    if skimage_module is not None and getattr(skimage_module, "__file__", None):
+        _protect_module(_SKIMAGE, skimage_module)
+        segmentation_module = sys.modules.get(_SKIMAGE_SEGMENTATION)
+        if segmentation_module is not None and getattr(segmentation_module, "__file__", None):
+            _protect_module(_SKIMAGE_SEGMENTATION, segmentation_module)
+        return
+
+    sys.modules.pop(_SKIMAGE, None)
+    sys.modules.pop(_SKIMAGE_SEGMENTATION, None)
+
+    skimage_module = types.ModuleType(_SKIMAGE)
+    segmentation_module = types.ModuleType(_SKIMAGE_SEGMENTATION)
+    io_module = types.ModuleType(f"{_SKIMAGE}.io")
+    exposure_module = types.ModuleType(f"{_SKIMAGE}.exposure")
+    transform_module = types.ModuleType(f"{_SKIMAGE}.transform")
+    color_module = types.ModuleType(f"{_SKIMAGE}.color")
+    measure_module = types.ModuleType(f"{_SKIMAGE}.measure")
+    draw_module = types.ModuleType(f"{_SKIMAGE}.draw")
+
+    def _find_boundaries(mask, *_args, **_kwargs):  # pragma: no cover - lightweight stub
+        try:
+            import numpy as _np  # type: ignore
+
+            return _np.zeros_like(mask, dtype=bool)
+        except Exception:
+            return mask
+
+    segmentation_module.find_boundaries = _find_boundaries  # type: ignore[attr-defined]
+    segmentation_module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
+    skimage_module.segmentation = segmentation_module  # type: ignore[attr-defined]
+    skimage_module.io = io_module  # type: ignore[attr-defined]
+    skimage_module.exposure = exposure_module  # type: ignore[attr-defined]
+    skimage_module.transform = transform_module  # type: ignore[attr-defined]
+    skimage_module.color = color_module  # type: ignore[attr-defined]
+    skimage_module.measure = measure_module  # type: ignore[attr-defined]
+    skimage_module.draw = draw_module  # type: ignore[attr-defined]
+    skimage_module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
+
+    def _noop_loader(*_args, **_kwargs):  # pragma: no cover - simple stub
+        return None
+
+    io_module.imread = _noop_loader  # type: ignore[attr-defined]
+    io_module.imsave = _noop_loader  # type: ignore[attr-defined]
+    io_module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
+
+    try:
+        import numpy as _np  # type: ignore
+    except Exception:  # pragma: no cover - fallback when numpy unavailable
+        _np = None
+
+    def _adjust_gamma(image, gamma=1.0, gain=1.0):  # pragma: no cover - simple stub
+        if _np is None:
+            return image
+        gamma = float(gamma) if gamma not in (None, 0) else 1.0
+        gain = float(gain) if gain is not None else 1.0
+        try:
+            image = _np.asarray(image, dtype=float)
+            gamma = max(gamma, 1e-6)
+            adjusted = gain * _np.power(_np.maximum(image, 0.0), 1.0 / gamma)
+            return adjusted
+        except Exception:
+            return image
+
+    def _resize(image, output_shape, **_kwargs):  # pragma: no cover - simple stub
+        if _np is None:
+            return image
+        try:
+            result = _np.zeros(output_shape, dtype=getattr(image, "dtype", float))
+        except Exception:
+            result = image
+        return result
+
+    exposure_module.adjust_gamma = _adjust_gamma  # type: ignore[attr-defined]
+    exposure_module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
+
+    transform_module.resize = _resize  # type: ignore[attr-defined]
+    transform_module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
+
+    def _gray2rgb(image):  # pragma: no cover - simple stub
+        if _np is None:
+            return image
+        array = _np.asarray(image)
+        if array.ndim == 3 and array.shape[-1] == 3:
+            return array
+        return _np.stack([array, array, array], axis=-1)
+
+    def _rgb2gray(image):  # pragma: no cover - simple stub
+        if _np is None:
+            return image
+        array = _np.asarray(image)
+        if array.ndim == 2:
+            return array
+        weights = _np.array([0.2126, 0.7152, 0.0722])
+        try:
+            return _np.tensordot(array, weights, axes=([-1], [0]))
+        except Exception:
+            return array[..., 0]
+
+    color_module.gray2rgb = _gray2rgb  # type: ignore[attr-defined]
+    color_module.rgb2gray = _rgb2gray  # type: ignore[attr-defined]
+    color_module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
+
+    def _noop_regionprops(*_args, **_kwargs):  # pragma: no cover - simple stub
+        return []
+
+    measure_module.regionprops = _noop_regionprops  # type: ignore[attr-defined]
+    measure_module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
+
+    def _circle_perimeter(r, c, radius, *, shape=None):  # pragma: no cover - simple stub
+        if _np is None:
+            return ([int(r)],), ([int(c)],)
+        radius = max(int(radius), 0)
+        if radius == 0:
+            return _np.array([int(r)]), _np.array([int(c)])
+        theta = _np.linspace(0.0, 2.0 * _np.pi, num=max(8, radius * 8), endpoint=False)
+        rr = _np.round(r + radius * _np.sin(theta)).astype(int)
+        cc = _np.round(c + radius * _np.cos(theta)).astype(int)
+        if shape is not None and len(shape) >= 2:
+            rr = _np.clip(rr, 0, shape[0] - 1)
+            cc = _np.clip(cc, 0, shape[1] - 1)
+        return rr, cc
+
+    draw_module.circle_perimeter = _circle_perimeter  # type: ignore[attr-defined]
+    draw_module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
+
+    sys.modules[_SKIMAGE_SEGMENTATION] = segmentation_module
+    sys.modules[_SKIMAGE] = skimage_module
+    sys.modules[f"{_SKIMAGE}.io"] = io_module
+    sys.modules[f"{_SKIMAGE}.exposure"] = exposure_module
+    sys.modules[f"{_SKIMAGE}.transform"] = transform_module
+    sys.modules[f"{_SKIMAGE}.color"] = color_module
+    sys.modules[f"{_SKIMAGE}.measure"] = measure_module
+    sys.modules[f"{_SKIMAGE}.draw"] = draw_module
+
+
+def _ensure_dask_stub() -> None:
+    dask_module = sys.modules.get(_DASK)
+    if dask_module is not None and getattr(dask_module, "__file__", None):
+        _protect_module(_DASK, dask_module)
+        return
+
+    class _DelayedComputation:
+        def __init__(self, func, args, kwargs):
+            self._func = func
+            self._args = args
+            self._kwargs = kwargs
+
+        def compute(self):  # pragma: no cover - simple stub
+            return self._func(*self._args, **self._kwargs)
+
+    def _delayed(func):  # pragma: no cover - simple stub
+        def _wrapper(*args, **kwargs):
+            return _DelayedComputation(func, args, kwargs)
+
+        return _wrapper
+
+    module = types.ModuleType(_DASK)
+    module.delayed = _delayed  # type: ignore[attr-defined]
+    module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
+    sys.modules[_DASK] = module
+
+
+def _ensure_cv2_stub() -> None:
+    if _CV2 in sys.modules:
+        return
+    cv2_stub = types.ModuleType(_CV2)
+    cv2_stub.__bootstrap_stub__ = True  # type: ignore[attr-defined]
+    sys.modules[_CV2] = cv2_stub
 
 
 def _ensure_heatmap_dependency_stubs() -> None:
@@ -1315,10 +1584,14 @@ def initialize():
     _ensure_pandas()
     _ensure_ipywidgets_stub()
     _ensure_heatmap_dependency_stubs()
+    _install_seaborn_image_stub()
     _ensure_anywidget_stub()
     _ensure_jscatter_stub()
     _ensure_ipython_display()
     _ensure_matplotlib_stub()
+    _ensure_skimage_stub()
+    _ensure_dask_stub()
+    _ensure_cv2_stub()
     _patch_heatmap_utilities()
     _preload_viewer_plugins()
 

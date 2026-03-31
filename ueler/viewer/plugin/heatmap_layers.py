@@ -2,25 +2,36 @@
 
 from __future__ import annotations
 
+import html
 import os
 import pickle
 import inspect
+import sys
 from typing import Iterable, List, Sequence, Set
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib import colors as mcolors
 from matplotlib.backend_bases import MouseButton
 from matplotlib.patches import Rectangle
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import seaborn as sns
 from scipy.cluster.hierarchy import cut_tree, linkage
+try:
+    from IPython.display import display
+except Exception:  # pragma: no cover - optional in non-notebook contexts
+    def display(*_args, **_kwargs):
+        return None
 
 from ueler.viewer.decorators import update_status_bar
 from ipywidgets import HBox, HTML, Layout, Tab, VBox
 
 
 NO_CLUSTER_SELECTED_MSG = "No cluster selected."
+UNASSIGNED_META_CLUSTER_ID = -1
+UNASSIGNED_META_CLUSTER_NAME = "Unassigned"
+UNASSIGNED_META_CLUSTER_COLOR = "#9e9e9e"
 
 
 def _remove_patches(patches):
@@ -174,6 +185,180 @@ class DataLayer:
         self._last_scatter_selection = None
         self._last_highlighted_clusters = None
 
+    @staticmethod
+    def _normalize_meta_cluster_id(meta_cluster_id):
+        if isinstance(meta_cluster_id, np.generic):
+            return meta_cluster_id.item()
+        return meta_cluster_id
+
+    @staticmethod
+    def _sort_meta_cluster_key(meta_cluster_id):
+        value = DataLayer._normalize_meta_cluster_id(meta_cluster_id)
+        if value == UNASSIGNED_META_CLUSTER_ID:
+            return (0, 0)
+        if isinstance(value, (int, np.integer)):
+            return (1, int(value))
+        return (2, str(value))
+
+    @staticmethod
+    def _as_hex_color(color_value):
+        if color_value is None:
+            return UNASSIGNED_META_CLUSTER_COLOR
+        try:
+            return mcolors.to_hex(color_value)
+        except Exception:
+            return str(color_value)
+
+    def _meta_cluster_display_name(self, meta_cluster_id):
+        names = getattr(self.data, 'meta_cluster_names', {}) or {}
+        normalized = self._normalize_meta_cluster_id(meta_cluster_id)
+        if normalized in names:
+            return str(names[normalized])
+        if normalized == UNASSIGNED_META_CLUSTER_ID:
+            return UNASSIGNED_META_CLUSTER_NAME
+        return f"Meta-cluster {normalized}"
+
+    def _next_available_meta_cluster_id(self):
+        names = getattr(self.data, 'meta_cluster_names', {}) or {}
+        used = {
+            int(key)
+            for key in names
+            if isinstance(key, (int, np.integer)) and int(key) >= 0
+        }
+        candidate = int(getattr(self.data, 'next_meta_cluster_id', 0) or 0)
+        while candidate in used:
+            candidate += 1
+        self.data.next_meta_cluster_id = candidate + 1
+        return candidate
+
+    def _generate_meta_cluster_color(self, meta_cluster_id):
+        if meta_cluster_id == UNASSIGNED_META_CLUSTER_ID:
+            return UNASSIGNED_META_CLUSTER_COLOR
+        palette_size = max(8, int(meta_cluster_id) + 2) if isinstance(meta_cluster_id, int) else 8
+        palette = sns.color_palette('husl', palette_size)
+        if not palette:
+            palette = [
+                "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
+                "#9467bd", "#8c564b", "#e377c2", "#7f7f7f",
+            ]
+        color = palette[int(meta_cluster_id) % len(palette)] if isinstance(meta_cluster_id, int) else palette[0]
+        return self._as_hex_color(color)
+
+    def _meta_cluster_dropdown_options(self):
+        names = getattr(self.data, 'meta_cluster_names', {}) or {}
+        colors = getattr(self.data, 'meta_cluster_colors', {}) or {}
+        options = []
+        for meta_cluster_id in sorted(names.keys(), key=self._sort_meta_cluster_key):
+            color_hex = self._as_hex_color(colors.get(meta_cluster_id))
+            display_name = self._meta_cluster_display_name(meta_cluster_id)
+            label = f"[{color_hex}] {display_name} ({meta_cluster_id})"
+            options.append((label, meta_cluster_id))
+        return options
+
+    def _refresh_meta_cluster_registry_preview(self):
+        container = getattr(self.ui_component, 'meta_cluster_registry_box', None)
+        if container is None:
+            return
+
+        names = getattr(self.data, 'meta_cluster_names', {}) or {}
+        colors = getattr(self.data, 'meta_cluster_colors', {}) or {}
+        rows = []
+        for meta_cluster_id in sorted(names.keys(), key=self._sort_meta_cluster_key):
+            color_hex = self._as_hex_color(colors.get(meta_cluster_id))
+            display_name = html.escape(self._meta_cluster_display_name(meta_cluster_id))
+            label_html = HTML(value=f"<span style='font-family:monospace;'>[{color_hex}]</span> {display_name} ({meta_cluster_id})")
+            swatch_html = HTML(
+                value=(
+                    "<span style='display:inline-block;width:12px;height:12px;"
+                    f"border:1px solid #555;background:{color_hex};margin-right:6px;'></span>"
+                )
+            )
+            rows.append(HBox([swatch_html, label_html], layout=Layout(align_items='center')))
+        container.children = tuple(rows)
+
+    def _refresh_meta_cluster_controls(self):
+        if not hasattr(self, 'ui_component'):
+            return
+
+        options = self._meta_cluster_dropdown_options()
+
+        assign_dropdown = getattr(self.ui_component, 'cluster_id_dropdown', None)
+        rename_dropdown = getattr(self.ui_component, 'rename_cluster_dropdown', None)
+
+        for dropdown in (assign_dropdown, rename_dropdown):
+            if dropdown is None:
+                continue
+            previous_value = getattr(dropdown, 'value', None)
+            dropdown.options = options
+            available_values = [value for _, value in options]
+            if previous_value in available_values:
+                dropdown.value = previous_value
+            elif available_values:
+                preferred = UNASSIGNED_META_CLUSTER_ID if UNASSIGNED_META_CLUSTER_ID in available_values else available_values[0]
+                dropdown.value = preferred
+            else:
+                dropdown.value = None
+
+        self._refresh_meta_cluster_registry_preview()
+        if rename_dropdown is not None:
+            self.on_rename_cluster_selection_change({'new': rename_dropdown.value})
+
+    def _initialize_meta_cluster_registry(self):
+        if not hasattr(self.data, 'meta_cluster_names') or self.data.meta_cluster_names is None:
+            self.data.meta_cluster_names = {}
+        if not hasattr(self.data, 'meta_cluster_colors') or self.data.meta_cluster_colors is None:
+            self.data.meta_cluster_colors = {}
+
+        self.data.meta_cluster_names[UNASSIGNED_META_CLUSTER_ID] = UNASSIGNED_META_CLUSTER_NAME
+        self.data.meta_cluster_colors.setdefault(UNASSIGNED_META_CLUSTER_ID, UNASSIGNED_META_CLUSTER_COLOR)
+        self.data.next_meta_cluster_id = int(getattr(self.data, 'next_meta_cluster_id', 0) or 0)
+        self._refresh_meta_cluster_controls()
+
+    def _ensure_meta_cluster_entry(self, meta_cluster_id):
+        normalized = self._normalize_meta_cluster_id(meta_cluster_id)
+        if normalized == UNASSIGNED_META_CLUSTER_ID:
+            self.data.meta_cluster_names[normalized] = UNASSIGNED_META_CLUSTER_NAME
+            self.data.meta_cluster_colors.setdefault(normalized, UNASSIGNED_META_CLUSTER_COLOR)
+            return
+
+        self.data.meta_cluster_names.setdefault(normalized, f"Meta-cluster {normalized}")
+        if normalized not in self.data.meta_cluster_colors:
+            self.data.meta_cluster_colors[normalized] = self._generate_meta_cluster_color(normalized)
+
+    def _sync_meta_cluster_registry(self, meta_cluster_ids, palette_by_id=None):
+        self._initialize_meta_cluster_registry()
+
+        if palette_by_id is None:
+            palette_by_id = {}
+
+        incoming_ids = [] if meta_cluster_ids is None else list(meta_cluster_ids)
+        seen_ids = [self._normalize_meta_cluster_id(value) for value in incoming_ids]
+
+        if hasattr(self, 'heatmap_data') and self.heatmap_data is not None:
+            color_column = 'meta_cluster_revised' if 'meta_cluster_revised' in self.heatmap_data.columns else 'meta_cluster'
+            if color_column in self.heatmap_data.columns:
+                revised_values = self.heatmap_data[color_column].dropna().tolist()
+                seen_ids.extend(self._normalize_meta_cluster_id(value) for value in revised_values)
+
+        for meta_cluster_id in seen_ids:
+            self._ensure_meta_cluster_entry(meta_cluster_id)
+
+            if meta_cluster_id in palette_by_id:
+                self.data.meta_cluster_colors[meta_cluster_id] = self._as_hex_color(palette_by_id[meta_cluster_id])
+
+        int_ids = [
+            int(meta_cluster_id)
+            for meta_cluster_id in self.data.meta_cluster_names
+            if isinstance(meta_cluster_id, (int, np.integer)) and int(meta_cluster_id) >= 0
+        ]
+        next_id = (max(int_ids) + 1) if int_ids else 0
+        self.data.next_meta_cluster_id = max(int(getattr(self.data, 'next_meta_cluster_id', 0) or 0), next_id)
+        self._refresh_meta_cluster_controls()
+
+    def _ensure_meta_cluster_revised_column(self):
+        if 'meta_cluster_revised' not in self.heatmap_data.columns:
+            self.heatmap_data['meta_cluster_revised'] = self.heatmap_data['meta_cluster']
+
     def _update_orientation_state(self):
         if not hasattr(self, "heatmap_data") or self.heatmap_data is None:
             return
@@ -276,24 +461,42 @@ class DataLayer:
 
     def prepare_heatmap_data(self):
         df = self.main_viewer.cell_table
-        cluster = [self.ui_component.high_level_cluster_dropdown.value]
+        cluster_column = self.ui_component.high_level_cluster_dropdown.value
         subset_on = self.ui_component.subset_on_dropdown.value
 
-        channel = list(self.ui_component.channel_selector.value) + cluster
+        marker_columns = list(self.ui_component.channel_selector.value)
+        channel = marker_columns + [cluster_column]
 
         print(f"Preparing heatmap data for channels: {channel}")
-        print(f"Using cluster: {cluster}")
+        print(f"Using cluster: {[cluster_column]}")
 
         subset = list(self.ui_component.subset_selector.value)
         if subset:
             in_subset = df[subset_on].isin(subset)
             df = df[in_subset]
-        if df[cluster].nunique().values[0] > 300:
+        cluster_values = df[cluster_column]
+        try:
+            cluster_count = int(cluster_values.nunique())
+        except Exception:
+            cluster_count = len(pd.unique(cluster_values))
+        if cluster_count > 300:
             print("The number of classes is too large to display. Please select a smaller number of classes.")
             return
 
-        df_grouped = df[channel].groupby(cluster).median()
-        df_grouped = (df_grouped - df_grouped.mean()) / df_grouped.std()
+        df_grouped = df.groupby(cluster_column)[marker_columns].median()
+
+        zscore_across_markers = bool(
+            getattr(self.ui_component, 'zscore_across_markers_checkbox', None)
+            and self.ui_component.zscore_across_markers_checkbox.value
+        )
+        if zscore_across_markers:
+            row_means = df_grouped.mean(axis=1)
+            row_stds = df_grouped.std(axis=1).replace(0, np.nan)
+            df_grouped = df_grouped.sub(row_means, axis=0).div(row_stds, axis=0).fillna(0)
+        else:
+            col_means = df_grouped.mean(axis=0)
+            col_stds = df_grouped.std(axis=0).replace(0, np.nan)
+            df_grouped = df_grouped.sub(col_means, axis=1).div(col_stds, axis=1).fillna(0)
 
         self.heatmap_data = df_grouped
         self._update_orientation_state()
@@ -333,10 +536,12 @@ class DataLayer:
 
         high_level_cluster = self.ui_component.high_level_cluster_dropdown.value
 
-        if 'meta_cluster_revised' not in self.heatmap_data.columns:
-            heatmap_data = self.heatmap_data[['meta_cluster']].copy()
-        else:
-            heatmap_data = self.heatmap_data[['meta_cluster', 'meta_cluster_revised']].copy()
+        heatmap_data = pd.DataFrame(
+            {'meta_cluster': self.heatmap_data['meta_cluster']},
+            index=self.heatmap_data.index,
+        )
+        if 'meta_cluster_revised' in self.heatmap_data.columns:
+            heatmap_data['meta_cluster_revised'] = self.heatmap_data['meta_cluster_revised']
 
         heatmap_data.index.name = high_level_cluster
         heatmap_data.reset_index(inplace=True)
@@ -357,6 +562,21 @@ class DataLayer:
             self.main_viewer.cell_table.rename(
                 columns={'meta_cluster_revised': f"{column_name}_revised"}, inplace=True
             )
+
+        label_source_column = (
+            f"{column_name}_revised"
+            if f"{column_name}_revised" in self.main_viewer.cell_table.columns
+            else column_name
+        )
+        self.main_viewer.cell_table[column_name] = self.main_viewer.cell_table[label_source_column].map(
+            self._meta_cluster_display_name
+        )
+
+        revised_label_column = f"{column_name}_revised"
+        if revised_label_column in self.main_viewer.cell_table.columns:
+            self.main_viewer.cell_table[revised_label_column] = self.main_viewer.cell_table[
+                revised_label_column
+            ].map(self._meta_cluster_display_name)
 
         cluster_columns = self.main_viewer.cell_table.select_dtypes(include=['int', 'int64', 'object']).columns.tolist()
         print(cluster_columns)
@@ -758,13 +978,16 @@ class InteractionLayer:
         print(f"Highlighted cells from cluster {cluster_label} of {high_level_cluster} in the main viewer.")
 
     def trace_cluster(self, *args):
-        cell_id = self.main_viewer.image_display.selected_masks_label
-        if cell_id is None:
+        selections = self.main_viewer.image_display.selected_masks_label
+        if not selections:
             print("Please select a cell in the main viewer.")
             return
-        cell_id = cell_id.pop()
-        cell_id = cell_id[1]
-        fov = self.main_viewer.ui_component.image_selector.value
+        selection = next(iter(selections))
+        cell_id = getattr(selection, "mask_id", None)
+        if cell_id is None:
+            print("Could not determine selected cell identifier.")
+            return
+        fov = getattr(selection, "fov", None) or self.main_viewer.ui_component.image_selector.value
         cluster_column = self.ui_component.high_level_cluster_dropdown.value
         label_key = self.main_viewer.label_key
         fov_key = self.main_viewer.fov_key
@@ -888,15 +1111,23 @@ class InteractionLayer:
             self.ui_component.subset_selector.options = []
 
     def update_ui_components(self, indices):
-        is_enabled = bool(indices)
-        self.ui_component.cluster_id_text.disabled = not is_enabled
+        has_options = bool(getattr(self.ui_component.cluster_id_dropdown, 'options', []))
+        is_enabled = bool(indices) and has_options
+        self.ui_component.cluster_id_dropdown.disabled = not is_enabled
         self.ui_component.cluster_id_apply_button.disabled = not is_enabled
 
+    def on_rename_cluster_selection_change(self, change):
+        selected_id = change.get('new') if isinstance(change, dict) else None
+        if selected_id is None:
+            self.ui_component.rename_cluster_name.value = ""
+            return
+        self.ui_component.rename_cluster_name.value = self._meta_cluster_display_name(selected_id)
+
     def apply_new_cluster_id(self, *args):
-        new_cluster_id = self.ui_component.cluster_id_text.value
+        new_cluster_id = self.ui_component.cluster_id_dropdown.value
         selected_indices = list(self.data.current_clusters["index"].value or [])
         if new_cluster_id is None:
-            print("Please enter a valid cluster ID.")
+            print("Please select a meta-cluster.")
             return
         if not selected_indices:
             print("No clusters selected to update.")
@@ -907,8 +1138,9 @@ class InteractionLayer:
             print("No cluster ordering available.")
             return
 
-        if 'meta_cluster_revised' not in self.heatmap_data.columns:
-            self.heatmap_data['meta_cluster_revised'] = self.heatmap_data['meta_cluster']
+        self._ensure_meta_cluster_revised_column()
+        self._ensure_meta_cluster_entry(new_cluster_id)
+        self._refresh_meta_cluster_controls()
 
         cluster_index = self._cluster_index_labels()
         if cluster_index is None:
@@ -926,7 +1158,78 @@ class InteractionLayer:
             self.update_text_labels()
 
         self._engage_cutoff_lock("Cutoff locked after meta-cluster reassignment")
-        print(f"New cluster ID {new_cluster_id} applied to selected rows.")
+        print(f"Assigned selected clusters to {self._meta_cluster_display_name(new_cluster_id)} ({new_cluster_id}).")
+
+    def rename_meta_cluster(self, *args):
+        selected_id = self.ui_component.rename_cluster_dropdown.value
+        new_name = (self.ui_component.rename_cluster_name.value or "").strip()
+        if selected_id is None:
+            print("Please select a meta-cluster to rename.")
+            return
+        if not new_name:
+            print("Please enter a non-empty name.")
+            return
+
+        self.data.meta_cluster_names[selected_id] = new_name
+        self._refresh_meta_cluster_controls()
+        self.ui_component.rename_cluster_dropdown.value = selected_id
+        self.ui_component.cluster_id_dropdown.value = selected_id
+        print(f"Renamed meta-cluster {selected_id} to '{new_name}'.")
+
+    def add_meta_cluster(self, *args):
+        new_id = self._next_available_meta_cluster_id()
+        requested_name = (self.ui_component.new_cluster_name.value or "").strip()
+        new_name = requested_name if requested_name else f"Meta-cluster {new_id}"
+
+        self.data.meta_cluster_names[new_id] = new_name
+        self.data.meta_cluster_colors[new_id] = self._generate_meta_cluster_color(new_id)
+        self.ui_component.new_cluster_name.value = ""
+
+        self._refresh_meta_cluster_controls()
+        self.ui_component.rename_cluster_dropdown.value = new_id
+        self.ui_component.cluster_id_dropdown.value = new_id
+        print(f"Added meta-cluster {new_id} ({new_name}).")
+
+    def remove_meta_cluster(self, *args):
+        selected_id = self.ui_component.rename_cluster_dropdown.value
+        if selected_id is None:
+            print("Please select a meta-cluster to remove.")
+            return
+        if selected_id == UNASSIGNED_META_CLUSTER_ID:
+            print("The unassigned meta-cluster cannot be removed.")
+            return
+
+        if hasattr(self, 'heatmap_data') and self.heatmap_data is not None:
+            self._ensure_meta_cluster_revised_column()
+            column = 'meta_cluster_revised'
+            data_store = getattr(self.heatmap_data, '_data', None)
+            if isinstance(data_store, dict) and column in data_store:
+                data_store[column] = [
+                    UNASSIGNED_META_CLUSTER_ID if value == selected_id else value
+                    for value in data_store[column]
+                ]
+            else:
+                self.heatmap_data.loc[
+                    self.heatmap_data[column] == selected_id,
+                    column,
+                ] = UNASSIGNED_META_CLUSTER_ID
+
+        self.data.meta_cluster_names.pop(selected_id, None)
+        self.data.meta_cluster_colors.pop(selected_id, None)
+        self._ensure_meta_cluster_entry(UNASSIGNED_META_CLUSTER_ID)
+        self._refresh_meta_cluster_controls()
+        self.ui_component.rename_cluster_dropdown.value = UNASSIGNED_META_CLUSTER_ID
+        self.ui_component.cluster_id_dropdown.value = UNASSIGNED_META_CLUSTER_ID
+
+        self.display_row_colors_as_patches()
+        if not self.adapter.is_wide():
+            self.update_text_labels()
+
+        self._engage_cutoff_lock("Cutoff locked after meta-cluster removal")
+        print(
+            f"Removed meta-cluster {selected_id}. Existing assignments were moved to "
+            f"{UNASSIGNED_META_CLUSTER_NAME} ({UNASSIGNED_META_CLUSTER_ID})."
+        )
 
 
 class DisplayLayer:
@@ -971,7 +1274,8 @@ class DisplayLayer:
             HBox([
                 self.ui_component.cluster_method_dropdown,
                 self.ui_component.distance_metric_dropdown,
-                self.ui_component.horizontal_layout_checkbox
+                self.ui_component.horizontal_layout_checkbox,
+                self.ui_component.zscore_across_markers_checkbox,
             ], layout=Layout(gap='8px')),
             HBox([self.ui_component.plot_button])
         ])
@@ -981,9 +1285,17 @@ class DisplayLayer:
                 self.ui_component.lock_cutoff_button,
                 self.ui_component.lock_override_button
             ], layout=Layout(gap='8px')),
-            HBox([self.ui_component.cluster_id_text,
+            HBox([self.ui_component.cluster_id_dropdown,
                 self.ui_component.cluster_id_apply_button])
         ])
+
+        rename = VBox([
+            HBox([self.ui_component.rename_cluster_dropdown]),
+            HBox([self.ui_component.rename_cluster_name, self.ui_component.rename_cluster_apply_button]),
+            HBox([self.ui_component.new_cluster_name, self.ui_component.add_cluster_button]),
+            HBox([self.ui_component.remove_cluster_button]),
+            self.ui_component.meta_cluster_registry_box,
+        ], layout=Layout(gap='6px'))
 
         link = VBox([
             HBox([self.ui_component.main_viewer_checkbox]),
@@ -1003,8 +1315,8 @@ class DisplayLayer:
         ])
 
         self.controls_tab = Tab(
-            children=[setup, edit, trace, link, save],
-            titles=('Setup', 'Assign', 'Trace', 'Linked plugins', 'Save')
+            children=[setup, edit, rename, trace, link, save],
+            titles=('Setup', 'Assign', 'Rename', 'Trace', 'Linked plugins', 'Save')
         )
 
         self.controls_section = VBox([self.controls_tab], layout=Layout(width='100%', gap='8px'))
@@ -1094,6 +1406,9 @@ class DisplayLayer:
         with self.plot_output:
             self.plot_output.clear_output(wait=True)
             self.generate_heatmap()
+
+        if self.adapter.is_wide() and not self._plot_output_has_widget_view():
+            self.restore_footer_canvas()
         if debug_enabled:
             mode = 'wide' if self.adapter.is_wide() else 'vertical'
             print(f'[heatmap] plot refreshed in {mode} mode')
@@ -1177,6 +1492,58 @@ class DisplayLayer:
             except Exception:
                 pass
 
+    def _plot_output_has_widget_view(self):
+        plot_output = getattr(self, 'plot_output', None)
+        outputs = getattr(plot_output, 'outputs', ()) if plot_output is not None else ()
+        for output in outputs or ():
+            if not isinstance(output, dict):
+                continue
+            data = output.get('data')
+            if isinstance(data, dict) and 'application/vnd.jupyter.widget-view+json' in data:
+                return True
+        return False
+
+    def _heatmap_colormap_settings(self):
+        zscore_toggle = bool(
+            getattr(self.ui_component, 'zscore_across_markers_checkbox', None)
+            and self.ui_component.zscore_across_markers_checkbox.value
+        )
+        if zscore_toggle:
+            return {"cmap": "bwr", "center": 0}
+        return {"cmap": "Reds", "center": None}
+
+    def redraw_cached_footer_canvas(self):
+        artifacts = getattr(self, '_cached_footer_artifacts', None)
+        if not artifacts:
+            return False
+
+        fig = artifacts.get('fig') if isinstance(artifacts, dict) else None
+        canvas = artifacts.get('canvas') if isinstance(artifacts, dict) else None
+
+        if canvas is not None and hasattr(canvas, 'draw_idle'):
+            try:
+                canvas.draw_idle()
+            except Exception:
+                pass
+
+        if self._plot_output_has_widget_view():
+            return True
+
+        with self.plot_output:
+            self.plot_output.clear_output(wait=True)
+            display_func = display
+            shim_module = sys.modules.get('viewer.plugin.heatmap_layers')
+            if shim_module is not None:
+                display_func = getattr(shim_module, 'display', display)
+
+            # Prefer replaying the ipympl canvas widget to preserve interactivity.
+            if canvas is not None and hasattr(canvas, 'model_id'):
+                display_func(canvas)
+            elif fig is not None:
+                display_func(fig)
+
+        return True
+
     @update_status_bar
     def generate_heatmap(self):
         markers = list(self.ui_component.channel_selector.value)
@@ -1215,7 +1582,7 @@ class DisplayLayer:
         cluster_colors_series = cluster_labels.map(cluster_colors)
 
         self.data.cluster_colors = cluster_colors_series.to_dict()
-        self.data.meta_cluster_colors = dict(cluster_colors)
+        self._sync_meta_cluster_registry(np.unique(meta_cluster_labels), dict(cluster_colors))
 
         sns.set_context('notebook')
 
@@ -1245,6 +1612,7 @@ class DisplayLayer:
             self.width,
             self.height,
             cluster_colors_series,
+            **self._heatmap_colormap_settings(),
         )
 
         g = sns.clustermap(**clustermap_kwargs)
@@ -1325,6 +1693,28 @@ class DisplayLayer:
         plt.tight_layout()
         plt.show()
 
+        self._cached_footer_artifacts = {
+            'fig': g.fig,
+            'canvas': getattr(g.fig, 'canvas', None),
+            'axes': {
+                'heatmap': getattr(g, 'ax_heatmap', None),
+                'row_colors': getattr(g, 'ax_row_colors', None),
+                'row_dendrogram': getattr(g, 'ax_row_dendrogram', None),
+                'col_dendrogram': getattr(g, 'ax_col_dendrogram', None),
+            },
+        }
+
+        if self.adapter.is_wide() and not self._plot_output_has_widget_view():
+            canvas = self._cached_footer_artifacts.get('canvas')
+            display_func = display
+            shim_module = sys.modules.get('viewer.plugin.heatmap_layers')
+            if shim_module is not None:
+                display_func = getattr(shim_module, 'display', display)
+            if canvas is not None and hasattr(canvas, 'model_id'):
+                display_func(canvas)
+            else:
+                display_func(g.fig)
+
         self.display_row_colors_as_patches()
 
         g.fig.canvas.header_visible = False
@@ -1370,6 +1760,14 @@ class DisplayLayer:
             if pd.isna(meta_value):
                 return None
 
+            # Always honor explicit registry colors first. This keeps colors stable
+            # for user-added meta-clusters that may not exist in the cutoff palette.
+            if meta_value in meta_palette:
+                return meta_palette[meta_value]
+
+            if cluster_label in cluster_palette:
+                return cluster_palette[cluster_label]
+
             if cmap is not None:
                 mapped_value = meta_value
                 if norm is not None and hasattr(norm, '__call__'):
@@ -1381,12 +1779,6 @@ class DisplayLayer:
                     return cmap(mapped_value)
                 except Exception:
                     pass
-
-            if meta_value in meta_palette:
-                return meta_palette[meta_value]
-
-            if cluster_label in cluster_palette:
-                return cluster_palette[cluster_label]
 
             return None
 
@@ -1461,3 +1853,5 @@ class DisplayLayer:
         with self.plot_output:
             self.plot_output.clear_output(wait=True)
             self.generate_heatmap()
+        if self.adapter.is_wide() and not self._plot_output_has_widget_view():
+            self.restore_footer_canvas()

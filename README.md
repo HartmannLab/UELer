@@ -9,7 +9,7 @@ You can try UELer without installation by launching it on [Binder](https://mybin
 
 ### 1. Set up the environment
 
-You can create a compatible environment using the `environment.yml` file provided in this repository.
+You can create a compatible environment using the `env/environment.yml` file provided in this repository.
 
 1. Download the `environment.yml` file to your preferred folder.
 2. Change your current directory to that folder.
@@ -100,36 +100,30 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 - **Wide Plugins**: Enable "Horizontal layout" (for example, in the heatmap plugin) to undock the tool into the footer while keeping the accordion available for other controls.
 
 ## New Update  
-### **UELer v0.2.1 Summary**
-**Gallery and Mask Painting**
-- Painted mask colors now persist across all FOVs and appear in the gallery even when the viewer isn’t open.
-- Fixed multiple gallery color and rendering issues, ensuring all cells display correct mask colors.
-- Improved synchronization between the mask painter and cell gallery for consistent colors and outline thickness.
-- Resolved performance issues when using the mask painter across multiple FOVs.
+### **UELer v0.3.1 Summary**
+- Consolidated dev notes into topic-oriented summaries under `dev_note/`.
+- Added a dev note index mapping source notes to the new topic summaries for quicker navigation.
+- Removed `dev_note/issue_tracking/` after distilling its contents into the topic summaries and related issue links.
 
-**ROI and Cell Gallery Enhancements**
-- ROI and cell galleries stabilized with predictable layout, no clipping, and consistent tile sizing.
-- Introduced pagination with clear navigation controls and fixed caret/focus behavior in expression filters.
-- Implemented ROI filtering tabs (simple/advanced) and added error handling plus performance warnings.
-
-**Rendering and Visualization**
-- Unified gallery and viewer rendering through a shared engine for visual consistency.
-- Added automatic scale bars across viewer and exports with accurate physical scaling.
-- Improved outline scaling, tooltip precision, and histogram responsiveness.
-
-**Batch Export and Performance**
-- Batch exports now include accurate scale bars and synchronized viewer settings.
-- Enhanced ROI browser caching and FOV filtering for faster, more reliable browsing.
-- Added throttling, debounce logic, and guards to prevent redundant redraws and improve responsiveness.
-
-**UI and Plugin Improvements**
-- Consolidated and refined plugin layouts to prevent overflow and improve usability.
-- Reorganized channel and pixel annotation panels with clearer controls and consistent palette management.
-- Added cache configuration to advanced settings and maintained test coverage for layout stability.
-
-**Testing and Documentation**
-- Extensive new unit tests for rendering, ROI management, caching, palettes, and scale bars.
-- Updated documentation explaining FOV downsampling and rendering behavior.
+### **UELer v0.3.0-beta Summary**
+- **OME-TIFF Support**: Added native support for loading OME-TIFF files (`.ome.tif`, `.ome.tiff`). The viewer now automatically detects OME-TIFF datasets and handles multi-channel lazy loading via `dask-image`, preserving memory efficiency.
+- Added per-channel visibility checkboxes in the channel controls so you can temporarily hide individual channels without removing them from the active selection.
+- Added a channel color legend (overlay + adjacent panel) with a toggle so displayed channels are always labeled in their render colors.
+- Heatmap plugin now includes a dedicated `Rename` tab for meta-cluster management (rename/add/remove with color preview), and the `Assign` tab now uses a dropdown populated from user-defined meta-cluster labels.
+- Heatmap setup now includes a `Z-score across markers` toggle so users can normalize each class across selected markers; default behavior remains per-marker z-scoring across classes.
+- Heatmap color mapping now adapts to normalization mode: z-score mode uses a diverging red-white-blue palette centered at 0, while non-zscore mode uses a red sequential palette.
+- Heatmap `Save to Cell Table` now stores renamed meta-cluster labels in both the requested output column and the companion `<column_name>_revised` column (when revised assignments exist), instead of numeric IDs.
+- Fixed heatmap meta-cluster color rendering beyond dendrogram cutoff: user-added/revised meta-cluster IDs now consistently use their registry colors instead of cutoff colormap fallbacks.
+- Fixed a #73 follow-up crash during heatmap regeneration by handling numpy array meta-cluster IDs safely in registry sync (avoids ambiguous truth-value evaluation in `_sync_meta_cluster_registry`).
+- Fixed a #73 follow-up rendering issue in horizontal layout where the footer area could remain blank after plotting; heatmap figures are now reliably replayed into the footer pane.
+- Fixed a #73 follow-up layout issue in horizontal mode where wide heatmaps could exceed the Heatmap footer tab width; heatmap width now clamps to the tab/plugin width budget.
+- Map mode navigation now converts FOV-local cell coordinates into stitched-map pixels via `ImageMaskViewer.resolve_cell_map_position`, letting scatter, heatmap, gallery, and Go To plugins centre precisely on cells without mutating the underlying table.
+- Chart scatter compose now relies on the viewer’s existing selection observers instead of `jscatter.compose` sync hooks, preventing the ValueError triggered when multiple plots are active.
+- VS Code notebooks now auto-fallback to a static Matplotlib scatter when widget front-ends fail (detected via `VSCODE_PID` or `UELER_SCATTER_BACKEND=static`), with an inline notice and an override flag to force the interactive widget backend. See [ueler/viewer/plugin/chart.py#L90-L110](ueler/viewer/plugin/chart.py#L90-L110).
+- Cell mask tooltips now honour the viewer’s configurable FOV, label, and mask keys, so datasets with renamed columns once again display channel means and custom tooltip labels instead of falling back to mask IDs.
+- Introduced a cached `resolve_cell_record` helper and expanded tooltip unit tests, ensuring hover events remain responsive while covering default and custom key combinations.
+- ROI Manager now remains available when only `base_folder` is configured (no masks or cell table), so ROIs can still be captured and persisted to `<base_folder>/.UELer/roi_manager.csv` during raw-image-only sessions.
+- Map mode groundwork from v0.3.0-alpha remains available behind `ENABLE_MAP_MODE`, including stitched viewport rendering, descriptor validation, and shared cache management for multi-FOV slides.
 
 ## Earlier Updates  
 
