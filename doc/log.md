@@ -1,5 +1,16 @@
 ### v0.3.1
 
+**Channel grid display — cell selection and hover tooltip (#76 follow-up)**
+- Grid view now supports the same cell-selection and hover-tooltip interactivity as the composited view.
+- Clicking a cell in any pane toggles it in the shared `selected_masks_label` set; Ctrl+click adds to the current selection; right-click clears all selections.
+- White-edge highlights are applied to every pane simultaneously via `_update_grid_patches`, mirroring `ImageDisplay.update_patches`.
+- A per-pane debounced hover tooltip (300 ms) shows mask ID and per-cell values, mirroring `ImageDisplay.process_hover_event`.
+- `_update_grid_display` now populates `full_resolution_label_masks` so mask-hit lookup and edge rendering work in grid mode.
+- FOV change (`on_image_change`) now clears grid patches when grid mode is active.
+- `update_panes` stores clean copies of rendered arrays in `_stored_arrays` so highlights can be removed without a full re-render.
+- Extended `tests/test_channel_grid_view.py` with 7 new interactivity tests (total 29 tests).
+- Validated with: `python -m unittest tests.test_channel_grid_view` (`Ran 29 tests ... OK`).
+
 **Channel grid display mode (#76)**
 - Added a "Channel grid view" checkbox to the Channels accordion that renders each visible channel as a separate labelled pane in a grid layout.
 - Grid uses a single matplotlib figure with `sharex=True, sharey=True`, so pan/zoom in any pane synchronises all others automatically.

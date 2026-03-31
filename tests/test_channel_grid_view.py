@@ -47,6 +47,7 @@ class _DummyAxes:
 class _DummyImageDisplay:
     def __init__(self):
         self.ax = _DummyAxes()
+        self.selected_masks_label = set()
 
 
 class _DummyUiComponent:
@@ -368,6 +369,110 @@ class UpdateDisplayRoutingTests(ToggleViewerMixin, unittest.TestCase):
         # have fallen through to the composited rendering path (which would
         # attempt to access viewer.ui_component.channel_selector etc.).
         self.assertIn(2, viewer._updates)
+
+
+# ---------------------------------------------------------------------------
+# Interactivity: pane annotations, stored arrays, selection, clear_patches
+# ---------------------------------------------------------------------------
+
+
+class _InteractivityViewer(_DummyViewer):
+    """Extends the basic dummy with mask-related attributes for interactivity tests."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.masks_available = False
+        self.full_resolution_label_masks = {}
+        self.mask_outline_thickness = 1
+        self.ui_component.image_selector = SimpleNamespace(value="fov1")
+        self.ui_component.mask_display_controls = {}
+
+    def resolve_mask_hit_at_viewport(self, x, y):
+        return None
+
+
+class GridChannelInteractivityTests(unittest.TestCase):
+    def setUp(self):
+        plt.close("all")
+        self.viewer = _InteractivityViewer(width=100, height=80)
+        self.channels = ["DAPI", "CD3"]
+        self.xlim = (0.0, 100.0)
+        self.ylim = (80.0, 0.0)
+
+    def tearDown(self):
+        plt.close("all")
+
+    def _make_grid(self):
+        return GridChannelDisplay(self.viewer, self.channels, self.xlim, self.ylim)
+
+    # --- pane annotations ---
+
+    def test_pane_annotations_created_for_each_channel(self):
+        """One tooltip annotation should exist per channel pane."""
+        grid = self._make_grid()
+        self.assertEqual(len(grid.pane_annotations), len(self.channels))
+
+    def test_pane_annotations_initially_invisible(self):
+        grid = self._make_grid()
+        for ann in grid.pane_annotations:
+            self.assertFalse(ann.get_visible())
+
+    # --- stored arrays ---
+
+    def test_stored_arrays_populated_by_update_panes(self):
+        """update_panes should store a copy of each rendered array."""
+        grid = self._make_grid()
+        arr_a = np.zeros((5, 5, 3), dtype=np.float32) + 0.1
+        arr_b = np.ones((5, 5, 3), dtype=np.float32) * 0.5
+        grid.update_panes({"DAPI": arr_a, "CD3": arr_b}, (0, 10, 0, 10))
+        self.assertIn("DAPI", grid._stored_arrays)
+        self.assertIn("CD3", grid._stored_arrays)
+
+    def test_stored_arrays_are_copies(self):
+        """Stored arrays must be independent copies to allow safe overlay editing."""
+        grid = self._make_grid()
+        arr = np.zeros((5, 5, 3), dtype=np.float32)
+        grid.update_panes({"DAPI": arr, "CD3": arr.copy()}, (0, 10, 0, 10))
+        arr[0, 0] = 1.0  # mutate original
+        self.assertEqual(grid._stored_arrays["DAPI"][0, 0, 0], 0.0)
+
+    # --- clear_patches ---
+
+    def test_clear_patches_empties_selection(self):
+        """clear_patches should remove all entries from selected_masks_label."""
+        from ueler.viewer.image_display import MaskSelection
+
+        grid = self._make_grid()
+        self.viewer.image_display.selected_masks_label.add(
+            MaskSelection(fov="fov1", mask="cells", mask_id=42)
+        )
+        grid.clear_patches()
+        self.assertEqual(len(self.viewer.image_display.selected_masks_label), 0)
+
+    def test_clear_patches_calls_update_grid_patches(self):
+        """clear_patches must invoke _update_grid_patches (tracked via canvas draw_idle)."""
+        grid = self._make_grid()
+        draw_idle_calls = []
+        grid.fig.canvas.draw_idle = lambda: draw_idle_calls.append(1)
+        grid.clear_patches()
+        self.assertGreater(len(draw_idle_calls), 0)
+
+    # --- _update_grid_patches (no selections → restore stored arrays) ---
+
+    def test_update_grid_patches_restores_stored_arrays_when_no_selection(self):
+        """When selection is empty, each pane should have its clean stored array restored."""
+        grid = self._make_grid()
+        arr_a = np.zeros((5, 5, 3), dtype=np.float32) + 0.2
+        arr_b = np.zeros((5, 5, 3), dtype=np.float32) + 0.4
+        grid.update_panes({"DAPI": arr_a, "CD3": arr_b}, (0, 10, 0, 10))
+
+        # Dirty the imshow data to simulate a previous overlay
+        grid.img_artists[0].set_data(np.ones((5, 5, 3), dtype=np.float32))
+
+        # With empty selection, _update_grid_patches should restore the clean data
+        grid._update_grid_patches()
+        restored = grid.img_artists[0].get_array()
+        np.testing.assert_allclose(restored[:, :, 0], 0.2, atol=1e-5)
 
 
 if __name__ == "__main__":

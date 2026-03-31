@@ -1670,6 +1670,8 @@ class ImageMaskViewer:
 
                 if not heatmap_linked:
                     self.image_display.clear_patches()
+                    if self._grid_display is not None:
+                        self._grid_display.clear_patches()
 
                 if chart_plugin is not None:
                     chart_plugin.highlight_cells()
@@ -2110,6 +2112,21 @@ class ImageMaskViewer:
         )
         region_xy = (xmin, xmax, ymin, ymax)
         region_ds = (xmin_ds, xmax_ds, ymin_ds, ymax_ds)
+
+        # Populate full_resolution_label_masks so that mask-hit lookup and
+        # edge-highlight rendering work identically in grid mode.
+        if self.masks_available:
+            self.full_resolution_label_masks = {}
+            selected_masks = [
+                mask_name
+                for mask_name, cb in self.ui_component.mask_display_controls.items()
+                if getattr(cb, "value", False)
+            ]
+            for mask_name in selected_masks:
+                label_cache = self.label_masks_cache.get(fov_name, {})
+                label_mask_dict = label_cache.get(mask_name)
+                if label_mask_dict and 1 in label_mask_dict:
+                    self.full_resolution_label_masks[mask_name] = label_mask_dict[1]
 
         arrays_by_channel: dict = {}
         for ch in visible_channels:
