@@ -348,9 +348,14 @@ def display_ui(viewer):
         layout=Layout(width='350px', overflow_x='hidden', overflow_y='auto', gap='10px')
     )
 
+    center_area = VBox(
+        [viewer.image_output, viewer.grid_output],
+        layout=Layout()
+    )
+
     ui = HBox([
         left_panel,
-        viewer.image_output,
+        center_area,
         viewer.side_plot  # Add the chart output widget to the right
     ])
 
@@ -463,6 +468,15 @@ class uicomponents:
             children=(self.show_channel_legend_checkbox, self.channel_legend_box),
             layout=Layout(width='100%', gap='4px', padding='4px 0')
         )
+
+        self.grid_view_checkbox = Checkbox(
+            value=False,
+            description='Channel grid view',
+            disabled=False,
+            style={'description_width': 'auto'}
+        )
+        self.grid_view_checkbox.observe(viewer.on_grid_view_toggle, names='value')
+
         self.mask_controls_box = VBox(
             layout=Layout(
                 width='100%',
@@ -594,6 +608,7 @@ class uicomponents:
                 self.marker_set_controls_panel,
                 self.channel_controls_box,
                 self.channel_legend_panel,
+                self.grid_view_checkbox,
             ),
             layout=Layout(width='100%', gap='10px')
         )

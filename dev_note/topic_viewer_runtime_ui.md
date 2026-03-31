@@ -7,7 +7,7 @@ These notes cover the main viewer runtime, downsampling behavior, channel contro
 - Maintain a lazy load pipeline for FOVs and overlays, with LRU-based caches for image, mask, and annotation data.
 - Use downsampling factors derived from viewport and FOV size to keep navigation responsive.
 - Respect dataset-specific keys for tooltips instead of hard-coded column names.
-- Offer per-channel visibility toggles and a channel legend without altering the underlying selection list.
+- Offer per-channel visibility toggles, a channel legend, and a channel grid display mode without altering the underlying selection list.
 - Provide a VS Code scatter fallback when widget rendering fails.
 
 ## Current status
@@ -16,6 +16,7 @@ These notes cover the main viewer runtime, downsampling behavior, channel contro
 - Tooltip lookup uses viewer-configured keys and caches resolved rows for performance.
 - VS Code scatter fallback uses a static Matplotlib plot when widget front-ends fail.
 - Per-channel visibility toggles and channel color legend features are implemented and tested.
+- Channel grid display mode (Issue #76) is implemented: a "Channel grid view" checkbox renders each visible channel as a separate labelled pane in a synchronised matplotlib subplot grid.
 
 ## Open items
 - Keep UI/UX changes consistent with map mode and plugin rendering updates.
@@ -26,6 +27,7 @@ These notes cover the main viewer runtime, downsampling behavior, channel contro
 - https://github.com/HartmannLab/UELer/issues/64
 - https://github.com/HartmannLab/UELer/issues/66
 - https://github.com/HartmannLab/UELer/issues/75
+- https://github.com/HartmannLab/UELer/issues/76
 
 ## Key source links
 - [dev_note/FOV_load_cycle.md](dev_note/FOV_load_cycle.md)

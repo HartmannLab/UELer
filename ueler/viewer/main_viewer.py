@@ -348,6 +348,11 @@ class ImageMaskViewer:
             self.image_display.main_viewer = self
             plt.show()
 
+        # Grid-view output (hidden until the user activates channel grid mode)
+        self.grid_output = Output()
+        self.grid_output.layout.display = 'none'
+        self._grid_display = None
+
         # Initialize widgets
         create_widgets(self)
         self._refresh_map_controls()
@@ -641,6 +646,17 @@ class ImageMaskViewer:
         new_value = bool(change.get("new"))
         if new_value == self._map_mode_active:
             return
+        # Grid view is incompatible with map mode — deactivate it cleanly
+        if new_value:
+            grid_cb = getattr(getattr(self, "ui_component", None), "grid_view_checkbox", None)
+            if grid_cb is not None and grid_cb.value:
+                grid_cb.value = False  # triggers on_grid_view_toggle(False)
+            if grid_cb is not None:
+                grid_cb.disabled = True
+        else:
+            grid_cb = getattr(getattr(self, "ui_component", None), "grid_view_checkbox", None)
+            if grid_cb is not None:
+                grid_cb.disabled = False
         if new_value:
             map_id = getattr(self.ui_component, "map_selector", None)
             candidate = map_id.value if map_id is not None else None
@@ -1680,6 +1696,10 @@ class ImageMaskViewer:
         elif toolbar is not None and hasattr(toolbar, "push_current"):
             toolbar.push_current()
 
+        # Refresh grid panes when a new FOV is loaded in grid mode
+        if self._grid_display is not None and self.initialized:
+            self._update_grid_display(self.current_downsample_factor)
+
         self.inform_plugins('on_fov_change')
 
     def on_channel_selection_change(self, change):
@@ -2011,6 +2031,93 @@ class ImageMaskViewer:
 
     def on_channel_legend_toggle(self, change) -> None:
         self._refresh_channel_legend()
+
+    # ------------------------------------------------------------------
+    # Channel grid view (Issue #76)
+    # ------------------------------------------------------------------
+
+    def on_grid_view_toggle(self, change) -> None:
+        """Activate or deactivate the per-channel grid display mode."""
+        from ueler.viewer.channel_grid_view import GridChannelDisplay
+
+        if change.get("new"):
+            # ---- Activating grid mode ----
+            xlim = self.image_display.ax.get_xlim()
+            ylim = self.image_display.ax.get_ylim()
+
+            selected_channels = list(self.ui_component.channel_selector.value)
+            visible_channels = list(self._get_visible_channels(selected_channels))
+
+            self.grid_output.clear_output(wait=True)
+            self._grid_display = GridChannelDisplay(self, visible_channels, xlim, ylim)
+            with self.grid_output:
+                plt.show()
+
+            # Swap visibility
+            self.image_output.layout.display = "none"
+            self.grid_output.layout.display = ""
+
+            # Render the initial panes
+            self._update_grid_display(self.current_downsample_factor)
+        else:
+            # ---- Deactivating grid mode ----
+            if self._grid_display is not None:
+                # Sync the grid's viewport back into image_display.ax
+                xlim, ylim = self._grid_display.get_viewport()
+                self.image_display.ax.set_xlim(xlim)
+                self.image_display.ax.set_ylim(ylim)
+                self._grid_display = None
+
+            self.grid_output.layout.display = "none"
+            self.image_output.layout.display = ""
+
+            # Refresh the composited view at the restored viewport
+            self.update_display(self.current_downsample_factor)
+
+    def _update_grid_display(self, downsample_factor: int = 8) -> None:
+        """Re-render all channel panes for the current grid view.
+
+        Called both from :meth:`update_display` (when grid mode is active) and
+        from :meth:`on_grid_view_toggle` during activation.
+        """
+        if self._grid_display is None:
+            return
+
+        from ueler.viewer.channel_grid_view import GridChannelDisplay
+
+        selected_channels = list(self.ui_component.channel_selector.value)
+        visible_channels = list(self._get_visible_channels(selected_channels))
+
+        selector = getattr(self.ui_component, "image_selector", None)
+        fov_name = selector.value if selector is not None else None
+        if not fov_name:
+            return
+
+        # Recreate the figure if the visible channel set has changed
+        if list(self._grid_display.channels) != visible_channels:
+            xlim, ylim = self._grid_display.get_viewport()
+            self.grid_output.clear_output(wait=True)
+            self._grid_display = GridChannelDisplay(self, visible_channels, xlim, ylim)
+            with self.grid_output:
+                plt.show()
+
+        if not visible_channels:
+            return
+
+        # Compute viewport from image_display.ax (kept in sync by GridChannelDisplay._on_draw)
+        xmin, xmax, ymin, ymax, xmin_ds, xmax_ds, ymin_ds, ymax_ds = get_axis_limits_with_padding(
+            self, downsample_factor
+        )
+        region_xy = (xmin, xmax, ymin, ymax)
+        region_ds = (xmin_ds, xmax_ds, ymin_ds, ymax_ds)
+
+        arrays_by_channel: dict = {}
+        for ch in visible_channels:
+            arrays_by_channel[ch] = self._compose_fov_image(
+                fov_name, (ch,), downsample_factor, region_xy, region_ds
+            )
+
+        self._grid_display.update_panes(arrays_by_channel, region_xy)
 
     def update_controls(self, change):
         """Create widgets dynamically based on selected channels and masks, and attach update callbacks."""
@@ -3428,6 +3535,11 @@ class ImageMaskViewer:
 
     def update_display(self, downsample_factor=8):
         """Update the display with the current downsample factor and visible area."""
+        # Route to grid display when channel grid mode is active
+        if self._grid_display is not None:
+            self._update_grid_display(downsample_factor)
+            return
+
         # Get visible region coordinates
         xmin, xmax, ymin, ymax, xmin_ds, xmax_ds, ymin_ds, ymax_ds = get_axis_limits_with_padding(self, downsample_factor)
 

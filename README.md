@@ -101,6 +101,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### **UELer v0.3.1 Summary**
+- Added per-channel grid display mode: a new "Channel grid view" checkbox in the Channels panel renders each visible channel as a separate labelled pane in a synchronised grid layout.
 - Consolidated dev notes into topic-oriented summaries under `dev_note/`.
 - Added a dev note index mapping source notes to the new topic summaries for quicker navigation.
 - Removed `dev_note/issue_tracking/` after distilling its contents into the topic summaries and related issue links.

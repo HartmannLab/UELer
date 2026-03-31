@@ -29,6 +29,7 @@ dev_note/github_issues.md
 .binder/
 .github/
 .specify/
+.local/
 specs/
 
 

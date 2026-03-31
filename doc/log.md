@@ -1,5 +1,15 @@
 ### v0.3.1
 
+**Channel grid display mode (#76)**
+- Added a "Channel grid view" checkbox to the Channels accordion that renders each visible channel as a separate labelled pane in a grid layout.
+- Grid uses a single matplotlib figure with `sharex=True, sharey=True`, so pan/zoom in any pane synchronises all others automatically.
+- Each pane shows the channel name as an overlaid text label.
+- The grid viewport is seeded from the current composited-view position; switching back restores that position to the main viewer.
+- Map mode disables and deactivates grid mode (the two modes are mutually exclusive).
+- New `GridChannelDisplay` class in `ueler/viewer/channel_grid_view.py` encapsulates the figure management and viewport-sync logic.
+- Added 22 unit tests in `tests/test_channel_grid_view.py`.
+- Validated with: `python -m unittest tests.test_channel_grid_view` (`Ran 22 tests ... OK`).
+
 **Dev note topic summaries**
 - Added topic-oriented summaries in `dev_note/` to consolidate project notes by area (viewer runtime, map mode, OME-TIFF, heatmap/FlowSOM, ROI, exports, and packaging).
 - Added `dev_note/index.md` to map original notes and issue-tracking files into the new summary topics.

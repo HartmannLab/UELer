@@ -252,6 +252,7 @@ class MapModeActivationTests(unittest.TestCase):
         self.viewer._visible_map_fovs = ()
         self.viewer._active_map_id = None
         self.viewer._last_viewport_px = None
+        self.viewer._grid_display = None
         self.viewer.current_downsample_factor = 8
         self.viewer.width = 1
         self.viewer.height = 1
