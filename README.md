@@ -100,6 +100,11 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 - **Wide Plugins**: Enable "Horizontal layout" (for example, in the heatmap plugin) to undock the tool into the footer while keeping the accordion available for other controls.
 
 ## New Update  
+### **UELer v0.3.1 Summary**
+- Consolidated dev notes into topic-oriented summaries under `dev_note/`.
+- Added a dev note index mapping source notes to the new topic summaries for quicker navigation.
+- Removed `dev_note/issue_tracking/` after distilling its contents into the topic summaries and related issue links.
+
 ### **UELer v0.3.0-beta Summary**
 - **OME-TIFF Support**: Added native support for loading OME-TIFF files (`.ome.tif`, `.ome.tiff`). The viewer now automatically detects OME-TIFF datasets and handles multi-channel lazy loading via `dask-image`, preserving memory efficiency.
 - Added per-channel visibility checkboxes in the channel controls so you can temporarily hide individual channels without removing them from the active selection.

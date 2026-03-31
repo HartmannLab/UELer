@@ -1,4 +1,11 @@
-### v0.3.0-beta (OME-TIFF support)
+### v0.3.1
+
+**Dev note topic summaries**
+- Added topic-oriented summaries in `dev_note/` to consolidate project notes by area (viewer runtime, map mode, OME-TIFF, heatmap/FlowSOM, ROI, exports, and packaging).
+- Added `dev_note/index.md` to map original notes and issue-tracking files into the new summary topics.
+- Removed `dev_note/issue_tracking/` after distilling its contents into the topic summaries and related issue links.
+
+### v0.3.0-beta
 
 **Channel color legend (#75)**
 - Added a per-channel color legend with an on-image overlay and adjacent UI legend that mirrors the rendered channel colors.
@@ -96,8 +103,6 @@
 - Updated `ImageMaskViewer` to automatically detect OME-TIFF files in the base folder and switch to `ome-tiff` mode, populating the FOV list from file names.
 - Preserved existing folder-based loading behavior while enabling seamless integration of OME-TIFF datasets.
 - Added unit tests in `tests/test_ome_tiff_loading.py` to verify channel name extraction and wrapper functionality.
-
-### v0.3.0-beta
 
 **Map mode stitched interactions (#62 follow-up)**
 - Reworked stitched mask highlight overlays to pull tile placement from `MapTileViewport` metadata and aligned single-FOV contour drawing with viewport offsets, resolving the Reply (3) highlight drift and `IndexError` when zoomed.
