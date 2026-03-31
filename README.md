@@ -105,26 +105,6 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 - Added a dev note index mapping source notes to the new topic summaries for quicker navigation.
 - Removed `dev_note/issue_tracking/` after distilling its contents into the topic summaries and related issue links.
 
-### **UELer v0.3.0-beta Summary**
-- **OME-TIFF Support**: Added native support for loading OME-TIFF files (`.ome.tif`, `.ome.tiff`). The viewer now automatically detects OME-TIFF datasets and handles multi-channel lazy loading via `dask-image`, preserving memory efficiency.
-- Added per-channel visibility checkboxes in the channel controls so you can temporarily hide individual channels without removing them from the active selection.
-- Added a channel color legend (overlay + adjacent panel) with a toggle so displayed channels are always labeled in their render colors.
-- Heatmap plugin now includes a dedicated `Rename` tab for meta-cluster management (rename/add/remove with color preview), and the `Assign` tab now uses a dropdown populated from user-defined meta-cluster labels.
-- Heatmap setup now includes a `Z-score across markers` toggle so users can normalize each class across selected markers; default behavior remains per-marker z-scoring across classes.
-- Heatmap color mapping now adapts to normalization mode: z-score mode uses a diverging red-white-blue palette centered at 0, while non-zscore mode uses a red sequential palette.
-- Heatmap `Save to Cell Table` now stores renamed meta-cluster labels in both the requested output column and the companion `<column_name>_revised` column (when revised assignments exist), instead of numeric IDs.
-- Fixed heatmap meta-cluster color rendering beyond dendrogram cutoff: user-added/revised meta-cluster IDs now consistently use their registry colors instead of cutoff colormap fallbacks.
-- Fixed a #73 follow-up crash during heatmap regeneration by handling numpy array meta-cluster IDs safely in registry sync (avoids ambiguous truth-value evaluation in `_sync_meta_cluster_registry`).
-- Fixed a #73 follow-up rendering issue in horizontal layout where the footer area could remain blank after plotting; heatmap figures are now reliably replayed into the footer pane.
-- Fixed a #73 follow-up layout issue in horizontal mode where wide heatmaps could exceed the Heatmap footer tab width; heatmap width now clamps to the tab/plugin width budget.
-- Map mode navigation now converts FOV-local cell coordinates into stitched-map pixels via `ImageMaskViewer.resolve_cell_map_position`, letting scatter, heatmap, gallery, and Go To plugins centre precisely on cells without mutating the underlying table.
-- Chart scatter compose now relies on the viewer’s existing selection observers instead of `jscatter.compose` sync hooks, preventing the ValueError triggered when multiple plots are active.
-- VS Code notebooks now auto-fallback to a static Matplotlib scatter when widget front-ends fail (detected via `VSCODE_PID` or `UELER_SCATTER_BACKEND=static`), with an inline notice and an override flag to force the interactive widget backend. See [ueler/viewer/plugin/chart.py#L90-L110](ueler/viewer/plugin/chart.py#L90-L110).
-- Cell mask tooltips now honour the viewer’s configurable FOV, label, and mask keys, so datasets with renamed columns once again display channel means and custom tooltip labels instead of falling back to mask IDs.
-- Introduced a cached `resolve_cell_record` helper and expanded tooltip unit tests, ensuring hover events remain responsive while covering default and custom key combinations.
-- ROI Manager now remains available when only `base_folder` is configured (no masks or cell table), so ROIs can still be captured and persisted to `<base_folder>/.UELer/roi_manager.csv` during raw-image-only sessions.
-- Map mode groundwork from v0.3.0-alpha remains available behind `ENABLE_MAP_MODE`, including stitched viewport rendering, descriptor validation, and shared cache management for multi-FOV slides.
-
 ## Earlier Updates  
 
 You can find previous update logs [here](/doc/log.md).
