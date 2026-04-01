@@ -102,6 +102,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 ## New Update  
 ### **UELer v0.3.1 Summary**
 - Added per-channel grid display mode: a new "Channel grid view" checkbox in the Channels panel renders each visible channel as a separate labelled pane in a synchronised grid layout.
+- Linked the histogram cutoff in the Chart plugin to the cell gallery: enabling the "Cell gallery" checkbox in "Linked plugins" now sends all cells above/below the cutoff (across all FOVs) to the gallery; toggling above/below updates the gallery immediately.
 - Consolidated dev notes into topic-oriented summaries under `dev_note/`.
 - Added a dev note index mapping source notes to the new topic summaries for quicker navigation.
 - Removed `dev_note/issue_tracking/` after distilling its contents into the topic summaries and related issue links.

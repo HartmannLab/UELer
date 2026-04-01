@@ -321,7 +321,7 @@ class ChartDisplay(PluginBase):
                 )
                 fig.canvas.draw_idle()
                 print(f"Cutoff set at: {self.cutoff:.3f}")
-                self.highlight_cells()
+                self.highlight_cells(push_to_gallery=True)
 
             fig.canvas.mpl_connect("button_press_event", onclick)
             fig.tight_layout()
@@ -329,7 +329,7 @@ class ChartDisplay(PluginBase):
 
         self._plot_host.children = [self._hist_output]
         if self.cutoff is not None:
-            self.highlight_cells()
+            self.highlight_cells(push_to_gallery=False)
 
     # ------------------------------------------------------------------
     # Selection + linking helpers
@@ -415,7 +415,7 @@ class ChartDisplay(PluginBase):
             return
         self._apply_external_selection(traced.index)
 
-    def highlight_cells(self) -> None:
+    def highlight_cells(self, *, push_to_gallery: bool = False) -> None:
         x_col = self.ui_component.x_axis_selector.value
         if x_col == "None" or self.cutoff is None:
             print("X-axis not selected or cutoff unset.")
@@ -435,6 +435,11 @@ class ChartDisplay(PluginBase):
             mask_name=self.main_viewer.mask_key,
             mask_ids=mask_ids,
         )
+        if push_to_gallery:
+            # Update selected_indices with all-FOV matches so the gallery
+            # observer (forward_to_cell_gallery) fires when linked.
+            all_matched_indices = set(cell_table.loc[matches].index)
+            self.selected_indices.value = all_matched_indices
 
     # ------------------------------------------------------------------
     # Data helpers
@@ -669,6 +674,9 @@ class ChartDisplay(PluginBase):
                 )
 
         self.selected_indices.add_observer(forward_to_cell_gallery)
+        self.ui_component.above_below_buttons.observe(
+            lambda _: self.highlight_cells(push_to_gallery=True), names="value"
+        )
         self._observers_registered = True
 
     def color_points(self, selected_indices, selected_colors=None):

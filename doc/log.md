@@ -1,5 +1,11 @@
 ### v0.3.1
 
+**Histogram cutoff linked to cell gallery (#77)**
+- `highlight_cells()` in `ChartDisplay` now updates `selected_indices` with all-FOV row indices matching the cutoff, triggering the existing `forward_to_cell_gallery` observer and populating the cell gallery whenever the "Cell gallery" linking checkbox is enabled.
+- Toggling "above"/"below" in the histogram controls automatically re-applies the filter without a second histogram click (new observer registered in `setup_observe()`).
+- Image display highlighting (current FOV only) is unchanged.
+- Added 10 unit tests in `tests/test_chart_cell_gallery_link.py` covering above/below filtering, all-FOV gallery scope, checkbox gate, and auto-update on toggle.
+
 **Channel grid display — cell selection and hover tooltip (#76 follow-up)**
 - Grid view now supports the same cell-selection and hover-tooltip interactivity as the composited view.
 - Clicking a cell in any pane toggles it in the shared `selected_masks_label` set; Ctrl+click adds to the current selection; right-click clears all selections.
