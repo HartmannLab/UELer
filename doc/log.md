@@ -1,5 +1,11 @@
 ### v0.3.1
 
+**Batch export marker set dropdown live refresh (#78 follow-up)**
+- `BatchExportPlugin.on_marker_sets_changed()` added; it calls `refresh_marker_options()` so the marker set dropdown updates immediately whenever a set is saved, updated, or deleted — no viewer restart needed.
+- `main_viewer.update_marker_set()` now calls `update_marker_set_dropdown()` after overwriting an existing set, ensuring `inform_plugins('on_marker_sets_changed')` fires for that path too (it was previously missing).
+- Added `TestMarkerSetDropdownRefresh` (2 tests) in `tests/test_export_fovs_batch.py` covering the delegation and idempotency of `on_marker_sets_changed()`.
+- Validated with: `python -m unittest tests.test_export_fovs_batch` (`Ran 20 tests … 19 OK, 1 pre-existing failure`).
+
 **Batch export available in simple viewer mode (#78)**
 - `BatchExportPlugin` is now loaded when only images are present (`cell_table is None`), enabling full-FOV and ROI exports without needing a cell table.
 - Added `_refresh_mode_availability()` to `BatchExportPlugin`: replaces the Single Cells tab content with an informational notice when no cell table is loaded, and restores it when one is set later via `on_cell_table_change()`.

@@ -753,6 +753,10 @@ class BatchExportPlugin(PluginBase):
             self.refresh_roi_options()
         self.refresh_overlay_capabilities()
 
+    def on_marker_sets_changed(self) -> None:
+        """Called by the viewer when marker sets are added, updated, or deleted."""
+        self.refresh_marker_options()
+
     def after_all_plugins_loaded(self) -> None:  # type: ignore[override]
         super().after_all_plugins_loaded()
         self.refresh_marker_options()

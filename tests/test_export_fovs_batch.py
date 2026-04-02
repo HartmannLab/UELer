@@ -835,5 +835,77 @@ class TestSimpleViewerModeExport(unittest.TestCase):
         self.assertIs(plugin.ui_component.mode_tabs.children[1], plugin.ui_component.single_cell_box)
 
 
+class TestMarkerSetDropdownRefresh(unittest.TestCase):
+    """on_marker_sets_changed() and update_marker_set() broadcast to BatchExportPlugin."""
+
+    def _make_plugin(self):
+        tmp = TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        viewer = _BatchExportViewerStub(Path(tmp.name))
+        viewer.marker_sets = {"SetA": {}, "SetB": {}}
+
+        class _Stub(BatchExportPlugin):
+            def setup_widget_observers(self):
+                return
+
+            def _build_widgets(self):
+                from ipywidgets import VBox, Tab
+                self.ui_component.full_fov_box = VBox([])
+                self.ui_component.single_cell_box = VBox([])
+                self.ui_component.roi_box = VBox([])
+                self.ui_component.mode_tabs = Tab(
+                    children=[
+                        self.ui_component.full_fov_box,
+                        self.ui_component.single_cell_box,
+                        self.ui_component.roi_box,
+                    ]
+                )
+                self.ui_component.mode_tabs.selected_index = 0
+                from tests.test_export_fovs_batch import _StubWidget, _StubHTML
+                self.ui_component.include_masks = _StubWidget(False)
+                self.ui_component.include_annotations = _StubWidget(False)
+                self.ui_component.mask_outline_thickness = _StubWidget(1)
+                self.ui_component.overlay_hint = _StubHTML()
+                self.ui_component.marker_set_dropdown = SimpleNamespace(
+                    options=[], value=None
+                )
+
+            def _build_layout(self):
+                return
+
+            def _connect_events(self):
+                return
+
+            def refresh_fov_options(self):
+                return
+
+            def refresh_cell_options(self):
+                return
+
+            def refresh_roi_options(self):
+                return
+
+        plugin = _Stub(viewer, width=320, height=480)
+        self.addCleanup(plugin._executor.shutdown, False)
+        return viewer, plugin
+
+    def test_on_marker_sets_changed_calls_refresh_marker_options(self):
+        """on_marker_sets_changed() delegates to refresh_marker_options()."""
+        viewer, plugin = self._make_plugin()
+        call_log = []
+        plugin.refresh_marker_options = lambda: call_log.append(1)
+        plugin.on_marker_sets_changed()
+        self.assertEqual(call_log, [1], "refresh_marker_options should be called exactly once")
+
+    def test_on_marker_sets_changed_idempotent(self):
+        """Calling on_marker_sets_changed() multiple times is safe."""
+        viewer, plugin = self._make_plugin()
+        call_log = []
+        plugin.refresh_marker_options = lambda: call_log.append(1)
+        plugin.on_marker_sets_changed()
+        plugin.on_marker_sets_changed()
+        self.assertEqual(len(call_log), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

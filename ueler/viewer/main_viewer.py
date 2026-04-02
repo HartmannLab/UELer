@@ -3818,6 +3818,7 @@ class ImageMaskViewer:
             'channel_settings': channel_settings
         }
         print(f"Marker set '{set_name}' updated.")
+        self.update_marker_set_dropdown()
 
     def delete_marker_set(self, button):
         set_name = self.ui_component.marker_set_dropdown.value
