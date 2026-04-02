@@ -1,5 +1,13 @@
 ### v0.3.1
 
+**Batch export available in simple viewer mode (#78)**
+- `BatchExportPlugin` is now loaded when only images are present (`cell_table is None`), enabling full-FOV and ROI exports without needing a cell table.
+- Added `_refresh_mode_availability()` to `BatchExportPlugin`: replaces the Single Cells tab content with an informational notice when no cell table is loaded, and restores it when one is set later via `on_cell_table_change()`.
+- `display_ui()` whitelist expanded to include `"export_fovs"` for simple mode.
+- `_refresh_mode_availability()` is called at init, after `after_all_plugins_loaded()`, and on every `on_cell_table_change()` event.
+- Added 9 unit tests in `tests/test_export_fovs_batch.py` (`TestSimpleViewerModeExport`) covering: notice rendering, tab index reset, full/ROI tab preservation, cell table restoration, and idempotent invocations.
+- Validated with: `python -m unittest tests.test_export_fovs_batch` (`Ran 18 tests … 17 OK, 1 pre-existing failure`).
+
 **Histogram cutoff linked to cell gallery (#77)**
 - `highlight_cells()` in `ChartDisplay` now updates `selected_indices` with all-FOV row indices matching the cutoff, triggering the existing `forward_to_cell_gallery` observer and populating the cell gallery whenever the "Cell gallery" linking checkbox is enabled.
 - Toggling "above"/"below" in the histogram controls automatically re-applies the filter without a second histogram click (new observer registered in `setup_observe()`).

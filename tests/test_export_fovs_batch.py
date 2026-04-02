@@ -448,6 +448,9 @@ class ExportFOVsBatchTests(unittest.TestCase):
             def refresh_roi_options(self):  # pragma: no cover - not needed for tests
                 return
 
+            def _refresh_mode_availability(self):  # pragma: no cover - mode_tabs not built in this stub
+                return
+
         plugin = _TestBatchExportPlugin(viewer, width=320, height=480)
         viewer.SidePlots.export_fovs_output = plugin
         self.addCleanup(plugin._executor.shutdown, False)
@@ -705,6 +708,131 @@ class ExportFOVsBatchTests(unittest.TestCase):
         finalise_mock.assert_called_once()
         scale_mock.assert_called_once()
         self.assertTrue(plugin.ui_component.cell_preview_output.cleared)
+
+
+class TestSimpleViewerModeExport(unittest.TestCase):
+    """BatchExportPlugin behaviour when cell_table is None (simple viewer mode)."""
+
+    def _make_plugin(self, cell_table=None):
+        tmp = TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        viewer = _BatchExportViewerStub(Path(tmp.name))
+        viewer.cell_table = cell_table
+
+        from ipywidgets import HTML as _HTML, Tab, VBox
+
+        class _ModePlugin(BatchExportPlugin):
+            def setup_widget_observers(self):
+                return
+
+            def _build_widgets(self):
+                self.ui_component.full_fov_box = VBox([])
+                self.ui_component.single_cell_box = VBox([])
+                self.ui_component.roi_box = VBox([])
+                self.ui_component.mode_tabs = Tab(
+                    children=[
+                        self.ui_component.full_fov_box,
+                        self.ui_component.single_cell_box,
+                        self.ui_component.roi_box,
+                    ]
+                )
+                self.ui_component.mode_tabs.selected_index = 0
+                self.ui_component.include_masks = _StubWidget(False)
+                self.ui_component.include_annotations = _StubWidget(False)
+                self.ui_component.mask_outline_thickness = _StubWidget(1)
+                self.ui_component.overlay_hint = _StubHTML()
+
+            def _build_layout(self):
+                return
+
+            def _connect_events(self):
+                return
+
+            def refresh_marker_options(self):
+                return
+
+            def refresh_fov_options(self):
+                return
+
+            def refresh_cell_options(self):
+                return
+
+            def refresh_roi_options(self):
+                return
+
+        plugin = _ModePlugin(viewer, width=320, height=480)
+        self.addCleanup(plugin._executor.shutdown, False)
+        return viewer, plugin
+
+    def test_simple_mode_replaces_single_cell_box(self):
+        """When cell_table is None, mode_tabs replaces single_cell_box with a notice widget."""
+        viewer, plugin = self._make_plugin(cell_table=None)
+        children = plugin.ui_component.mode_tabs.children
+        self.assertIsNot(children[1], plugin.ui_component.single_cell_box)
+
+    def test_simple_mode_notice_is_html(self):
+        """The replacement widget in Single Cells tab is an HTML instance."""
+        from ipywidgets import HTML as _HTML
+        viewer, plugin = self._make_plugin(cell_table=None)
+        children = plugin.ui_component.mode_tabs.children
+        self.assertIsInstance(children[1], _HTML)
+
+    def test_simple_mode_full_fov_and_roi_tabs_unaffected(self):
+        """Full FOV and ROI boxes are preserved unchanged in simple viewer mode."""
+        viewer, plugin = self._make_plugin(cell_table=None)
+        children = plugin.ui_component.mode_tabs.children
+        self.assertIs(children[0], plugin.ui_component.full_fov_box)
+        self.assertIs(children[2], plugin.ui_component.roi_box)
+
+    def test_simple_mode_resets_selected_index_when_on_single_cells_tab(self):
+        """If the Single Cells tab is active when cell_table is None, selected_index is reset to 0."""
+        viewer, plugin = self._make_plugin(cell_table=None)
+        # Manually restore single_cell_box and set active tab to 1, then re-invoke the method
+        plugin.ui_component.mode_tabs.children = (
+            plugin.ui_component.full_fov_box,
+            plugin.ui_component.single_cell_box,
+            plugin.ui_component.roi_box,
+        )
+        plugin.ui_component.mode_tabs.selected_index = 1
+        plugin._refresh_mode_availability()
+        self.assertEqual(plugin.ui_component.mode_tabs.selected_index, 0)
+
+    def test_simple_mode_leaves_selected_index_unchanged_on_other_tabs(self):
+        """selected_index is not changed when the active tab is not Single Cells."""
+        viewer, plugin = self._make_plugin(cell_table=None)
+        plugin.ui_component.mode_tabs.selected_index = 2  # ROIs tab
+        plugin._refresh_mode_availability()
+        self.assertEqual(plugin.ui_component.mode_tabs.selected_index, 2)
+
+    def test_full_mode_keeps_single_cell_box(self):
+        """When cell_table is not None, mode_tabs retains the original single_cell_box."""
+        viewer, plugin = self._make_plugin(cell_table=SimpleNamespace(empty=False))
+        children = plugin.ui_component.mode_tabs.children
+        self.assertIs(children[1], plugin.ui_component.single_cell_box)
+
+    def test_on_cell_table_change_restores_single_cell_box(self):
+        """on_cell_table_change restores single_cell_box after a table is loaded."""
+        viewer, plugin = self._make_plugin(cell_table=None)
+        # Verify the box was replaced after init
+        self.assertIsNot(plugin.ui_component.mode_tabs.children[1], plugin.ui_component.single_cell_box)
+        # Simulate cell table being set on the viewer
+        viewer.cell_table = SimpleNamespace(empty=False)
+        plugin.on_cell_table_change()
+        self.assertIs(plugin.ui_component.mode_tabs.children[1], plugin.ui_component.single_cell_box)
+
+    def test_refresh_mode_availability_idempotent_without_table(self):
+        """Calling _refresh_mode_availability multiple times with no table is safe."""
+        viewer, plugin = self._make_plugin(cell_table=None)
+        first_notice = plugin.ui_component.mode_tabs.children[1]
+        plugin._refresh_mode_availability()
+        # Same notice object should remain (no unnecessary replacement)
+        self.assertIs(plugin.ui_component.mode_tabs.children[1], first_notice)
+
+    def test_refresh_mode_availability_idempotent_with_table(self):
+        """Calling _refresh_mode_availability multiple times with a table is safe."""
+        viewer, plugin = self._make_plugin(cell_table=SimpleNamespace(empty=False))
+        plugin._refresh_mode_availability()
+        self.assertIs(plugin.ui_component.mode_tabs.children[1], plugin.ui_component.single_cell_box)
 
 
 if __name__ == "__main__":

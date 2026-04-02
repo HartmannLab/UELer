@@ -120,6 +120,7 @@ class BatchExportPlugin(PluginBase):
         self.refresh_cell_options()
         self.refresh_roi_options()
         self.refresh_overlay_capabilities()
+        self._refresh_mode_availability()
 
         self.setup_widget_observers()
         self.initialized = True
@@ -651,6 +652,36 @@ class BatchExportPlugin(PluginBase):
         else:
             self.ui_component.overlay_hint.value = ""
 
+    def _refresh_mode_availability(self) -> None:
+        """Show/hide the Single Cells tab based on whether a cell table is loaded."""
+        df = getattr(self.main_viewer, "cell_table", None)
+        has_table = df is not None
+
+        tabs = self.ui_component.mode_tabs
+        current_children = list(tabs.children)
+        single_cell_tab_idx = 1  # Full FOV=0, Single Cells=1, ROIs=2
+
+        if has_table:
+            # Restore the real single_cell_box if it was replaced
+            if current_children[single_cell_tab_idx] is not self.ui_component.single_cell_box:
+                current_children[single_cell_tab_idx] = self.ui_component.single_cell_box
+                tabs.children = tuple(current_children)
+        else:
+            # Replace with a notice widget if not already done
+            if current_children[single_cell_tab_idx] is self.ui_component.single_cell_box:
+                notice = HTML(
+                    value=(
+                        "<div style='padding:12px; color:#666;'>"
+                        "<i>Cell table not loaded — Single Cells export is unavailable "
+                        "in simple viewer mode.</i></div>"
+                    )
+                )
+                current_children[single_cell_tab_idx] = notice
+                tabs.children = tuple(current_children)
+            # Switch away from Single Cells tab if it is currently selected
+            if tabs.selected_index == single_cell_tab_idx:
+                tabs.selected_index = 0
+
     def _sync_mask_outline_with_viewer(self, viewer_thickness: int, thickness_widget) -> None:
         self._viewer_outline_thickness = viewer_thickness
         if self._mask_outline_overridden and self._mask_outline_thickness == viewer_thickness:
@@ -715,6 +746,7 @@ class BatchExportPlugin(PluginBase):
 
     def on_cell_table_change(self) -> None:  # type: ignore[override]
         self.refresh_cell_options()
+        self._refresh_mode_availability()
 
     def on_mv_update_display(self) -> None:  # type: ignore[override]
         if self.ui_component.roi_limit_to_fov.value:
@@ -728,6 +760,7 @@ class BatchExportPlugin(PluginBase):
         self.refresh_cell_options()
         self.refresh_roi_options()
         self.refresh_overlay_capabilities()
+        self._refresh_mode_availability()
 
     def on_viewer_mask_outline_change(self, thickness: int) -> None:
         try:

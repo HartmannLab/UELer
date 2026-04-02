@@ -286,7 +286,7 @@ def display_ui(viewer):
     if viewer.cell_table is not None:
         viewer.SidePlots.annotation_display_output = AnnotationDisplay(viewer, 6, 3)
     else:
-        allow_plugins = {"roi_manager_plugin"}
+        allow_plugins = {"roi_manager_plugin", "export_fovs"}
 
     viewer.dynamically_load_plugins(allow_plugins=allow_plugins)
     if hasattr(viewer, "setup_attr_observers"):
