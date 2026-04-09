@@ -54,5 +54,5 @@ def __dir__() -> list[str]:
 
 
 if TYPE_CHECKING:  # pragma: no cover - for static type checkers only
-	from viewer import ImageMaskViewer, create_widgets, display_ui  # noqa: F401
-	from . import viewer as viewer  # noqa: F401
+	from ueler.viewer import ImageMaskViewer, create_widgets, display_ui  # noqa: F401
+	from ueler import viewer as viewer  # noqa: F401

@@ -36,7 +36,7 @@ class ScatterWidgetDependencyTests(unittest.TestCase):
 
 class ScatterWidgetColoringTests(unittest.TestCase):
     def test_set_categorical_colors_aligns_with_indices(self):
-        from viewer.plugin.scatter_widget import ScatterPlotWidget
+        from ueler.viewer.plugin.scatter_widget import ScatterPlotWidget
 
         frame = pd.DataFrame({"x": [1, 2, 3], "y": [4, 5, 6]}, index=[10, 20, 30])
         widget = ScatterPlotWidget("test", frame, "x", "y")

@@ -193,12 +193,12 @@ if "viewer.annotation_display" not in sys.modules:
     annotation_stub.AnnotationDisplay = AnnotationDisplay
     sys.modules["viewer.annotation_display"] = annotation_stub
 
-from viewer.ui_components import (
+from ueler.viewer.ui_components import (
     build_wide_plugin_pane,
     collect_wide_plugin_entries,
     update_wide_plugin_panel,
 )
-from viewer.plugin.plugin_base import PluginBase
+from ueler.viewer.plugin.plugin_base import PluginBase
 
 
 widgets = sys.modules["ipywidgets"]

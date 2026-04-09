@@ -226,7 +226,7 @@ if "ipywidgets" not in sys.modules:
 from ipywidgets import Layout
 
 from ueler.image_utils import select_downsample_factor  # type: ignore[import-error]
-from viewer.plugin.roi_manager_plugin import ROIManagerPlugin
+from ueler.viewer.plugin.roi_manager_plugin import ROIManagerPlugin
 
 
 class RestrictiveTagsWidget:

@@ -355,9 +355,9 @@ if "viewer.annotation_display" not in sys.modules:  # pragma: no cover - stub fa
 
 import pandas as pd
 
-from viewer.plugin.chart import ChartDisplay
-from viewer.plugin.plugin_base import PluginBase
-from viewer.ui_components import update_wide_plugin_panel
+from ueler.viewer.plugin.chart import ChartDisplay
+from ueler.viewer.plugin.plugin_base import PluginBase
+from ueler.viewer.ui_components import update_wide_plugin_panel
 
 
 class _StubViewer:

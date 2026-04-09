@@ -327,9 +327,9 @@ if "viewer.annotation_display" not in sys.modules:
     annotation_stub.AnnotationDisplay = _AnnotationDisplay
     sys.modules["viewer.annotation_display"] = annotation_stub
 
-from data_loader import load_annotations_for_fov
-from viewer.color_palettes import DEFAULT_COLOR, build_discrete_colormap
-from viewer.main_viewer import (
+from ueler.data_loader import load_annotations_for_fov
+from ueler.viewer.color_palettes import DEFAULT_COLOR, build_discrete_colormap
+from ueler.viewer.main_viewer import (
     ANNOTATION_PALETTE_FILE_SUFFIX,
     ANNOTATION_REGISTRY_FILENAME,
     ImageMaskViewer,

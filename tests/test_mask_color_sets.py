@@ -72,7 +72,7 @@ if "ipywidgets" not in sys.modules:
 
     sys.modules["ipywidgets"] = widgets
 
-from viewer.plugin.mask_painter import (
+from ueler.viewer.plugin.mask_painter import (
     COLOR_SET_FILE_SUFFIX,
     DEFAULT_COLOR,
     MaskPainterDisplay,

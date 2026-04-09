@@ -1332,8 +1332,8 @@ def _patch_heatmap_utilities() -> None:
     bypassed via ``__new__``."""
 
     try:
-        from viewer.plugin import heatmap as heatmap_module
-        from viewer.plugin import heatmap_layers as heatmap_layers_module
+        from ueler.viewer.plugin import heatmap as heatmap_module
+        from ueler.viewer.plugin import heatmap_layers as heatmap_layers_module
     except Exception:  # pragma: no cover - defensive guard for missing modules
         return
 
