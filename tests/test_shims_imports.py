@@ -82,6 +82,13 @@ class TestShimImportCompatibility(unittest.TestCase):
 
         self.assertIs(shim_constants, legacy_constants)
 
+    def test_image_utils_alias_and_canonical_module(self):
+        legacy_image_utils = importlib.import_module("image_utils")
+        shim_image_utils = importlib.import_module("ueler.image_utils")
+
+        self.assertIs(shim_image_utils, legacy_image_utils)
+        self.assertTrue(callable(shim_image_utils.calculate_downsample_factor))
+
 
 if __name__ == "__main__":  # pragma: no cover - unittest entrypoint
     unittest.main()

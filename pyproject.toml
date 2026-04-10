@@ -7,7 +7,7 @@ name = "ueler"
 version = "0.3.1"
 description = "Usability Enhanced Linked Viewer for MIBI imaging"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { text = "Proprietary" }
 authors = [
     { name = "Yu-Le Wu (Hartmann Lab, DKFZ)" }

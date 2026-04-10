@@ -1,5 +1,10 @@
 ### v0.3.1
 
+**Packaged `image_utils` restore (#79 follow-up)**
+- Restored `ueler.image_utils` as a concrete packaged module after the root-level `image_utils.py` removal left canonical imports pointing at a missing alias target.
+- Reversed the utility compatibility shims so legacy imports (`image_utils`, `data_loader`, `constants`) resolve to the packaged `ueler.*` modules rather than the deleted root-level files.
+- Added focused regression coverage in `tests/test_shims_imports.py` and validated the restored downsample helper via `tests.test_roi_manager_tags.ROIManagerTagsTests.test_select_downsample_factor_clamps_against_allowed_list`.
+
 **Batch export marker set dropdown live refresh (#78 follow-up)**
 - `BatchExportPlugin.on_marker_sets_changed()` added; it calls `refresh_marker_options()` so the marker set dropdown updates immediately whenever a set is saved, updated, or deleted — no viewer restart needed.
 - `main_viewer.update_marker_set()` now calls `update_marker_set_dropdown()` after overwriting an existing set, ensuring `inform_plugins('on_marker_sets_changed')` fires for that path too (it was previously missing).

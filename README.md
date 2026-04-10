@@ -101,6 +101,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### **UELer v0.3.1 Summary**
+- Restored `ueler.image_utils` as a real packaged module and corrected the legacy utility shims so packaging cleanup no longer breaks imports through `ueler.image_utils` or the old root-level utility module names.
 - Added per-channel grid display mode: a new "Channel grid view" checkbox in the Channels panel renders each visible channel as a separate labelled pane in a synchronised grid layout.
 - Linked the histogram cutoff in the Chart plugin to the cell gallery: enabling the "Cell gallery" checkbox in "Linked plugins" now sends all cells above/below the cutoff (across all FOVs) to the gallery; toggling above/below updates the gallery immediately.
 - Enabled batch export in simple viewer mode (images-only): the Batch Export plugin now loads when no cell table is present; the Single Cells tab is replaced with an informational notice and restored automatically once a cell table is added.

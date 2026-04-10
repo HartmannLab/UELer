@@ -10,12 +10,12 @@ from importlib.machinery import ModuleSpec
 from typing import Dict, Iterable, Mapping
 
 # Alias tables derived from the Task 4 mapping proposal. The dictionaries are
-# intentionally flat (module path -> legacy target) so the registration helper
+# intentionally flat (alias path -> target module) so the registration helper
 # can iterate without additional structure.
 UTILITY_ALIASES: Dict[str, str] = {
-	"ueler.constants": "constants",
-	"ueler.data_loader": "data_loader",
-	"ueler.image_utils": "image_utils",
+	"constants": "ueler.constants",
+	"data_loader": "ueler.data_loader",
+	"image_utils": "ueler.image_utils",
 }
 
 VIEWER_CORE_ALIASES: Dict[str, str] = {
