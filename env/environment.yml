@@ -5,19 +5,4 @@ dependencies:
   - python=3.10
   - pip
   - hdf5
-  - scikit-image=0.19
-  - dask
-  - dask-image
-  - ipydatagrid
-  - panel
-  - bqplot
-  - pip:
-    - ark-analysis==0.7.0
-    - seaborn
-    - seaborn-image
-    - opencv-python
-    - watchfiles
-    - jupyter-scatter[all]
-    - ipywidgets==8.1.7
-    - anywidget==0.9.18
 
