@@ -8,14 +8,14 @@ version = "0.3.1"
 description = "Usability Enhanced Linked Viewer for MIBI imaging"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "Proprietary" }
+license = "GPL-3.0-only"
+license-files = ["LICENSE.txt"]
 authors = [
     { name = "Yu-Le Wu (Hartmann Lab, DKFZ)" }
 ]
 keywords = ["imaging", "viewer", "notebook", "MIBI"]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: Other/Proprietary License",
     "Operating System :: OS Independent",
 ]
 dependencies = [
