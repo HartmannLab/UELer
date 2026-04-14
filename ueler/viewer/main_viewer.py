@@ -198,6 +198,18 @@ class ImageMaskViewer:
         self._map_pixel_size_nm = None
         self._map_canvas_size = None
         self._last_viewport_px: Optional[Tuple[float, float, float, float, int]] = None
+        # When True, update_display returns immediately without rendering.
+        # Used to suppress the cascade of renders triggered by widget observers
+        # during load_widget_states (which fires one observer per widget).
+        self._suspend_display_updates: bool = False
+        # Maximum tiles rendered in a single VirtualMapLayer.render() call.
+        # Limits sequential TIFF loads on slow network file systems for large
+        # maps that exceed this count.  Set to 0 to disable the limit.
+        self._map_render_tile_limit: int = 80
+        # When False, _batch_compute_channel_stats is a no-op.  Set to True to
+        # re-enable the upfront channel-stats precomputation for all map tiles.
+        # Keep False until the large-dataset crash is fully diagnosed.
+        self._map_batch_stats_enabled: bool = False
 
         # Specifiy the keys for the x, y and label columns in the cell table
         self.x_key = "X"
@@ -251,6 +263,8 @@ class ImageMaskViewer:
 
         if self._map_mode_enabled:
             self._initialize_map_descriptors()
+        if self._debug:
+            print("[INIT DEBUG] _initialize_map_descriptors done", flush=True)
 
         # Initialize caches and other variables
         self.max_cache_size = 100
@@ -305,9 +319,13 @@ class ImageMaskViewer:
 
         # Load the status images
         self.load_status_images()
+        if self._debug:
+            print("[INIT DEBUG] load_status_images done", flush=True)
 
         # Load the first FOV and set image dimensions
         initial_fov = self.available_fovs[0]
+        if self._debug:
+            print(f"[INIT DEBUG] loading initial FOV: {initial_fov}", flush=True)
         self.load_fov(initial_fov)
         fov_images = self.image_cache[initial_fov]
         if isinstance(fov_images, OMEFovWrapper):
@@ -331,6 +349,8 @@ class ImageMaskViewer:
                     getattr(first_channel_image, "shape", None),
                 )
             self.height, self.width = first_channel_image.shape
+        if self._debug:
+            print(f"[INIT DEBUG] initial FOV loaded, size={self.width}x{self.height}", flush=True)
 
         # Calculate the downsample factor based on image size
         initial_factor = select_downsample_factor(
@@ -340,13 +360,19 @@ class ImageMaskViewer:
             allowed_factors=self.downsample_factors,
         )
         self.on_downsample_factor_changed(initial_factor)
+        if self._debug:
+            print(f"[INIT DEBUG] downsample factor set to {self.current_downsample_factor}", flush=True)
 
         # Initialize image output and image display
         self.image_output = Output()
+        if self._debug:
+            print("[INIT DEBUG] creating ImageDisplay + plt.show()", flush=True)
         with self.image_output:
             self.image_display = ImageDisplay(self.width, self.height)
             self.image_display.main_viewer = self
             plt.show()
+        if self._debug:
+            print("[INIT DEBUG] ImageDisplay created", flush=True)
 
         # Grid-view output (hidden until the user activates channel grid mode)
         self.grid_output = Output()
@@ -354,8 +380,14 @@ class ImageMaskViewer:
         self._grid_display = None
 
         # Initialize widgets
+        if self._debug:
+            print("[INIT DEBUG] calling create_widgets", flush=True)
         create_widgets(self)
+        if self._debug:
+            print("[INIT DEBUG] create_widgets done; calling _refresh_map_controls", flush=True)
         self._refresh_map_controls()
+        if self._debug:
+            print("[INIT DEBUG] _refresh_map_controls done", flush=True)
         pixel_widget = getattr(self.ui_component, "pixel_size_inttext", None)
         if pixel_widget is not None:
             try:
@@ -379,28 +411,64 @@ class ImageMaskViewer:
         self.ui_component.annotation_editor_host.layout.display = ""
         self._initialize_annotation_palette_manager()
         self._refresh_annotation_control_states()
+        if self._debug:
+            print("[INIT DEBUG] annotation palette manager ready", flush=True)
 
         # Setup widget observers
+        if self._debug:
+            print("[INIT DEBUG] calling setup_widget_observers", flush=True)
         self.setup_widget_observers()
+        if self._debug:
+            print("[INIT DEBUG] setup_widget_observers done", flush=True)
 
         # Setup event connections
+        if self._debug:
+            print("[INIT DEBUG] calling setup_event_connections", flush=True)
         self.setup_event_connections()
+        if self._debug:
+            print("[INIT DEBUG] setup_event_connections done", flush=True)
 
         # Initial setup
+        if self._debug:
+            print("[INIT DEBUG] calling update_marker_set_dropdown", flush=True)
         self.update_marker_set_dropdown()
+        if self._debug:
+            print("[INIT DEBUG] calling update_controls", flush=True)
         self.update_controls(None)
+        if self._debug:
+            print("[INIT DEBUG] update_controls done; calling on_image_change", flush=True)
         self.on_image_change(None)
+        if self._debug:
+            print("[INIT DEBUG] on_image_change done; calling update_display", flush=True)
         self.update_display(self.current_downsample_factor)
+        if self._debug:
+            print("[INIT DEBUG] update_display done", flush=True)
 
         self.SidePlots = SimpleNamespace()
         self.BottomPlots = SimpleNamespace()
+        if self._debug:
+            print("[INIT DEBUG] SidePlots/BottomPlots set", flush=True)
 
-        self.load_widget_states(os.path.join(self.base_folder, ".UELer", 'widget_states.json'))
+        # Suppress the per-widget update_display observers that fire while
+        # restoring saved states, then do exactly one render at the end.
+        if self._debug:
+            print("[INIT DEBUG] entering load_widget_states", flush=True)
+        self._suspend_display_updates = True
+        try:
+            self.load_widget_states(os.path.join(self.base_folder, ".UELer", 'widget_states.json'))
+        finally:
+            self._suspend_display_updates = False
+        if self._debug:
+            print("[INIT DEBUG] load_widget_states done", flush=True)
 
         # Setup attribute observers
+        if self._debug:
+            print("[INIT DEBUG] calling setup_attr_observers", flush=True)
         self.setup_attr_observers()
 
         self.initialized = True
+        if self._debug:
+            print("[INIT DEBUG] __init__ COMPLETE", flush=True)
     
     def _has_tiff_files(self, fov_name):
         """Check if a directory contains .tif or .tiff files, including in 'rescaled' subdirectory."""
@@ -573,6 +641,14 @@ class ImageMaskViewer:
             display.combined = placeholder
         except Exception:
             pass
+        # Pre-populate the draw-event centre so that the first async draw_event
+        # fired by the ipympl frontend after map activation sees an "unchanged"
+        # centre and short-circuits before calling update_display / tile loading.
+        # Without this, the initial background draw triggers a full map render
+        # (loading all visible tiles) before the user has interacted with the
+        # canvas, which can exhaust memory on large datasets.
+        display.prev_center_x = width_px / 2.0
+        display.prev_center_y = height_px / 2.0
         self._sync_navigation_home_view()
 
     def _sync_canvas_to_current_fov(self) -> None:
@@ -644,6 +720,8 @@ class ImageMaskViewer:
 
     def on_map_mode_toggle(self, change):
         new_value = bool(change.get("new"))
+        if self._debug:
+            print(f"[INIT DEBUG] on_map_mode_toggle fired: new_value={new_value}, _map_mode_active={self._map_mode_active}", flush=True)
         if new_value == self._map_mode_active:
             return
         # Grid view is incompatible with map mode — deactivate it cleanly
@@ -693,11 +771,69 @@ class ImageMaskViewer:
         else:
             self._refresh_map_controls()
 
+    def _load_masks_into_cache(self, fov_name: str) -> None:
+        """Load masks for *fov_name* into the mask/edge/label caches (Phase 4 lazy pyramid)."""
+        if fov_name in self.mask_cache:
+            # Already loaded — just refresh LRU order
+            self.mask_cache.move_to_end(fov_name)
+            return
+
+        masks_dict = load_masks_for_fov(fov_name, self.masks_folder, self.mask_names_set)
+        if masks_dict:
+            self.mask_cache[fov_name] = masks_dict
+            self.mask_cache.move_to_end(fov_name)
+
+            self.edge_masks_cache[fov_name] = {}
+            self.label_masks_cache[fov_name] = {}
+            for mask_name, mask in masks_dict.items():
+                if mask is None or mask.size == 0:
+                    print(f"Warning: Mask '{mask_name}' in FOV '{fov_name}' is empty or invalid.")
+                    continue
+
+                self.edge_masks_cache[fov_name][mask_name] = {}
+                # Phase 4: store only factor=1; other levels computed on demand via
+                # _get_label_mask_at_factor.
+                self.label_masks_cache[fov_name][mask_name] = {1: mask}
+        else:
+            self.mask_cache[fov_name] = {}
+            self.edge_masks_cache[fov_name] = {}
+            self.label_masks_cache[fov_name] = {}
+
+        # Evict least-recently-used if cache exceeds capacity
+        while len(self.mask_cache) > self.max_cache_size:
+            removed_fov, _ = self.mask_cache.popitem(last=False)
+            self.edge_masks_cache.pop(removed_fov, None)
+            self.label_masks_cache.pop(removed_fov, None)
+            print(f"Removed FOV '{removed_fov}' from mask cache.")
+
+    def _get_label_mask_at_factor(self, fov_name: str, mask_name: str, factor: int):
+        """Return the downsampled label mask for *fov_name*/*mask_name* at *factor*.
+
+        Computes and caches the downsampled array on first access (lazy pyramid).
+        """
+        factor_dict = self.label_masks_cache.get(fov_name, {}).get(mask_name)
+        if factor_dict is None:
+            return None
+        if factor not in factor_dict:
+            full_res = factor_dict.get(1)
+            if full_res is None:
+                return None
+            factor_dict[factor] = full_res[::factor, ::factor]
+        return factor_dict[factor]
+
     def _activate_map_mode(self, map_id: str) -> None:
+        if self._debug:
+            print(f"[INIT DEBUG] _activate_map_mode: map_id={map_id!r}", flush=True)
         if map_id not in self._map_descriptors:
             raise KeyError(map_id)
+        if self._debug:
+            print("[INIT DEBUG] _activate_map_mode: calling _get_map_layer", flush=True)
         layer = self._get_map_layer(map_id)
+        if self._debug:
+            print("[INIT DEBUG] _activate_map_mode: computing canvas dimensions", flush=True)
         width_px, height_px, base_pixel = self._compute_map_canvas_dimensions(layer)
+        if self._debug:
+            print(f"[INIT DEBUG] _activate_map_mode: canvas={width_px}x{height_px}px, pixel={base_pixel}um", flush=True)
         self._map_mode_active = True
         self._active_map_id = map_id
         self._map_pixel_size_nm = base_pixel * 1000.0
@@ -710,7 +846,18 @@ class ImageMaskViewer:
             image_selector.disabled = True
         if selector is not None:
             selector.disabled = False
+        if self._debug:
+            print(f"[INIT DEBUG] _activate_map_mode: calling _set_map_canvas_dimensions({width_px}, {height_px})", flush=True)
         self._set_map_canvas_dimensions(width_px, height_px)
+        descriptor = self._map_descriptors[map_id]
+        tile_names = [spec.name for spec in getattr(descriptor, 'fovs', ())]
+        if self._debug:
+            print(f"[INIT DEBUG] _activate_map_mode: {len(tile_names)} tiles, _batch_compute_channel_stats follows (enabled={self._map_batch_stats_enabled})", flush=True)
+        channel_selector = getattr(getattr(self, 'ui_component', None), 'channel_selector', None)
+        selected_channels = list(getattr(channel_selector, 'value', ())) if channel_selector is not None else []
+        self._batch_compute_channel_stats(tile_names, selected_channels)
+        if self._debug:
+            print("[INIT DEBUG] _activate_map_mode: _batch_compute_channel_stats done", flush=True)
         try:
             factor = select_downsample_factor(
                 width_px,
@@ -721,6 +868,8 @@ class ImageMaskViewer:
             self.on_downsample_factor_changed(factor)
         except Exception:
             pass
+        if self._debug:
+            print("[INIT DEBUG] _activate_map_mode: DONE", flush=True)
 
     def _deactivate_map_mode(self) -> None:
         self._map_mode_active = False
@@ -734,6 +883,101 @@ class ImageMaskViewer:
         if map_selector is not None:
             map_selector.disabled = True
         self._sync_canvas_to_current_fov()
+
+    def _batch_compute_channel_stats(self, tile_names, channels) -> None:
+        """Compute channel display stats for all tiles in one parallelised Dask batch.
+
+        Skipped entirely when ``self._map_batch_stats_enabled`` is ``False``.
+        Set that flag to ``True`` to re-enable upfront stat precomputation.
+
+        All (tile, channel) Dask tasks are collected first and then fired with a
+        single dask.compute() call so Dask's threaded scheduler reads TIFFs in
+        parallel instead of serially.
+
+        To prevent OOM on very large maps (hundreds of tiles), already-cached tiles
+        are always processed while newly-loaded tiles are capped at
+        ``_BATCH_NEW_TILE_LIMIT`` per call.  Remaining tiles receive per-tile stats
+        the first time they are rendered.
+        """
+        if not getattr(self, '_map_batch_stats_enabled', False):
+            return
+
+        _BATCH_NEW_TILE_LIMIT = 20
+
+        if not channels or not tile_names:
+            return
+        try:
+            import dask as _dask
+            from ueler.data_loader import _build_channel_stat_tasks, _apply_channel_stat_values
+        except ImportError:
+            return
+
+        # 1. Partition tile names into cached vs. new, then cap new loads to avoid OOM.
+        cached_set = set(self.image_cache.keys())
+        bounded: list[str] = []
+        new_count = 0
+        for name in tile_names:
+            if name in cached_set:
+                bounded.append(name)
+            elif new_count < _BATCH_NEW_TILE_LIMIT:
+                bounded.append(name)
+                new_count += 1
+        tile_names = bounded
+
+        # 2. Ensure all selected lazy arrays are loaded (no stats yet — compute_stats=False
+        #    because _map_mode_active is True at this point).
+        for fov_name in tile_names:
+            try:
+                self.load_fov(fov_name, requested_channels=tuple(channels))
+            except Exception:
+                pass
+
+        task_list = []
+        task_meta = []  # list of (channel_name, dtype)
+        # 3. Collect Dask tasks and metadata for every (fov, channel) pair.
+        for fov_name in tile_names:
+            img_entry = self.image_cache.get(fov_name)
+            if img_entry is None:
+                continue
+            for ch in channels:
+                if isinstance(img_entry, dict):
+                    arr = img_entry.get(ch)
+                else:
+                    # OMEFovWrapper — skip; stats handled by _ensure_channel_max_computed
+                    arr = None
+                if arr is None:
+                    continue
+                try:
+                    pt, mt = _build_channel_stat_tasks(arr)
+                except Exception:
+                    continue
+                task_list.extend([pt, mt])
+                task_meta.append((ch, getattr(arr, "dtype", None)))
+
+        if not task_list:
+            return
+
+        # 4. Single batched compute — all TIFFs read in parallel.
+        try:
+            results = _dask.compute(*task_list)
+        except Exception:
+            return
+
+        # 5. Apply results.
+        for i, (ch, dtype) in enumerate(task_meta):
+            percentile_value = results[i * 2]
+            absolute_max = results[i * 2 + 1]
+            try:
+                _apply_channel_stat_values(ch, percentile_value, absolute_max, dtype, self.channel_max_values)
+            except Exception:
+                pass
+
+        # 6. Sync UI controls for each unique channel.
+        for ch in set(channels):
+            try:
+                self._sync_channel_controls(ch)
+            except Exception:
+                pass
 
     def _render_map_view(
         self,
@@ -781,7 +1025,7 @@ class ImageMaskViewer:
                 descriptor,
                 allowed_downsample=allowed,
                 cache=self._map_tile_cache,
-                cache_capacity=self._map_tile_cache_capacity,
+                cache_capacity=max(self._map_tile_cache_capacity, len(descriptor.fovs)),
             )
             self._map_layers[map_id] = layer
         return layer
@@ -1436,7 +1680,10 @@ class ImageMaskViewer:
             # for self.image_cache[fov_name][ch] is None, load the image
             elif self.image_cache[fov_name][ch] is None:
                 # Load images for FOV
-                self.image_cache[fov_name][ch] = load_one_channel_fov(fov_name, self.base_folder, self.channel_max_values, ch)
+                self.image_cache[fov_name][ch] = load_one_channel_fov(
+                    fov_name, self.base_folder, self.channel_max_values, ch,
+                    compute_stats=not getattr(self, '_map_mode_active', False),
+                )
                 self._sync_channel_controls(ch)
 
         self.image_cache.move_to_end(fov_name)
@@ -1454,51 +1701,20 @@ class ImageMaskViewer:
 
         # Load masks only if masks are available
         if self.masks_available:
-            # Load masks if not in cache
-            if fov_name not in self.mask_cache:
-                # Load masks for FOV
-                masks_dict = load_masks_for_fov(fov_name, self.masks_folder, self.mask_names_set)
-                if masks_dict:
-                    self.mask_cache[fov_name] = masks_dict
-                    self.mask_cache.move_to_end(fov_name)
-
-                    # Precompute edge masks and downsampled label masks
-                    self.edge_masks_cache[fov_name] = {}
-                    self.label_masks_cache[fov_name] = {}
-                    for mask_name, mask in masks_dict.items():
-                        # Check if the mask is valid and has non-zero dimensions
-                        if mask is None or mask.size == 0:
-                            print(f"Warning: Mask '{mask_name}' in FOV '{fov_name}' is empty or invalid.")
-                            continue  # Skip this mask
-
-                        self.edge_masks_cache[fov_name][mask_name] = {}
-                        self.label_masks_cache[fov_name][mask_name] = {}
-                        for factor in self.downsample_factors:
-                            # Ensure the downsampled dimensions are at least 1
-                            new_width = max(1, mask.shape[1] // factor)
-                            new_height = max(1, mask.shape[0] // factor)
-
-                            # Downsample label mask
-                            downsampled_mask = mask.astype(np.float32)[::factor,::factor].astype(mask.dtype)
-                            self.label_masks_cache[fov_name][mask_name][factor] = downsampled_mask
-
-                            # # Generate edge mask
-                            # edge_mask = generate_edges(downsampled_mask)
-                            # self.edge_masks_cache[fov_name][mask_name][factor] = edge_mask
+            # In map mode, skip mask loading when no mask overlay is active
+            if getattr(self, '_map_mode_active', False):
+                _ui = getattr(self, 'ui_component', None)
+                _mask_controls = getattr(_ui, 'mask_display_controls', {}) if _ui else {}
+                if _mask_controls and not any(getattr(cb, 'value', False) for cb in _mask_controls.values()):
+                    self.mask_cache.setdefault(fov_name, {})
+                    self.label_masks_cache.setdefault(fov_name, {})
+                    self.edge_masks_cache.setdefault(fov_name, {})
+                    # Skip - no mask overlays active in map mode
+                    pass
                 else:
-                    self.mask_cache[fov_name] = {}
-                    self.edge_masks_cache[fov_name] = {}
-                    self.label_masks_cache[fov_name] = {}
-
-                # Remove least recently used if cache exceeds max size
-                while len(self.mask_cache) > self.max_cache_size:
-                    removed_fov, _ = self.mask_cache.popitem(last=False)
-                    self.edge_masks_cache.pop(removed_fov, None)
-                    self.label_masks_cache.pop(removed_fov, None)
-                    print(f"Removed FOV '{removed_fov}' from mask cache.")
+                    self._load_masks_into_cache(fov_name)
             else:
-                # Move the accessed FOV to the end to mark it as recently used
-                self.mask_cache.move_to_end(fov_name)
+                self._load_masks_into_cache(fov_name)
 
             # Update global mask names set
             self.mask_names = sorted(self.mask_names_set)
@@ -1707,8 +1923,12 @@ class ImageMaskViewer:
     def on_channel_selection_change(self, change):
         self.update_controls(None)
         self.setup_widget_observers()
-        # Optional: Decide whether to clear the marker set selection
-        # self.marker_set_dropdown.value = None
+        if getattr(self, '_map_mode_active', False) and self._active_map_id:
+            descriptor = self._map_descriptors.get(self._active_map_id)
+            if descriptor is not None:
+                tile_names = [spec.name for spec in descriptor.fovs]
+                new_channels = list(change.get('new', ())) if isinstance(change, dict) else []
+                self._batch_compute_channel_stats(tile_names, new_channels)
     
     def on_pixel_size_change(self, change):
         if self._suspend_pixel_size_observer:
@@ -3278,10 +3498,7 @@ class ImageMaskViewer:
                 if getattr(cb, "value", False)
             ]
             for mask_name in selected_masks:
-                label_dict = self.label_masks_cache.get(fov_name, {}).get(mask_name)
-                if not label_dict:
-                    continue
-                label_mask_ds = label_dict.get(downsample_factor)
+                label_mask_ds = self._get_label_mask_at_factor(fov_name, mask_name, downsample_factor)
                 if label_mask_ds is None:
                     continue
                 try:
@@ -3303,6 +3520,9 @@ class ImageMaskViewer:
                     )
                 )
 
+            # Pre-populate lazy pyramid levels before collect_mask_regions accesses the dict
+            for _mn in selected_masks:
+                self._get_label_mask_at_factor(fov_name, _mn, downsample_factor)
             label_cache = self.label_masks_cache.get(fov_name, {})
             mask_regions = collect_mask_regions(
                 label_cache,
@@ -3516,12 +3736,8 @@ class ImageMaskViewer:
                 )
 
         if snapshot.include_masks and snapshot.masks:
-            mask_cache = self.label_masks_cache.get(fov_name, {})
             for mask_snapshot in snapshot.masks:
-                ds_cache = mask_cache.get(mask_snapshot.name)
-                mask_ds = None
-                if ds_cache:
-                    mask_ds = ds_cache.get(downsample_factor)
+                mask_ds = self._get_label_mask_at_factor(fov_name, mask_snapshot.name, downsample_factor)
                 if mask_ds is None:
                     raw_mask = self.mask_cache.get(fov_name, {}).get(mask_snapshot.name)
                     if raw_mask is not None:
@@ -3552,6 +3768,8 @@ class ImageMaskViewer:
 
     def update_display(self, downsample_factor=8):
         """Update the display with the current downsample factor and visible area."""
+        if getattr(self, '_suspend_display_updates', False):
+            return
         # Route to grid display when channel grid mode is active
         if self._grid_display is not None:
             self._update_grid_display(downsample_factor)
@@ -3616,14 +3834,11 @@ class ImageMaskViewer:
                     if getattr(cb, "value", False)
                 ]
                 for mask_name in selected_masks:
-                    label_cache = self.label_masks_cache.get(self.ui_component.image_selector.value, {})
-                    label_mask_dict = label_cache.get(mask_name)
-                    if not label_mask_dict:
-                        continue
-                    if 1 in label_mask_dict:
-                        label_mask_full = label_mask_dict[1]
+                    current_fov_name = self.ui_component.image_selector.value
+                    label_mask_full = self._get_label_mask_at_factor(current_fov_name, mask_name, 1)
+                    if label_mask_full is not None:
                         self.full_resolution_label_masks[mask_name] = label_mask_full
-                    label_mask_ds = label_mask_dict.get(downsample_factor)
+                    label_mask_ds = self._get_label_mask_at_factor(current_fov_name, mask_name, downsample_factor)
                     if label_mask_ds is None:
                         continue
                     self.current_label_masks[mask_name] = label_mask_ds[ymin_ds:ymax_ds, xmin_ds:xmax_ds]
@@ -4006,11 +4221,16 @@ class ImageMaskViewer:
         """Load the state of all widgets from a JSON file."""
         # When the json file does not exist, do nothing
         if not os.path.exists(file_path):
-            # this is the first time the viewer is run
+            if self._debug:
+                print("[INIT DEBUG] load_widget_states: no saved state file, skipping", flush=True)
             return
 
+        if self._debug:
+            print(f"[INIT DEBUG] load_widget_states: reading {file_path}", flush=True)
         with open(file_path, 'r') as f:
             state = json.load(f)
+        if self._debug:
+            print(f"[INIT DEBUG] load_widget_states: {len(state)} keys to restore", flush=True)
 
         selected_section_index = state.get('control_sections_selected_index')
 
@@ -4029,7 +4249,11 @@ class ImageMaskViewer:
                 if isinstance(attr, Widget):
                     # If the widget has a 'value' attribute, set it to the saved value
                     if hasattr(attr, 'value'):
+                        if self._debug:
+                            print(f"[INIT DEBUG] restoring widget '{attr_name}' = {value!r}", flush=True)
                         attr.value = value
+                        if self._debug:
+                            print(f"[INIT DEBUG] widget '{attr_name}' restored ok", flush=True)
                     else:
                         # Skip widgets without a 'value' attribute
                         pass
@@ -4055,10 +4279,20 @@ class ImageMaskViewer:
                 self.mask_names = value
 
         # Update the marker set dropdown and controls
+        if self._debug:
+            print("[INIT DEBUG] load_widget_states: calling update_marker_set_dropdown", flush=True)
         self.update_marker_set_dropdown()
+        if self._debug:
+            print("[INIT DEBUG] load_widget_states: calling update_controls", flush=True)
         self.update_controls(None)
+        if self._debug:
+            print("[INIT DEBUG] load_widget_states: calling update_display (suppressed if _suspend_display_updates)", flush=True)
         self.update_display(self.current_downsample_factor)
+        if self._debug:
+            print("[INIT DEBUG] load_widget_states: calling update_keys", flush=True)
         self.update_keys(None)
+        if self._debug:
+            print("[INIT DEBUG] load_widget_states: update_keys done", flush=True)
 
         accordion = getattr(self.ui_component, 'control_sections', None)
         if accordion is not None:
@@ -4072,8 +4306,12 @@ class ImageMaskViewer:
 
         if self._debug:
             print(f"Widget states loaded from {file_path}")
+        if self._debug:
+            print("[INIT DEBUG] load_widget_states: calling inform_plugins", flush=True)
         self.inform_plugins('on_marker_sets_changed')
         self.inform_plugins('refresh_roi_table')
+        if self._debug:
+            print("[INIT DEBUG] load_widget_states: DONE", flush=True)
     
     def load_status_images(self):
         self._status_image["processing"] = load_asset_bytes("loading.gif")

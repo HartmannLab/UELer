@@ -121,6 +121,23 @@ class VirtualMapLayer:
         xmin_um, xmax_um, ymin_um, ymax_um, ds_factor = self._viewport
 
         visible_tiles = self._collect_visible_tiles(xmin_um, xmax_um, ymin_um, ymax_um)
+
+        # For very large maps cap the number of tiles rendered per call to avoid
+        # loading hundreds of TIFF files from a slow network FS in one shot.
+        # Prefer tiles closest to the viewport centre so the most relevant
+        # region is always visible; the rest fade in on panning / zooming.
+        _RENDER_TILE_LIMIT: int = getattr(self._viewer, '_map_render_tile_limit', 80)
+        if len(visible_tiles) > _RENDER_TILE_LIMIT:
+            cx = (xmin_um + xmax_um) / 2.0
+            cy = (ymin_um + ymax_um) / 2.0
+            visible_tiles = sorted(
+                visible_tiles,
+                key=lambda item: (
+                    ((item[0].x_min_um + item[0].x_max_um) / 2.0 - cx) ** 2
+                    + ((item[0].y_min_um + item[0].y_max_um) / 2.0 - cy) ** 2
+                ),
+            )[:_RENDER_TILE_LIMIT]
+
         self._last_visible_fovs = tuple(tile.name for tile, _ in visible_tiles)
         self._last_tile_viewports.clear()
         if not visible_tiles:

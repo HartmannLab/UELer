@@ -530,7 +530,7 @@ class ImageDisplay:
                 if mask_name in selected_masks:
                     if mask_name in self.main_viewer.mask_cache[self.main_viewer.ui_component.image_selector.value]:
                         # If selected_mask_full_visible is defined
-                        mask_label_ds = self.main_viewer.label_masks_cache[fov_name][mask_name][cdf]
+                        mask_label_ds = self.main_viewer._get_label_mask_at_factor(fov_name, mask_name, cdf)
                         mask_label_ds = mask_label_ds[ymin_ds:ymax_ds, xmin_ds:xmax_ds]
 
                         # In the `selected_mask_label_ds`, Keep only labels in mask_ids

@@ -1,5 +1,13 @@
 ### v0.3.1
 
+**Map mode large-dataset crash fix — render suppression & tile cap (Follow-up)**
+- **Root cause confirmed:** During `load_widget_states`, changing every saved widget value fires the slider observer (`FloatSlider.value` → `lambda: update_display()`). For a 400-tile map on a slow network FS this produced many successive full-map renders (one per channel × 2 sliders), each requiring hundreds of sequential TIFF reads — enough to time out the Jupyter kernel connection.
+- **Fix 1 — Suppress renders during state restoration** (`main_viewer.py`): Added `_suspend_display_updates: bool` flag. Set to `True` in `__init__` around `load_widget_states` (in a try/finally) and checked at the top of `update_display`. All widget-observer render bursts are silently skipped; the first real render happens on first user interaction after the viewer is displayed.
+- **Fix 2 — Per-render tile cap** (`virtual_map_layer.py`): Added `_RENDER_TILE_LIMIT` check in `render()`. When visible tiles exceed `viewer._map_render_tile_limit` (default 80), tiles are sorted by distance from the viewport centre and only the nearest 80 are rendered in a single call. This bounds the TIFF-read cost of any single render for very large maps.
+- Also added `_map_render_tile_limit: int = 80` instance variable to `ImageMaskViewer` (settable by the user to tune for their dataset / FS speed).
+- Prior fix (batch stats tile cap, same log entry) is preserved.
+- Validated with: `python -m unittest tests/test_map_mode_activation.py tests/test_virtual_map_layer.py` (19/19 tests pass).
+
 **Packaged `image_utils` restore (#79 follow-up)**
 - Restored `ueler.image_utils` as a concrete packaged module after the root-level `image_utils.py` removal left canonical imports pointing at a missing alias target.
 - Reversed the utility compatibility shims so legacy imports (`image_utils`, `data_loader`, `constants`) resolve to the packaged `ueler.*` modules rather than the deleted root-level files.

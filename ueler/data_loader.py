@@ -124,26 +124,23 @@ def merge_channel_max(channel_name, channel_max_values, display_max, dtype_max):
     return True
 
 
-def _update_channel_max(channel_name, channel_image, channel_max_values) -> None:
-    if channel_image is None:
-        return
-
+def _build_channel_stat_tasks(channel_image):
+    """Return (percentile_task, max_task) as Dask delayed objects without computing."""
     dask, da = _ensure_dask()
-
     axes = tuple(range(channel_image.ndim))
-
     try:
         percentile_task = da.nanpercentile(channel_image, 99.9, axis=axes)
     except (ValueError, NotImplementedError):
         percentile_task = da.nanmax(channel_image, axis=axes)
-
     max_task = da.nanmax(channel_image, axis=axes)
-    percentile_value, absolute_max = dask.compute(percentile_task, max_task)
+    return percentile_task, max_task
 
+
+def _apply_channel_stat_values(channel_name, percentile_value, absolute_max, dtype, channel_max_values) -> None:
+    """Apply already-computed stat values to channel_max_values (no Dask computation)."""
     if percentile_value is None or np.isnan(percentile_value):
         percentile_value = absolute_max
 
-    dtype = getattr(channel_image, "dtype", None)
     if dtype is not None and np.issubdtype(dtype, np.integer):
         dtype_limit = float(np.iinfo(dtype).max)
     elif dtype is not None and np.issubdtype(dtype, np.floating):
@@ -160,13 +157,26 @@ def _update_channel_max(channel_name, channel_image, channel_max_values) -> None
     merge_channel_max(channel_name, channel_max_values, display_max, dtype_limit)
 
 
+def _update_channel_max(channel_name, channel_image, channel_max_values) -> None:
+    if channel_image is None:
+        return
+
+    dask, da = _ensure_dask()
+    percentile_task, max_task = _build_channel_stat_tasks(channel_image)
+    percentile_value, absolute_max = dask.compute(percentile_task, max_task)
+    _apply_channel_stat_values(
+        channel_name, percentile_value, absolute_max,
+        getattr(channel_image, "dtype", None), channel_max_values,
+    )
+
+
 def _ensure_channel_folder(base_folder: str, fov_name: str) -> str:
     fov_path = os.path.join(base_folder, fov_name)
     rescaled_path = os.path.join(fov_path, "rescaled")
     return rescaled_path if os.path.isdir(rescaled_path) else fov_path
 
 
-def load_one_channel_fov(fov_name, base_folder, channel_max_values, requested_channel):
+def load_one_channel_fov(fov_name, base_folder, channel_max_values, requested_channel, compute_stats=True):
     channel_folder = _ensure_channel_folder(base_folder, fov_name)
     tiff_files = _list_tiff_files(channel_folder)
     if not tiff_files:
@@ -186,7 +196,8 @@ def load_one_channel_fov(fov_name, base_folder, channel_max_values, requested_ch
             channel_image = channel_image[-1, :, :]
         channel_image = channel_image.rechunk(_CHUNK_SIZE)
 
-        _update_channel_max(channel_name, channel_image, channel_max_values)
+        if compute_stats:
+            _update_channel_max(channel_name, channel_image, channel_max_values)
 
     return channel_image
 
@@ -248,7 +259,16 @@ def load_masks_for_fov(fov_name, masks_folder, mask_names_set):
                 f"Warning: Mask '{mask_name}' in FOV '{fov_name}' has unexpected dimensions {mask_image.shape}."
             )
 
-        if getattr(mask_image, "max", lambda: 2)() <= 1:
+        mask_dtype = getattr(mask_image, "dtype", None)
+        needs_label = mask_dtype is not None and (
+            np.issubdtype(mask_dtype, np.bool_)
+            or (
+                np.issubdtype(mask_dtype, np.unsignedinteger)
+                and np.iinfo(mask_dtype).max == 1
+            )
+        )
+        mask_image = np.asarray(mask_image)  # materialize once
+        if needs_label:
             mask_image = measure.label(mask_image)
 
         mask_dict[mask_name] = mask_image
