@@ -43,6 +43,7 @@ def _ensure_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             ""
             if col
             in {
+                "fov",
                 "marker_set",
                 "tags",
                 "annotation_palette",
@@ -54,7 +55,7 @@ def _ensure_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             else 0.0
         )
     df = df[ROI_COLUMNS]
-    for col in ["marker_set", "tags", "annotation_palette", "mask_color_set", "mask_visibility", "comment", "map_id"]:
+    for col in ["fov", "marker_set", "tags", "annotation_palette", "mask_color_set", "mask_visibility", "comment", "map_id"]:
         if col in df.columns:
             df[col] = (
                 df[col]

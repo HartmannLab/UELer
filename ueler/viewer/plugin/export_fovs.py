@@ -444,6 +444,9 @@ class BatchExportPlugin(PluginBase):
         self.ui_component.cell_apply_filter.on_click(lambda _: self.refresh_cell_options())
         self.ui_component.cell_preview_button.on_click(lambda _: self._preview_single_cell())
         self.ui_component.roi_limit_to_fov.observe(lambda _: self.refresh_roi_options(), names="value")
+        roi_mgr = getattr(self.main_viewer, "roi_manager", None)
+        if roi_mgr is not None:
+            roi_mgr._table.add_observer(lambda _df: self.refresh_roi_options())
         self.ui_component.include_masks.observe(lambda _: self.refresh_overlay_capabilities(), names="value")
         self.ui_component.mask_outline_thickness.observe(
             self._on_mask_outline_thickness_change,
@@ -539,7 +542,10 @@ class BatchExportPlugin(PluginBase):
         for _, row in df.iterrows():
             record = row.to_dict()
             roi_id = str(record.get("roi_id"))
-            label = f"{record.get('fov', '—')} · {record.get('marker_set', '—')} · {roi_id[:8]}"
+            fov = str(record.get("fov") or "")
+            map_id = str(record.get("map_id") or "")
+            location = fov if fov else (f"[MAP:{map_id}]" if map_id else "—")
+            label = f"{location} · {record.get('marker_set', '—')} · {roi_id[:8]}"
             options.append((label, roi_id))
             self._roi_records[roi_id] = record
 
@@ -1391,6 +1397,68 @@ class BatchExportPlugin(PluginBase):
             payload["metadata"] = {"scale_bar_um": spec.physical_length_um}
         return payload
 
+    def _render_map_region_direct(
+        self,
+        layer,
+        xmin_um: float,
+        xmax_um: float,
+        ymin_um: float,
+        ymax_um: float,
+        downsample_factor: int,
+        channels: tuple,
+        channel_settings: Mapping[str, Any],
+    ) -> np.ndarray:
+        """Render a rectangular region of the stitched map using explicit channel settings.
+
+        Unlike ``VirtualMapLayer.render()``, which reads contrast/color from the live viewer
+        UI widgets, this method calls ``render_fov_to_array`` directly with the supplied
+        ``channel_settings``.  This is required for batch export so that the marker profile's
+        settings are used instead of whatever the user currently has on screen.
+        """
+        visible_tiles = layer._collect_visible_tiles(xmin_um, xmax_um, ymin_um, ymax_um)
+        canvas = layer._allocate_canvas(xmin_um, xmax_um, ymin_um, ymax_um, downsample_factor)
+
+        if not visible_tiles:
+            return canvas  # empty (all-zero) canvas — no tiles overlap this region
+
+        viewer = self.main_viewer
+        for tile, intersection in visible_tiles:
+            region = layer._compute_tile_region(tile, intersection, downsample_factor)
+            if region is None:
+                continue
+            region_xy, region_ds = region
+
+            viewer.load_fov(tile.name, channels)
+            fov_arrays = viewer.image_cache.get(tile.name)
+            if not fov_arrays:
+                continue
+
+            tile_image = render_fov_to_array(
+                tile.name,
+                fov_arrays,
+                channels,
+                channel_settings,
+                downsample_factor=downsample_factor,
+                region_xy=region_xy,
+                # Do NOT pass region_ds here: it is in absolute downsampled coordinates
+                # (non-zero origin), but render_fov_to_array uses it to set the canvas
+                # shape.  Let render_fov_to_array derive region_ds from region_xy so
+                # the shape is always consistent with the clipped region.
+            )
+            layer._blit_tile(
+                canvas,
+                tile_image,
+                intersection,
+                xmin_um,
+                ymin_um,
+                tile.name,
+                region_xy,
+                region_ds,
+                downsample_factor,
+            )
+
+        return canvas
+
     def _export_map_roi_worker(
         self,
         *,
@@ -1404,7 +1472,12 @@ class BatchExportPlugin(PluginBase):
         scale_ratio: float,
         overlay_snapshot: OverlaySnapshot,
     ) -> Dict[str, Any]:
-        """Export a map-mode ROI by rendering via VirtualMapLayer.set_viewport + render."""
+        """Export a map-mode ROI using the marker profile's channel settings directly.
+
+        Renders via ``_render_map_region_direct`` (which calls ``render_fov_to_array`` per
+        tile) so the marker profile's contrast/color settings are used — not the live viewer
+        UI state, which would produce white/black output.
+        """
         import math
 
         map_id = str(roi.get("map_id") or "").strip()
@@ -1426,10 +1499,15 @@ class BatchExportPlugin(PluginBase):
             raise ValueError("ROI has zero or negative extent.")
 
         # Convert stitched-canvas pixels → physical um for the layer API.
-        xmin_um = x_min * base_px_um
-        xmax_um = x_max * base_px_um
-        ymin_um = y_min * base_px_um
-        ymax_um = y_max * base_px_um
+        # The canvas origin corresponds to the map's physical bounds origin, so
+        # we must add the layer's min bounds (matching _render_map_view at line ~1083).
+        bounds = layer.map_bounds()
+        bounds_min_x = float(bounds[0])
+        bounds_min_y = float(bounds[2])
+        xmin_um = bounds_min_x + x_min * base_px_um
+        xmax_um = bounds_min_x + x_max * base_px_um
+        ymin_um = bounds_min_y + y_min * base_px_um
+        ymax_um = bounds_min_y + y_max * base_px_um
 
         # Use the requested downsample (from UI), but clamp to what the layer allows.
         allowed: tuple = getattr(layer, "_allowed_downsample", ()) or ()
@@ -1439,16 +1517,20 @@ class BatchExportPlugin(PluginBase):
         else:
             ds = max(1, int(downsample))
 
-        # Temporarily override the layer viewport, then restore it.
-        saved_viewport = getattr(layer, "_viewport", None)
-        try:
-            layer.set_viewport(xmin_um, xmax_um, ymin_um, ymax_um, downsample_factor=ds)
-            image = layer.render(marker_profile.selected_channels)
-        finally:
-            layer._viewport = saved_viewport  # type: ignore[attr-defined]
+        # Render the region using the marker profile's channel settings directly.
+        # This avoids the white/black artefact caused by layer.render() reading live
+        # UI widget values (contrast_min/max, colors) instead of the export profile.
+        channels = tuple(marker_profile.selected_channels)
+        image = self._render_map_region_direct(
+            layer,
+            xmin_um, xmax_um, ymin_um, ymax_um,
+            ds,
+            channels,
+            marker_profile.channel_settings,
+        )
 
         if image is None or not image.size:
-            raise ValueError("VirtualMapLayer.render returned an empty array.")
+            raise ValueError("Map region render returned an empty array.")
 
         # pixel_size_nm for the scale bar: base pixel is base_px_um µm, scaled by ds.
         pixel_size_nm = base_px_um * 1000.0 * ds

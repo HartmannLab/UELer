@@ -1118,34 +1118,38 @@ class BatchExportMapROIItemsTests(unittest.TestCase):
         self.assertTrue(fname.startswith("FOV_A_"), f"Expected 'FOV_A_' prefix, got: {fname}")
         self.assertEqual(items[0].metadata.get("fov"), "FOV_A")
 
-    def test_export_map_roi_worker_calls_set_viewport_and_writes_file(self):
-        """_export_map_roi_worker sets viewport, calls render, and invokes _write_image."""
+    def test_export_map_roi_worker_calls_render_map_region_direct(self):
+        """_export_map_roi_worker uses _render_map_region_direct (not layer.render) so
+        the marker profile's channel settings are applied — not the live UI widget values."""
         output_file = str(self.base_path / "out_map_roi.png")
 
-        # Build a stub layer
-        rendered_array = np.ones((10, 10, 3), dtype=np.float32) * 0.5
-        layer_calls = []
+        # The stub layer implements the internal helpers used by _render_map_region_direct.
+        rendered_tile = np.ones((10, 10, 3), dtype=np.float32) * 0.5
+        region_direct_calls = []
+
+        # Patch _render_map_region_direct to record the call and return a known canvas.
+        def _fake_render_map_region_direct(
+            _self, layer, xmin_um, xmax_um, ymin_um, ymax_um, ds, channels, channel_settings
+        ):
+            region_direct_calls.append({
+                "xmin_um": xmin_um,
+                "xmax_um": xmax_um,
+                "ymin_um": ymin_um,
+                "ymax_um": ymax_um,
+                "ds": ds,
+                "channels": channels,
+                "channel_settings": channel_settings,
+            })
+            return rendered_tile
 
         class _StubLayer:
             _allowed_downsample = (1, 2, 4)
-            _viewport = None
-
-            def base_pixel_size_um(self):
-                return 0.5
-
-            def set_viewport(self, xmin_um, xmax_um, ymin_um, ymax_um, *, downsample_factor):
-                layer_calls.append(("set_viewport", xmin_um, xmax_um, ymin_um, ymax_um, downsample_factor))
-                self._viewport = (xmin_um, xmax_um, ymin_um, ymax_um, downsample_factor)
-
-            def render(self, channels):
-                layer_calls.append(("render", channels))
-                return rendered_array
-
-        stub_layer = _StubLayer()
+            def base_pixel_size_um(self): return 0.5
+            def map_bounds(self): return (0.0, 500.0, 0.0, 500.0)  # zero-origin
 
         viewer = _BatchExportViewerStub(self.base_path)
         viewer._active_map_id = "slide-1"
-        viewer._get_map_layer = lambda map_id: stub_layer  # noqa: ARG001
+        viewer._get_map_layer = lambda _: _StubLayer()
 
         plugin = BatchExportPlugin.__new__(BatchExportPlugin)
         plugin.main_viewer = viewer
@@ -1158,16 +1162,18 @@ class BatchExportMapROIItemsTests(unittest.TestCase):
             "y_min": 50.0,
             "y_max": 200.0,
         }
+        profile = self._make_marker_profile()
 
         write_calls = []
 
         def _fake_write_image(_self, array, path, fmt, dpi, *, scale_bar_spec=None):
-            write_calls.append({"path": path, "array": array, "fmt": fmt})
+            write_calls.append({"path": path, "fmt": fmt})
 
-        with mock.patch.object(BatchExportPlugin, "_write_image", _fake_write_image):
+        with mock.patch.object(BatchExportPlugin, "_render_map_region_direct", _fake_render_map_region_direct), \
+             mock.patch.object(BatchExportPlugin, "_write_image", _fake_write_image):
             result = plugin._export_map_roi_worker(
                 roi=roi,
-                marker_profile=self._make_marker_profile(),
+                marker_profile=profile,
                 downsample=1,
                 file_format="png",
                 output_path=output_file,
@@ -1177,76 +1183,141 @@ class BatchExportMapROIItemsTests(unittest.TestCase):
                 overlay_snapshot=self._make_overlay_snapshot(),
             )
 
-        # set_viewport must have been called with um-space coordinates
-        set_vp_calls = [c for c in layer_calls if c[0] == "set_viewport"]
-        self.assertEqual(len(set_vp_calls), 1)
-        _, xmin_um, xmax_um, ymin_um, ymax_um, ds = set_vp_calls[0]
-        self.assertAlmostEqual(xmin_um, 100.0 * 0.5)   # x_min * base_px_um
-        self.assertAlmostEqual(xmax_um, 300.0 * 0.5)
-        self.assertAlmostEqual(ymin_um, 50.0 * 0.5)
-        self.assertAlmostEqual(ymax_um, 200.0 * 0.5)
+        # _render_map_region_direct must be called once with um-space coordinates.
+        # With zero-origin bounds (0,0), xmin_um = bounds_min_x + x_min * base_px_um.
+        self.assertEqual(len(region_direct_calls), 1)
+        call = region_direct_calls[0]
+        self.assertAlmostEqual(call["xmin_um"], 0.0 + 100.0 * 0.5)  # bounds_min_x + x_min * base_px_um
+        self.assertAlmostEqual(call["xmax_um"], 0.0 + 300.0 * 0.5)
+        self.assertAlmostEqual(call["ymin_um"], 0.0 + 50.0 * 0.5)
+        self.assertAlmostEqual(call["ymax_um"], 0.0 + 200.0 * 0.5)
 
-        # render must have been called
-        render_calls = [c for c in layer_calls if c[0] == "render"]
-        self.assertEqual(len(render_calls), 1)
+        # The marker profile's channel_settings must be forwarded (not UI widget values).
+        self.assertIs(call["channel_settings"], profile.channel_settings)
 
-        # _write_image must have been called with the correct output path
-        self.assertEqual(len(write_calls), 1, "_write_image should be called once")
+        # _write_image must be called with the output path.
+        self.assertEqual(len(write_calls), 1)
         self.assertEqual(write_calls[0]["path"], output_file)
         self.assertEqual(write_calls[0]["fmt"], "png")
 
-        # The worker must return the output path in the result dict
         self.assertEqual(result["output_path"], output_file)
 
-    def test_export_map_roi_worker_restores_viewport_on_success(self):
-        """After rendering, the layer's _viewport is restored to its original value."""
-        output_file = str(self.base_path / "out_restore.png")
-        original_viewport = ("saved", "value")
+    def test_render_map_region_direct_uses_render_fov_to_array_per_tile(self):
+        """_render_map_region_direct calls render_fov_to_array with the supplied
+        channel_settings for each visible tile — not the live UI widget values."""
+        import math
+        from ueler.rendering import ChannelRenderSettings
+
+        channel_settings = {
+            "DNA": ChannelRenderSettings(color=(1.0, 0.0, 0.0), contrast_min=0.0, contrast_max=1.0),
+        }
+        channels = ("DNA",)
+
+        # Minimal fake tile geometry matching the VirtualMapLayer dataclass fields
+        from ueler.viewer.virtual_map_layer import MapTileGeometry
+        tile = MapTileGeometry(
+            name="FOV_A",
+            pixel_size_um=0.5,
+            width_px=100,
+            height_px=100,
+            x_min_um=0.0,
+            x_max_um=50.0,
+            y_min_um=0.0,
+            y_max_um=50.0,
+        )
+        intersection = (5.0, 25.0, 5.0, 25.0)
+        region_xy = (10, 50, 10, 50)
+        region_ds = (10, 50, 10, 50)
+        rendered_tile_array = np.ones((40, 40, 3), dtype=np.float32) * 0.4
+        canvas = np.zeros((50, 50, 3), dtype=np.float32)
 
         class _StubLayer:
             _allowed_downsample = (1,)
-            _viewport = original_viewport
+            def base_pixel_size_um(self): return 0.5
+            def _collect_visible_tiles(self, *_a): return [(tile, intersection)]
+            def _allocate_canvas(self, *_a): return canvas
+            def _compute_tile_region(self, *_a): return (region_xy, region_ds)
+            def _blit_tile(self, *_a, **_kw): return None
 
-            def base_pixel_size_um(self):
-                return 1.0
+        fov_arrays = {"DNA": np.ones((100, 100), dtype=np.float32) * 0.3}
 
-            def set_viewport(self, *_args, **_kwargs):
-                self._viewport = ("new_viewport",)
+        class _FakeViewer:
+            image_cache = {"FOV_A": fov_arrays}
+            def load_fov(self, fov_name, channels): pass
 
-            def render(self, _channels):
-                return np.ones((4, 4, 3), dtype=np.float32)
+        plugin = BatchExportPlugin.__new__(BatchExportPlugin)
+        plugin.main_viewer = _FakeViewer()
 
-        stub_layer = _StubLayer()
+        render_calls = []
+
+        def _fake_render_fov_to_array(fov_name, arrays, chans, ch_settings, *, downsample_factor, region_xy, region_ds=None):
+            render_calls.append({"fov": fov_name, "channel_settings": ch_settings})
+            return rendered_tile_array
+
+        with mock.patch("ueler.viewer.plugin.export_fovs.render_fov_to_array", _fake_render_fov_to_array):
+            plugin._render_map_region_direct(
+                _StubLayer(),
+                5.0, 25.0, 5.0, 25.0,
+                1,
+                channels,
+                channel_settings,
+            )
+
+        self.assertEqual(len(render_calls), 1)
+        self.assertEqual(render_calls[0]["fov"], "FOV_A")
+        # The supplied channel_settings are passed through unmodified
+        self.assertIs(render_calls[0]["channel_settings"], channel_settings)
+
+    def test_export_map_roi_worker_applies_map_bounds_offset(self):
+        """_export_map_roi_worker adds the layer's physical bounds origin to canvas-pixel
+        coordinates before passing them to _render_map_region_direct.  This matches the
+        behaviour of _render_map_view and is required for maps whose tiles have non-zero
+        stage-coordinate origins (e.g. absolute µm positions)."""
+        output_file = str(self.base_path / "out_map_roi_offset.png")
+        region_direct_calls = []
+        rendered_tile = np.ones((10, 10, 3), dtype=np.float32) * 0.5
+
+        def _fake_render(self_, layer, xmin_um, xmax_um, ymin_um, ymax_um, ds, channels, ch_settings):
+            region_direct_calls.append((xmin_um, xmax_um, ymin_um, ymax_um))
+            return rendered_tile
+
+        class _StubLayerOffset:
+            _allowed_downsample = (1,)
+            def base_pixel_size_um(self): return 2.0
+            def map_bounds(self): return (1_000.0, 3_000.0, 4_000.0, 6_000.0)  # non-zero origin
 
         viewer = _BatchExportViewerStub(self.base_path)
-        viewer._get_map_layer = lambda _: stub_layer
+        viewer._get_map_layer = lambda _: _StubLayerOffset()
 
         plugin = BatchExportPlugin.__new__(BatchExportPlugin)
         plugin.main_viewer = viewer
 
-        with mock.patch.object(BatchExportPlugin, "_write_image", lambda *_a, **_kw: None):
+        roi = {"fov": "", "map_id": "slide-1", "x_min": 50.0, "x_max": 100.0, "y_min": 20.0, "y_max": 70.0}
+
+        with mock.patch.object(BatchExportPlugin, "_render_map_region_direct", _fake_render), \
+             mock.patch.object(BatchExportPlugin, "_write_image", lambda *a, **kw: None):
             plugin._export_map_roi_worker(
-                roi={"fov": "", "map_id": "slide-1", "x_min": 0.0, "x_max": 10.0, "y_min": 0.0, "y_max": 10.0},
+                roi=roi,
                 marker_profile=self._make_marker_profile(),
-                downsample=1,
-                file_format="png",
-                output_path=output_file,
-                dpi=300,
-                include_scale_bar=False,
-                scale_ratio=10.0,
+                downsample=1, file_format="png", output_path=output_file,
+                dpi=300, include_scale_bar=False, scale_ratio=10.0,
                 overlay_snapshot=self._make_overlay_snapshot(),
             )
 
-        self.assertIs(stub_layer._viewport, original_viewport, "Viewport not restored after rendering")
+        self.assertEqual(len(region_direct_calls), 1)
+        xmin_um, xmax_um, ymin_um, ymax_um = region_direct_calls[0]
+        # Expected: bounds_min + pixel_coord * base_px_um
+        self.assertAlmostEqual(xmin_um, 1_000.0 + 50.0 * 2.0)   # 1100
+        self.assertAlmostEqual(xmax_um, 1_000.0 + 100.0 * 2.0)  # 1200
+        self.assertAlmostEqual(ymin_um, 4_000.0 + 20.0 * 2.0)   # 4040
+        self.assertAlmostEqual(ymax_um, 4_000.0 + 70.0 * 2.0)   # 4140
 
     def test_export_map_roi_worker_raises_on_empty_roi(self):
         """A ROI with zero extent raises ValueError."""
         class _StubLayer:
             _allowed_downsample = (1,)
-            _viewport = None
             def base_pixel_size_um(self): return 1.0
-            def set_viewport(self, *_a, **_kw): pass
-            def render(self, _c): return np.ones((4, 4, 3), dtype=np.float32)
+            def map_bounds(self): return (0.0, 1000.0, 0.0, 1000.0)
 
         viewer = _BatchExportViewerStub(self.base_path)
         viewer._get_map_layer = lambda _: _StubLayer()
@@ -1266,6 +1337,207 @@ class BatchExportMapROIItemsTests(unittest.TestCase):
                     scale_ratio=10.0,
                     overlay_snapshot=self._make_overlay_snapshot(),
                 )
+
+
+    def test_build_roi_items_routes_nan_fov_map_roi_to_map_worker(self):
+        """After CSV reload, fov may be NaN (float). With fov sanitized to '',
+        map-mode ROIs must still route to the map-mode worker."""
+        roi_id = "nan-fov-roi-aabbccddeeff"
+        # Simulate what happens after _ensure_dataframe sanitizes: fov="" (not NaN)
+        roi_records = {
+            roi_id: {"fov": "", "map_id": "slide-1", "x_min": 0, "x_max": 100, "y_min": 0, "y_max": 100}
+        }
+        plugin = self._make_plugin_for_build(roi_records, [roi_id])
+        items = plugin._build_roi_items(
+            marker_profile=self._make_marker_profile(),
+            output_dir=str(self.base_path),
+            file_format="png",
+            downsample=1,
+            dpi=300,
+            include_scale_bar=False,
+            scale_ratio=10.0,
+            pixel_size_nm=390.0,
+            overlay_snapshot=self._make_overlay_snapshot(),
+        )
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].metadata.get("map_id"), "slide-1")
+        fname = Path(items[0].output_path).name
+        self.assertTrue(fname.startswith("map_"), f"Expected map_ prefix, got: {fname}")
+
+    def test_refresh_roi_options_shows_map_label_for_map_mode_roi(self):
+        """Map-mode ROIs (fov='', map_id='slide-1') display [MAP:slide-1] in the label."""
+        import pandas as pd
+        from ueler.viewer.roi_manager import ROIManager
+
+        viewer = _BatchExportViewerStub(self.base_path)
+        viewer.roi_manager = ROIManager(str(self.base_path))
+
+        # Insert a map-mode ROI directly
+        viewer.roi_manager.add_roi({
+            "fov": "",
+            "map_id": "slide-1",
+            "x_min": 10.0, "x_max": 50.0, "y_min": 10.0, "y_max": 50.0,
+            "marker_set": "test_markers",
+        })
+
+        plugin = BatchExportPlugin.__new__(BatchExportPlugin)
+        plugin.main_viewer = viewer
+        plugin._roi_records = {}
+        plugin.ui_component = SimpleNamespace(
+            roi_selection=SimpleNamespace(options=[], value=()),
+            roi_limit_to_fov=SimpleNamespace(value=False),
+        )
+
+        plugin.refresh_roi_options()
+
+        # The label should include [MAP:slide-1], not empty fov or 'nan'
+        options = plugin.ui_component.roi_selection.options
+        self.assertEqual(len(options), 1)
+        label, _ = options[0]
+        self.assertIn("[MAP:slide-1]", label)
+        self.assertNotIn("nan", label.lower())
+
+    def test_roi_table_observer_refreshes_batch_export_roi_list(self):
+        """When ROI manager adds a new ROI, the batch export's roi_selection is refreshed."""
+        from ueler.viewer.roi_manager import ROIManager
+
+        viewer = _BatchExportViewerStub(self.base_path)
+        viewer.roi_manager = ROIManager(str(self.base_path))
+
+        plugin = BatchExportPlugin.__new__(BatchExportPlugin)
+        plugin.main_viewer = viewer
+        plugin._roi_records = {}
+        plugin._executor = None
+        plugin._current_job = None
+        plugin._current_future = None
+        plugin._event_loop = None
+        plugin._io_loop = None
+        plugin._cell_records = {}
+        plugin._cell_filter_snapshot = ""
+        plugin._seen_results = set()
+        plugin._viewer_outline_thickness = 1
+        plugin._mask_outline_thickness = 1
+        plugin._mask_outline_overridden = False
+        plugin._suspend_outline_widget_callback = False
+        plugin._overlay_snapshot = None
+        plugin._overlay_cache = {}
+        plugin._viewer_pixel_size_nm = 390.0
+
+        # Build minimal UI widgets needed by refresh_roi_options and _connect_events
+        plugin.ui_component = SimpleNamespace(
+            mode_selector=SimpleNamespace(observe=lambda *a, **kw: None),
+            full_fov_use_all=SimpleNamespace(observe=lambda *a, **kw: None),
+            browse_button=SimpleNamespace(on_click=lambda *a: None),
+            start_button=SimpleNamespace(on_click=lambda *a: None),
+            cancel_button=SimpleNamespace(on_click=lambda *a: None),
+            cell_apply_filter=SimpleNamespace(on_click=lambda *a: None),
+            cell_preview_button=SimpleNamespace(on_click=lambda *a: None),
+            roi_limit_to_fov=SimpleNamespace(value=False, observe=lambda *a, **kw: None),
+            roi_selection=SimpleNamespace(options=[], value=()),
+            include_masks=SimpleNamespace(observe=lambda *a, **kw: None),
+            mask_outline_thickness=SimpleNamespace(observe=lambda *a, **kw: None),
+        )
+
+        plugin._connect_events()
+
+        # Verify the ROI list is initially empty
+        self.assertEqual(len(plugin.ui_component.roi_selection.options), 0)
+
+        # Add a ROI — the observer should auto-refresh the batch export list
+        viewer.roi_manager.add_roi({
+            "fov": "FOV_A",
+            "marker_set": "panel1",
+            "x_min": 0, "x_max": 10, "y_min": 0, "y_max": 10,
+        })
+
+        # After add_roi, the observer should have triggered refresh_roi_options
+        options = plugin.ui_component.roi_selection.options
+        self.assertGreaterEqual(len(options), 1, "ROI list should refresh after add_roi")
+
+
+class EnsureDataframeFovSanitizationTests(unittest.TestCase):
+    """Tests for _ensure_dataframe handling of 'fov' column NaN values."""
+
+    def test_fov_nan_sanitized_to_empty_string(self):
+        """When fov is NaN (as read from CSV), it should become ''."""
+        import pandas as pd
+        from ueler.viewer.roi_manager import _ensure_dataframe, ROI_COLUMNS
+
+        df = pd.DataFrame([{
+            "roi_id": "test-123",
+            "fov": float("nan"),
+            "map_id": "slide-1",
+            "x": 0, "y": 0, "width": 100, "height": 100, "zoom": 1.0,
+            "x_min": 0, "x_max": 100, "y_min": 0, "y_max": 100,
+            "marker_set": "panel1",
+            "tags": "", "annotation_palette": "", "mask_color_set": "",
+            "mask_visibility": "", "comment": "",
+            "created_at": "2025-01-01", "updated_at": "2025-01-01",
+        }])
+
+        result = _ensure_dataframe(df)
+        fov_value = result.iloc[0]["fov"]
+        self.assertEqual(fov_value, "", f"Expected empty string, got {fov_value!r}")
+
+    def test_fov_empty_string_preserved(self):
+        """When fov is already '', it should stay ''."""
+        import pandas as pd
+        from ueler.viewer.roi_manager import _ensure_dataframe
+
+        df = pd.DataFrame([{
+            "roi_id": "test-456",
+            "fov": "",
+            "map_id": "slide-1",
+            "x": 0, "y": 0, "width": 100, "height": 100, "zoom": 1.0,
+            "x_min": 0, "x_max": 100, "y_min": 0, "y_max": 100,
+            "marker_set": "panel1",
+            "tags": "", "annotation_palette": "", "mask_color_set": "",
+            "mask_visibility": "", "comment": "",
+            "created_at": "2025-01-01", "updated_at": "2025-01-01",
+        }])
+
+        result = _ensure_dataframe(df)
+        self.assertEqual(result.iloc[0]["fov"], "")
+
+    def test_fov_normal_value_preserved(self):
+        """When fov has a real value like 'FOV_A', it should stay unchanged."""
+        import pandas as pd
+        from ueler.viewer.roi_manager import _ensure_dataframe
+
+        df = pd.DataFrame([{
+            "roi_id": "test-789",
+            "fov": "FOV_A",
+            "map_id": "",
+            "x": 0, "y": 0, "width": 100, "height": 100, "zoom": 1.0,
+            "x_min": 0, "x_max": 100, "y_min": 0, "y_max": 100,
+            "marker_set": "panel1",
+            "tags": "", "annotation_palette": "", "mask_color_set": "",
+            "mask_visibility": "", "comment": "",
+            "created_at": "2025-01-01", "updated_at": "2025-01-01",
+        }])
+
+        result = _ensure_dataframe(df)
+        self.assertEqual(result.iloc[0]["fov"], "FOV_A")
+
+    def test_csv_roundtrip_preserves_empty_fov(self):
+        """Write a map-mode ROI to CSV and read it back — fov must remain ''."""
+        import pandas as pd
+        from ueler.viewer.roi_manager import ROIManager
+
+        tmp = TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        mgr = ROIManager(tmp.name)
+
+        mgr.add_roi({"fov": "", "map_id": "slide-1", "marker_set": "p1",
+                      "x_min": 0, "x_max": 10, "y_min": 0, "y_max": 10})
+
+        # Reload from CSV
+        mgr2 = ROIManager(tmp.name)
+        df = mgr2.list_rois()
+        self.assertEqual(len(df), 1)
+        fov_val = df.iloc[0]["fov"]
+        self.assertEqual(fov_val, "", f"Expected empty fov after CSV roundtrip, got {fov_val!r}")
+        self.assertEqual(df.iloc[0]["map_id"], "slide-1")
 
 
 if __name__ == "__main__":
