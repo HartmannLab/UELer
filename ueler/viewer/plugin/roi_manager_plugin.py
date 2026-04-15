@@ -546,7 +546,10 @@ class ROIManagerPlugin(PluginBase):
     # Event handlers and helpers
     # ------------------------------------------------------------------
     def _on_roi_table_change(self, df):  # pragma: no cover - observer callback
-        self.refresh_roi_table(df, force_refresh=True)
+        try:
+            self.refresh_roi_table(df, force_refresh=True)
+        except Exception:  # pragma: no cover - best-effort UI update
+            pass
 
     def _on_selection_change(self, change):
         if self._suspend_ui_events or change.get("name") != "value":
@@ -622,7 +625,7 @@ class ROIManagerPlugin(PluginBase):
             df = pd.DataFrame()
 
         if self.ui_component.limit_to_fov_checkbox.value:
-            current_fov = getattr(self.main_viewer.ui_component.image_selector, "value", None)
+            current_fov = self.main_viewer.get_active_fov()
             if current_fov:
                 df = df[df["fov"] == current_fov]
 
@@ -657,7 +660,7 @@ class ROIManagerPlugin(PluginBase):
         self._refresh_browser_gallery()
 
         scope = (
-            getattr(self.main_viewer.ui_component.image_selector, "value", "all FOVs")
+            (self.main_viewer.get_active_fov() or "all FOVs")
             if self.ui_component.limit_to_fov_checkbox.value
             else "all FOVs"
         )
@@ -665,6 +668,8 @@ class ROIManagerPlugin(PluginBase):
 
     @staticmethod
     def _format_roi_label(record) -> str:
+        fov = str(record.get("fov") or "")
+        map_id = str(record.get("map_id") or "")
         marker = record.get("marker_set") or "—"
         tags = record.get("tags") or ""
         tag_display = f" [{tags}]" if tags else ""
@@ -674,7 +679,8 @@ class ROIManagerPlugin(PluginBase):
             int(round(record.get("x_max", 0) or 0)),
             int(round(record.get("y_max", 0) or 0)),
         )
-        return f"{record.get('fov', '—')} · {marker}{tag_display} · {coords[0]}:{coords[1]} → {coords[2]}:{coords[3]}"
+        location = fov if fov else (f"[MAP:{map_id}]" if map_id else "—")
+        return f"{location} · {marker}{tag_display} · {coords[0]}:{coords[1]} → {coords[2]}:{coords[3]}"
 
     def _refresh_browser_filters(self) -> None:
         widget = getattr(self.ui_component, "browser_fov_filter", None)
@@ -704,7 +710,7 @@ class ROIManagerPlugin(PluginBase):
         df = table.copy()
 
         if self.ui_component.browser_limit_to_current.value:
-            current_fov = getattr(self.main_viewer.ui_component.image_selector, "value", None)
+            current_fov = self.main_viewer.get_active_fov()
             if current_fov:
                 df = df[df["fov"] == current_fov]
 
@@ -1202,7 +1208,8 @@ class ROIManagerPlugin(PluginBase):
     ) -> Optional[np.ndarray]:
         fov_name = record.get("fov")
         if not fov_name:
-            return None
+            # Map-mode ROI: render from the stitched map layer.
+            return self._render_map_roi_tile(record, marker_profile)
 
         try:
             self.main_viewer.load_fov(fov_name, marker_profile.selected_channels)
@@ -1235,6 +1242,67 @@ class ROIManagerPlugin(PluginBase):
             return None
 
         return np.clip(array, 0.0, 1.0)
+
+    def _render_map_roi_tile(
+        self,
+        record: Mapping[str, object],
+        marker_profile: _MarkerProfile,
+    ) -> Optional[np.ndarray]:
+        """Render a thumbnail for a map-mode ROI via the stitched VirtualMapLayer."""
+        map_id = str(record.get("map_id") or "").strip()
+        if not map_id:
+            # Graceful fallback: try the currently active map.
+            map_id = getattr(self.main_viewer, "_active_map_id", None) or ""
+        if not map_id:
+            return None
+
+        try:
+            layer = self.main_viewer._get_map_layer(map_id)
+            base_px_um = float(layer.base_pixel_size_um())
+        except Exception:
+            return None
+        if base_px_um <= 0:
+            return None
+
+        try:
+            x_min = float(record.get("x_min") or 0.0)
+            x_max = float(record.get("x_max") or 0.0)
+            y_min = float(record.get("y_min") or 0.0)
+            y_max = float(record.get("y_max") or 0.0)
+        except (TypeError, ValueError):
+            return None
+        if x_max <= x_min or y_max <= y_min:
+            return None
+
+        # Convert stitched-canvas pixels to physical um for the layer API.
+        xmin_um = x_min * base_px_um
+        xmax_um = x_max * base_px_um
+        ymin_um = y_min * base_px_um
+        ymax_um = y_max * base_px_um
+
+        # Pick the smallest allowed downsample factor that fits THUMBNAIL_MAX_EDGE.
+        longest_edge = max(x_max - x_min, y_max - y_min)
+        min_ds = max(1, math.ceil(longest_edge / self.THUMBNAIL_MAX_EDGE))
+        allowed: tuple = getattr(layer, "_allowed_downsample", ()) or ()
+        if allowed:
+            candidates = [f for f in allowed if f >= min_ds]
+            ds = min(candidates) if candidates else max(allowed)
+        else:
+            ds = min_ds
+
+        # Temporarily set the viewport on the shared layer, then restore it.
+        saved_viewport = getattr(layer, "_viewport", None)
+        try:
+            layer.set_viewport(xmin_um, xmax_um, ymin_um, ymax_um, downsample_factor=ds)
+            image = layer.render(marker_profile.selected_channels)
+        except Exception:
+            return None
+        finally:
+            layer._viewport = saved_viewport  # type: ignore[attr-defined]
+
+        if image is None or not image.size:
+            return None
+        return np.clip(image.astype(np.float32), 0.0, 1.0)
 
     def _resolve_roi_overlays(
         self,
@@ -1781,7 +1849,12 @@ class ROIManagerPlugin(PluginBase):
             return
 
         record = {
-            "fov": getattr(self.main_viewer.ui_component.image_selector, "value", ""),
+            "fov": self.main_viewer.get_active_fov() or "",
+            "map_id": (
+                getattr(self.main_viewer, "_active_map_id", None) or ""
+                if getattr(self.main_viewer, "_map_mode_active", False)
+                else ""
+            ),
             **viewport,
             "marker_set": self._resolve_marker_set_choice(),
             "tags": list(self.ui_component.tags.value),
@@ -1793,7 +1866,8 @@ class ROIManagerPlugin(PluginBase):
 
         result = self.main_viewer.roi_manager.add_roi(record)
         self._selected_roi_id = result.get("roi_id")
-        self.refresh_roi_table(force_refresh=True)
+        # preserve_page=False: navigate to page 1 so the new ROI is immediately visible.
+        self.refresh_roi_table(force_refresh=True, preserve_page=False)
         self.set_status("ROI captured from current view.", level="success")
 
     def _update_selected_roi(self, _):
@@ -1808,7 +1882,12 @@ class ROIManagerPlugin(PluginBase):
 
         updates = {
             **viewport,
-            "fov": getattr(self.main_viewer.ui_component.image_selector, "value", ""),
+            "fov": self.main_viewer.get_active_fov() or "",
+            "map_id": (
+                getattr(self.main_viewer, "_active_map_id", None) or ""
+                if getattr(self.main_viewer, "_map_mode_active", False)
+                else ""
+            ),
             "marker_set": self._resolve_marker_set_choice(),
             "tags": list(self.ui_component.tags.value),
             "comment": self.ui_component.comment.value.strip(),
@@ -2091,6 +2170,23 @@ class ROIManagerPlugin(PluginBase):
         limit_browser = bool(getattr(self.ui_component.browser_limit_to_current, "value", False))
         if not (limit_editor or limit_browser):
             return
+        self.refresh_roi_table(force_refresh=True, preserve_page=False)
+
+    def on_map_mode_activate(self) -> None:  # type: ignore[override]
+        """Disable FOV-scope controls and show all ROIs when map mode activates."""
+        for attr in ("limit_to_fov_checkbox", "browser_limit_to_current"):
+            widget = getattr(self.ui_component, attr, None)
+            if widget is not None:
+                widget.value = False
+                widget.disabled = True
+        self.refresh_roi_table(force_refresh=True, preserve_page=False)
+
+    def on_map_mode_deactivate(self) -> None:  # type: ignore[override]
+        """Re-enable FOV-scope controls when map mode deactivates."""
+        for attr in ("limit_to_fov_checkbox", "browser_limit_to_current"):
+            widget = getattr(self.ui_component, attr, None)
+            if widget is not None:
+                widget.disabled = False
         self.refresh_roi_table(force_refresh=True, preserve_page=False)
 
     def on_marker_sets_changed(self) -> None:

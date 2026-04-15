@@ -1,5 +1,33 @@
 ### v0.3.1
 
+**Map mode batch export and ROI label fix (Follow-up)**
+- **Root cause 1 (batch export drops map-mode ROIs):** `_build_roi_items()` had `if not fov: continue` — map-mode ROIs have `fov=""`, so every one was silently skipped and never exported.
+- **Fix 1:** Replaced the unconditional guard with three-way branching: non-empty `fov` → original single-FOV path; `fov=""` + `map_id` non-empty → new map-mode path via `_export_map_roi_worker`; both empty → skip. Output filename for map-mode ROIs uses `map_{map_id}_roi_{roi_id[:12]}.{format}`.
+- **New `_export_map_roi_worker()`:** Mirrors `_render_map_roi_tile` (thumbnail renderer). Retrieves the `VirtualMapLayer` via `_get_map_layer(map_id)`, converts canvas pixels to physical µm (`xmin_um = x_min × base_pixel_size_um`), calls `layer.set_viewport(...)` + `layer.render(channels)`, saves/restores `layer._viewport` in a `try/finally`, then passes the rendered array through the existing `_finalise_array` + `_write_image` pipeline. Scale bar `pixel_size_nm` is computed as `base_px_um × 1000 × downsample`.
+- **Root cause 2 (ROI label shows stale FOV name after update):** `_update_selected_roi()` stored the new `fov` value but never stored `map_id`, so updating an existing ROI in map mode overwrote the `map_id` with the default empty string, causing `_format_roi_label` to fall back to the stale `fov` value.
+- **Fix 2:** Added `map_id` to the `updates` dict in `_update_selected_roi`, using the same `_map_mode_active` / `_active_map_id` pattern already used by `_capture_current_view`. Note: ROIs captured with the *old* code (before this session's `get_active_fov()` fix) retain stale `fov` names and must be re-captured.
+- Added 8 new unit tests: `BatchExportMapROIItemsTests` in `test_export_fovs_batch.py` (skips unattributed ROIs, creates map JobItem, single-FOV path unaffected, viewport set/render/write called, viewport restored, zero-extent raises) + 2 new tests in `ROIManagerMapModeTests` (`test_update_selected_roi_stores_map_id_in_map_mode`, `test_update_selected_roi_stores_fov_in_single_fov_mode`).
+- Validated with: `python -m unittest tests.test_export_fovs_batch tests.test_roi_manager_tags` (59/60 pass; 1 pre-existing failure in `test_export_fovs_batch_writes_file` unrelated to these changes).
+
+**Map mode ROI capture: blank thumbnails and stale list (Follow-up)**
+- **Root cause 1 (blank thumbnails):** `_render_roi_tile` immediately returned `None` when `record["fov"]` was empty — all map-mode ROIs were rendered as "Preview unavailable" in the gallery.
+- **Fix 1:** Added `map_id` column to `ROI_COLUMNS` (and `_default_record`/`_ensure_dataframe`). `_capture_current_view` now stores the active map ID alongside `fov = ""`. New `_render_map_roi_tile` method renders the stitched region via `VirtualMapLayer.set_viewport` / `VirtualMapLayer.render`, saving and restoring the layer viewport so live rendering is not disturbed.
+- **Root cause 2 (stale list):** After capture, `refresh_roi_table(force_refresh=True)` was called with `preserve_page=True` (default), so the gallery stayed on the current page — new ROIs (sorted newest-first on page 1) were invisible. Additionally, the `_on_roi_table_change` observer fired synchronously *during* `add_roi`, before `_selected_roi_id` was set to the new ID, leaving the dropdown unselected.
+- **Fix 2:** Changed `_capture_current_view` to call `refresh_roi_table(force_refresh=True, preserve_page=False)`, navigating to page 1 immediately after capture. `_on_roi_table_change` wrapped in `try/except` to prevent observer exceptions from silently aborting the capture flow. `_format_roi_label` now shows `[MAP:<map_id>]` for map-mode ROIs instead of an empty FOV field.
+- Added 7 new unit tests in `tests/test_roi_manager_tags.py` covering `map_id` capture, label formatting, `_render_map_roi_tile` via stub layer, and viewport restore.
+- Validated with: `python -m unittest tests.test_roi_manager_tags tests.test_map_mode_activation tests.test_export_fovs_batch` (73/74 pass; 1 pre-existing failure).
+
+
+- All plugin `image_selector.value` FOV reads replaced with `get_active_fov()` — a new `ImageMaskViewer` method that returns `None` in map mode (where the widget is disabled/stale) and the selector value otherwise.
+- New `PluginBase` lifecycle hooks `on_map_mode_activate()` / `on_map_mode_deactivate()` added (no-op stubs, overridden per plugin). Hooks are broadcast from `on_map_mode_toggle()` and `on_map_selector_change()` via `inform_plugins`.
+- **ROI Manager** (`roi_manager_plugin.py`): 5 FOV-lookup sites fixed; `on_map_mode_activate` disables and unchecks `limit_to_fov_checkbox` / `browser_limit_to_current` and forces a full-ROI table refresh; `on_map_mode_deactivate` re-enables them.
+- **Batch Export** (`export_fovs.py`): 1 FOV-lookup site fixed in `refresh_roi_options()`; `on_map_mode_activate` disables and unchecks `roi_limit_to_fov` and refreshes ROI options; `on_map_mode_deactivate` re-enables.
+- **`center_on_roi()`** rewritten to be map-aware: in map mode, FOV-local pixel corners are translated to stitched-canvas coordinates via `resolve_cell_map_position()` without touching `image_selector`; records with empty `fov` use raw coordinates directly.
+- Added 13 unit tests across `test_map_mode_activation.py` (`GetActiveFovTests`, `CenterOnRoiMapModeTests`), `test_roi_manager_tags.py` (`ROIManagerMapModeTests`), and `test_export_fovs_batch.py` (`BatchExportMapModeTests`). All pass.
+- Validated with: `python -m unittest tests.test_map_mode_activation tests.test_roi_manager_tags tests.test_export_fovs_batch` (69/69 tests pass; 1 pre-existing failure excluded).
+
+
+
 **Map mode large-dataset crash fix — render suppression & tile cap (Follow-up)**
 - **Root cause confirmed:** During `load_widget_states`, changing every saved widget value fires the slider observer (`FloatSlider.value` → `lambda: update_display()`). For a 400-tile map on a slow network FS this produced many successive full-map renders (one per channel × 2 sliders), each requiring hundreds of sequential TIFF reads — enough to time out the Jupyter kernel connection.
 - **Fix 1 — Suppress renders during state restoration** (`main_viewer.py`): Added `_suspend_display_updates: bool` flag. Set to `True` in `__init__` around `load_widget_states` (in a try/finally) and checked at the top of `update_display`. All widget-observer render bursts are silently skipped; the first real render happens on first user interaction after the viewer is displayed.

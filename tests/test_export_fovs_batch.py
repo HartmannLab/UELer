@@ -327,11 +327,17 @@ class _BatchExportViewerStub:
         self.initialized = True
         self._debug = False
         self.pixel_size_nm = 390.0
+        self._map_mode_active = False
         self.ui_component = SimpleNamespace(
             mask_display_controls={"MASK": SimpleNamespace(value=True)},
             mask_color_controls={"MASK": SimpleNamespace(value="Red")},
             image_selector=SimpleNamespace(value=None),
         )
+
+    def get_active_fov(self):
+        if self._map_mode_active:
+            return None
+        return getattr(self.ui_component.image_selector, "value", None) or None
 
     def capture_overlay_snapshot(self, *, include_masks: bool, include_annotations: bool):  # pragma: no cover - unused in tests
         raise NotImplementedError
@@ -901,10 +907,365 @@ class TestMarkerSetDropdownRefresh(unittest.TestCase):
         """Calling on_marker_sets_changed() multiple times is safe."""
         viewer, plugin = self._make_plugin()
         call_log = []
+class BatchExportMapModeTests(unittest.TestCase):
+    """Tests for BatchExportPlugin map-mode lifecycle hooks."""
+
+    def setUp(self) -> None:
+        self._tmp_dir = TemporaryDirectory()
+        self.addCleanup(self._tmp_dir.cleanup)
+        self.base_path = Path(self._tmp_dir.name)
+
+    class _StubWidget:
+        def __init__(self, value=None):
+            self.value = value
+            self.disabled = False
+
+    def _make_minimal_plugin(self):
+        """Create a minimal BatchExportPlugin with just roi_limit_to_fov wired up."""
+        viewer = _BatchExportViewerStub(self.base_path)
+        roi_limit = self._StubWidget(False)
+        plugin = BatchExportPlugin.__new__(BatchExportPlugin)
+        plugin.main_viewer = viewer
+        plugin.ui_component = SimpleNamespace(roi_limit_to_fov=roi_limit)
+        plugin._refresh_calls = []
+        plugin.refresh_roi_options = lambda: plugin._refresh_calls.append(1)
+        return plugin, viewer, roi_limit
+
+    def test_on_map_mode_activate_disables_roi_limit_to_fov(self):
+        plugin, viewer, roi_limit = self._make_minimal_plugin()
+        roi_limit.value = True
+        plugin.on_map_mode_activate()
+        self.assertFalse(roi_limit.value)
+        self.assertTrue(roi_limit.disabled)
+        self.assertTrue(plugin._refresh_calls, "refresh_roi_options should be called")
+
+    def test_on_map_mode_deactivate_reenables_roi_limit_to_fov(self):
+        plugin, viewer, roi_limit = self._make_minimal_plugin()
+        roi_limit.disabled = True
+        plugin.on_map_mode_deactivate()
+        self.assertFalse(roi_limit.disabled)
+        self.assertTrue(plugin._refresh_calls, "refresh_roi_options should be called")
+
+    def test_on_map_mode_activate_handles_missing_widget_gracefully(self):
+        plugin, viewer, _ = self._make_minimal_plugin()
+        plugin.ui_component = SimpleNamespace()  # no roi_limit_to_fov
+        plugin.on_map_mode_activate()  # must not raise
+
+    def test_on_map_mode_deactivate_handles_missing_widget_gracefully(self):
+        plugin, viewer, _ = self._make_minimal_plugin()
+        plugin.ui_component = SimpleNamespace()  # no roi_limit_to_fov
+        plugin.on_map_mode_deactivate()  # must not raise
+
+
         plugin.refresh_marker_options = lambda: call_log.append(1)
         plugin.on_marker_sets_changed()
         plugin.on_marker_sets_changed()
         self.assertEqual(len(call_log), 2)
+
+
+class BatchExportMapModeTests(unittest.TestCase):
+    """Tests for BatchExportPlugin map-mode lifecycle hooks."""
+
+    def setUp(self) -> None:
+        self._tmp_dir = TemporaryDirectory()
+        self.addCleanup(self._tmp_dir.cleanup)
+        self.base_path = Path(self._tmp_dir.name)
+
+    class _StubWidget:
+        def __init__(self, value=None):
+            self.value = value
+            self.disabled = False
+
+    def _make_minimal_plugin(self):
+        """Create a minimal BatchExportPlugin with just roi_limit_to_fov wired up."""
+        viewer = _BatchExportViewerStub(self.base_path)
+        roi_limit = self._StubWidget(False)
+        plugin = BatchExportPlugin.__new__(BatchExportPlugin)
+        plugin.main_viewer = viewer
+        plugin.ui_component = SimpleNamespace(roi_limit_to_fov=roi_limit)
+        plugin._refresh_calls = []
+        plugin.refresh_roi_options = lambda: plugin._refresh_calls.append(1)
+        return plugin, viewer, roi_limit
+
+    def test_on_map_mode_activate_disables_roi_limit_to_fov(self):
+        plugin, viewer, roi_limit = self._make_minimal_plugin()
+        roi_limit.value = True
+        plugin.on_map_mode_activate()
+        self.assertFalse(roi_limit.value)
+        self.assertTrue(roi_limit.disabled)
+        self.assertTrue(plugin._refresh_calls, "refresh_roi_options should be called")
+
+    def test_on_map_mode_deactivate_reenables_roi_limit_to_fov(self):
+        plugin, viewer, roi_limit = self._make_minimal_plugin()
+        roi_limit.disabled = True
+        plugin.on_map_mode_deactivate()
+        self.assertFalse(roi_limit.disabled)
+        self.assertTrue(plugin._refresh_calls, "refresh_roi_options should be called")
+
+    def test_on_map_mode_activate_handles_missing_widget_gracefully(self):
+        plugin, viewer, _ = self._make_minimal_plugin()
+        plugin.ui_component = SimpleNamespace()  # no roi_limit_to_fov
+        plugin.on_map_mode_activate()  # must not raise
+
+    def test_on_map_mode_deactivate_handles_missing_widget_gracefully(self):
+        plugin, viewer, _ = self._make_minimal_plugin()
+        plugin.ui_component = SimpleNamespace()  # no roi_limit_to_fov
+        plugin.on_map_mode_deactivate()  # must not raise
+
+
+class BatchExportMapROIItemsTests(unittest.TestCase):
+    """Tests for map-mode ROI job creation and worker execution in BatchExportPlugin."""
+
+    def setUp(self) -> None:
+        self._tmp_dir = TemporaryDirectory()
+        self.addCleanup(self._tmp_dir.cleanup)
+        self.base_path = Path(self._tmp_dir.name)
+
+    def _make_plugin_for_build(self, roi_records, selected_ids):
+        """Return a minimal BatchExportPlugin for testing _build_roi_items."""
+        viewer = _BatchExportViewerStub(self.base_path)
+        plugin = BatchExportPlugin.__new__(BatchExportPlugin)
+        plugin.main_viewer = viewer
+        plugin._roi_records = roi_records
+        plugin.ui_component = SimpleNamespace(
+            roi_selection=SimpleNamespace(value=tuple(selected_ids)),
+        )
+        return plugin
+
+    def _make_marker_profile(self):
+        from ueler.viewer.plugin.export_fovs import _MarkerProfile
+        from ueler.rendering import ChannelRenderSettings
+        return _MarkerProfile(
+            name="test",
+            selected_channels=("DNA",),
+            channel_settings={"DNA": ChannelRenderSettings(color=(1.0, 0.0, 0.0), contrast_min=0.0, contrast_max=1.0)},
+        )
+
+    def _make_overlay_snapshot(self):
+        return OverlaySnapshot(
+            include_annotations=False,
+            include_masks=False,
+            annotation=None,
+            masks=(),
+        )
+
+    def test_build_roi_items_skips_unattributed_roi(self):
+        """ROI with fov='' and map_id='' is silently skipped."""
+        roi_id = "unattributed-roi-0001"
+        roi_records = {roi_id: {"fov": "", "map_id": "", "x_min": 0, "x_max": 10, "y_min": 0, "y_max": 10}}
+        plugin = self._make_plugin_for_build(roi_records, [roi_id])
+        items = plugin._build_roi_items(
+            marker_profile=self._make_marker_profile(),
+            output_dir=str(self.base_path),
+            file_format="png",
+            downsample=1,
+            dpi=300,
+            include_scale_bar=False,
+            scale_ratio=10.0,
+            pixel_size_nm=390.0,
+            overlay_snapshot=self._make_overlay_snapshot(),
+        )
+        self.assertEqual(len(items), 0)
+
+    def test_build_roi_items_creates_map_roi_item(self):
+        """ROI with fov='' and map_id='slide-1' produces one JobItem with map_ prefix filename."""
+        roi_id = "map-roi-aabbccddeeff1122"
+        roi_records = {
+            roi_id: {"fov": "", "map_id": "slide-1", "x_min": 100, "x_max": 200, "y_min": 50, "y_max": 150}
+        }
+        plugin = self._make_plugin_for_build(roi_records, [roi_id])
+        items = plugin._build_roi_items(
+            marker_profile=self._make_marker_profile(),
+            output_dir=str(self.base_path),
+            file_format="png",
+            downsample=1,
+            dpi=300,
+            include_scale_bar=False,
+            scale_ratio=10.0,
+            pixel_size_nm=390.0,
+            overlay_snapshot=self._make_overlay_snapshot(),
+        )
+        self.assertEqual(len(items), 1)
+        item = items[0]
+        self.assertIn("slide-1", item.output_path)
+        self.assertTrue(item.output_path.startswith(str(self.base_path)))
+        self.assertTrue(item.output_path.endswith(".png"))
+        # Map-mode items use map_ prefix in filename
+        fname = Path(item.output_path).name
+        self.assertTrue(fname.startswith("map_"), f"Expected 'map_' prefix, got: {fname}")
+        self.assertEqual(item.metadata.get("map_id"), "slide-1")
+
+    def test_build_roi_items_single_fov_roi_unaffected(self):
+        """ROI with a non-empty fov still creates a JobItem using the old path."""
+        roi_id = "fov-roi-aabbccddeeff1122"
+        roi_records = {
+            roi_id: {"fov": "FOV_A", "map_id": "", "x_min": 10, "x_max": 50, "y_min": 10, "y_max": 50}
+        }
+        plugin = self._make_plugin_for_build(roi_records, [roi_id])
+        items = plugin._build_roi_items(
+            marker_profile=self._make_marker_profile(),
+            output_dir=str(self.base_path),
+            file_format="png",
+            downsample=1,
+            dpi=300,
+            include_scale_bar=False,
+            scale_ratio=10.0,
+            pixel_size_nm=390.0,
+            overlay_snapshot=self._make_overlay_snapshot(),
+        )
+        self.assertEqual(len(items), 1)
+        fname = Path(items[0].output_path).name
+        self.assertTrue(fname.startswith("FOV_A_"), f"Expected 'FOV_A_' prefix, got: {fname}")
+        self.assertEqual(items[0].metadata.get("fov"), "FOV_A")
+
+    def test_export_map_roi_worker_calls_set_viewport_and_writes_file(self):
+        """_export_map_roi_worker sets viewport, calls render, and invokes _write_image."""
+        output_file = str(self.base_path / "out_map_roi.png")
+
+        # Build a stub layer
+        rendered_array = np.ones((10, 10, 3), dtype=np.float32) * 0.5
+        layer_calls = []
+
+        class _StubLayer:
+            _allowed_downsample = (1, 2, 4)
+            _viewport = None
+
+            def base_pixel_size_um(self):
+                return 0.5
+
+            def set_viewport(self, xmin_um, xmax_um, ymin_um, ymax_um, *, downsample_factor):
+                layer_calls.append(("set_viewport", xmin_um, xmax_um, ymin_um, ymax_um, downsample_factor))
+                self._viewport = (xmin_um, xmax_um, ymin_um, ymax_um, downsample_factor)
+
+            def render(self, channels):
+                layer_calls.append(("render", channels))
+                return rendered_array
+
+        stub_layer = _StubLayer()
+
+        viewer = _BatchExportViewerStub(self.base_path)
+        viewer._active_map_id = "slide-1"
+        viewer._get_map_layer = lambda map_id: stub_layer  # noqa: ARG001
+
+        plugin = BatchExportPlugin.__new__(BatchExportPlugin)
+        plugin.main_viewer = viewer
+
+        roi = {
+            "fov": "",
+            "map_id": "slide-1",
+            "x_min": 100.0,
+            "x_max": 300.0,
+            "y_min": 50.0,
+            "y_max": 200.0,
+        }
+
+        write_calls = []
+
+        def _fake_write_image(_self, array, path, fmt, dpi, *, scale_bar_spec=None):
+            write_calls.append({"path": path, "array": array, "fmt": fmt})
+
+        with mock.patch.object(BatchExportPlugin, "_write_image", _fake_write_image):
+            result = plugin._export_map_roi_worker(
+                roi=roi,
+                marker_profile=self._make_marker_profile(),
+                downsample=1,
+                file_format="png",
+                output_path=output_file,
+                dpi=300,
+                include_scale_bar=False,
+                scale_ratio=10.0,
+                overlay_snapshot=self._make_overlay_snapshot(),
+            )
+
+        # set_viewport must have been called with um-space coordinates
+        set_vp_calls = [c for c in layer_calls if c[0] == "set_viewport"]
+        self.assertEqual(len(set_vp_calls), 1)
+        _, xmin_um, xmax_um, ymin_um, ymax_um, ds = set_vp_calls[0]
+        self.assertAlmostEqual(xmin_um, 100.0 * 0.5)   # x_min * base_px_um
+        self.assertAlmostEqual(xmax_um, 300.0 * 0.5)
+        self.assertAlmostEqual(ymin_um, 50.0 * 0.5)
+        self.assertAlmostEqual(ymax_um, 200.0 * 0.5)
+
+        # render must have been called
+        render_calls = [c for c in layer_calls if c[0] == "render"]
+        self.assertEqual(len(render_calls), 1)
+
+        # _write_image must have been called with the correct output path
+        self.assertEqual(len(write_calls), 1, "_write_image should be called once")
+        self.assertEqual(write_calls[0]["path"], output_file)
+        self.assertEqual(write_calls[0]["fmt"], "png")
+
+        # The worker must return the output path in the result dict
+        self.assertEqual(result["output_path"], output_file)
+
+    def test_export_map_roi_worker_restores_viewport_on_success(self):
+        """After rendering, the layer's _viewport is restored to its original value."""
+        output_file = str(self.base_path / "out_restore.png")
+        original_viewport = ("saved", "value")
+
+        class _StubLayer:
+            _allowed_downsample = (1,)
+            _viewport = original_viewport
+
+            def base_pixel_size_um(self):
+                return 1.0
+
+            def set_viewport(self, *_args, **_kwargs):
+                self._viewport = ("new_viewport",)
+
+            def render(self, _channels):
+                return np.ones((4, 4, 3), dtype=np.float32)
+
+        stub_layer = _StubLayer()
+
+        viewer = _BatchExportViewerStub(self.base_path)
+        viewer._get_map_layer = lambda _: stub_layer
+
+        plugin = BatchExportPlugin.__new__(BatchExportPlugin)
+        plugin.main_viewer = viewer
+
+        with mock.patch.object(BatchExportPlugin, "_write_image", lambda *_a, **_kw: None):
+            plugin._export_map_roi_worker(
+                roi={"fov": "", "map_id": "slide-1", "x_min": 0.0, "x_max": 10.0, "y_min": 0.0, "y_max": 10.0},
+                marker_profile=self._make_marker_profile(),
+                downsample=1,
+                file_format="png",
+                output_path=output_file,
+                dpi=300,
+                include_scale_bar=False,
+                scale_ratio=10.0,
+                overlay_snapshot=self._make_overlay_snapshot(),
+            )
+
+        self.assertIs(stub_layer._viewport, original_viewport, "Viewport not restored after rendering")
+
+    def test_export_map_roi_worker_raises_on_empty_roi(self):
+        """A ROI with zero extent raises ValueError."""
+        class _StubLayer:
+            _allowed_downsample = (1,)
+            _viewport = None
+            def base_pixel_size_um(self): return 1.0
+            def set_viewport(self, *_a, **_kw): pass
+            def render(self, _c): return np.ones((4, 4, 3), dtype=np.float32)
+
+        viewer = _BatchExportViewerStub(self.base_path)
+        viewer._get_map_layer = lambda _: _StubLayer()
+        plugin = BatchExportPlugin.__new__(BatchExportPlugin)
+        plugin.main_viewer = viewer
+
+        with mock.patch.object(BatchExportPlugin, "_write_image", lambda *_a, **_kw: None):
+            with self.assertRaises(ValueError, msg="Should raise on zero extent ROI"):
+                plugin._export_map_roi_worker(
+                    roi={"fov": "", "map_id": "slide-1", "x_min": 5.0, "x_max": 5.0, "y_min": 0.0, "y_max": 10.0},
+                    marker_profile=self._make_marker_profile(),
+                    downsample=1,
+                    file_format="png",
+                    output_path=str(self.base_path / "zero.png"),
+                    dpi=300,
+                    include_scale_bar=False,
+                    scale_ratio=10.0,
+                    overlay_snapshot=self._make_overlay_snapshot(),
+                )
 
 
 if __name__ == "__main__":

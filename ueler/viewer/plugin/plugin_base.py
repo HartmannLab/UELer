@@ -59,6 +59,16 @@ class PluginBase:
 
         pass
 
+    def on_map_mode_activate(self):
+        """Hook invoked when map mode is activated or the active map changes."""
+
+        pass
+
+    def on_map_mode_deactivate(self):
+        """Hook invoked when map mode is deactivated."""
+
+        pass
+
     def on_widget_value_change(self, change):  # NOSONAR - legacy signature
         """Callback function to handle widget value changes."""
         if self.initialized:

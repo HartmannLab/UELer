@@ -15,6 +15,7 @@ __all__ = ["ROI_COLUMNS", "ROIManager"]
 ROI_COLUMNS = [
     "roi_id",
     "fov",
+    "map_id",
     "x",
     "y",
     "width",
@@ -48,11 +49,12 @@ def _ensure_dataframe(df: pd.DataFrame) -> pd.DataFrame:
                 "mask_color_set",
                 "mask_visibility",
                 "comment",
+                "map_id",
             }
             else 0.0
         )
     df = df[ROI_COLUMNS]
-    for col in ["marker_set", "tags", "annotation_palette", "mask_color_set", "mask_visibility", "comment"]:
+    for col in ["marker_set", "tags", "annotation_palette", "mask_color_set", "mask_visibility", "comment", "map_id"]:
         if col in df.columns:
             df[col] = (
                 df[col]
@@ -111,6 +113,7 @@ class ROIManager:
         return {
             "roi_id": str(uuid.uuid4()),
             "fov": "",
+            "map_id": "",
             "x": 0.0,
             "y": 0.0,
             "width": 0.0,

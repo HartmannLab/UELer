@@ -31,6 +31,8 @@ from ueler.data_loader import (
     merge_channel_max,
     OMEFovWrapper,
     find_ome_tiff_files,
+    _build_channel_stat_tasks,
+    _apply_channel_stat_values,
 )
 from ueler.image_utils import (
     calculate_downsample_factor,
@@ -206,10 +208,16 @@ class ImageMaskViewer:
         # Limits sequential TIFF loads on slow network file systems for large
         # maps that exceed this count.  Set to 0 to disable the limit.
         self._map_render_tile_limit: int = 80
-        # When False, _batch_compute_channel_stats is a no-op.  Set to True to
-        # re-enable the upfront channel-stats precomputation for all map tiles.
-        # Keep False until the large-dataset crash is fully diagnosed.
+        # When False, _batch_compute_channel_stats is a no-op.  Upfront batch
+        # precomputation is disabled to avoid OOM on large datasets.
         self._map_batch_stats_enabled: bool = False
+        # When True, channel stats are computed lazily for each tile the first
+        # time it is rendered.  The running max is merged into channel_max_values
+        # so contrast sliders grow progressively as the user pans around the map.
+        self._map_lazy_stats_enabled: bool = True
+        # Tracks (fov_name, channel) pairs for which lazy stats have already been
+        # computed in the current session.  Cleared when a new map is activated.
+        self._stats_computed_fovs: set = set()
 
         # Specifiy the keys for the x, y and label columns in the cell table
         self.x_key = "X"
@@ -749,9 +757,11 @@ class ImageMaskViewer:
                 return
             self._activate_map_mode(candidate)
             self._refresh_map_controls()
+            self.inform_plugins('on_map_mode_activate')
         else:
             self._deactivate_map_mode()
             self._refresh_map_controls()
+            self.inform_plugins('on_map_mode_deactivate')
 
         self.update_display(self.current_downsample_factor)
         self.inform_plugins('on_fov_change')
@@ -766,6 +776,7 @@ class ImageMaskViewer:
         if self._map_mode_active:
             self._activate_map_mode(new_value)
             self._refresh_map_controls()
+            self.inform_plugins('on_map_mode_activate')
             self.update_display(self.current_downsample_factor)
             self.inform_plugins('on_fov_change')
         else:
@@ -858,6 +869,8 @@ class ImageMaskViewer:
         self._batch_compute_channel_stats(tile_names, selected_channels)
         if self._debug:
             print("[INIT DEBUG] _activate_map_mode: _batch_compute_channel_stats done", flush=True)
+        # Reset lazy-stats tracking so the new map starts fresh.
+        self._stats_computed_fovs = set()
         try:
             factor = select_downsample_factor(
                 width_px,
@@ -974,6 +987,76 @@ class ImageMaskViewer:
 
         # 6. Sync UI controls for each unique channel.
         for ch in set(channels):
+            try:
+                self._sync_channel_controls(ch)
+            except Exception:
+                pass
+
+    def _update_stats_for_visited_tile(self, fov_name: str, channels: Tuple[str, ...]) -> None:
+        """Lazily compute channel display stats for a single tile that has just been rendered.
+
+        Called from ``_render_fov_region`` the first time a tile/channel pair is
+        visited.  The data array is already in ``self.image_cache`` so there is no
+        additional I/O — only a fast in-memory Dask reduction.  The resulting max
+        values are merged via ``merge_channel_max`` (keeps running maximum) and the
+        contrast sliders are updated if the range grew.
+
+        Controlled by ``self._map_lazy_stats_enabled`` (default ``True``).
+        Skips OMEFovWrapper tiles — those are handled by
+        ``_ensure_channel_max_computed``.
+        """
+        if not getattr(self, '_map_lazy_stats_enabled', True):
+            return
+
+        img_entry = self.image_cache.get(fov_name)
+        if img_entry is None or isinstance(img_entry, OMEFovWrapper):
+            return
+
+        try:
+            import dask as _dask
+        except ImportError:
+            return
+
+        task_list = []
+        task_meta = []  # list of (channel, dtype)
+        stats_key_prefix = f"{fov_name}\x00"
+
+        for ch in channels:
+            key = stats_key_prefix + ch
+            if key in self._stats_computed_fovs:
+                continue
+            arr = img_entry.get(ch) if isinstance(img_entry, dict) else None
+            if arr is None:
+                continue
+            try:
+                pt, mt = _build_channel_stat_tasks(arr)
+            except Exception:
+                continue
+            task_list.extend([pt, mt])
+            task_meta.append((ch, getattr(arr, "dtype", None)))
+
+        if not task_list:
+            return
+
+        try:
+            results = _dask.compute(*task_list)
+        except Exception:
+            return
+
+        changed_channels = set()
+        for i, (ch, dtype) in enumerate(task_meta):
+            percentile_value = results[i * 2]
+            absolute_max = results[i * 2 + 1]
+            try:
+                prev = self.channel_max_values.get(ch)
+                _apply_channel_stat_values(ch, percentile_value, absolute_max, dtype, self.channel_max_values)
+                if self.channel_max_values.get(ch) != prev:
+                    changed_channels.add(ch)
+            except Exception:
+                pass
+            self._stats_computed_fovs.add(stats_key_prefix + ch)
+
+        for ch in changed_channels:
             try:
                 self._sync_channel_controls(ch)
             except Exception:
@@ -3265,6 +3348,15 @@ class ImageMaskViewer:
     # ------------------------------------------------------------------
     # ROI helpers for plugin integration
     # ------------------------------------------------------------------
+    def get_active_fov(self) -> Optional[str]:
+        """Return the active FOV name, or ``None`` when map mode is active."""
+        if self._map_mode_active:
+            return None
+        selector = getattr(self.ui_component, "image_selector", None)
+        if selector is None:
+            return None
+        return getattr(selector, "value", None) or None
+
     def capture_viewport_bounds(self):
         ax = getattr(self.image_display, "ax", None)
         if ax is None:
@@ -3290,11 +3382,7 @@ class ImageMaskViewer:
         }
 
     def center_on_roi(self, record):
-        target_fov = record.get("fov")
-        current_selector = getattr(self.ui_component, "image_selector", None)
-        if target_fov and current_selector is not None and target_fov != current_selector.value:
-            current_selector.value = target_fov
-
+        target_fov = record.get("fov") or ""
         x_min = record.get("x_min", 0.0)
         x_max = record.get("x_max", self.width)
         y_min = record.get("y_min", 0.0)
@@ -3303,6 +3391,23 @@ class ImageMaskViewer:
         ax = getattr(self.image_display, "ax", None)
         if ax is None:
             return
+
+        if self._map_mode_active:
+            if target_fov:
+                # Translate FOV-local pixel corners to stitched-canvas coordinates.
+                pos_tl = self.resolve_cell_map_position(target_fov, x_min, y_min)
+                pos_br = self.resolve_cell_map_position(target_fov, x_max, y_max)
+                if pos_tl is not None and pos_br is not None:
+                    x_min = min(pos_tl.x_px, pos_br.x_px)
+                    x_max = max(pos_tl.x_px, pos_br.x_px)
+                    y_min = min(pos_tl.y_px, pos_br.y_px)
+                    y_max = max(pos_tl.y_px, pos_br.y_px)
+            # In map mode do not touch image_selector — the stitched canvas is the viewport.
+        else:
+            current_selector = getattr(self.ui_component, "image_selector", None)
+            if target_fov and current_selector is not None and target_fov != current_selector.value:
+                current_selector.value = target_fov
+
         ax.set_xlim(x_min, x_max)
         ax.set_ylim(y_max, y_min)
         self.image_display.fig.canvas.draw_idle()
@@ -3610,13 +3715,16 @@ class ImageMaskViewer:
         region_xy: Tuple[int, int, int, int],
         region_ds: Tuple[int, int, int, int],
     ) -> np.ndarray:
-        return self._compose_fov_image(
+        result = self._compose_fov_image(
             fov_name,
             tuple(selected_channels),
             downsample_factor,
             region_xy,
             region_ds,
         )
+        # Lazily compute channel stats for this tile now that its data is loaded.
+        self._update_stats_for_visited_tile(fov_name, tuple(selected_channels))
+        return result
 
     # ------------------------------------------------------------------
     # Mask painter integration

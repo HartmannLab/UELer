@@ -531,7 +531,7 @@ class BatchExportPlugin(PluginBase):
             return
 
         if self.ui_component.roi_limit_to_fov.value:
-            current_fov = getattr(self.main_viewer.ui_component.image_selector, "value", None)
+            current_fov = self.main_viewer.get_active_fov()
             if current_fov:
                 df = df[df["fov"] == current_fov]
 
@@ -743,6 +743,21 @@ class BatchExportPlugin(PluginBase):
     def on_fov_change(self) -> None:  # type: ignore[override]
         self.refresh_roi_options()
         self.refresh_overlay_capabilities()
+
+    def on_map_mode_activate(self) -> None:  # type: ignore[override]
+        """Disable FOV-scope ROI filter when map mode activates."""
+        roi_limit = getattr(self.ui_component, "roi_limit_to_fov", None)
+        if roi_limit is not None:
+            roi_limit.value = False
+            roi_limit.disabled = True
+        self.refresh_roi_options()
+
+    def on_map_mode_deactivate(self) -> None:  # type: ignore[override]
+        """Re-enable FOV-scope ROI filter when map mode deactivates."""
+        roi_limit = getattr(self.ui_component, "roi_limit_to_fov", None)
+        if roi_limit is not None:
+            roi_limit.disabled = False
+        self.refresh_roi_options()
 
     def on_cell_table_change(self) -> None:  # type: ignore[override]
         self.refresh_cell_options()
@@ -1199,9 +1214,48 @@ class BatchExportPlugin(PluginBase):
             record = self._roi_records.get(roi_id)
             if not record:
                 continue
-            fov = record.get("fov")
-            if not fov:
+            fov = record.get("fov") or ""
+            map_id = str(record.get("map_id") or "").strip()
+
+            if not fov and not map_id:
+                # Completely unattributed ROI — skip.
                 continue
+
+            if not fov and map_id:
+                # Map-mode ROI — render via the stitched VirtualMapLayer.
+                output_path = os.path.join(
+                    output_dir,
+                    f"map_{self._safe_filename(map_id)}_roi_{self._safe_filename(roi_id[:12])}.{file_format}",
+                )
+                worker = partial(
+                    self._export_map_roi_worker,
+                    roi=record,
+                    marker_profile=marker_profile,
+                    downsample=downsample,
+                    file_format=file_format,
+                    output_path=output_path,
+                    dpi=dpi,
+                    include_scale_bar=include_scale_bar,
+                    scale_ratio=scale_ratio,
+                    overlay_snapshot=overlay_snapshot,
+                )
+                metadata = {
+                    "map_id": map_id,
+                    "roi_id": roi_id,
+                    "mode": self.MODE_ROIS,
+                    "marker_set": marker_profile.name,
+                }
+                items.append(
+                    JobItem(
+                        item_id=f"roi::{roi_id}",
+                        execute=worker,
+                        output_path=output_path,
+                        metadata=metadata,
+                    )
+                )
+                continue
+
+            # Single-FOV ROI — original path.
             output_path = os.path.join(
                 output_dir,
                 f"{self._safe_filename(str(fov))}_roi_{self._safe_filename(roi_id[:12])}.{file_format}",
@@ -1332,6 +1386,81 @@ class BatchExportPlugin(PluginBase):
             downsample=downsample,
         )
         self._write_image(image, output_path, file_format, dpi, scale_bar_spec=spec)
+        payload: Dict[str, Any] = {"output_path": output_path}
+        if spec is not None:
+            payload["metadata"] = {"scale_bar_um": spec.physical_length_um}
+        return payload
+
+    def _export_map_roi_worker(
+        self,
+        *,
+        roi: Mapping[str, Any],
+        marker_profile: _MarkerProfile,
+        downsample: int,
+        file_format: str,
+        output_path: str,
+        dpi: int,
+        include_scale_bar: bool,
+        scale_ratio: float,
+        overlay_snapshot: OverlaySnapshot,
+    ) -> Dict[str, Any]:
+        """Export a map-mode ROI by rendering via VirtualMapLayer.set_viewport + render."""
+        import math
+
+        map_id = str(roi.get("map_id") or "").strip()
+        if not map_id:
+            map_id = getattr(self.main_viewer, "_active_map_id", None) or ""
+        if not map_id:
+            raise ValueError("Cannot export map-mode ROI: no map_id stored.")
+
+        layer = self.main_viewer._get_map_layer(map_id)
+        base_px_um = float(layer.base_pixel_size_um())
+        if base_px_um <= 0:
+            raise ValueError(f"Invalid base_pixel_size_um={base_px_um} for map '{map_id}'.")
+
+        x_min = float(roi.get("x_min") or 0.0)
+        x_max = float(roi.get("x_max") or 0.0)
+        y_min = float(roi.get("y_min") or 0.0)
+        y_max = float(roi.get("y_max") or 0.0)
+        if x_max <= x_min or y_max <= y_min:
+            raise ValueError("ROI has zero or negative extent.")
+
+        # Convert stitched-canvas pixels → physical um for the layer API.
+        xmin_um = x_min * base_px_um
+        xmax_um = x_max * base_px_um
+        ymin_um = y_min * base_px_um
+        ymax_um = y_max * base_px_um
+
+        # Use the requested downsample (from UI), but clamp to what the layer allows.
+        allowed: tuple = getattr(layer, "_allowed_downsample", ()) or ()
+        if allowed:
+            candidates = [f for f in allowed if f >= downsample]
+            ds = min(candidates) if candidates else max(allowed)
+        else:
+            ds = max(1, int(downsample))
+
+        # Temporarily override the layer viewport, then restore it.
+        saved_viewport = getattr(layer, "_viewport", None)
+        try:
+            layer.set_viewport(xmin_um, xmax_um, ymin_um, ymax_um, downsample_factor=ds)
+            image = layer.render(marker_profile.selected_channels)
+        finally:
+            layer._viewport = saved_viewport  # type: ignore[attr-defined]
+
+        if image is None or not image.size:
+            raise ValueError("VirtualMapLayer.render returned an empty array.")
+
+        # pixel_size_nm for the scale bar: base pixel is base_px_um µm, scaled by ds.
+        pixel_size_nm = base_px_um * 1000.0 * ds
+
+        final_array, spec = self._finalise_array(
+            image,
+            include_scale_bar=include_scale_bar,
+            scale_ratio=scale_ratio,
+            pixel_size_nm=pixel_size_nm,
+            downsample=ds,
+        )
+        self._write_image(final_array, output_path, file_format, dpi, scale_bar_spec=spec)
         payload: Dict[str, Any] = {"output_path": output_path}
         if spec is not None:
             payload["metadata"] = {"scale_bar_um": spec.physical_length_um}

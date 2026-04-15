@@ -612,5 +612,133 @@ class MapModeActivationTests(unittest.TestCase):
         self.assertEqual(hit.map_id, "slide-1")
 
 
+class GetActiveFovTests(unittest.TestCase):
+    def setUp(self):
+        self.viewer = ImageMaskViewer.__new__(ImageMaskViewer)
+        self.viewer._map_mode_active = False
+        self.viewer._map_mode_enabled = True
+        self.viewer.ui_component = SimpleNamespace(
+            image_selector=SimpleNamespace(value="FOV_A", disabled=False)
+        )
+
+    def test_returns_selector_value_in_single_fov_mode(self):
+        result = self.viewer.get_active_fov()
+        self.assertEqual(result, "FOV_A")
+
+    def test_returns_none_in_map_mode(self):
+        self.viewer._map_mode_active = True
+        result = self.viewer.get_active_fov()
+        self.assertIsNone(result)
+
+    def test_returns_none_when_selector_value_is_empty_string(self):
+        self.viewer.ui_component.image_selector.value = ""
+        result = self.viewer.get_active_fov()
+        self.assertIsNone(result)
+
+    def test_returns_none_when_no_image_selector(self):
+        del self.viewer.ui_component.image_selector
+        result = self.viewer.get_active_fov()
+        self.assertIsNone(result)
+
+
+class CenterOnRoiMapModeTests(unittest.TestCase):
+    def setUp(self):
+        self.viewer = ImageMaskViewer.__new__(ImageMaskViewer)
+        self.viewer._map_mode_active = False
+        self.viewer._map_mode_enabled = True
+        self.viewer._active_map_id = None
+        self.viewer._map_descriptors = {}
+        self.viewer.width = 1024
+        self.viewer.height = 1024
+        self.viewer.current_downsample_factor = 1
+        self.viewer.update_display = lambda *args, **kwargs: None
+        display = _FakeImageDisplay()
+        self.ax = display.ax
+        self.viewer.image_display = display
+        self.viewer.ui_component = SimpleNamespace(
+            image_selector=SimpleNamespace(value="FOV_A", disabled=False)
+        )
+
+    def test_single_fov_mode_navigates_to_target_fov(self):
+        record = {"fov": "FOV_B", "x_min": 10.0, "x_max": 50.0, "y_min": 20.0, "y_max": 80.0}
+        self.viewer.center_on_roi(record)
+        self.assertEqual(self.viewer.ui_component.image_selector.value, "FOV_B")
+        self.assertEqual(self.ax.get_xlim(), (10.0, 50.0))
+
+    def test_single_fov_mode_keeps_current_fov_when_already_selected(self):
+        record = {"fov": "FOV_A", "x_min": 0.0, "x_max": 100.0, "y_min": 0.0, "y_max": 100.0}
+        self.viewer.center_on_roi(record)
+        self.assertEqual(self.viewer.ui_component.image_selector.value, "FOV_A")
+        self.assertEqual(self.ax.get_xlim(), (0.0, 100.0))
+
+    def test_map_mode_does_not_touch_image_selector(self):
+        layer = _CaptureLayer(0.5, (0.0, 1024.0, 0.0, 1024.0))
+        layer._tile = SimpleNamespace(
+            name="FOV_A",
+            pixel_size_um=0.5,
+            width_px=512,
+            height_px=512,
+            x_min_um=0.0,
+            x_max_um=256.0,
+            y_min_um=0.0,
+            y_max_um=256.0,
+        )
+        self.viewer._map_mode_active = True
+        self.viewer._active_map_id = "slide-1"
+        self.viewer._map_descriptors = {"slide-1": object()}
+        self.viewer.ui_component.image_selector.value = "FOV_A"
+
+        record = {"fov": "FOV_A", "x_min": 10.0, "x_max": 50.0, "y_min": 20.0, "y_max": 80.0}
+        with patch.object(ImageMaskViewer, "_get_map_layer", lambda self, map_id: layer):
+            self.viewer.center_on_roi(record)
+
+        # image_selector must not be changed in map mode
+        self.assertEqual(self.viewer.ui_component.image_selector.value, "FOV_A")
+
+    def test_map_mode_translates_fov_corners_to_stitched_canvas(self):
+        # Base pixel 0.5 um/px; bounds origin at (100 um, 200 um).
+        # Tile FOV_A starts at bounds origin → stitched offset = (0, 0).
+        # FOV pixel × (pixel_size_um / base_pixel_um) = pixel × 1.0 → same pixel value.
+        layer = _CaptureLayer(0.5, (100.0, 612.0, 200.0, 712.0))
+        layer._tile = SimpleNamespace(
+            name="FOV_A",
+            pixel_size_um=0.5,
+            width_px=512,
+            height_px=512,
+            x_min_um=100.0,
+            x_max_um=356.0,
+            y_min_um=200.0,
+            y_max_um=456.0,
+        )
+        self.viewer._map_mode_active = True
+        self.viewer._active_map_id = "slide-1"
+        self.viewer._map_descriptors = {"slide-1": object()}
+
+        record = {"fov": "FOV_A", "x_min": 0.0, "x_max": 50.0, "y_min": 0.0, "y_max": 30.0}
+        with patch.object(ImageMaskViewer, "_get_map_layer", lambda self, map_id: layer):
+            self.viewer.center_on_roi(record)
+
+        xlim = self.ax.get_xlim()
+        ylim = self.ax.get_ylim()
+        # offset is zero → canvas coords equal FOV-local coords
+        self.assertAlmostEqual(xlim[0], 0.0)
+        self.assertAlmostEqual(xlim[1], 50.0)
+        # y-axis is inverted: ylim = (y_max, y_min)
+        self.assertAlmostEqual(ylim[0], 30.0)
+        self.assertAlmostEqual(ylim[1], 0.0)
+
+    def test_map_mode_empty_fov_uses_record_coords_directly(self):
+        self.viewer._map_mode_active = True
+        self.viewer._active_map_id = "slide-1"
+        self.viewer._map_descriptors = {"slide-1": object()}
+
+        record = {"fov": "", "x_min": 200.0, "x_max": 400.0, "y_min": 100.0, "y_max": 300.0}
+        self.viewer.center_on_roi(record)
+
+        self.assertEqual(self.ax.get_xlim(), (200.0, 400.0))
+        # inverted y
+        self.assertEqual(self.ax.get_ylim(), (300.0, 100.0))
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

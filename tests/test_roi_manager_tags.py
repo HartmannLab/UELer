@@ -226,7 +226,7 @@ if "ipywidgets" not in sys.modules:
 from ipywidgets import Layout
 
 from ueler.image_utils import select_downsample_factor  # type: ignore[import-error]
-from ueler.viewer.plugin.roi_manager_plugin import ROIManagerPlugin
+from ueler.viewer.plugin.roi_manager_plugin import ROIManagerPlugin, _MarkerProfile
 
 
 class RestrictiveTagsWidget:
@@ -277,12 +277,17 @@ class DummyROIManager:
         self.table = []
         self.observable = SimpleNamespace(add_observer=lambda *_: None)
         self.last_added = None
+        self.last_updated = None
 
     def add_roi(self, record):
         record = record.copy()
         record.setdefault("roi_id", "test-roi")
         self.last_added = record
         return record
+
+    def update_roi(self, roi_id, updates):
+        self.last_updated = {"roi_id": roi_id, **updates}
+        return True
 
 
 class DummyMainViewer:
@@ -292,11 +297,21 @@ class DummyMainViewer:
         storage_path = os.path.join(base_folder, "roi_manager.csv")
         self.roi_manager = DummyROIManager(storage_path)
         self.marker_sets = {}
+        self._map_mode_active = False
+        self._active_map_id = None
         self.ui_component = SimpleNamespace(
             image_selector=SimpleNamespace(value="FOV1"),
             marker_set_dropdown=SimpleNamespace(value=None),
             channel_selector=SimpleNamespace(value=()),
         )
+
+    def get_active_fov(self):
+        if self._map_mode_active:
+            return None
+        return getattr(self.ui_component.image_selector, "value", None) or None
+
+    def _get_map_layer(self, map_id):
+        raise KeyError(f"No map layer for {map_id!r}")
 
     def capture_viewport_bounds(self):
         return {
@@ -554,6 +569,212 @@ class ROIManagerTagsTests(unittest.TestCase):
 
         # Small images stay at the minimum allowed factor.
         self.assertEqual(select_downsample_factor(50, 50, max_dimension=512, allowed_factors=allowed), 1)
+
+
+class ROIManagerMapModeTests(unittest.TestCase):
+    """Tests for ROI Manager map-mode lifecycle hooks and FOV attribution."""
+
+    def _make_plugin(self, *, map_mode_active: bool = False):
+        viewer = DummyMainViewer()
+        viewer._map_mode_active = map_mode_active
+        plugin = make_plugin.__wrapped__(viewer) if hasattr(make_plugin, "__wrapped__") else None
+        # Rebuild plugin with the custom viewer
+        p = object.__new__(ROIManagerPlugin)
+        p.displayed_name = "ROI manager"
+        p.SidePlots_id = "roi_manager_output"
+        p.main_viewer = viewer
+        p.ui_component = SimpleNamespace()
+        p._selected_roi_id = None
+        p._suspend_ui_events = False
+        p.initialized = False
+        p.STATUS_COLORS = ROIManagerPlugin.STATUS_COLORS
+        p.CURRENT_MARKER_VALUE = ROIManagerPlugin.CURRENT_MARKER_VALUE
+        p._suspend_browser_events = False
+        p._browser_axis_to_roi = {}
+        p._browser_click_cid = None
+        p._browser_figure = None
+        p._browser_current_page = 1
+        p._browser_total_pages = 1
+        p._browser_last_signature = None
+        p._browser_expression_cache = None
+        p._browser_expression_error = None
+        p._browser_tag_buttons = {}
+        p._browser_expression_selection = (0, 0)
+        p._use_browser_expression_js = False
+        p._thumbnail_downsample_cache = {}
+        p.THUMBNAIL_MAX_EDGE = ROIManagerPlugin.THUMBNAIL_MAX_EDGE
+        p.width = 6
+        p.height = 3
+        p._build_widgets()
+        return p
+
+    def test_capture_stores_fov_name_in_single_fov_mode(self):
+        plugin = self._make_plugin(map_mode_active=False)
+        plugin.refresh_roi_table = lambda *_, **__: None
+        plugin.set_status = lambda *_, **__: None
+        plugin._capture_current_view(None)
+        recorded = plugin.main_viewer.roi_manager.last_added
+        self.assertIsNotNone(recorded)
+        self.assertEqual(recorded.get("fov"), "FOV1")
+
+    def test_capture_stores_empty_fov_in_map_mode(self):
+        plugin = self._make_plugin(map_mode_active=True)
+        plugin.refresh_roi_table = lambda *_, **__: None
+        plugin.set_status = lambda *_, **__: None
+        plugin._capture_current_view(None)
+        recorded = plugin.main_viewer.roi_manager.last_added
+        self.assertIsNotNone(recorded)
+        self.assertEqual(recorded.get("fov"), "")
+
+    def test_capture_stores_map_id_in_map_mode(self):
+        plugin = self._make_plugin(map_mode_active=True)
+        plugin.main_viewer._active_map_id = "slide-1"
+        plugin.refresh_roi_table = lambda *_, **__: None
+        plugin.set_status = lambda *_, **__: None
+        plugin._capture_current_view(None)
+        recorded = plugin.main_viewer.roi_manager.last_added
+        self.assertIsNotNone(recorded)
+        self.assertEqual(recorded.get("map_id"), "slide-1")
+
+    def test_capture_stores_empty_map_id_in_single_fov_mode(self):
+        plugin = self._make_plugin(map_mode_active=False)
+        plugin.main_viewer._active_map_id = "slide-1"
+        plugin.refresh_roi_table = lambda *_, **__: None
+        plugin.set_status = lambda *_, **__: None
+        plugin._capture_current_view(None)
+        recorded = plugin.main_viewer.roi_manager.last_added
+        self.assertIsNotNone(recorded)
+        self.assertEqual(recorded.get("map_id"), "")
+
+    def test_on_map_mode_activate_disables_fov_checkboxes(self):
+        plugin = self._make_plugin(map_mode_active=True)
+        plugin.refresh_roi_table = lambda *_, **__: None
+        plugin.on_map_mode_activate()
+        self.assertTrue(plugin.ui_component.limit_to_fov_checkbox.disabled)
+        self.assertFalse(plugin.ui_component.limit_to_fov_checkbox.value)
+        self.assertTrue(plugin.ui_component.browser_limit_to_current.disabled)
+        self.assertFalse(plugin.ui_component.browser_limit_to_current.value)
+
+    def test_on_map_mode_deactivate_reenables_fov_checkboxes(self):
+        plugin = self._make_plugin(map_mode_active=False)
+        plugin.refresh_roi_table = lambda *_, **__: None
+        # Simulate map mode having been active
+        plugin.ui_component.limit_to_fov_checkbox.disabled = True
+        plugin.ui_component.browser_limit_to_current.disabled = True
+        plugin.on_map_mode_deactivate()
+        self.assertFalse(plugin.ui_component.limit_to_fov_checkbox.disabled)
+        self.assertFalse(plugin.ui_component.browser_limit_to_current.disabled)
+
+    def test_update_selected_roi_stores_map_id_in_map_mode(self):
+        """_update_selected_roi stores the active map_id when called in map mode."""
+        plugin = self._make_plugin(map_mode_active=True)
+        plugin.main_viewer._active_map_id = "slide-1"
+        plugin._selected_roi_id = "roi-0001"
+        plugin.refresh_roi_table = lambda *_, **__: None
+        plugin.set_status = lambda *_, **__: None
+        plugin._update_selected_roi(None)
+        updated = plugin.main_viewer.roi_manager.last_updated
+        self.assertIsNotNone(updated)
+        self.assertEqual(updated.get("map_id"), "slide-1", "Expected map_id='slide-1' in updated record")
+        self.assertEqual(updated.get("fov"), "", "Expected fov='' in map mode")
+
+    def test_update_selected_roi_stores_fov_in_single_fov_mode(self):
+        """_update_selected_roi stores the FOV name (not map_id) in single-FOV mode."""
+        plugin = self._make_plugin(map_mode_active=False)
+        plugin._selected_roi_id = "roi-0002"
+        plugin.refresh_roi_table = lambda *_, **__: None
+        plugin.set_status = lambda *_, **__: None
+        plugin._update_selected_roi(None)
+        updated = plugin.main_viewer.roi_manager.last_updated
+        self.assertIsNotNone(updated)
+        self.assertEqual(updated.get("fov"), "FOV1", "Expected fov='FOV1' in single-FOV mode")
+        self.assertEqual(updated.get("map_id"), "", "Expected map_id='' in single-FOV mode")
+
+    def test_render_map_roi_tile_returns_none_without_map_id(self):
+        """_render_map_roi_tile returns None when no map_id is stored and no active map."""
+        plugin = self._make_plugin(map_mode_active=False)
+        profile = _MarkerProfile(
+            name="test",
+            selected_channels=("CHANNEL",),
+            channel_settings={},
+        )
+        result = plugin._render_map_roi_tile({"fov": "", "map_id": ""}, profile)
+        self.assertIsNone(result)
+
+    def test_render_map_roi_tile_renders_via_layer(self):
+        """_render_map_roi_tile calls set_viewport/render on the map layer and returns float32."""
+        import numpy as np
+
+        plugin = self._make_plugin(map_mode_active=True)
+
+        # Stub a VirtualMapLayer-like object.
+        rendered_image = np.ones((32, 32, 3), dtype=np.float32) * 0.5
+        viewport_calls = []
+
+        class _StubLayer:
+            _allowed_downsample = (1, 2, 4, 8)
+            _viewport = None
+
+            def base_pixel_size_um(self):
+                return 0.5
+
+            def set_viewport(self, xmin_um, xmax_um, ymin_um, ymax_um, *, downsample_factor):
+                viewport_calls.append((xmin_um, xmax_um, ymin_um, ymax_um, downsample_factor))
+                self._viewport = (xmin_um, xmax_um, ymin_um, ymax_um, downsample_factor)
+
+            def render(self, channels):
+                return rendered_image
+
+        stub_layer = _StubLayer()
+        plugin.main_viewer._active_map_id = "slide-1"
+        plugin.main_viewer._get_map_layer = lambda mid: stub_layer
+
+        profile = _MarkerProfile(
+            name="test",
+            selected_channels=("CHANNEL",),
+            channel_settings={},
+        )
+        record = {"fov": "", "map_id": "slide-1", "x_min": 0.0, "x_max": 100.0, "y_min": 0.0, "y_max": 100.0}
+        result = plugin._render_map_roi_tile(record, profile)
+
+        self.assertIsNotNone(result)
+        self.assertIsInstance(result, np.ndarray)
+        self.assertEqual(result.dtype, np.float32)
+        self.assertTrue(len(viewport_calls) == 1, "set_viewport should be called once")
+
+    def test_render_map_roi_tile_restores_viewport(self):
+        """_render_map_roi_tile restores the layer viewport after rendering."""
+        import numpy as np
+
+        plugin = self._make_plugin(map_mode_active=True)
+
+        class _StubLayer:
+            _allowed_downsample = (1, 2, 4, 8)
+            _viewport = (99.0, 100.0, 99.0, 100.0, 1)  # pre-existing viewport
+
+            def base_pixel_size_um(self):
+                return 1.0
+
+            def set_viewport(self, xmin_um, xmax_um, ymin_um, ymax_um, *, downsample_factor):
+                self._viewport = (xmin_um, xmax_um, ymin_um, ymax_um, downsample_factor)
+
+            def render(self, channels):
+                return np.zeros((8, 8, 3), dtype=np.float32)
+
+        original_vp = (99.0, 100.0, 99.0, 100.0, 1)
+        stub_layer = _StubLayer()
+        plugin.main_viewer._active_map_id = "slide-1"
+        plugin.main_viewer._get_map_layer = lambda mid: stub_layer
+
+        profile = _MarkerProfile(
+            name="test",
+            selected_channels=("CHANNEL",),
+            channel_settings={},
+        )
+        record = {"fov": "", "map_id": "slide-1", "x_min": 10.0, "x_max": 50.0, "y_min": 10.0, "y_max": 50.0}
+        plugin._render_map_roi_tile(record, profile)
+
+        self.assertEqual(stub_layer._viewport, original_vp, "Viewport should be restored after thumbnail rendering")
 
 
 if __name__ == "__main__":  # pragma: no cover
