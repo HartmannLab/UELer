@@ -18,6 +18,7 @@ env/
 .DS_Store
 Thumbs.db
 *.tmp
+*_tmp
 *.swp
 .vscode/
 .idea/
@@ -34,4 +35,5 @@ specs/
 
 
 script/*.ipynb
-!script/run_ueler.ipynbsite/
+!script/run_ueler.ipynb
+site/
