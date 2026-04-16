@@ -776,6 +776,55 @@ class ROIManagerMapModeTests(unittest.TestCase):
 
         self.assertEqual(stub_layer._viewport, original_vp, "Viewport should be restored after thumbnail rendering")
 
+    def test_render_map_roi_tile_applies_bounds_offset(self):
+        """_render_map_roi_tile adds map_bounds() origin when converting canvas pixels to µm."""
+        import numpy as np
+
+        plugin = self._make_plugin(map_mode_active=True)
+
+        viewport_calls = []
+
+        class _StubLayerOffset:
+            _allowed_downsample = (1, 2, 4)
+            _viewport = None
+
+            def base_pixel_size_um(self):
+                return 0.5  # 0.5 µm per canvas pixel
+
+            def map_bounds(self):
+                # Non-zero stage origin: x from 1000 µm, y from 4000 µm
+                return (1000.0, 3000.0, 4000.0, 6000.0)
+
+            def set_viewport(self, xmin_um, xmax_um, ymin_um, ymax_um, *, downsample_factor):
+                viewport_calls.append((xmin_um, xmax_um, ymin_um, ymax_um))
+                self._viewport = (xmin_um, xmax_um, ymin_um, ymax_um, downsample_factor)
+
+            def render(self, channels):
+                return np.ones((8, 8, 3), dtype=np.float32)
+
+        stub_layer = _StubLayerOffset()
+        plugin.main_viewer._active_map_id = "slide-1"
+        plugin.main_viewer._get_map_layer = lambda mid: stub_layer
+
+        profile = _MarkerProfile(
+            name="test",
+            selected_channels=("DAPI",),
+            channel_settings={},
+        )
+        # Canvas pixels: x=[200,400], y=[80,280].
+        # Expected µm: xmin = 1000 + 200*0.5 = 1100, xmax = 1000 + 400*0.5 = 1200
+        #              ymin = 4000 + 80*0.5  = 4040, ymax = 4000 + 280*0.5 = 4140
+        record = {"fov": "", "map_id": "slide-1", "x_min": 200.0, "x_max": 400.0, "y_min": 80.0, "y_max": 280.0}
+        result = plugin._render_map_roi_tile(record, profile)
+
+        self.assertIsNotNone(result, "Should produce a rendered thumbnail")
+        self.assertEqual(len(viewport_calls), 1, "set_viewport should be called once")
+        xmin_um, xmax_um, ymin_um, ymax_um = viewport_calls[0]
+        self.assertAlmostEqual(xmin_um, 1100.0, msg="xmin_um must include bounds origin")
+        self.assertAlmostEqual(xmax_um, 1200.0, msg="xmax_um must include bounds origin")
+        self.assertAlmostEqual(ymin_um, 4040.0, msg="ymin_um must include bounds origin")
+        self.assertAlmostEqual(ymax_um, 4140.0, msg="ymax_um must include bounds origin")
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

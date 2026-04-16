@@ -1274,11 +1274,20 @@ class ROIManagerPlugin(PluginBase):
         if x_max <= x_min or y_max <= y_min:
             return None
 
-        # Convert stitched-canvas pixels to physical um for the layer API.
-        xmin_um = x_min * base_px_um
-        xmax_um = x_max * base_px_um
-        ymin_um = y_min * base_px_um
-        ymax_um = y_max * base_px_um
+        # Convert stitched-canvas pixels to physical µm for the layer API.
+        # Must add the map's physical bounds origin so that coordinates are
+        # absolute µm matching where the tiles actually live on the stage.
+        try:
+            bounds = layer.map_bounds()
+            bounds_min_x = float(bounds[0])
+            bounds_min_y = float(bounds[2])
+        except Exception:
+            bounds_min_x = 0.0
+            bounds_min_y = 0.0
+        xmin_um = bounds_min_x + x_min * base_px_um
+        xmax_um = bounds_min_x + x_max * base_px_um
+        ymin_um = bounds_min_y + y_min * base_px_um
+        ymax_um = bounds_min_y + y_max * base_px_um
 
         # Pick the smallest allowed downsample factor that fits THUMBNAIL_MAX_EDGE.
         longest_edge = max(x_max - x_min, y_max - y_min)

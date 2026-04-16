@@ -3383,6 +3383,7 @@ class ImageMaskViewer:
 
     def center_on_roi(self, record):
         target_fov = record.get("fov") or ""
+        map_id = str(record.get("map_id") or "").strip()
         x_min = record.get("x_min", 0.0)
         x_max = record.get("x_max", self.width)
         y_min = record.get("y_min", 0.0)
@@ -3391,6 +3392,19 @@ class ImageMaskViewer:
         ax = getattr(self.image_display, "ax", None)
         if ax is None:
             return
+
+        # If this is a map-mode ROI, ensure the correct map is active before centering.
+        if not target_fov and map_id:
+            needs_activation = not self._map_mode_active
+            needs_switch = self._map_mode_active and self._active_map_id != map_id
+            if needs_activation or needs_switch:
+                try:
+                    self._activate_map_mode(map_id)
+                    self._refresh_map_controls()
+                    self.update_display(self.current_downsample_factor)
+                except Exception:
+                    if self._debug:
+                        print(f"[viewer] center_on_roi: failed to activate map {map_id!r}")
 
         if self._map_mode_active:
             if target_fov:

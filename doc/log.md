@@ -1,5 +1,14 @@
 ### v0.3.1
 
+**Issue #81: consistent plugin behavior — ROI gallery black thumbnails and centering on map-mode ROIs**
+- **Root cause 1 (black ROI gallery thumbnails):** `_render_map_roi_tile()` in `roi_manager_plugin.py` converted canvas-pixel coordinates to µm by multiplying by `base_pixel_size_um` alone, omitting the map's physical bounds origin (from `layer.map_bounds()`). Identical to the batch-export white-PNG bug. For maps with non-zero stage coordinates, `layer.set_viewport()` received coordinates far outside all tiles → `render()` returned zeros → black thumbnails.
+- **Fix 1:** After acquiring `base_px_um`, call `layer.map_bounds()` and apply the origin: `xmin_um = float(bounds[0]) + x_min * base_px_um` (all four edges). Call wrapped in try/except so zero-origin maps are unaffected.
+- **Root cause 2 (centering fails when map not active):** `center_on_roi()` in `main_viewer.py` only handled coordinate translation if `self._map_mode_active` was already `True`. If the user was in single-FOV mode and activated a map-mode ROI via the ROI browser or "Center" button, the method fell through to the single-FOV `else` branch with an empty `fov` string — skipping the FOV selector and placing the viewport on the wrong canvas.
+- **Fix 2:** At the top of `center_on_roi`, extract `map_id` from the record. If `not target_fov and map_id` and the correct map is not active, call `_activate_map_mode(map_id)`, `_refresh_map_controls()`, and `update_display(...)` before the existing coordinate-translation logic. Mirrors the pattern in `focus_on_cell()`.
+- Added 1 new test `test_render_map_roi_tile_applies_bounds_offset` in `test_roi_manager_tags.py`: stubs `map_bounds()` with non-zero origin `(1000, 3000, 4000, 6000)`, asserts `set_viewport` receives offset µm coords.
+- Added 3 new tests in `test_map_mode_activation.py`: `test_center_on_roi_activates_map_mode_when_inactive`, `test_center_on_roi_switches_map_when_wrong_map_active`, `test_center_on_roi_skips_activation_when_correct_map_already_active`.
+- Validated with: `python -m unittest tests.test_roi_manager_tags tests.test_map_mode_activation` (56/56 pass).
+
 **MkDocs Material documentation site (#80)**
 - Created a full documentation site using Material for MkDocs, covering installation, getting started, tutorials (basic usage, user interface, map mode, batch export), FAQ, and developer notes (packaging, viewer runtime, map mode internals, export pipeline, ROI workflows, heatmap & cell annotation, OME-TIFF loading).
 - Added `.github/workflows/docs.yml` to auto-deploy the site to GitHub Pages on every push to `main`.
