@@ -34,4 +34,4 @@ specs/
 
 
 script/*.ipynb
-!script/run_ueler.ipynb
+!script/run_ueler.ipynbsite/

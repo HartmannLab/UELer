@@ -41,10 +41,13 @@ dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
 ]
+docs = [
+    "mkdocs-material>=9.5",
+]
 
 [project.urls]
 homepage = "https://github.com/HartmannLab/UELer"
-documentation = "https://github.com/HartmannLab/UELer"
+documentation = "https://hartmannlab.github.io/UELer/"
 
 [tool.setuptools.packages.find]
 include = ["ueler", "ueler.*"]

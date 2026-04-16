@@ -1,5 +1,10 @@
 ### v0.3.1
 
+**MkDocs Material documentation site (#80)**
+- Created a full documentation site using Material for MkDocs, covering installation, getting started, tutorials (basic usage, user interface, map mode, batch export), FAQ, and developer notes (packaging, viewer runtime, map mode internals, export pipeline, ROI workflows, heatmap & cell annotation, OME-TIFF loading).
+- Added `.github/workflows/docs.yml` to auto-deploy the site to GitHub Pages on every push to `main`.
+- Added `[project.optional-dependencies] docs = ["mkdocs-material>=9.5"]` to `pyproject.toml` and updated the documentation URL to `https://hartmannlab.github.io/UELer/`.
+
 **Map mode ROI export: fix white PNG — missing bounds offset and region_ds mismatch (Follow-up)**
 - **Root cause 1 (white PNG, main bug):** `_export_map_roi_worker` converted canvas-pixel coordinates to µm by multiplying by `base_pixel_size_um` alone, omitting the map's physical bounds origin (from `layer.map_bounds()`). The live display path `_render_map_view` correctly adds `bounds_min_x` / `bounds_min_y` before calling `layer.set_viewport`. For maps with non-zero stage coordinates (absolute µm positions), the passed µm rectangle fell entirely outside all tile geometries, so `_collect_visible_tiles` returned nothing and the canvas stayed all-zeros → white PNG after normalisation.
 - **Fix 1:** In `_export_map_roi_worker`, call `layer.map_bounds()` and apply the bounds origin offset: `xmin_um = bounds[0] + x_min * base_px_um` (and equivalently for all four edges). This matches the pattern in `_render_map_view` (line 1083).
