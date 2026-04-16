@@ -33,7 +33,6 @@ dev_note/github_issues.md
 .local/
 specs/
 
-
 script/*.ipynb
 !script/run_ueler.ipynb
 site/
