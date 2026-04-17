@@ -1,5 +1,11 @@
 ### v0.3.1
 
+**Issue #81 reply 2: scatter-plot selection now highlights cell masks in map mode**
+- **Root cause:** `_on_scatter_selection()` and `_apply_external_selection()` in `chart.py` only updated `selected_indices` (cell gallery) and optionally navigated the viewport. Neither called `set_mask_ids()`, so mask highlights were never triggered from scatter-plot lasso/click events regardless of mode.
+- **Fix:** Added `_sync_mask_highlights_from_selection(indices)` to `ChartDisplay`. In single-FOV mode it filters the cell table to the active FOV and calls `set_mask_ids(mask_ids=[...])`. In map mode (`get_active_fov()` returns `None`) it builds `(fov, mask_id)` pairs and calls `set_mask_ids(fov_mask_pairs=[...])` — the same pattern used by `highlight_cells()`. The new helper is called from `_on_scatter_selection()` and `_apply_external_selection()` whenever `mv_linked_checkbox` is enabled.
+- **Changed files:** `ueler/viewer/plugin/chart.py`, `tests/test_chart_cell_gallery_link.py`.
+- Validated with: `python -m unittest tests.test_chart_cell_gallery_link tests.test_map_mode_activation tests.test_painted_colors_all_fovs tests.test_mask_color_sets` (51/51 pass).
+
 **Issue #81 follow-up: map-mode cell mask highlighting and mask painter overlay**
 - **Root cause 1 (scatter highlight not working in map mode):** `highlight_cells()` in `chart.py` filtered by `image_selector.value` (stale in map mode). `set_mask_ids()` in `image_display.py` read the same stale selector, printed "No active FOV", and returned without populating `selected_masks_label`. The existing `_update_map_mask_highlights()` downstream already handles per-tile overlay correctly — it just never received valid `(fov, mask_id)` pairs.
 - **Fix 1:** `highlight_cells()` calls `get_active_fov()`. In map mode, it builds explicit `(fov, mask_id)` pairs from the cell table filtered by the comparator, and passes them to `set_mask_ids()` via a new `fov_mask_pairs` keyword. `set_mask_ids()` gains `fov_mask_pairs`: when provided, directly populates `selected_masks_label` and skips single-FOV validation.

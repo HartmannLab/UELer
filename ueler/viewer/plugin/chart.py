@@ -342,8 +342,10 @@ class ChartDisplay(PluginBase):
         }
         self._update_single_point_state(normalized)
         self.selected_indices.value = normalized
-        if self.ui_component.mv_linked_checkbox.value and len(normalized) == 1:
-            self._focus_main_viewer(next(iter(normalized)))
+        if self.ui_component.mv_linked_checkbox.value:
+            if len(normalized) == 1:
+                self._focus_main_viewer(next(iter(normalized)))
+            self._sync_mask_highlights_from_selection(normalized)
 
     def _on_scatter_hover(self, index: Optional[Union[int, str]]) -> None:
         # Reserved for future hover-linked integrations.
@@ -359,6 +361,8 @@ class ChartDisplay(PluginBase):
         for scatter in self._scatter_views.values():
             scatter.apply_selection(normalized, announce=False)
         self.selected_indices.value = normalized
+        if self.ui_component.mv_linked_checkbox.value:
+            self._sync_mask_highlights_from_selection(normalized)
 
     def apply_color_mapping(
         self,
@@ -382,6 +386,69 @@ class ChartDisplay(PluginBase):
         x = row[self.main_viewer.x_key]
         y = row[self.main_viewer.y_key]
         self.main_viewer.focus_on_cell(fov, x, y, radius=100.0)
+
+    def _sync_mask_highlights_from_selection(
+        self, indices: Set[Union[int, str]]
+    ) -> None:
+        """Translate scatter selection row indices to mask highlights in the viewer.
+
+        Called whenever the scatter selection changes and the main-viewer
+        link is active.  Works in both single-FOV and map mode.
+        """
+        try:
+            image_display = getattr(self.main_viewer, "image_display", None)
+            if image_display is None:
+                return
+            mask_key = getattr(self.main_viewer, "mask_key", None)
+            if not mask_key:
+                return
+
+            if not indices:
+                image_display.set_mask_ids(
+                    mask_name=mask_key,
+                    mask_ids=[],
+                )
+                return
+
+            cell_table = self.main_viewer.cell_table
+            fov_col = self.main_viewer.fov_key
+            lbl_col = self.main_viewer.label_key
+
+            valid_indices = [idx for idx in indices if idx in cell_table.index]
+            if not valid_indices:
+                return
+
+            active_fov = self.main_viewer.get_active_fov()
+            if active_fov:
+                # Single-FOV mode: highlight only cells in the active FOV.
+                rows = cell_table.loc[
+                    valid_indices,
+                    [fov_col, lbl_col],
+                ]
+                mask_ids = rows.loc[
+                    rows[fov_col] == active_fov, lbl_col
+                ].astype(int).tolist()
+                image_display.set_mask_ids(
+                    mask_name=mask_key,
+                    mask_ids=mask_ids,
+                )
+            else:
+                # Map mode: pass explicit (fov, mask_id) pairs so each
+                # selection is correctly routed to its tile viewport.
+                rows = cell_table.loc[valid_indices, [fov_col, lbl_col]]
+                fov_mask_pairs = list(zip(
+                    rows[fov_col].astype(str),
+                    rows[lbl_col].astype(int),
+                ))
+                image_display.set_mask_ids(
+                    mask_name=mask_key,
+                    mask_ids=[],
+                    fov_mask_pairs=fov_mask_pairs,
+                )
+        except Exception:
+            if getattr(self.main_viewer, "_debug", False):
+                import traceback
+                traceback.print_exc()
 
     # ------------------------------------------------------------------
     # Trace + highlight

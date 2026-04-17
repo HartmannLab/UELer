@@ -182,9 +182,15 @@ from ueler.viewer.plugin.chart import ChartDisplay
 class _FakeImageDisplay:
     def __init__(self):
         self.last_mask_ids: list = []
+        self.last_fov_mask_pairs = None
 
     def set_mask_ids(self, *, mask_name, mask_ids, fov_mask_pairs=None):
-        self.last_mask_ids = list(mask_ids)
+        if fov_mask_pairs is not None:
+            self.last_fov_mask_pairs = list(fov_mask_pairs)
+            self.last_mask_ids = []
+        else:
+            self.last_mask_ids = list(mask_ids)
+            self.last_fov_mask_pairs = None
 
 
 class _FakeCellGallery:
@@ -383,6 +389,93 @@ class TestAboveBelowToggleAutoUpdate(unittest.TestCase):
         prev = self.gallery.received
         self.chart.ui_component.above_below_buttons._trigger("below")
         self.assertEqual(self.gallery.received, prev)
+
+
+# ---------------------------------------------------------------------------
+# Scatter selection → mask highlights
+# ---------------------------------------------------------------------------
+
+class TestScatterSelectionMaskHighlights(unittest.TestCase):
+    """_on_scatter_selection / _apply_external_selection update mask highlights."""
+
+    def setUp(self):
+        table = _two_fov_table()
+        self.viewer = _make_viewer(table)
+        self.chart = _make_chart(self.viewer)
+        self.image_display: _FakeImageDisplay = self.viewer.image_display
+        self.chart.ui_component.cell_gallery_linked_checkbox.value = False
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+    def _trigger_scatter_selection(self, row_indices):
+        """Simulate jscatter firing a selection event for the given row indices."""
+        self.chart._on_scatter_selection(set(row_indices), origin="test")
+
+    # ------------------------------------------------------------------
+    # Single-FOV mode (get_active_fov returns "fov1")
+    # ------------------------------------------------------------------
+    def test_scatter_highlights_current_fov_cells(self):
+        """Scatter selection → set_mask_ids with only the active-FOV mask IDs."""
+        # rows 1 and 3 are in fov1 (labels 2 and 3); row 3 is in fov2 (label 4)
+        self.chart.ui_component.mv_linked_checkbox.value = True
+        self._trigger_scatter_selection([1, 2, 3])  # row indices (0-based)
+        # fov1 rows: index 1 (label 2), index 2 (label 3)
+        self.assertIn(2, self.image_display.last_mask_ids)
+        self.assertIn(3, self.image_display.last_mask_ids)
+        # fov2 row (index 3, label 4) must NOT appear in single-FOV highlight
+        self.assertNotIn(4, self.image_display.last_mask_ids)
+
+    def test_scatter_clears_highlights_on_empty_selection(self):
+        """Empty scatter selection → highlights cleared."""
+        self.chart.ui_component.mv_linked_checkbox.value = True
+        self.image_display.last_mask_ids = [1, 2]  # pretend something is highlighted
+        self._trigger_scatter_selection([])
+        self.assertEqual(self.image_display.last_mask_ids, [])
+
+    def test_scatter_no_highlights_when_mv_not_linked(self):
+        """When mv_linked_checkbox is off, scatter selection must not touch mask IDs."""
+        self.chart.ui_component.mv_linked_checkbox.value = False
+        self.image_display.last_mask_ids = []
+        self._trigger_scatter_selection([1, 2])
+        # Nothing should have been written
+        self.assertEqual(self.image_display.last_mask_ids, [])
+
+    # ------------------------------------------------------------------
+    # Map mode (get_active_fov returns None)
+    # ------------------------------------------------------------------
+    def test_scatter_highlights_map_mode_uses_fov_mask_pairs(self):
+        """In map mode scatter selection passes fov_mask_pairs, not mask_ids."""
+        self.viewer.get_active_fov = lambda: None  # simulate map mode
+        self.chart.ui_component.mv_linked_checkbox.value = True
+
+        self._trigger_scatter_selection([1, 2, 3])  # rows from both fov1 and fov2
+
+        # fov_mask_pairs must have been set (last_fov_mask_pairs populated)
+        self.assertIsNotNone(self.image_display.last_fov_mask_pairs)
+        pairs = self.image_display.last_fov_mask_pairs
+        # Row 1 → fov1 / label 2; row 2 → fov1 / label 3; row 3 → fov2 / label 4
+        self.assertIn(("fov1", 2), pairs)
+        self.assertIn(("fov1", 3), pairs)
+        self.assertIn(("fov2", 4), pairs)
+
+    # ------------------------------------------------------------------
+    # _apply_external_selection path (trace + clear button)
+    # ------------------------------------------------------------------
+    def test_apply_external_selection_syncs_highlights(self):
+        """_apply_external_selection with indices → mask highlights updated."""
+        self.chart.ui_component.mv_linked_checkbox.value = True
+        self.chart._apply_external_selection([0, 1])  # rows 0,1 are both fov1
+        # fov1 rows: index 0 (label 1), index 1 (label 2)
+        self.assertIn(1, self.image_display.last_mask_ids)
+        self.assertIn(2, self.image_display.last_mask_ids)
+
+    def test_apply_external_selection_clears_highlights(self):
+        """_apply_external_selection(set()) → highlights cleared."""
+        self.chart.ui_component.mv_linked_checkbox.value = True
+        self.image_display.last_mask_ids = [1]
+        self.chart._apply_external_selection(set())
+        self.assertEqual(self.image_display.last_mask_ids, [])
 
 
 if __name__ == "__main__":
