@@ -14,6 +14,7 @@ from .engine import (
     render_fov_to_array,
     render_roi_to_array,
     set_cell_color,
+    set_cell_colors_bulk,
 )
 
 __all__ = [
@@ -30,4 +31,5 @@ __all__ = [
     "render_fov_to_array",
     "render_roi_to_array",
     "set_cell_color",
+    "set_cell_colors_bulk",
 ]

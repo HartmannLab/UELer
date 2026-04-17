@@ -560,7 +560,8 @@ def render_roi_to_array(
 # This allows all rendering contexts (main viewer, cell gallery, ROI gallery,
 # batch export) to access the same painted color mappings.
 
-_CELL_COLOR_REGISTRY: dict[tuple[str, int], str] = {}
+# Nested dict: fov -> {mask_id -> color}.  Keyed by FOV for O(1) per-FOV access.
+_CELL_COLOR_REGISTRY: dict[str, dict[int, str]] = {}
 
 
 def set_cell_color(fov: str, mask_id: int, color: str) -> None:
@@ -575,7 +576,22 @@ def set_cell_color(fov: str, mask_id: int, color: str) -> None:
         mask_id: The mask/label ID of the cell
         color: The color string (e.g., "#00FFFF" for cyan)
     """
-    _CELL_COLOR_REGISTRY[(fov, mask_id)] = color
+    _CELL_COLOR_REGISTRY.setdefault(fov, {})[mask_id] = color
+
+
+def set_cell_colors_bulk(entries: dict[str, dict[int, str]]) -> None:
+    """Register colors for many cells across multiple FOVs in one call.
+
+    Significantly faster than calling :func:`set_cell_color` in a loop because
+    the per-FOV sub-dicts are updated with a single ``dict.update()`` each,
+    avoiding per-cell Python overhead.
+
+    Args:
+        entries: Mapping of ``fov -> {mask_id -> color}`` pairs to merge into
+            the registry.  Existing entries for the same cells are overwritten.
+    """
+    for fov, colors in entries.items():
+        _CELL_COLOR_REGISTRY.setdefault(fov, {}).update(colors)
 
 
 def get_cell_color(fov: str, mask_id: int) -> Optional[str]:
@@ -588,7 +604,7 @@ def get_cell_color(fov: str, mask_id: int) -> Optional[str]:
     Returns:
         The color string if one has been set, None otherwise
     """
-    return _CELL_COLOR_REGISTRY.get((fov, mask_id))
+    return _CELL_COLOR_REGISTRY.get(fov, {}).get(mask_id)
 
 
 def clear_cell_colors(fov: Optional[str] = None) -> None:
@@ -600,9 +616,7 @@ def clear_cell_colors(fov: Optional[str] = None) -> None:
     if fov is None:
         _CELL_COLOR_REGISTRY.clear()
     else:
-        keys_to_remove = [key for key in _CELL_COLOR_REGISTRY if key[0] == fov]
-        for key in keys_to_remove:
-            del _CELL_COLOR_REGISTRY[key]
+        _CELL_COLOR_REGISTRY.pop(fov, None)
 
 
 def get_all_cell_colors_for_fov(fov: str) -> dict[int, str]:
@@ -614,7 +628,7 @@ def get_all_cell_colors_for_fov(fov: str) -> dict[int, str]:
     Returns:
         Dictionary mapping mask_id -> color for all cells in the FOV
     """
-    return {mask_id: color for (fov_name, mask_id), color in _CELL_COLOR_REGISTRY.items() if fov_name == fov}
+    return dict(_CELL_COLOR_REGISTRY.get(fov, {}))
 
 
 __all__ = [
@@ -630,6 +644,7 @@ __all__ = [
     "render_fov_to_array",
     "render_roi_to_array",
     "set_cell_color",
+    "set_cell_colors_bulk",
     "get_cell_color",
     "clear_cell_colors",
     "get_all_cell_colors_for_fov",

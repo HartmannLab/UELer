@@ -42,7 +42,7 @@ from ueler.viewer.palette_store import (
     slugify_name as shared_slugify_name,
     write_palette_file,
 )
-from ueler.rendering import set_cell_color, get_cell_color, clear_cell_colors
+from ueler.rendering import set_cell_color, get_cell_color, clear_cell_colors, set_cell_colors_bulk
 COLOR_SET_FILE_SUFFIX = ".maskcolors.json"
 REGISTRY_FILENAME = "mask_color_sets_index.json"
 COLOR_SET_VERSION = "1.0.0"
@@ -154,6 +154,7 @@ class MaskPainterDisplay(PluginBase):
         self._last_applied_fov: Optional[str] = None
         self._last_applied_identifier: Optional[str] = None
         self._last_applied_classes: Optional[set] = None
+        self._last_applied_class_colors: dict[str, str] = {}
 
         storage_folder = self._determine_storage_folder()
         if storage_folder is None:
@@ -744,17 +745,27 @@ class MaskPainterDisplay(PluginBase):
                 cummulative=True,
             )
 
-        def _register_color_globally(cls_value, color):
-            """Register color for all cells of this class across all FOVs (for gallery)."""
+        def _register_color_globally(cls_str, cls_value, color):
+            """Register color for all cells of this class across all FOVs (for gallery).
+
+            Uses a vectorized bulk-write instead of iterrows() to avoid O(N)
+            Python-level per-cell overhead.
+            """
+            if self._last_applied_class_colors.get(cls_str) == color:
+                # Color unchanged since last registration — registry is already
+                # correct for this class; skip the expensive bulk write.
+                return
             matching_cells = self.main_viewer.cell_table.loc[
                 self.main_viewer.cell_table[identifier] == cls_value,
                 [self.main_viewer.fov_key, self.main_viewer.label_key],
             ]
-            
-            for _, row in matching_cells.iterrows():
-                fov = row[self.main_viewer.fov_key]
-                mask_id = row[self.main_viewer.label_key]
-                set_cell_color(fov, mask_id, color)
+            fov_arr = matching_cells[self.main_viewer.fov_key].to_numpy()
+            mid_arr = matching_cells[self.main_viewer.label_key].to_numpy()
+            entries: dict[str, dict[int, str]] = {}
+            for fov, mid in zip(fov_arr, mid_arr):
+                entries.setdefault(fov, {})[int(mid)] = color
+            set_cell_colors_bulk(entries)
+            self._last_applied_class_colors[cls_str] = color
 
         # Apply colors to visible classes
         for cls_str, cls_value in reversed(converted_visible):
@@ -767,7 +778,7 @@ class MaskPainterDisplay(PluginBase):
             if current_fov:
                 _apply_color_to_current_fov(cls_value, color)
             if register_globally:
-                _register_color_globally(cls_value, color)
+                _register_color_globally(cls_str, cls_value, color)
 
         # Apply default color to hidden classes
         if hidden_classes:
@@ -775,7 +786,7 @@ class MaskPainterDisplay(PluginBase):
                 if current_fov:
                     _apply_color_to_current_fov(cls_value, self.default_color)
                 if register_globally:
-                    _register_color_globally(cls_value, self.default_color)
+                    _register_color_globally(cls_str, cls_value, self.default_color)
 
         self._log("Masks updated with class-based colors.")
         
@@ -793,6 +804,7 @@ class MaskPainterDisplay(PluginBase):
         self._last_applied_fov = None
         self._last_applied_identifier = None
         self._last_applied_classes = None
+        self._last_applied_class_colors = {}
 
     def on_mv_update_display(self):
         """Handle main viewer display updates.

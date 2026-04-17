@@ -101,6 +101,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### **UELer v0.3.1 Summary**
+- Improved mask painter performance on large datasets (#82): restructured the cell colour registry to a nested dict for O(1) per-FOV access, replaced the `iterrows()` global-registration loop with a vectorised bulk write, and added per-class dirty tracking so unchanged classes skip re-registration entirely.
 - Published a [documentation site](https://hartmannlab.github.io/UELer/) built with Material for MkDocs, covering installation, getting started, tutorials, FAQ, and developer notes. The site is auto-deployed to GitHub Pages on every push to `main`.
 - Restored `ueler.image_utils` as a real packaged module and corrected the legacy utility shims so packaging cleanup no longer breaks imports through `ueler.image_utils` or the old root-level utility module names.
 - Added per-channel grid display mode: a new "Channel grid view" checkbox in the Channels panel renders each visible channel as a separate labelled pane in a synchronised grid layout.

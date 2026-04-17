@@ -1,5 +1,13 @@
 ### v0.3.1
 
+**Issue #82: mask painter performance — nested registry, bulk write, dirty tracking**
+- Restructured `_CELL_COLOR_REGISTRY` in `engine.py` from a flat `dict[tuple[str, int], str]` to a nested `dict[str, dict[int, str]]` (FOV → mask_id → color). `get_all_cell_colors_for_fov` is now O(1) per FOV instead of scanning the entire registry; `clear_cell_colors(fov)` uses a single `dict.pop()` instead of a linear scan-and-delete loop.
+- Added `set_cell_colors_bulk(entries)` to `engine.py` and exported it via `ueler/rendering/__init__.py`. It merges a pre-built nested dict into the registry with one `dict.update()` per FOV, replacing O(N) per-cell writes.
+- Replaced the `iterrows()` loop inside `_register_color_globally` (nested in `apply_colors_to_masks`) with a vectorised path: two `.to_numpy()` calls build `fov_arr`/`mid_arr`, a single dict comprehension groups mask IDs by FOV, and one `set_cell_colors_bulk()` call writes all entries.
+- Added `_last_applied_class_colors: dict[str, str]` to `MaskPainterDisplay`. `_register_color_globally` now skips the bulk write entirely if a class's color is unchanged since the last registration, and updates the cache only after writing. `on_cell_table_change()` resets the cache.
+- Added 21 new tests in `tests/test_mask_color_overlay.py` covering the nested registry structure, `set_cell_colors_bulk`, the bulk-write integration path, and per-class dirty tracking.
+- Validated with: `python -m unittest tests.test_mask_color_overlay tests.test_cell_gallery tests.test_painted_colors_all_fovs tests.test_mask_color_sets` (40/40 pass).
+
 **Issue #81 reply 2: scatter-plot selection now highlights cell masks in map mode**
 - **Root cause:** `_on_scatter_selection()` and `_apply_external_selection()` in `chart.py` only updated `selected_indices` (cell gallery) and optionally navigated the viewport. Neither called `set_mask_ids()`, so mask highlights were never triggered from scatter-plot lasso/click events regardless of mode.
 - **Fix:** Added `_sync_mask_highlights_from_selection(indices)` to `ChartDisplay`. In single-FOV mode it filters the cell table to the active FOV and calls `set_mask_ids(mask_ids=[...])`. In map mode (`get_active_fov()` returns `None`) it builds `(fov, mask_id)` pairs and calls `set_mask_ids(fov_mask_pairs=[...])` — the same pattern used by `highlight_cells()`. The new helper is called from `_on_scatter_selection()` and `_apply_external_selection()` whenever `mv_linked_checkbox` is enabled.
