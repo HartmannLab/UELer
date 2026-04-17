@@ -459,17 +459,18 @@ class ImageDisplay:
                         self.img_display.set_data(combined)
                         self.fig.canvas.draw_idle()
 
-    def set_mask_ids(self, mask_name, mask_ids):
+    def set_mask_ids(self, mask_name, mask_ids, *, fov_mask_pairs=None):
         """
         Set the mask IDs to display and update the display.
 
         Parameters:
             mask_name (str): The name of the mask to select IDs from.
             mask_ids (list or int): The mask ID(s) to display. Can be a single int or a list of ints.
+            fov_mask_pairs (list, optional): Explicit list of (fov_name, mask_id) tuples.
+                Used in map mode where multiple FOVs may be visible at once.
         """
-        # if mask_ids is empty
-
-        if not mask_ids:
+        # if mask_ids is empty and no explicit pairs given, clear all selections
+        if not mask_ids and not fov_mask_pairs:
             self.selected_masks_label.clear()
             self.update_patches()
             return
@@ -482,6 +483,15 @@ class ImageDisplay:
 
         # Clear previous selections
         self.selected_masks_label.clear()
+
+        # Map mode: explicit per-FOV pairs provided by the caller
+        if fov_mask_pairs:
+            for fov_name, mask_id in fov_mask_pairs:
+                self.selected_masks_label.add(
+                    MaskSelection(fov=str(fov_name), mask=str(mask_name), mask_id=int(mask_id))
+                )
+            self.update_patches(do_not_reset=True)
+            return
 
         selector = getattr(self.main_viewer.ui_component, "image_selector", None)
         current_fov = selector.value if selector is not None else None

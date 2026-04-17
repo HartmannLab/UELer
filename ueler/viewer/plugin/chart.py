@@ -423,18 +423,33 @@ class ChartDisplay(PluginBase):
         cell_table = self.main_viewer.cell_table
         select_above = self.ui_component.above_below_buttons.value == "above"
         comparator = np.greater if select_above else np.less
-        within_fov = (
-            cell_table[self.main_viewer.fov_key]
-            == self.main_viewer.ui_component.image_selector.value
-        )
         matches = comparator(cell_table[x_col], self.cutoff)
-        mask_ids = cell_table.loc[
-            within_fov & matches, self.main_viewer.label_key
-        ].tolist()
-        self.main_viewer.image_display.set_mask_ids(
-            mask_name=self.main_viewer.mask_key,
-            mask_ids=mask_ids,
-        )
+        active_fov = self.main_viewer.get_active_fov()
+        if active_fov:
+            # Single-FOV mode: filter by the current FOV
+            within_fov = cell_table[self.main_viewer.fov_key] == active_fov
+            mask_ids = cell_table.loc[
+                within_fov & matches, self.main_viewer.label_key
+            ].tolist()
+            self.main_viewer.image_display.set_mask_ids(
+                mask_name=self.main_viewer.mask_key,
+                mask_ids=mask_ids,
+            )
+        else:
+            # Map mode: include all matching cells; pass per-FOV pairs so that
+            # set_mask_ids can correctly associate each mask_id with its FOV.
+            fov_col = self.main_viewer.fov_key
+            lbl_col = self.main_viewer.label_key
+            matched_rows = cell_table.loc[matches, [fov_col, lbl_col]]
+            fov_mask_pairs = list(zip(
+                matched_rows[fov_col].astype(str),
+                matched_rows[lbl_col].astype(int),
+            ))
+            self.main_viewer.image_display.set_mask_ids(
+                mask_name=self.main_viewer.mask_key,
+                mask_ids=[],
+                fov_mask_pairs=fov_mask_pairs,
+            )
         if push_to_gallery:
             # Update selected_indices with all-FOV matches so the gallery
             # observer (forward_to_cell_gallery) fires when linked.

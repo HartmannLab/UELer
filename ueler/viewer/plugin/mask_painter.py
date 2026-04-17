@@ -711,7 +711,7 @@ class MaskPainterDisplay(PluginBase):
             self._log("Select at least one class to color.", error=True, clear=True)
             return
 
-        current_fov = self.main_viewer.ui_component.image_selector.value
+        current_fov = self.main_viewer.get_active_fov()
 
         column = self.main_viewer.cell_table[identifier]
         dtype = column.dtype
@@ -764,14 +764,16 @@ class MaskPainterDisplay(PluginBase):
                 continue
             
             color = picker.value
-            _apply_color_to_current_fov(cls_value, color)
+            if current_fov:
+                _apply_color_to_current_fov(cls_value, color)
             if register_globally:
                 _register_color_globally(cls_value, color)
 
         # Apply default color to hidden classes
         if hidden_classes:
             for cls_str, cls_value in converted_hidden:
-                _apply_color_to_current_fov(cls_value, self.default_color)
+                if current_fov:
+                    _apply_color_to_current_fov(cls_value, self.default_color)
                 if register_globally:
                     _register_color_globally(cls_value, self.default_color)
 
@@ -808,7 +810,7 @@ class MaskPainterDisplay(PluginBase):
         if not self.ui_component.enabled_checkbox.value:
             return
         
-        current_fov = self.main_viewer.ui_component.image_selector.value
+        current_fov = self.main_viewer.get_active_fov()
         current_identifier = self.ui_component.identifier_dropdown.value
         current_classes = set(self._get_visible_classes()) if current_identifier else set()
         
@@ -820,8 +822,15 @@ class MaskPainterDisplay(PluginBase):
         )
         
         if state_changed:
-            # Only apply to current FOV, don't register globally (performance optimization)
-            self.apply_colors_to_masks(None, notify_cell_gallery=False, register_globally=False)
+            # In map mode (current_fov is None), register globally so the
+            # _apply_map_painter_overlay method can read from the registry.
+            # In single-FOV mode, skip global registration for performance.
+            map_mode = current_fov is None
+            self.apply_colors_to_masks(
+                None,
+                notify_cell_gallery=False,
+                register_globally=map_mode,
+            )
 
     def _notify_cell_gallery_update(self) -> None:
         """Notify the cell gallery plugin that mask painter has applied color changes."""

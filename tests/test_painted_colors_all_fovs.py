@@ -54,7 +54,10 @@ class TestPaintedColorsAllFovs(unittest.TestCase):
         image_display = types.SimpleNamespace()
         image_display.set_mask_colors_current_fov = lambda **kwargs: None
         viewer.image_display = image_display
-        
+
+        # get_active_fov returns the current image selector value (single-FOV mode)
+        viewer.get_active_fov = lambda: ui_component.image_selector.value
+
         return viewer
 
     def test_colors_registered_for_all_fovs(self):

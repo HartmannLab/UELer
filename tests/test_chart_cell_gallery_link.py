@@ -183,7 +183,7 @@ class _FakeImageDisplay:
     def __init__(self):
         self.last_mask_ids: list = []
 
-    def set_mask_ids(self, *, mask_name, mask_ids):
+    def set_mask_ids(self, *, mask_name, mask_ids, fov_mask_pairs=None):
         self.last_mask_ids = list(mask_ids)
 
 
@@ -213,6 +213,7 @@ def _make_viewer(cell_table: "pd.DataFrame") -> SimpleNamespace:
         ui_component=ui_component,
         image_display=image_display,
         SidePlots=side_plots,
+        get_active_fov=lambda: ui_component.image_selector.value,
     )
     return viewer
 

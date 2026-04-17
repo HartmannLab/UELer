@@ -87,7 +87,7 @@ from weakref import WeakKeyDictionary
 
 from skimage.io import imsave
 from skimage.segmentation import find_boundaries
-from ueler.rendering.engine import scale_outline_thickness, thicken_outline
+from ueler.rendering.engine import scale_outline_thickness, thicken_outline, get_all_cell_colors_for_fov
 # from dask.distributed import LocalCluster, Client
 
 # # Create a LocalCluster with a memory limit of 4 GB per worker
@@ -1584,6 +1584,143 @@ class ImageMaskViewer:
         else:
             display.img_display.set_data(base_image)
         display.fig.canvas.draw_idle()
+
+    def _apply_map_painter_overlay(self) -> None:
+        """Overlay mask painter colors on the current map view.
+
+        This method is analogous to ``_update_map_mask_highlights`` but reads
+        from the global cell-color registry (populated by the mask painter
+        plugin) instead of the highlight selection set.  It applies colored
+        outlines for each class directly onto the already-rendered stitched
+        map image, bypassing the per-tile render cache.
+
+        Call order in ``update_display``:
+            1. ``_apply_map_painter_overlay()`` — paint class colors onto base
+            2. ``_update_map_mask_highlights()`` — overlay selection highlights
+               on top
+        """
+        if not (self._map_mode_active and self._active_map_id and self._is_mask_painter_enabled()):
+            return
+
+        display = getattr(self, "image_display", None)
+        if display is None:
+            return
+
+        base_image = display._materialize_combined()
+        if base_image is None:
+            return
+
+        try:
+            layer = self._get_map_layer(self._active_map_id)
+        except Exception:
+            return
+
+        tile_viewports = layer.last_tile_viewports()
+        if not tile_viewports:
+            return
+
+        mask_key = getattr(self, "mask_key", None)
+        if not mask_key:
+            return
+
+        overlay = np.array(base_image, copy=True)
+        applied = False
+
+        for fov_name, viewport_info in tile_viewports.items():
+            cell_colors = get_all_cell_colors_for_fov(str(fov_name))
+            if not cell_colors:
+                continue
+
+            mask_array = self._get_mask_array(str(fov_name), str(mask_key))
+            if mask_array is None or mask_array.size == 0:
+                continue
+
+            region_xy = getattr(viewport_info, "region_xy", None)
+            if region_xy is None:
+                continue
+
+            try:
+                x_min_px = int(region_xy[0])
+                x_max_px = int(region_xy[1])
+                y_min_px = int(region_xy[2])
+                y_max_px = int(region_xy[3])
+            except Exception:
+                continue
+
+            if x_min_px >= x_max_px or y_min_px >= y_max_px:
+                continue
+
+            try:
+                mask_region = mask_array[y_min_px:y_max_px, x_min_px:x_max_px]
+            except Exception:
+                continue
+            if mask_region.size == 0:
+                continue
+
+            downsample = max(1, int(getattr(viewport_info, "downsample_factor", 1)))
+            mask_region_ds = mask_region[::downsample, ::downsample]
+            if mask_region_ds.size == 0:
+                continue
+
+            dest_x0 = max(0, int(getattr(viewport_info, "dest_x0", 0)))
+            dest_x1 = max(dest_x0, int(getattr(viewport_info, "dest_x1", dest_x0)))
+            dest_y0 = max(0, int(getattr(viewport_info, "dest_y0", 0)))
+            dest_y1 = max(dest_y0, int(getattr(viewport_info, "dest_y1", dest_y0)))
+
+            if dest_x0 >= dest_x1 or dest_y0 >= dest_y1:
+                continue
+
+            section_view = overlay[dest_y0:dest_y1, dest_x0:dest_x1]
+            if section_view.size == 0:
+                continue
+
+            # Group mask IDs by color for efficient edge computation
+            color_to_ids: dict = {}
+            for mask_id, color_hex in cell_colors.items():
+                color_to_ids.setdefault(color_hex, []).append(mask_id)
+
+            for color_hex, mask_ids_for_color in color_to_ids.items():
+                try:
+                    color_rgb = list(to_rgb(color_hex))
+                except Exception:
+                    continue
+
+                color_mask = np.isin(mask_region_ds, mask_ids_for_color)
+                if not np.any(color_mask):
+                    continue
+
+                try:
+                    edges = find_boundaries(color_mask, mode="inner")
+                except Exception:
+                    edges = color_mask
+                if not np.any(edges):
+                    edges = color_mask
+
+                outline_thickness = scale_outline_thickness(
+                    getattr(self, "mask_outline_thickness", 1),
+                    downsample,
+                )
+                if outline_thickness > 1:
+                    try:
+                        edges = thicken_outline(edges, outline_thickness - 1)
+                    except Exception:
+                        pass
+
+                rows = min(section_view.shape[0], edges.shape[0])
+                cols = min(section_view.shape[1], edges.shape[1])
+                if rows <= 0 or cols <= 0:
+                    continue
+
+                section_view[:rows, :cols][edges[:rows, :cols]] = color_rgb
+                applied = True
+
+        if applied:
+            # Update combined so _update_map_mask_highlights builds on top of
+            # the painted image rather than the raw rendered base.
+            display.combined = overlay
+            display.img_display.set_data(overlay)
+            display.fig.canvas.draw_idle()
+
     def after_all_plugins_loaded(self):
         # loop through all the attributes of self.SidePlots, call the `after_all_plugins_loaded`` method
         for attr_name in dir(self.SidePlots):
@@ -3979,6 +4116,11 @@ class ImageMaskViewer:
         self.inform_plugins('on_mv_update_display')
         self.update_scale_bar()
         if self._map_mode_active and self._active_map_id:
+            try:
+                self._apply_map_painter_overlay()
+            except Exception:
+                if self._debug:
+                    print("[viewer] Failed to apply map painter overlay")
             try:
                 self._update_map_mask_highlights()
             except Exception:
