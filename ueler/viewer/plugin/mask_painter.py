@@ -20,6 +20,7 @@ from ipywidgets import (
     Tab,
     TagsInput,
     Text,
+    ToggleButtons,
     VBox,
 )
 
@@ -143,12 +144,16 @@ class MaskPainterDisplay(PluginBase):
         self.ui_component.default_color_picker.value = self.default_color
         self.ui_component.default_color_picker.observe(self.on_default_color_change, names="value")
         self.class_color_controls: Dict[str, ColorPicker] = {}
+        self.class_visible_controls: Dict[str, Checkbox] = {}
+        self.class_mode_controls: Dict[str, ToggleButtons] = {}
         self.current_classes: List[str] = []
         self.current_identifier: Optional[str] = None
         self.selected_classes: List[str] = []
         self.hidden_color_cache: Dict[str, str] = {}
         self.registry_records: Dict[str, Dict[str, str]] = {}
         self.active_color_set_name = ""
+        self._cell_mode_cache: Dict[str, Dict[int, str]] = {}  # fov -> {mask_id: mode}
+        self._last_applied_class_modes: Dict[str, str] = {}
         
         # Track last applied state to avoid unnecessary re-application
         self._last_applied_fov: Optional[str] = None
@@ -212,11 +217,30 @@ class MaskPainterDisplay(PluginBase):
         self.current_classes = classes
 
         self.class_color_controls.clear()
-        color_picker_widgets: List[ColorPicker] = []
+        self.class_visible_controls.clear()
+        self.class_mode_controls.clear()
+        color_picker_widgets: List[HBox] = []
         for cls in classes:
-            picker = ColorPicker(description=str(cls), value=self.default_color, layout=Layout(width="auto"))
+            picker = ColorPicker(description=str(cls), value=self.default_color, layout=Layout(width="200px"))
             self.class_color_controls[cls] = picker
-            color_picker_widgets.append(picker)
+            vis_cb = Checkbox(
+                value=True,
+                description="",
+                indent=False,
+                layout=Layout(width="30px"),
+                tooltip=f"Show/hide {cls}",
+            )
+            vis_cb.observe(self._on_visibility_or_mode_change, names="value")
+            self.class_visible_controls[cls] = vis_cb
+            mode_tb = ToggleButtons(
+                options=[("outline", "outline"), ("fill", "fill")],
+                value="outline",
+                layout=Layout(width="160px"),
+                style={"button_width": "70px"},
+            )
+            mode_tb.observe(self._on_visibility_or_mode_change, names="value")
+            self.class_mode_controls[cls] = mode_tb
+            color_picker_widgets.append(HBox([vis_cb, picker, mode_tb]))
 
         self.ui_component.color_picker_box.children = tuple(color_picker_widgets)
         allowed_tags = list(classes)
@@ -248,6 +272,9 @@ class MaskPainterDisplay(PluginBase):
                 if picker is not None:
                     picker.value = color
             self.hidden_color_cache.clear()
+            # Also make all visibility checkboxes ticked
+            for cb in self.class_visible_controls.values():
+                cb.value = True
             self.selected_classes = list(self.class_color_controls.keys())
             self._refresh_color_picker_display()
         else:
@@ -295,12 +322,16 @@ class MaskPainterDisplay(PluginBase):
         else:
             visible_keys = list(self.selected_classes)
 
-        children = tuple(
-            self.class_color_controls[key]
-            for key in visible_keys
-            if key in self.class_color_controls
-        )
-        self.ui_component.color_picker_box.children = children
+        rows: List[HBox] = []
+        for key in visible_keys:
+            if key not in self.class_color_controls:
+                continue
+            vis_cb = self.class_visible_controls.get(key)
+            picker = self.class_color_controls[key]
+            mode_tb = self.class_mode_controls.get(key)
+            parts = [w for w in (vis_cb, picker, mode_tb) if w is not None]
+            rows.append(HBox(parts))
+        self.ui_component.color_picker_box.children = tuple(rows)
 
     def _set_default_color(self, new_color: Optional[str], update_ui: bool = True) -> None:
         normalized = normalize_hex_color(new_color) or DEFAULT_COLOR
@@ -355,6 +386,7 @@ class MaskPainterDisplay(PluginBase):
         self._refresh_color_picker_display()
 
     def _get_visible_classes(self) -> List[str]:
+        """Return classes that are currently visible (checkbox ticked)."""
         if self.ui_component.show_all_checkbox.value:
             order = list(self.ui_component.sorting_items_tagsinput.value)
             if not order:
@@ -362,12 +394,24 @@ class MaskPainterDisplay(PluginBase):
             remainder = [
                 key for key in self.class_color_controls.keys() if key not in order
             ]
-            return order + remainder
-        return list(self.selected_classes or self.ui_component.sorting_items_tagsinput.value)
+            candidates = order + remainder
+        else:
+            candidates = list(self.selected_classes or self.ui_component.sorting_items_tagsinput.value)
+        # Filter by per-class visibility checkbox
+        return [
+            key for key in candidates
+            if self.class_visible_controls.get(key, None) is None
+            or self.class_visible_controls[key].value
+        ]
 
     def _get_hidden_classes(self) -> List[str]:
+        """Return classes that are either not selected or have their checkbox unchecked."""
         if self.ui_component.show_all_checkbox.value:
-            return []
+            # Only checkbox-hidden classes
+            return [
+                key for key, cb in self.class_visible_controls.items()
+                if not cb.value
+            ]
         visible = set(self._get_visible_classes())
         return [key for key in self.class_color_controls.keys() if key not in visible]
 
@@ -390,6 +434,14 @@ class MaskPainterDisplay(PluginBase):
                 self.default_color,
                 hidden_cache=self.hidden_color_cache,
             )
+            modes_map = {
+                cls: getattr(self.class_mode_controls.get(cls), "value", "outline")
+                for cls in class_order
+            }
+            visible_map = {
+                cls: bool(getattr(self.class_visible_controls.get(cls), "value", True))
+                for cls in class_order
+            }
             timestamp = datetime.utcnow().isoformat() + "Z"
             identifier = self.current_identifier
 
@@ -400,6 +452,8 @@ class MaskPainterDisplay(PluginBase):
                 "default_color": self.default_color,
                 "class_order": list(class_order),
                 "colors": color_map,
+                "modes": modes_map,
+                "visible": visible_map,
                 "saved_at": timestamp,
             }
 
@@ -453,6 +507,14 @@ class MaskPainterDisplay(PluginBase):
                 self.default_color,
                 hidden_cache=self.hidden_color_cache,
             )
+            modes_map = {
+                cls: getattr(self.class_mode_controls.get(cls), "value", "outline")
+                for cls in class_order
+            }
+            visible_map = {
+                cls: bool(getattr(self.class_visible_controls.get(cls), "value", True))
+                for cls in class_order
+            }
             timestamp = datetime.utcnow().isoformat() + "Z"
             identifier = self.current_identifier
 
@@ -463,6 +525,8 @@ class MaskPainterDisplay(PluginBase):
                 "default_color": self.default_color,
                 "class_order": list(class_order),
                 "colors": color_map,
+                "modes": modes_map,
+                "visible": visible_map,
                 "saved_at": timestamp,
             }
 
@@ -649,6 +713,20 @@ class MaskPainterDisplay(PluginBase):
 
         self._refresh_color_picker_display()
         self._log(f"Loaded color set '{payload.get('name', path.stem)}' from {path}.", clear=True)
+        # Restore per-class modes
+        modes_payload = payload.get("modes", {})
+        if isinstance(modes_payload, dict):
+            for cls, mode in modes_payload.items():
+                tb = self.class_mode_controls.get(str(cls))
+                if tb is not None and mode in ("outline", "fill"):
+                    tb.value = mode
+        # Restore per-class visibility
+        visible_payload = payload.get("visible", {})
+        if isinstance(visible_payload, dict):
+            for cls, vis in visible_payload.items():
+                cb = self.class_visible_controls.get(str(cls))
+                if cb is not None:
+                    cb.value = bool(vis)
         if self.ui_component.enabled_checkbox.value:
             self.apply_colors_to_masks(None)
 
@@ -767,26 +845,43 @@ class MaskPainterDisplay(PluginBase):
             set_cell_colors_bulk(entries)
             self._last_applied_class_colors[cls_str] = color
 
+        def _register_mode_globally(cls_str, cls_value, mode):
+            """Register render mode for all cells of this class across all FOVs."""
+            if self._last_applied_class_modes.get(cls_str) == mode:
+                return
+            matching_cells = self.main_viewer.cell_table.loc[
+                self.main_viewer.cell_table[identifier] == cls_value,
+                [self.main_viewer.fov_key, self.main_viewer.label_key],
+            ]
+            fov_arr = matching_cells[self.main_viewer.fov_key].to_numpy()
+            mid_arr = matching_cells[self.main_viewer.label_key].to_numpy()
+            for fov, mid in zip(fov_arr, mid_arr):
+                self._cell_mode_cache.setdefault(str(fov), {})[int(mid)] = mode
+            self._last_applied_class_modes[cls_str] = mode
+
         # Apply colors to visible classes
         for cls_str, cls_value in reversed(converted_visible):
             picker = self.class_color_controls.get(cls_str)
             if picker is None:
                 self._log(f"Class '{cls_str}' not found in controls; skipping.", error=True)
                 continue
-            
+
             color = picker.value
+            mode_tb = self.class_mode_controls.get(cls_str)
+            mode = getattr(mode_tb, "value", "outline") if mode_tb is not None else "outline"
             if current_fov:
                 _apply_color_to_current_fov(cls_value, color)
             if register_globally:
                 _register_color_globally(cls_str, cls_value, color)
+                _register_mode_globally(cls_str, cls_value, mode)
 
-        # Apply default color to hidden classes
+        # Apply empty-string sentinel to hidden classes so they are invisible
         if hidden_classes:
             for cls_str, cls_value in converted_hidden:
                 if current_fov:
-                    _apply_color_to_current_fov(cls_value, self.default_color)
+                    _apply_color_to_current_fov(cls_value, "")
                 if register_globally:
-                    _register_color_globally(cls_str, cls_value, self.default_color)
+                    _register_color_globally(cls_str, cls_value, "")
 
         self._log("Masks updated with class-based colors.")
         
@@ -798,6 +893,25 @@ class MaskPainterDisplay(PluginBase):
         if notify_cell_gallery:
             self._notify_cell_gallery_update()
 
+    def _on_visibility_or_mode_change(self, _change):
+        """Called when any per-class visibility checkbox or mode ToggleButtons changes.
+
+        Forces ``apply_colors_to_masks`` to re-run so hidden classes immediately
+        receive the ``""`` sentinel and visible classes get their current color/mode.
+        Resets the dirty-skip caches so the change is not skipped.
+        """
+        if not self.ui_component.enabled_checkbox.value:
+            return
+        # Invalidate caches so apply_colors_to_masks doesn't skip the re-write
+        self._last_applied_class_colors.clear()
+        self._last_applied_class_modes.clear()
+        map_mode = self.main_viewer.get_active_fov() is None
+        self.apply_colors_to_masks(
+            None,
+            notify_cell_gallery=False,
+            register_globally=map_mode,
+        )
+
     def on_cell_table_change(self):
         self._initialise_identifier_options()
         # Clear tracking state when cell table changes
@@ -805,6 +919,8 @@ class MaskPainterDisplay(PluginBase):
         self._last_applied_identifier = None
         self._last_applied_classes = None
         self._last_applied_class_colors = {}
+        self._last_applied_class_modes = {}
+        self._cell_mode_cache = {}
 
     def on_mv_update_display(self):
         """Handle main viewer display updates.
@@ -866,6 +982,15 @@ class MaskPainterDisplay(PluginBase):
         Returns None if no color has been painted for this cell.
         """
         return get_cell_color(fov, mask_id)
+
+    def get_mode_map_for_fov(self, fov: str) -> Dict[int, str]:
+        """Return the per-cell render mode mapping for a given FOV.
+
+        Returns a dict mapping ``mask_id -> "outline" | "fill"`` for cells
+        that have been assigned a mode via ``apply_colors_to_masks``.
+        Cells absent from the returned dict should default to ``"outline"``.
+        """
+        return dict(self._cell_mode_cache.get(str(fov), {}))
 
     def initiate_ui(self):
         controls = HBox([

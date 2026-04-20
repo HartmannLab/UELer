@@ -136,7 +136,7 @@ class TestPaintedColorsAllFovs(unittest.TestCase):
                         "Color should be available for FOV_003 even though it was never loaded")
 
     def test_hidden_classes_registered_for_all_fovs(self):
-        """Test that hidden classes (default color) are also registered globally."""
+        """Test that hidden classes are registered with empty string (truly invisible)."""
         from ueler.viewer.plugin.mask_painter import MaskPainterDisplay
         import ipywidgets
         
@@ -164,9 +164,9 @@ class TestPaintedColorsAllFovs(unittest.TestCase):
         self.assertEqual(get_cell_color('FOV_002', 3), '#FF00FF')
         self.assertEqual(get_cell_color('FOV_003', 5), '#FF00FF')
         
-        # Verify TypeB (hidden) gets default color across all FOVs
-        self.assertEqual(get_cell_color('FOV_001', 2), '#808080')
-        self.assertEqual(get_cell_color('FOV_002', 4), '#808080')
+        # Verify TypeB (hidden) gets empty string (truly invisible) across all FOVs
+        self.assertEqual(get_cell_color('FOV_001', 2), '')
+        self.assertEqual(get_cell_color('FOV_002', 4), '')
 
 
 if __name__ == '__main__':

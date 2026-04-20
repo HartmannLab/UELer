@@ -92,6 +92,9 @@ def collect_mask_regions(
     return masks
 
 
+FILL_ALPHA_DEFAULT: float = 0.35
+
+
 def apply_registry_colors(
     image: np.ndarray,
     *,
@@ -102,9 +105,11 @@ def apply_registry_colors(
     color_map: Optional[Mapping[int, str]] = None,
     enable: bool = True,
     exclude_ids: Optional[set] = None,
+    mode_map: Optional[Mapping[int, str]] = None,
+    fill_alpha: float = FILL_ALPHA_DEFAULT,
 ) -> np.ndarray:
     """Overlay painted mask colors onto an image array.
-    
+
     Args:
         image: Base image to overlay colors onto
         fov: FOV name for looking up registry colors
@@ -114,6 +119,9 @@ def apply_registry_colors(
         color_map: Optional explicit color mapping (overrides registry)
         enable: Whether to apply colors at all
         exclude_ids: Set of mask IDs to skip (e.g., currently selected cells)
+        mode_map: Optional per-cell render mode mapping (mask_id -> "outline" | "fill").
+            Cells absent from this mapping default to "outline".
+        fill_alpha: Alpha used when blending filled cells onto the image (0–1).
     """
     if not enable or not mask_regions:
         return image
@@ -125,9 +133,18 @@ def apply_registry_colors(
     dilation = _resolve_outline_dilation(outline_thickness, downsample_factor)
     result = np.array(image, copy=True)
     excluded = exclude_ids or set()
+    resolved_mode_map: Mapping[int, str] = mode_map or {}
 
     for region in mask_regions.values():
-        _apply_region_colors(result, np.asarray(region), registry, dilation, excluded)
+        _apply_region_colors(
+            result,
+            np.asarray(region),
+            registry,
+            dilation,
+            excluded,
+            resolved_mode_map,
+            fill_alpha,
+        )
 
     return result
 
@@ -146,6 +163,8 @@ def _apply_region_colors(
     registry: Mapping[int, str],
     dilation: int,
     exclude_ids: set,
+    mode_map: Mapping[int, str],
+    fill_alpha: float,
 ) -> None:
     if region_array.size == 0:
         return
@@ -154,7 +173,7 @@ def _apply_region_colors(
         # Skip excluded IDs (e.g., currently selected cells)
         if raw_mask_id in exclude_ids:
             continue
-            
+
         rgb = _to_rgb_safe(colour_hex)
         if rgb is None:
             continue
@@ -163,11 +182,18 @@ def _apply_region_colors(
         if not np.any(mask_bool):
             continue
 
-        edges = find_boundaries(mask_bool, mode="inner")
-        if dilation > 0:
-            edges = thicken_outline(edges, dilation)
-        if np.any(edges):
-            canvas[edges] = rgb
+        render_mode = mode_map.get(int(raw_mask_id), "outline")
+        if render_mode == "fill":
+            rgb_arr = np.array(rgb, dtype=np.float32)
+            canvas[mask_bool] = (
+                (1.0 - fill_alpha) * canvas[mask_bool] + fill_alpha * rgb_arr
+            ).astype(canvas.dtype)
+        else:
+            edges = find_boundaries(mask_bool, mode="inner")
+            if dilation > 0:
+                edges = thicken_outline(edges, dilation)
+            if np.any(edges):
+                canvas[edges] = rgb
 
 
 def _iter_mask_region_ids(

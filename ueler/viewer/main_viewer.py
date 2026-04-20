@@ -58,7 +58,7 @@ from ueler.viewer.color_palettes import (
     merge_palette_updates,
     normalize_hex_color,
 )
-from ueler.viewer.mask_color_overlay import apply_registry_colors, collect_mask_regions
+from ueler.viewer.mask_color_overlay import apply_registry_colors, collect_mask_regions, FILL_ALPHA_DEFAULT
 from ueler.rendering import (
     AnnotationOverlaySnapshot,
     AnnotationRenderSettings,
@@ -466,6 +466,9 @@ class ImageMaskViewer:
             self.load_widget_states(os.path.join(self.base_folder, ".UELer", 'widget_states.json'))
         finally:
             self._suspend_display_updates = False
+        # One render after widget-state restoration so the display reflects
+        # the restored channel/contrast/FOV selections (fixes #84).
+        self.update_display(self.current_downsample_factor)
         if self._debug:
             print("[INIT DEBUG] load_widget_states done", flush=True)
 
@@ -1674,45 +1677,65 @@ class ImageMaskViewer:
             if section_view.size == 0:
                 continue
 
-            # Group mask IDs by color for efficient edge computation
-            color_to_ids: dict = {}
-            for mask_id, color_hex in cell_colors.items():
-                color_to_ids.setdefault(color_hex, []).append(mask_id)
+            # Group mask IDs by (color, mode) for efficient rendering
+            painter = self._get_mask_painter()
+            mode_map_for_fov = painter.get_mode_map_for_fov(str(fov_name)) if painter is not None else {}
+            fill_alpha = FILL_ALPHA_DEFAULT
 
-            for color_hex, mask_ids_for_color in color_to_ids.items():
+            color_mode_to_ids: dict = {}
+            for mask_id, color_hex in cell_colors.items():
+                if not color_hex:
+                    continue
+                render_mode = mode_map_for_fov.get(int(mask_id), "outline")
+                color_mode_to_ids.setdefault((color_hex, render_mode), []).append(mask_id)
+
+            for (color_hex, render_mode), mask_ids_for_group in color_mode_to_ids.items():
                 try:
                     color_rgb = list(to_rgb(color_hex))
                 except Exception:
                     continue
 
-                color_mask = np.isin(mask_region_ds, mask_ids_for_color)
-                if not np.any(color_mask):
+                group_mask = np.isin(mask_region_ds, mask_ids_for_group)
+                if not np.any(group_mask):
                     continue
 
-                try:
-                    edges = find_boundaries(color_mask, mode="inner")
-                except Exception:
-                    edges = color_mask
-                if not np.any(edges):
-                    edges = color_mask
-
-                outline_thickness = scale_outline_thickness(
-                    getattr(self, "mask_outline_thickness", 1),
-                    downsample,
-                )
-                if outline_thickness > 1:
+                if render_mode == "fill":
+                    rows = min(section_view.shape[0], group_mask.shape[0])
+                    cols = min(section_view.shape[1], group_mask.shape[1])
+                    if rows <= 0 or cols <= 0:
+                        continue
+                    target = section_view[:rows, :cols]
+                    pixels = group_mask[:rows, :cols]
+                    color_arr = np.array(color_rgb, dtype=np.float32)
+                    target[pixels] = (
+                        (1.0 - fill_alpha) * target[pixels] + fill_alpha * color_arr
+                    ).astype(target.dtype)
+                    applied = True
+                else:
                     try:
-                        edges = thicken_outline(edges, outline_thickness - 1)
+                        edges = find_boundaries(group_mask, mode="inner")
                     except Exception:
-                        pass
+                        edges = group_mask
+                    if not np.any(edges):
+                        edges = group_mask
 
-                rows = min(section_view.shape[0], edges.shape[0])
-                cols = min(section_view.shape[1], edges.shape[1])
-                if rows <= 0 or cols <= 0:
-                    continue
+                    outline_thickness = scale_outline_thickness(
+                        getattr(self, "mask_outline_thickness", 1),
+                        downsample,
+                    )
+                    if outline_thickness > 1:
+                        try:
+                            edges = thicken_outline(edges, outline_thickness - 1)
+                        except Exception:
+                            pass
 
-                section_view[:rows, :cols][edges[:rows, :cols]] = color_rgb
-                applied = True
+                    rows = min(section_view.shape[0], edges.shape[0])
+                    cols = min(section_view.shape[1], edges.shape[1])
+                    if rows <= 0 or cols <= 0:
+                        continue
+
+                    section_view[:rows, :cols][edges[:rows, :cols]] = color_rgb
+                    applied = True
 
         if applied:
             # Update combined so _update_map_mask_highlights builds on top of
@@ -2030,8 +2053,11 @@ class ImageMaskViewer:
         new_selection = tuple(ch for ch in previous_channels if ch in new_channel_options)
         if new_selection:
             self.ui_component.channel_selector.value = new_selection
-        elif self.cell_table is not None:
-            self.ui_component.channel_selector.value = (new_channel_options[0],)
+        elif self.cell_table is not None or not self.initialized:
+            # During initial startup (not yet initialized) always select the first
+            # channel so update_display produces a visible image even in simple
+            # viewer mode (no cell_table). Fixes #84.
+            self.ui_component.channel_selector.value = (new_channel_options[0],) if new_channel_options else ()
         else:
             self.ui_component.channel_selector.value = ()
 
@@ -3753,7 +3779,14 @@ class ImageMaskViewer:
                 for mask_name, cb in controls.mask_display_controls.items()
                 if getattr(cb, "value", False)
             ]
+            painter_enabled_early = self._is_mask_painter_enabled()
+            painter_mask_key = getattr(self, "mask_key", None)
             for mask_name in selected_masks:
+                # When the painter is active it takes exclusive rendering control
+                # of the primary mask key — skip it here so the painter's per-cell
+                # coloring is the only contribution for that mask layer.
+                if painter_enabled_early and painter_mask_key and mask_name == painter_mask_key:
+                    continue
                 label_mask_ds = self._get_label_mask_at_factor(fov_name, mask_name, downsample_factor)
                 if label_mask_ds is None:
                     continue
@@ -3806,6 +3839,8 @@ class ImageMaskViewer:
                 if hasattr(self.image_display, "selected_cells")
                 else set()
             )
+            painter = self._get_mask_painter()
+            mode_map = painter.get_mode_map_for_fov(fov_name) if painter is not None else None
             combined = apply_registry_colors(
                 combined,
                 fov=fov_name,
@@ -3813,6 +3848,7 @@ class ImageMaskViewer:
                 outline_thickness=int(self.mask_outline_thickness),
                 downsample_factor=downsample_factor,
                 exclude_ids=excluded,
+                mode_map=mode_map,
             )
 
         return combined
@@ -3899,6 +3935,13 @@ class ImageMaskViewer:
             return False
         
         return bool(getattr(checkbox, "value", False))
+
+    def _get_mask_painter(self):
+        """Return the MaskPainterDisplay plugin instance, or None."""
+        sideplots = getattr(self, "SidePlots", None)
+        if sideplots is None:
+            return None
+        return getattr(sideplots, "mask_painter_output", None)
 
     # ------------------------------------------------------------------
     # Export overlay helpers
@@ -4423,6 +4466,9 @@ class ImageMaskViewer:
         # Display the main UI
         display_ui(self)
         self.after_all_plugins_loaded()
+        # Backstop render: the full widget tree is now visible; ensure the
+        # image canvas reflects the current state (fixes #84).
+        self.update_display(self.current_downsample_factor)
 
     def refresh_bottom_panel(self, ordering=None):
         debug_enabled = getattr(self, '_debug', False)
