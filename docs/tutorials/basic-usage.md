@@ -14,7 +14,7 @@ After [configuring your paths](../getting-started.md), run all cells in `script/
 
 Use the **Select Image** dropdown in the left panel to choose a Field of View (FOV). UELer loads the image data on demand and caches recently accessed FOVs in memory.
 
-The **Cache Size** slider controls how many FOVs can be held in memory at once. Increase it if you have sufficient RAM and want faster back-and-forth navigation.
+The **Cache Size** text box controls how many FOVs can be held in memory at once. Increase it if you have sufficient RAM and want faster back-and-forth navigation.
 
 ---
 

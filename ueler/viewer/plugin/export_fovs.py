@@ -351,7 +351,15 @@ class BatchExportPlugin(PluginBase):
 
         filter_row = HBox(
             [self.ui_component.cell_filter, self.ui_component.cell_apply_filter],
-            layout=Layout(gap="10px", align_items="center", width="100%", flex_flow="row nowrap"),
+            layout=Layout(
+                gap="10px",
+                align_items="center",
+                width="100%",
+                max_width="97%",
+                min_width="0",
+                box_sizing="border-box",
+                flex_flow="row nowrap",
+            ),
         )
 
         self.ui_component.single_cell_box = VBox(
@@ -395,7 +403,15 @@ class BatchExportPlugin(PluginBase):
 
         output_row = HBox(
             [self.ui_component.output_path, self.ui_component.browse_button],
-            layout=Layout(gap="10px", align_items="center", width="100%", flex_flow="row nowrap"),
+            layout=Layout(
+                gap="10px",
+                align_items="center",
+                width="100%",
+                max_width="97%",
+                min_width="0",
+                box_sizing="border-box",
+                flex_flow="row nowrap",
+            ),
         )
 
         controls = VBox(

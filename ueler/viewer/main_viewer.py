@@ -2715,7 +2715,10 @@ class ImageMaskViewer:
                     gap='6px',
                     min_height='30px',
                     overflow='visible',
-                    width='100%'
+                    width='100%',
+                    max_width='97%',
+                    min_width='0',
+                    box_sizing='border-box',
                 )
             )
             channel_widgets.extend([channel_header, contrast_min_slider, contrast_max_slider])
@@ -2772,7 +2775,11 @@ class ImageMaskViewer:
                         justify_content='flex-start',
                         gap='10px',
                         min_height='30px',
-                        overflow='hidden'
+                        overflow='hidden',
+                        width='100%',
+                        max_width='97%',
+                        min_width='0',
+                        box_sizing='border-box',
                     )
                 )
                 mask_widgets.append(mask_control)
@@ -2836,7 +2843,10 @@ class ImageMaskViewer:
 
         if not section_children:
             section_children = (
-                VBox([self.ui_component.empty_controls_placeholder], layout=Layout(width="100%")),
+                VBox(
+                    [self.ui_component.empty_controls_placeholder],
+                    layout=Layout(width="100%", max_width='97%', min_width='0', box_sizing='border-box'),
+                ),
             )
             section_titles = ["Controls"]
 

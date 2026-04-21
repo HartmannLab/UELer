@@ -17,6 +17,7 @@ These notes cover the main viewer runtime, downsampling behavior, channel contro
 - VS Code scatter fallback uses a static Matplotlib plot when widget front-ends fail.
 - Per-channel visibility toggles and channel color legend features are implemented and tested.
 - Channel grid display mode (Issue #76) is implemented: a "Channel grid view" checkbox renders each visible channel as a separate labelled pane in a synchronised matplotlib subplot grid.
+- UI layout hardening for Issue #85 is in place: overflow-prone wrappers now use shrink-safe constraints (`max_width: 97%`, `min_width: 0`, `box_sizing: border-box`) in core viewer panels and selected plugin panels to reduce unnecessary horizontal scrollbars.
 
 ## Open items
 - Keep UI/UX changes consistent with map mode and plugin rendering updates.
@@ -28,6 +29,7 @@ These notes cover the main viewer runtime, downsampling behavior, channel contro
 - https://github.com/HartmannLab/UELer/issues/66
 - https://github.com/HartmannLab/UELer/issues/75
 - https://github.com/HartmannLab/UELer/issues/76
+- https://github.com/HartmannLab/UELer/issues/85
 
 ## Key source links
 - [dev_note/FOV_load_cycle.md](dev_note/FOV_load_cycle.md)

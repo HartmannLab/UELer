@@ -1,5 +1,12 @@
 ### v0.3.1
 
+**Reply to issue #85 — prevent unnecessary horizontal scrollbars in UI panels**
+- Added a shared constrained panel layout helper in `ui_components.py` and applied it to main control wrappers, channel/mask/annotation sections, and wide footer wrappers so panel containers no longer match parent width exactly.
+- Hardened dynamic rows in `main_viewer.py` (`update_controls`) by adding `max_width='97%'`, `min_width='0'`, and `box_sizing='border-box'` to channel and mask rows.
+- Applied the same constraints to key plugin wrappers in `chart_heatmap.py`, `heatmap_layers.py`, `roi_manager_plugin.py`, `export_fovs.py`, and `annotation_palette_editor.py`.
+- Added layout regression assertions in `tests/test_wide_plugin_panel.py`.
+- Validated with: `python -m unittest tests.test_wide_plugin_panel tests.test_chart_footer_behavior -v` (13/13 pass).
+
 **Reply to issue #84 — map mode black view (RC6: runner refresh parity with map switch)**
 - Fixed a remaining map-mode black/placeholder case in the `run_viewer(auto_display=False)` + `load_cell_table(auto_display=True)` workflow. Root cause: `load_cell_table` refresh path (`_refresh_viewer_state`) called `on_image_change` + `update_display` but did not run the same map re-activation sequence as map switching (`on_map_selector_change` -> `_activate_map_mode`). As a result, map canvas/viewport state could remain stale until a manual map switch forced re-activation. `_refresh_viewer_state` now re-activates the active map when `_map_mode_active` is true (using `_active_map_id` with `map_selector.value` fallback), refreshes map controls, and then renders. Added runner-level regression tests for active-map and selector-fallback re-activation paths. Validated with 8/8 tests passing in `tests.test_runner`.
 

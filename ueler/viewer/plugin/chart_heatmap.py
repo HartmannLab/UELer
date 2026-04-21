@@ -36,6 +36,17 @@ _SELECTION_NOTICE = (
 )
 
 
+def _bounded_panel_layout(**overrides) -> Layout:
+    props = {
+        "width": "100%",
+        "max_width": "97%",
+        "min_width": "0",
+        "box_sizing": "border-box",
+    }
+    props.update(overrides)
+    return Layout(**props)
+
+
 class ChartDisplay(PluginBase):
     def __init__(self, main_viewer, width: float, height: float):
         super().__init__(main_viewer, width, height)
@@ -56,20 +67,20 @@ class ChartDisplay(PluginBase):
         self._observers_registered = False
 
         self.ui_component = UiComponent(self.main_viewer)
-        self._hist_output = Output(layout=Layout(width="100%"))
+        self._hist_output = Output(layout=_bounded_panel_layout())
         self._plot_placeholder = HTML(
             value=_SELECTION_NOTICE,
-            layout=Layout(width="100%"),
+            layout=_bounded_panel_layout(),
         )
         self._plot_host = VBox(
-            [self._plot_placeholder], layout=Layout(width="100%", gap="8px")
+            [self._plot_placeholder], layout=_bounded_panel_layout(gap="8px")
         )
 
         self._wide_notice = HTML(
             value=(
                 "<b>Multiple heatmap scatter plots are active.</b> Controls and plots appear in the footer."
             ),
-            layout=Layout(width="100%", padding="8px"),
+            layout=_bounded_panel_layout(padding="8px"),
         )
         self._section_location = "vertical"
 
@@ -122,7 +133,7 @@ class ChartDisplay(PluginBase):
                     layout=Layout(gap="8px"),
                 ),
             ],
-            layout=Layout(width="100%", gap="8px"),
+            layout=_bounded_panel_layout(gap="8px"),
         )
 
         link_controls = VBox(
@@ -130,7 +141,7 @@ class ChartDisplay(PluginBase):
                 self.ui_component.mv_linked_checkbox,
                 self.ui_component.cell_gallery_linked_checkbox,
             ],
-            layout=Layout(width="100%", gap="8px"),
+            layout=_bounded_panel_layout(gap="8px"),
         )
 
         self._plot_tabs = Tab(
@@ -153,21 +164,21 @@ class ChartDisplay(PluginBase):
                 self.ui_component.plot_button,
                 self._plot_tabs,
             ],
-            layout=Layout(width="100%", gap="10px"),
+            layout=_bounded_panel_layout(gap="10px"),
         )
 
         self.controls_section = VBox(
             [chart_widgets],
-            layout=Layout(width="100%", gap="12px"),
+            layout=_bounded_panel_layout(gap="12px"),
         )
         self.plot_section = VBox(
             [self._plot_host],
-            layout=Layout(width="100%", flex="1 1 auto"),
+            layout=_bounded_panel_layout(flex="1 1 auto"),
         )
 
         self.ui = VBox(
             [self.controls_section, self.plot_section],
-            layout=Layout(width="100%", max_height="600px", gap="12px"),
+            layout=_bounded_panel_layout(max_height="600px", gap="12px"),
         )
 
     # ------------------------------------------------------------------

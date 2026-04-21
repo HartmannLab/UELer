@@ -98,20 +98,35 @@ from .plugin.plugin_base import PluginBase  # type: ignore[import-error]
 from .annotation_display import AnnotationDisplay  # type: ignore[import-error]
 
 
+def _bounded_panel_layout(**overrides):
+    """Return a width-constrained layout that avoids edge overflow in panels."""
+    props = {
+        'width': '100%',
+        'max_width': '97%',
+        'min_width': '0',
+        'box_sizing': 'border-box',
+    }
+    props.update(overrides)
+    return Layout(**props)
+
+
 def build_wide_plugin_pane(control=None, content=None):
     """Compose the standard left/right layout used in the footer tabs."""
     if control is None and content is None:
-        return VBox(children=(), layout=Layout(width='100%'))
+        return VBox(children=(), layout=_bounded_panel_layout())
 
     if control is None:
-        return VBox(children=(content,), layout=Layout(width='100%', overflow_y='auto'))
+        return VBox(children=(content,), layout=_bounded_panel_layout(overflow_y='auto'))
 
     if content is None:
-        return VBox(children=(control,), layout=Layout(width='100%', overflow_y='auto'))
+        return VBox(children=(control,), layout=_bounded_panel_layout(overflow_y='auto'))
 
     control_box = VBox(children=(control,), layout=Layout(width='6in', flex='0 0 6in', overflow_y='auto', gap='8px'))
-    content_box = VBox(children=(content,), layout=Layout(flex='1 1 auto', overflow='auto', min_height='360px'))
-    return HBox(children=(control_box, content_box), layout=Layout(width='100%', gap='12px', align_items='stretch'))
+    content_box = VBox(children=(content,), layout=Layout(flex='1 1 auto', min_width='0', overflow='auto', min_height='360px'))
+    return HBox(
+        children=(control_box, content_box),
+        layout=_bounded_panel_layout(gap='12px', align_items='stretch'),
+    )
 
 
 def collect_wide_plugin_entries(viewer):
@@ -307,11 +322,10 @@ def display_ui(viewer):
 
     viewer.side_plot = VBox(accordion_children) if accordion_children else Output()
 
-    viewer.wide_plugin_tab = Tab(children=[], layout=Layout(width='100%'))
+    viewer.wide_plugin_tab = Tab(children=[], layout=_bounded_panel_layout())
     viewer.wide_plugin_panel = VBox(
         [viewer.wide_plugin_tab],
-        layout=Layout(
-            width='100%',
+        layout=_bounded_panel_layout(
             margin='12px 0 0 0',
             border='1px solid var(--jp-border-color2, #cccccc)',
             padding='8px',
@@ -325,7 +339,7 @@ def display_ui(viewer):
             viewer.ui_component.control_sections,
             viewer.ui_component.annotation_editor_host,
         ],
-        layout=Layout(width='100%', gap='8px')
+        layout=_bounded_panel_layout(gap='8px')
     )
 
     top_part_widgets = VBox(
@@ -335,7 +349,7 @@ def display_ui(viewer):
             control_panel_stack,
             VBox([viewer.ui_component.advanced_settings_accordion]),
         ],
-        layout=Layout(width='100%', overflow_x='hidden')
+        layout=_bounded_panel_layout(overflow_x='hidden')
     )
 
     left_panel_children = [top_part_widgets]
@@ -359,7 +373,7 @@ def display_ui(viewer):
         viewer.side_plot  # Add the chart output widget to the right
     ])
 
-    root = VBox([ui, viewer.wide_plugin_panel], layout=Layout(width='100%', max_width='100%', gap='12px'))
+    root = VBox([ui, viewer.wide_plugin_panel], layout=Layout(width='100%', max_width='100%', min_width='0', box_sizing='border-box', gap='12px'))
 
     if hasattr(viewer, 'refresh_bottom_panel'):
         viewer.refresh_bottom_panel()
@@ -411,19 +425,19 @@ class uicomponents:
             value=None,
             description='Select map:',
             disabled=True,
-            layout=Layout(width='100%'),
+            layout=_bounded_panel_layout(),
             style={'description_width': 'auto'},
         )
         self.map_selector.observe(viewer.on_map_selector_change, names='value')
 
-        self.map_summary = HTML(value='', layout=Layout(width='100%'))
+        self.map_summary = HTML(value='', layout=_bounded_panel_layout())
         self.map_controls_box = VBox(
             children=(
                 HBox([self.map_mode_toggle], layout=Layout(width='100%')),
                 self.map_selector,
                 self.map_summary,
             ),
-            layout=Layout(width='100%', gap='4px')
+            layout=_bounded_panel_layout(gap='4px')
         )
         if map_controls_disabled:
             self.map_controls_box.layout.display = 'none'
@@ -435,15 +449,14 @@ class uicomponents:
             allowed_tags=[],  # This will be updated later
             description='Channels:',
             disabled=False,
-            layout=Layout(width='100%')
+            layout=_bounded_panel_layout()
         )
         self.channel_selector.observe(viewer.update_controls, names='value')
         self.channel_selector.observe(viewer.on_channel_selection_change, names='value')
 
         # Containers for channel, mask, and annotation controls
         self.channel_controls_box = VBox(
-            layout=Layout(
-                width='100%',
+            layout=_bounded_panel_layout(
                 overflow_y='auto',
                 gap='6px',
                 padding='4px 0',
@@ -461,12 +474,12 @@ class uicomponents:
 
         self.channel_legend_box = HTML(
             value='',
-            layout=Layout(width='100%', display='none')
+            layout=_bounded_panel_layout(display='none')
         )
 
         self.channel_legend_panel = VBox(
             children=(self.show_channel_legend_checkbox, self.channel_legend_box),
-            layout=Layout(width='100%', gap='4px', padding='4px 0')
+            layout=_bounded_panel_layout(gap='4px', padding='4px 0')
         )
 
         self.grid_view_checkbox = Checkbox(
@@ -478,8 +491,7 @@ class uicomponents:
         self.grid_view_checkbox.observe(viewer.on_grid_view_toggle, names='value')
 
         self.mask_controls_box = VBox(
-            layout=Layout(
-                width='100%',
+            layout=_bounded_panel_layout(
                 overflow_y='auto',
                 gap='6px',
                 padding='4px 0'
@@ -492,7 +504,7 @@ class uicomponents:
             max=10,
             step=1,
             description='Mask outline px:',
-            layout=Layout(width='100%'),
+            layout=_bounded_panel_layout(),
             style={'description_width': '150px'},
             continuous_update=False,
         )
@@ -556,7 +568,7 @@ class uicomponents:
             disabled=False
         )
 
-        channel_selector_layout = Layout(width='100%', gap='4px')
+        channel_selector_layout = _bounded_panel_layout(gap='4px')
         self.channel_selection_panel = VBox(
             children=(
                 self.channel_selector_text,
@@ -570,7 +582,7 @@ class uicomponents:
                 self.marker_set_dropdown,
                 self.marker_set_name_input,
             ),
-            layout=Layout(width='100%', gap='4px')
+            layout=_bounded_panel_layout(gap='4px')
         )
 
         marker_set_buttons = HBox(
@@ -580,17 +592,17 @@ class uicomponents:
                         self.load_marker_set_button,
                         self.save_marker_set_button,
                     ),
-                    layout=Layout(width='100%', gap='4px')
+                    layout=_bounded_panel_layout(gap='4px')
                 ),
                 VBox(
                     children=(
                         self.update_marker_set_button,
                         self.delete_marker_set_button,
                     ),
-                    layout=Layout(width='100%', gap='4px')
+                    layout=_bounded_panel_layout(gap='4px')
                 ),
             ),
-            layout=Layout(width='100%', gap='8px')
+            layout=_bounded_panel_layout(gap='8px')
         )
 
         self.marker_set_controls_panel = VBox(
@@ -599,7 +611,7 @@ class uicomponents:
                 marker_set_buttons,
                 self.delete_confirmation_checkbox,
             ),
-            layout=Layout(width='100%', gap='6px')
+            layout=_bounded_panel_layout(gap='6px')
         )
 
         self.channel_section_panel = VBox(
@@ -610,7 +622,7 @@ class uicomponents:
                 self.channel_legend_panel,
                 self.grid_view_checkbox,
             ),
-            layout=Layout(width='100%', gap='10px')
+            layout=_bounded_panel_layout(gap='10px')
         )
 
         self.control_sections = Accordion(
@@ -620,7 +632,7 @@ class uicomponents:
         self.control_sections.set_title(0, 'Channels')
 
         self.annotation_editor_host = VBox(
-            layout=Layout(width='100%', padding='8px 0 0 0')
+            layout=_bounded_panel_layout(padding='8px 0 0 0')
         )
         # Initialize enable downsample checkbox
         self.pixel_size_inttext = IntText(
@@ -715,8 +727,7 @@ class uicomponents:
         # Annotation controls (initially disabled until annotations are detected)
         self.annotation_controls_header = HTML(value='<b>Pixel annotations</b>')
         self.annotation_controls_box = VBox(
-            layout=Layout(
-                width='100%',
+            layout=_bounded_panel_layout(
                 overflow_y='auto',
                 gap='6px',
                 padding='4px 0'
@@ -737,7 +748,7 @@ class uicomponents:
             value=None,
             description='Annotation:',
             disabled=True,
-            layout=Layout(width='100%'),
+            layout=_bounded_panel_layout(),
             style={'description_width': 'auto'}
         )
         self.annotation_selector.observe(viewer.on_annotation_selection_change, names='value')
@@ -750,7 +761,7 @@ class uicomponents:
             description='Fill alpha:',
             disabled=True,
             continuous_update=False,
-            layout=Layout(width='100%'),
+            layout=_bounded_panel_layout(),
             style={'description_width': 'auto'}
         )
         self.annotation_alpha_slider.observe(viewer.on_annotation_alpha_change, names='value')
@@ -760,7 +771,7 @@ class uicomponents:
             value='id',
             description='Legend labels:',
             disabled=True,
-            layout=Layout(width='100%'),
+            layout=_bounded_panel_layout(),
             style={'description_width': 'auto'}
         )
         self.annotation_label_mode.observe(viewer.on_annotation_label_mode_change, names='value')
@@ -822,7 +833,7 @@ class uicomponents:
             self.annotation_palette_load_path_input = Text(
                 description='File:',
                 placeholder='path/to/file.pixelannotations.json',
-                layout=Layout(width='100%'),
+                layout=_bounded_panel_layout(),
                 style={'description_width': 'auto'}
             )
         self.annotation_palette_load_button = Button(description='Load file', icon='upload')
@@ -838,7 +849,7 @@ class uicomponents:
         self.annotation_palette_saved_sets_dropdown = Dropdown(
             description='Saved sets:',
             options=[('No saved sets', '')],
-            layout=Layout(width='100%'),
+            layout=_bounded_panel_layout(),
             style={'description_width': 'auto'}
         )
         self.annotation_palette_apply_saved_button = Button(description='Apply set')

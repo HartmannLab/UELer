@@ -290,6 +290,9 @@ class ROIManagerPlugin(PluginBase):
                         align_items="center",
                         gap="8px",
                         width="100%",
+                        max_width="97%",
+                        min_width="0",
+                        box_sizing="border-box",
                         flex_flow="row nowrap",
                     ),
                 ),
@@ -308,7 +311,7 @@ class ROIManagerPlugin(PluginBase):
             description="Tags:",
             allow_duplicates=False,
             allow_new=False,
-            layout=Layout(width="100%"),
+            layout=Layout(width="100%", max_width="97%", min_width="0", box_sizing="border-box"),
         )
         if hasattr(self.ui_component.browser_tags_filter, "restrict_to_allowed_tags"):
             try:
@@ -327,7 +330,7 @@ class ROIManagerPlugin(PluginBase):
             options=[],
             value=(),
             description="FOVs:",
-            layout=Layout(width="100%"),
+            layout=Layout(width="100%", max_width="97%", min_width="0", box_sizing="border-box"),
         )
 
         self.ui_component.browser_limit_to_current = Checkbox(
