@@ -61,6 +61,17 @@ class ImageDisplay:
         self.selected_mask_label = set()  # For storing mask IDs to display
         self._roi_selector = None
         self._roi_callback = None
+        # Viewport size trackers used by on_draw to detect zoom changes even
+        # when the center is unchanged (e.g., scroll-wheel zoom).
+        self.prev_viewport_width: float = 0.0
+        self.prev_viewport_height: float = 0.0
+        # Set to True by _set_map_canvas_dimensions after every map activation
+        # so that the very first on_draw event after the widget is shown skips
+        # the short-circuit and triggers a real tile render.  Prevents a black
+        # canvas when the widget is first displayed via load_cell_table, where
+        # the pre-display update_display() / draw_idle() call fires before
+        # ipympl has sent anything to the browser.
+        self._map_needs_initial_render: bool = False
 
     def _materialize_combined(self):
         """Return a copy of the combined image as a NumPy array, if available."""
@@ -211,12 +222,26 @@ class ImageDisplay:
         current_center_x = (self.ax.get_xlim()[0] + self.ax.get_xlim()[1]) / 2
         current_center_y = (self.ax.get_ylim()[0] + self.ax.get_ylim()[1]) / 2
 
-        if hasattr(self, "prev_center_x") and hasattr(self, "prev_center_y"):
-            if math.isclose(current_center_x, self.prev_center_x) and math.isclose(current_center_y, self.prev_center_y):
+        current_viewport_width = self.ax.get_xlim()[1] - self.ax.get_xlim()[0]
+        current_viewport_height = abs(self.ax.get_ylim()[0] - self.ax.get_ylim()[1])
+
+        # After every map activation _set_map_canvas_dimensions sets this flag
+        # so that the first on_draw after the widget is shown always triggers a
+        # real tile render, even when center/size appear unchanged (because the
+        # prev values were seeded to match the full canvas dimensions).
+        if getattr(self, '_map_needs_initial_render', False):
+            self._map_needs_initial_render = False
+        elif hasattr(self, "prev_center_x") and hasattr(self, "prev_center_y"):
+            if (math.isclose(current_center_x, self.prev_center_x)
+                    and math.isclose(current_center_y, self.prev_center_y)
+                    and math.isclose(current_viewport_width, self.prev_viewport_width)
+                    and math.isclose(current_viewport_height, self.prev_viewport_height)):
                 return
 
         self.prev_center_x = current_center_x
         self.prev_center_y = current_center_y
+        self.prev_viewport_width = current_viewport_width
+        self.prev_viewport_height = current_viewport_height
         
         """Adjust the downsample factor based on the zoom level."""
         if self.main_viewer.initialized:

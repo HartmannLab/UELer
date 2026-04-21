@@ -660,6 +660,20 @@ class ImageMaskViewer:
         # canvas, which can exhaust memory on large datasets.
         display.prev_center_x = width_px / 2.0
         display.prev_center_y = height_px / 2.0
+        # Seed the viewport size trackers so on_draw's size-equality check is
+        # initialised to the full canvas dimensions.  This preserves the
+        # memory-safety guard: subsequent background draw events from ipympl
+        # short-circuit without triggering a full tile load, while actual user
+        # zoom (which changes size) bypasses the short-circuit correctly.
+        display.prev_viewport_width = float(width_px)
+        display.prev_viewport_height = float(height_px)
+        # Signal that the very first on_draw AFTER the widget becomes visible
+        # must bypass the short-circuit and render real tiles.  This is needed
+        # because the pre-display update_display() call fires before ipympl has
+        # sent anything to the browser; the draw_idle() produced there never
+        # reaches the client, so the widget appears with the 1×1 black
+        # placeholder until forced here.
+        display._map_needs_initial_render = True
         self._sync_navigation_home_view()
 
     def _sync_canvas_to_current_fov(self) -> None:
@@ -2037,12 +2051,19 @@ class ImageMaskViewer:
                     getattr(first_channel_image, "shape", None),
                 )
             self.height, self.width = first_channel_image.shape
-        self.image_display.height = self.height
-        self.image_display.width = self.width
+        # In map mode the canvas viewport and image_display dimensions are
+        # managed exclusively by _set_map_canvas_dimensions().  Overwriting
+        # them here with single-FOV pixel dimensions (e.g. 1024×1024) places
+        # the viewport inside the map's coordinate space at a region that has
+        # no tiles, producing a black square view.  on_image_change is invoked
+        # by load_cell_table → _refresh_viewer_state regardless of map mode.
+        if not getattr(self, '_map_mode_active', False):
+            self.image_display.height = self.height
+            self.image_display.width = self.width
 
-        # Update axis limits
-        self.image_display.ax.set_xlim(0, self.width)
-        self.image_display.ax.set_ylim(self.height, 0)
+            # Update axis limits
+            self.image_display.ax.set_xlim(0, self.width)
+            self.image_display.ax.set_ylim(self.height, 0)
 
         # Update channel names
         new_channel_options = list(fov_images.keys())
@@ -4463,8 +4484,33 @@ class ImageMaskViewer:
             visible=False
         )
 
+        # Map mode: synchronously flush tiles into the canvas buffer BEFORE
+        # display_ui() sends the widget to the browser.  The backstop
+        # update_display() at the end uses draw_idle() (deferred), so without
+        # this flush the browser receives the stale 1×1 black placeholder that
+        # was set by _set_map_canvas_dimensions() during __init__.
+        if getattr(self, '_map_mode_active', False):
+            self.update_display(self.current_downsample_factor)
+            try:
+                self.image_display.fig.canvas.draw()
+            except Exception:
+                pass
+
         # Display the main UI
         display_ui(self)
+
+        # Map mode: re-sync the toolbar home view now that the toolbar is
+        # fully wired.  ipympl may reinitialise its nav stack on first widget
+        # show, overwriting the home entry that was patched during __init__
+        # before the toolbar existed.  Pressing Home without this fix zooms to
+        # a stale single-FOV region (small black square) instead of the full
+        # map extent.
+        if getattr(self, '_map_mode_active', False):
+            try:
+                self._sync_navigation_home_view()
+            except Exception:
+                pass
+
         self.after_all_plugins_loaded()
         # Backstop render: the full widget tree is now visible; ensure the
         # image canvas reflects the current state (fixes #84).

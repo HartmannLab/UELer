@@ -170,6 +170,28 @@ def _refresh_viewer_state(viewer: "ImageMaskViewer") -> None:
 	except AttributeError:
 		if getattr(viewer, "_debug", False):  # pragma: no cover - debug aid only
 			print("[runner] Skipping on_image_change refresh; side plots not fully initialised.")
+
+	# In map mode, run the same activation path used by map-selector changes.
+	# load_cell_table -> on_image_change mutates FOV-derived state even when the
+	# stitched map is the active viewport; re-activating the current map keeps
+	# map canvas and viewport state in sync before the next render.
+	map_mode_active = getattr(viewer, "_map_mode_active", False)
+	if isinstance(map_mode_active, bool) and map_mode_active:
+		active_map_id = getattr(viewer, "_active_map_id", None)
+		if not active_map_id:
+			ui = getattr(viewer, "ui_component", None)
+			selector = getattr(ui, "map_selector", None)
+			active_map_id = getattr(selector, "value", None)
+		activate = getattr(viewer, "_activate_map_mode", None)
+		if active_map_id is not None and callable(activate):
+			try:
+				activate(str(active_map_id))
+			except Exception:
+				if getattr(viewer, "_debug", False):  # pragma: no cover - debug aid only
+					print("[runner] Failed to re-activate map mode during refresh.")
+		refresh_map_controls = getattr(viewer, "_refresh_map_controls", None)
+		if callable(refresh_map_controls):
+			refresh_map_controls()
 	viewer.update_display(viewer.current_downsample_factor)
 	viewer.update_keys(None)
 	viewer.refresh_bottom_panel()
