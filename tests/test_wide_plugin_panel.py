@@ -264,7 +264,7 @@ class WidePanelHelperTests(unittest.TestCase):
         left_column, right_column = pane.children
         self.assertIn(control, left_column.children)
         self.assertIn(content, right_column.children)
-        self.assertEqual(getattr(pane.layout, "max_width", None), "97%")
+        self.assertEqual(getattr(pane.layout, "max_width", None), "99%")
         self.assertEqual(getattr(pane.layout, "min_width", None), "0")
         self.assertEqual(getattr(pane.layout, "box_sizing", None), "border-box")
 
@@ -274,7 +274,7 @@ class WidePanelHelperTests(unittest.TestCase):
         pane = build_wide_plugin_pane(control=None, content=content)
 
         self.assertEqual(len(pane.children), 1)
-        self.assertEqual(getattr(pane.layout, "max_width", None), "97%")
+        self.assertEqual(getattr(pane.layout, "max_width", None), "99%")
         self.assertEqual(getattr(pane.layout, "min_width", None), "0")
         self.assertEqual(getattr(pane.layout, "box_sizing", None), "border-box")
 

@@ -2674,6 +2674,8 @@ class ImageMaskViewer:
                 contrast_min_slider.step = step_size
                 contrast_min_slider.readout_format = readout_format
                 contrast_min_slider.value = min(contrast_min_slider.value, max_value)
+                contrast_min_slider.layout = Layout(width='100%', max_width='99%', min_width='0', box_sizing='border-box')
+                contrast_min_slider.style = {'description_width': '150px'}
             else:
                 contrast_min_slider = FloatSlider(
                     value=0.0,
@@ -2682,7 +2684,9 @@ class ImageMaskViewer:
                     step=step_size,
                     description=f"Min {channel}",
                     continuous_update=False,
-                    readout_format=readout_format
+                    readout_format=readout_format,
+                    layout=Layout(width='100%', max_width='99%', min_width='0', box_sizing='border-box'),
+                    style={'description_width': '150px'},
                 )
                 contrast_min_slider.observe(lambda change, ch=channel: self.update_display(self.current_downsample_factor), names='value')
                 self.ui_component.contrast_min_controls[channel] = contrast_min_slider
@@ -2693,6 +2697,8 @@ class ImageMaskViewer:
                 contrast_max_slider.step = step_size
                 contrast_max_slider.readout_format = readout_format
                 contrast_max_slider.value = max(min(contrast_max_slider.value, max_value), contrast_min_slider.value)
+                contrast_max_slider.layout = Layout(width='100%', max_width='99%', min_width='0', box_sizing='border-box')
+                contrast_max_slider.style = {'description_width': '150px'}
             else:
                 contrast_max_slider = FloatSlider(
                     value=max_value,
@@ -2701,7 +2707,9 @@ class ImageMaskViewer:
                     step=step_size,
                     description=f"Max {channel}",
                     continuous_update=False,
-                    readout_format=readout_format
+                    readout_format=readout_format,
+                    layout=Layout(width='100%', max_width='99%', min_width='0', box_sizing='border-box'),
+                    style={'description_width': '150px'},
                 )
                 contrast_max_slider.observe(lambda change, ch=channel: self.update_display(self.current_downsample_factor), names='value')
                 self.ui_component.contrast_max_controls[channel] = contrast_max_slider
@@ -2716,7 +2724,7 @@ class ImageMaskViewer:
                     min_height='30px',
                     overflow='visible',
                     width='100%',
-                    max_width='97%',
+                    max_width='99%',
                     min_width='0',
                     box_sizing='border-box',
                 )
@@ -2777,7 +2785,7 @@ class ImageMaskViewer:
                         min_height='30px',
                         overflow='hidden',
                         width='100%',
-                        max_width='97%',
+                        max_width='99%',
                         min_width='0',
                         box_sizing='border-box',
                     )
@@ -2845,7 +2853,7 @@ class ImageMaskViewer:
             section_children = (
                 VBox(
                     [self.ui_component.empty_controls_placeholder],
-                    layout=Layout(width="100%", max_width='97%', min_width='0', box_sizing='border-box'),
+                    layout=Layout(width="100%", max_width='99%', min_width='0', box_sizing='border-box'),
                 ),
             )
             section_titles = ["Controls"]

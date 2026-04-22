@@ -102,7 +102,7 @@ def _bounded_panel_layout(**overrides):
     """Return a width-constrained layout that avoids edge overflow in panels."""
     props = {
         'width': '100%',
-        'max_width': '97%',
+        'max_width': '99%',
         'min_width': '0',
         'box_sizing': 'border-box',
     }
@@ -468,13 +468,14 @@ class uicomponents:
             value=True,
             description='Show channel legend',
             disabled=False,
+            layout=Layout(width='99%', min_width='0', box_sizing='border-box'),
             style={'description_width': 'auto'}
         )
         self.show_channel_legend_checkbox.observe(viewer.on_channel_legend_toggle, names='value')
 
         self.channel_legend_box = HTML(
             value='',
-            layout=_bounded_panel_layout(display='none')
+            layout=_bounded_panel_layout(display='none', overflow_x='hidden')
         )
 
         self.channel_legend_panel = VBox(
@@ -486,6 +487,7 @@ class uicomponents:
             value=False,
             description='Channel grid view',
             disabled=False,
+            layout=Layout(width='99%', min_width='0', box_sizing='border-box'),
             style={'description_width': 'auto'}
         )
         self.grid_view_checkbox.observe(viewer.on_grid_view_toggle, names='value')
@@ -517,13 +519,17 @@ class uicomponents:
             options=[],  # Will be populated with marker set names
             value=None,
             description='Marker Set:',
-            disabled=False
+            disabled=False,
+            layout=_bounded_panel_layout(),
+            style={'description_width': '95px'},
         )
         self.marker_set_name_input = Text(
             value='',
             placeholder='Enter marker set name',
             description='Set Name:',
-            disabled=False
+            disabled=False,
+            layout=_bounded_panel_layout(),
+            style={'description_width': '95px'},
         )
 
         self.load_marker_set_button = Button(

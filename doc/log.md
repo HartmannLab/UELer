@@ -2,7 +2,8 @@
 
 **Reply to issue #85 — prevent unnecessary horizontal scrollbars in UI panels**
 - Added a shared constrained panel layout helper in `ui_components.py` and applied it to main control wrappers, channel/mask/annotation sections, and wide footer wrappers so panel containers no longer match parent width exactly.
-- Hardened dynamic rows in `main_viewer.py` (`update_controls`) by adding `max_width='97%'`, `min_width='0'`, and `box_sizing='border-box'` to channel and mask rows.
+- Tuned bounded width policy to `max_width='99%'` (follow-up to initial 97%) and kept `min_width='0'` + `box_sizing='border-box'` safeguards.
+- Hardened dynamic rows in `main_viewer.py` (`update_controls`) and normalised marker-set/slider/legend-related control layouts so inner widgets do not exceed parent containers.
 - Applied the same constraints to key plugin wrappers in `chart_heatmap.py`, `heatmap_layers.py`, `roi_manager_plugin.py`, `export_fovs.py`, and `annotation_palette_editor.py`.
 - Added layout regression assertions in `tests/test_wide_plugin_panel.py`.
 - Validated with: `python -m unittest tests.test_wide_plugin_panel tests.test_chart_footer_behavior -v` (13/13 pass).

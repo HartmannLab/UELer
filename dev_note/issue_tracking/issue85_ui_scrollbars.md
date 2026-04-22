@@ -13,9 +13,17 @@ Some UI panels match their parent width exactly (`width: 100%`). Combined with g
 Use a mixed strategy:
 - Preserve existing helper-driven constrained layouts already working well (for example `column_block_layout` with 98% width)
 - For overflow-prone wrappers currently using exact full-width, add shrink-safe constraints:
-  - `max_width: 97%`
+  - `max_width: 99%`
   - `min_width: 0`
   - `box_sizing: border-box`
+
+## Follow-up (Reply to #85)
+- Global bounded wrapper default relaxed from 97% to 99% after reports of over-constrained controls.
+- Added targeted inner-control normalization for:
+  - Marker set fields (`Marker Set`, `Set Name`)
+  - Channel min/max sliders
+  - Channel legend and grid-view checkbox rows
+- Kept `min_width: 0` and `box_sizing: border-box` safeguards to preserve scrollbar-prevention behavior.
 
 ## Implementation steps
 1. Add a shared bounded panel layout helper in `ueler/viewer/ui_components.py` and apply it to core control wrappers.

@@ -39,7 +39,7 @@ _SELECTION_NOTICE = (
 def _bounded_panel_layout(**overrides) -> Layout:
     props = {
         "width": "100%",
-        "max_width": "97%",
+        "max_width": "99%",
         "min_width": "0",
         "box_sizing": "border-box",
     }

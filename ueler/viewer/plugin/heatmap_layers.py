@@ -1321,21 +1321,21 @@ class DisplayLayer:
 
         self.controls_section = VBox(
             [self.controls_tab],
-            layout=Layout(width='100%', max_width='97%', min_width='0', box_sizing='border-box', gap='8px'),
+            layout=Layout(width='100%', max_width='99%', min_width='0', box_sizing='border-box', gap='8px'),
         )
         self.plot_section = VBox(
             [self.plot_output],
-            layout=Layout(width='100%', max_width='97%', min_width='0', box_sizing='border-box', flex='1 1 auto'),
+            layout=Layout(width='100%', max_width='99%', min_width='0', box_sizing='border-box', flex='1 1 auto'),
         )
 
         self.ui = VBox(
             [self.controls_section, self.plot_section],
-            layout=Layout(width='100%', max_width='97%', min_width='0', box_sizing='border-box', max_height='800px', gap='12px')
+            layout=Layout(width='100%', max_width='99%', min_width='0', box_sizing='border-box', max_height='800px', gap='12px')
         )
 
         self._wide_notice = HTML(
             value="<b>Horizontal layout enabled.</b> Controls and plots live in the footer tabs.",
-            layout=Layout(width='100%', max_width='97%', min_width='0', box_sizing='border-box', padding='8px')
+            layout=Layout(width='100%', max_width='99%', min_width='0', box_sizing='border-box', padding='8px')
         )
         self._section_location = 'vertical'
         self._ensure_plot_canvas_attached()
