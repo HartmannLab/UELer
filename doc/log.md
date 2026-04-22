@@ -1,5 +1,62 @@
 ### v0.3.1
 
+**Reply 7 to issue #85 — marker-set channel dedupe and control rebuild de-duplication**
+- Fixed a follow-up regression where loading saved marker sets could create repeated channel widget rows.
+- Added `_dedupe_channel_sequence(...)` in `main_viewer.py` and applied it to marker-set save/update/apply paths so selected channels are unique (first-seen order preserved).
+- Removed unconditional `update_controls(None)` in `_apply_marker_set` after selector assignment and now refresh only when selector value is unchanged.
+- Removed duplicate `channel_selector -> update_controls` observer registration in `ui_components.py`; channel changes now flow through `on_channel_selection_change` only.
+- Added de-duplication helper regression tests in `tests/test_channel_legend.py`.
+- Validated with:
+  - `python -m unittest tests.test_wide_plugin_panel tests.test_chart_footer_behavior tests.test_channel_legend tests.test_roi_manager_tags -v`
+  (53/53 pass)
+  - Extended run including `tests.test_export_fovs_batch` reports 1 pre-existing unrelated failure (`test_export_fovs_batch_writes_file`).
+
+**Reply 6 to issue #85 — enforce parent channel-panel vertical scrolling**
+- Ensured the shared channel-panel scrollbar appears when total channel widget height exceeds the container.
+- Root cause was child group shrink-to-fit behavior; channel group and slider layouts now use `flex: 0 0 auto` so rows keep intrinsic height and overflow is delegated to the parent scroller.
+- `channel_controls_box` now explicitly keeps `overflow_y='auto'` with `overflow_x='hidden'`.
+- Validated with:
+  - `python -m unittest tests.test_wide_plugin_panel tests.test_chart_footer_behavior tests.test_channel_legend tests.test_roi_manager_tags -v`
+  (49/49 pass)
+
+**Reply 5 to issue #85 — shared scroller restoration and dropdown offset**
+- Fixed a post-refactor regression where individual channel groups showed their own internal scrollbars; group and slider layouts were updated to suppress per-group overflow so only the shared channel-panel scroller is used.
+- Shifted the channel color dropdown 5px to the left in the header row.
+- Updated helper assertions in `tests/test_channel_legend.py` to verify dropdown left margin and overflow-safe slider layout values.
+- Validated with:
+  - `python -m unittest tests.test_wide_plugin_panel tests.test_chart_footer_behavior tests.test_channel_legend tests.test_roi_manager_tags -v`
+  (49/49 pass)
+
+**Reply 4 to issue #85 — three-row channel control reorganization**
+- Reworked channel controls in `update_controls` so each marker renders as a grouped three-row block:
+  1) header row: visibility checkbox + marker name + color dropdown,
+  2) Min slider row,
+  3) Max slider row.
+- Marker name is now shown once in the header row; slider descriptions were simplified to `Min` / `Max` only.
+- Replaced fixed wide color dropdown sizing with compact content-driven width calculated from color option names, reducing footprint while keeping names visible.
+- Added marker-label and grouped-row layout helpers to support the new structure and preserve shrink-safe behavior.
+- Updated `tests/test_channel_legend.py` helper assertions and validated with:
+  - `python -m unittest tests.test_wide_plugin_panel tests.test_chart_footer_behavior tests.test_channel_legend tests.test_roi_manager_tags -v`
+  (49/49 pass)
+
+**Reply 3 to issue #85 — channel panel row compaction and overflow cleanup**
+- Kept container wrappers at `max_width: 99%` and fixed remaining channel-panel overflows by compacting content rows only.
+- Reworked marker-set action buttons into a wrap-capable flex row and constrained the confirm-deletion checkbox row to prevent horizontal scrollbars in the marker-set section.
+- Tightened per-channel header row behavior in `update_controls`: compact visibility checkbox sizing/spacing, narrower color dropdown sizing, hidden row overflow, and reusable row-layout helpers.
+- Tuned slider row layout for longer usable marker-range tracks while preserving existing slider labels and readout.
+- Hardened channel legend rendering: content-width legend layout plus HTML wrapping safeguards (`overflow-wrap:anywhere`, `word-break:break-word`) for long channel names.
+- Extended regression coverage in `tests/test_channel_legend.py`; validated with:
+  - `python -m unittest tests.test_wide_plugin_panel tests.test_chart_footer_behavior tests.test_channel_legend -v`
+  - `python -m unittest tests.test_roi_manager_tags -v`
+  (49/49 pass)
+
+**Reply 2 to issue #85 — content-widget shrink policy for scrollbar prevention**
+- Kept all existing container wrappers at the current `max_width: 99%` policy and introduced a new content-widget sizing rule (`width/max_width: calc(100% - 5px)`, `min_width: 0`, `box_sizing: border-box`) so inner controls can shrink without forcing horizontal overflow.
+- Added `_content_widget_layout` in `ui_components.py` and applied it to marker set fields, channel selector rows, channel legend/grid checkboxes, mask outline slider, and annotation palette controls.
+- Updated `ImageMaskViewer.update_controls` in `main_viewer.py` to apply the same content-width rule to channel contrast sliders and mask color controls.
+- Added a shared `content_widget_layout` helper in `layout_utils.py` and adopted it in ROI Manager / Batch Export content widgets; added a matching content-control helper pass in `chart_heatmap.py` with wrap-safe rows.
+- Extended regression coverage in `tests/test_wide_plugin_panel.py` and validated with `python -m unittest tests.test_wide_plugin_panel tests.test_chart_footer_behavior tests.test_roi_manager_tags -v` (45/45 pass).
+
 **Reply to issue #85 — prevent unnecessary horizontal scrollbars in UI panels**
 - Added a shared constrained panel layout helper in `ui_components.py` and applied it to main control wrappers, channel/mask/annotation sections, and wide footer wrappers so panel containers no longer match parent width exactly.
 - Tuned bounded width policy to `max_width='99%'` (follow-up to initial 97%) and kept `min_width='0'` + `box_sizing='border-box'` safeguards.

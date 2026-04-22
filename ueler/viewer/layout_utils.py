@@ -32,6 +32,18 @@ def flex_fill_layout(**overrides) -> Layout:
     return Layout(**base)
 
 
+def content_widget_layout(**overrides) -> Layout:
+    """Layout for content controls that should sit slightly inside containers."""
+    base = {
+        "width": "calc(100% - 5px)",
+        "max_width": "calc(100% - 5px)",
+        "box_sizing": "border-box",
+        "min_width": "0",
+    }
+    base.update(overrides)
+    return Layout(**base)
+
+
 # Backwards-compatible helpers expected by the legacy UI module
 def constrained_column(*, max_width: str = "100%", gap: str | None = None, **overrides) -> Layout:
     """Return a column layout constrained to the given max width.

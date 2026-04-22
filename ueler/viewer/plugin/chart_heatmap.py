@@ -47,6 +47,17 @@ def _bounded_panel_layout(**overrides) -> Layout:
     return Layout(**props)
 
 
+def _content_control_layout(**overrides) -> Layout:
+    props = {
+        "width": "calc(100% - 5px)",
+        "max_width": "calc(100% - 5px)",
+        "min_width": "0",
+        "box_sizing": "border-box",
+    }
+    props.update(overrides)
+    return Layout(**props)
+
+
 class ChartDisplay(PluginBase):
     def __init__(self, main_viewer, width: float, height: float):
         super().__init__(main_viewer, width, height)
@@ -112,7 +123,7 @@ class ChartDisplay(PluginBase):
     def _build_layout(self) -> None:
         histogram_controls = HBox(
             [self.ui_component.bin_slider, self.ui_component.above_below_buttons],
-            layout=Layout(gap="12px"),
+            layout=Layout(gap="12px", flex_flow="row wrap", align_items="center"),
         )
 
         scatter_controls = VBox(
@@ -123,14 +134,14 @@ class ChartDisplay(PluginBase):
                         self.ui_component.scatter_set_selector,
                         self.ui_component.remove_scatter_button,
                     ],
-                    layout=Layout(gap="8px", align_items="center"),
+                    layout=Layout(gap="8px", align_items="center", flex_flow="row wrap"),
                 ),
                 HBox(
                     [
                         self.ui_component.clear_scatter_button,
                         self.ui_component.clear_selection_button,
                     ],
-                    layout=Layout(gap="8px"),
+                    layout=Layout(gap="8px", flex_flow="row wrap"),
                 ),
             ],
             layout=_bounded_panel_layout(gap="8px"),
@@ -159,7 +170,7 @@ class ChartDisplay(PluginBase):
                         self.ui_component.y_axis_selector,
                         self.ui_component.color_selector,
                     ],
-                    layout=Layout(gap="8px", align_items="center"),
+                    layout=Layout(gap="8px", align_items="center", flex_flow="row wrap"),
                 ),
                 self.ui_component.plot_button,
                 self._plot_tabs,
@@ -505,21 +516,21 @@ class UiComponent:
             value="None",
             description="X:",
             style=widget_style,
-            layout=Layout(width="150px"),
+            layout=_content_control_layout(width="auto", flex="1 1 0%"),
         )
         self.y_axis_selector = Dropdown(
             options=dropdown_options,
             value="None",
             description="Y:",
             style=widget_style,
-            layout=Layout(width="150px"),
+            layout=_content_control_layout(width="auto", flex="1 1 0%"),
         )
         self.color_selector = Dropdown(
             options=dropdown_options,
             value="None",
             description="Color:",
             style=widget_style,
-            layout=Layout(width="150px"),
+            layout=_content_control_layout(width="auto", flex="1 1 0%"),
         )
         self.plot_button = Button(
             description="Plot",
@@ -537,13 +548,13 @@ class UiComponent:
             description="Bins:",
             continuous_update=False,
             style={'description_width': 'auto'},
-            layout=Layout(width="250px"),
+            layout=_content_control_layout(width="auto", flex="1 1 0%"),
         )
         self.above_below_buttons = ToggleButtons(
             options=["below", "above"],
             description="Highlight:",
             style={'description_width': 'auto'},
-            layout=Layout(width="250px"),
+            layout=_content_control_layout(width="auto", flex="1 1 0%"),
         )
         self.point_size_slider = FloatSlider(
             value=10.0,
@@ -553,7 +564,7 @@ class UiComponent:
             description="Point Size:",
             continuous_update=False,
             style={'description_width': 'auto'},
-            layout=Layout(width="250px"),
+            layout=_content_control_layout(),
         )
         self.mv_linked_checkbox = Checkbox(
             value=False,
@@ -569,7 +580,7 @@ class UiComponent:
             options=[],
             description="Plots:",
             style={'description_width': 'auto'},
-            layout=Layout(width="250px"),
+            layout=_content_control_layout(width="auto", flex="1 1 0%"),
         )
         self.remove_scatter_button = Button(
             description="Remove",

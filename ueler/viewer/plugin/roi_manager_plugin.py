@@ -43,7 +43,7 @@ from ueler.rendering import (
 )
 
 from .plugin_base import PluginBase
-from ..layout_utils import column_block_layout, flex_fill_layout
+from ..layout_utils import column_block_layout, content_widget_layout, flex_fill_layout
 from ..tag_expression import TagExpressionError, compile_tag_expression
 
 
@@ -118,7 +118,7 @@ class ROIManagerPlugin(PluginBase):
         self._build_browser_widgets()
 
     def _build_editor_widgets(self) -> None:
-        full_width = column_block_layout
+        full_width = content_widget_layout
         button_layout = Layout(width="auto", flex="1 1 auto")
         style_auto = {"description_width": "auto"}
 
@@ -311,7 +311,7 @@ class ROIManagerPlugin(PluginBase):
             description="Tags:",
             allow_duplicates=False,
             allow_new=False,
-            layout=Layout(width="100%", max_width="99%", min_width="0", box_sizing="border-box"),
+            layout=content_widget_layout(),
         )
         if hasattr(self.ui_component.browser_tags_filter, "restrict_to_allowed_tags"):
             try:
@@ -330,7 +330,7 @@ class ROIManagerPlugin(PluginBase):
             options=[],
             value=(),
             description="FOVs:",
-            layout=Layout(width="100%", max_width="99%", min_width="0", box_sizing="border-box"),
+            layout=content_widget_layout(),
         )
 
         self.ui_component.browser_limit_to_current = Checkbox(

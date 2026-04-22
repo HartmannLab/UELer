@@ -194,6 +194,7 @@ if "viewer.annotation_display" not in sys.modules:
     sys.modules["viewer.annotation_display"] = annotation_stub
 
 from ueler.viewer.ui_components import (
+    _content_widget_layout,
     build_wide_plugin_pane,
     collect_wide_plugin_entries,
     update_wide_plugin_panel,
@@ -254,6 +255,14 @@ class ViewerHarness:
 
 
 class WidePanelHelperTests(unittest.TestCase):
+    def test_content_widget_layout_uses_calc_width_buffer(self):
+        layout = _content_widget_layout()
+
+        self.assertEqual(getattr(layout, "width", None), "calc(100% - 5px)")
+        self.assertEqual(getattr(layout, "max_width", None), "calc(100% - 5px)")
+        self.assertEqual(getattr(layout, "min_width", None), "0")
+        self.assertEqual(getattr(layout, "box_sizing", None), "border-box")
+
     def test_build_wide_plugin_pane_wraps_control_and_content(self):
         control = widgets.VBox()
         content = widgets.VBox()

@@ -17,7 +17,7 @@ from matplotlib.text import Annotation
 import cv2
 from collections import OrderedDict
 from types import SimpleNamespace
-from ipywidgets import IntText, Output, Dropdown, FloatSlider, Checkbox, Button, VBox, HBox, Layout, Widget
+from ipywidgets import IntText, Output, Dropdown, FloatSlider, Checkbox, Button, HTML, VBox, HBox, Layout, Widget
 from IPython.display import display
 import pandas as pd
 # Import modules
@@ -164,6 +164,84 @@ def _unique_annotation_values(array):
     if finite_values.size == 0:
         return np.array([], dtype=np.int32)
     return finite_values.astype(np.int32, copy=False)
+
+
+def _channel_color_dropdown_layout(color_options: Optional[Sequence[str]] = None) -> Layout:
+    """Content-driven compact color dropdown sizing for per-channel header rows."""
+    options = [str(opt) for opt in (color_options or ())]
+    longest = max((len(opt) for opt in options), default=8)
+    width_ch = min(14, max(7, longest + 1))
+    width = f'{width_ch}ch'
+    return Layout(
+        width=width,
+        min_width='68px',
+        max_width=width,
+        flex='0 0 auto',
+        margin='0 0 0 -5px',
+        box_sizing='border-box',
+    )
+
+
+def _channel_visibility_checkbox_layout() -> Layout:
+    """Compact fixed-size checkbox layout for per-channel visibility controls."""
+    return Layout(width='20px', min_width='20px', max_width='20px', margin='0')
+
+
+def _channel_slider_layout() -> Layout:
+    """Slider row layout tuned for maximum usable track length."""
+    return Layout(
+        width='calc(100% - 5px)',
+        max_width='calc(100% - 5px)',
+        min_width='0',
+        box_sizing='border-box',
+        flex='0 0 auto',
+    )
+
+
+def _channel_marker_label_layout() -> Layout:
+    """Marker label layout for per-channel header rows."""
+    return Layout(flex='1 1 auto', min_width='0', overflow='hidden')
+
+
+def _channel_header_row_layout() -> Layout:
+    """Row layout for visibility checkbox + marker label + color dropdown."""
+    return Layout(
+        display='flex',
+        align_items='center',
+        justify_content='flex-start',
+        gap='4px',
+        min_height='30px',
+        overflow='hidden',
+        width='100%',
+        max_width='calc(100% - 5px)',
+        min_width='0',
+        box_sizing='border-box',
+    )
+
+
+def _channel_group_layout() -> Layout:
+    """Grouped channel block layout containing header, Min, and Max rows."""
+    return Layout(
+        width='100%',
+        max_width='calc(100% - 5px)',
+        min_width='0',
+        box_sizing='border-box',
+        gap='2px',
+        flex='0 0 auto',
+    )
+
+
+def _dedupe_channel_sequence(channels: Sequence[str]) -> Tuple[str, ...]:
+    """Return channels in first-seen order with duplicates removed."""
+    ordered = []
+    seen = set()
+    for ch in channels:
+        name = str(ch)
+        if name in seen:
+            continue
+        seen.add(name)
+        ordered.append(name)
+    return tuple(ordered)
 
 class ImageMaskViewer:
     def __init__(self, base_folder, masks_folder=None, annotations_folder=None):
@@ -2478,13 +2556,13 @@ class ImageMaskViewer:
             g = int(max(0, min(255, round(rgb[1] * 255))))
             b = int(max(0, min(255, round(rgb[2] * 255))))
             lines.append(
-                f"<div style=\"color: rgb({r}, {g}, {b}); font-weight: 600;\">{safe_name}</div>"
+                f"<div style=\"color: rgb({r}, {g}, {b}); font-weight: 600; overflow-wrap: anywhere; word-break: break-word;\">{safe_name}</div>"
             )
 
         return (
             "<div style=\"background: rgba(255, 255, 255, 0.85); "
             "border: 1px solid #cccccc; border-radius: 4px; padding: 6px; "
-            "font-size: 12px; line-height: 1.2;\">"
+            "font-size: 12px; line-height: 1.2; max-width: 100%; overflow: hidden; box-sizing: border-box;\">"
             + "".join(lines)
             + "</div>"
         )
@@ -2626,6 +2704,7 @@ class ImageMaskViewer:
     def update_controls(self, change):
         """Create widgets dynamically based on selected channels and masks, and attach update callbacks."""
         channel_widgets = []
+        color_options = tuple(self.predefined_colors.keys())
 
         # Ensure max values are computed for selected channels
         fov_name = self.ui_component.image_selector.value
@@ -2640,17 +2719,17 @@ class ImageMaskViewer:
             # Reuse existing controls if they exist
             if channel in self.ui_component.color_controls:
                 color_dropdown = self.ui_component.color_controls[channel]
-                color_dropdown.description = "Color"
-                color_dropdown.style = {'description_width': '50px'}
-                color_dropdown.layout = Layout(width='auto', min_width='0px', flex='1 1 auto')
+                color_dropdown.description = ""
+                color_dropdown.style = {'description_width': '0px'}
+                color_dropdown.layout = _channel_color_dropdown_layout(color_options)
             else:
                 color_dropdown = Dropdown(
-                    options=list(self.predefined_colors.keys()),
+                    options=list(color_options),
                     value="Red",
-                    description="Color",
+                    description="",
                     disabled=False,
-                    layout=Layout(width='auto', min_width='0px', flex='1 1 auto'),
-                    style={'description_width': '50px'}
+                    layout=_channel_color_dropdown_layout(color_options),
+                    style={'description_width': '0px'}
                 )
                 color_dropdown.observe(lambda change, ch=channel: self.update_display(self.current_downsample_factor), names='value')
                 self.ui_component.color_controls[channel] = color_dropdown
@@ -2663,10 +2742,11 @@ class ImageMaskViewer:
                     description="",
                     disabled=False,
                     indent=False,
-                    layout=Layout(width='28px', min_width='28px', max_width='28px', margin='0 4px 0 0')
+                    layout=_channel_visibility_checkbox_layout()
                 )
                 visibility_checkbox.observe(lambda change, ch=channel: self.update_display(self.current_downsample_factor), names='value')
                 self.ui_component.channel_visibility_controls[channel] = visibility_checkbox
+            visibility_checkbox.layout = _channel_visibility_checkbox_layout()
 
             if channel in self.ui_component.contrast_min_controls:
                 contrast_min_slider = self.ui_component.contrast_min_controls[channel]
@@ -2674,19 +2754,20 @@ class ImageMaskViewer:
                 contrast_min_slider.step = step_size
                 contrast_min_slider.readout_format = readout_format
                 contrast_min_slider.value = min(contrast_min_slider.value, max_value)
-                contrast_min_slider.layout = Layout(width='100%', max_width='99%', min_width='0', box_sizing='border-box')
-                contrast_min_slider.style = {'description_width': '150px'}
+                contrast_min_slider.layout = _channel_slider_layout()
+                contrast_min_slider.description = 'Min'
+                contrast_min_slider.style = {'description_width': '42px'}
             else:
                 contrast_min_slider = FloatSlider(
                     value=0.0,
                     min=0.0,
                     max=max_value,
                     step=step_size,
-                    description=f"Min {channel}",
+                    description='Min',
                     continuous_update=False,
                     readout_format=readout_format,
-                    layout=Layout(width='100%', max_width='99%', min_width='0', box_sizing='border-box'),
-                    style={'description_width': '150px'},
+                    layout=_channel_slider_layout(),
+                    style={'description_width': '42px'},
                 )
                 contrast_min_slider.observe(lambda change, ch=channel: self.update_display(self.current_downsample_factor), names='value')
                 self.ui_component.contrast_min_controls[channel] = contrast_min_slider
@@ -2697,39 +2778,39 @@ class ImageMaskViewer:
                 contrast_max_slider.step = step_size
                 contrast_max_slider.readout_format = readout_format
                 contrast_max_slider.value = max(min(contrast_max_slider.value, max_value), contrast_min_slider.value)
-                contrast_max_slider.layout = Layout(width='100%', max_width='99%', min_width='0', box_sizing='border-box')
-                contrast_max_slider.style = {'description_width': '150px'}
+                contrast_max_slider.layout = _channel_slider_layout()
+                contrast_max_slider.description = 'Max'
+                contrast_max_slider.style = {'description_width': '42px'}
             else:
                 contrast_max_slider = FloatSlider(
                     value=max_value,
                     min=0.0,
                     max=max_value,
                     step=step_size,
-                    description=f"Max {channel}",
+                    description='Max',
                     continuous_update=False,
                     readout_format=readout_format,
-                    layout=Layout(width='100%', max_width='99%', min_width='0', box_sizing='border-box'),
-                    style={'description_width': '150px'},
+                    layout=_channel_slider_layout(),
+                    style={'description_width': '42px'},
                 )
                 contrast_max_slider.observe(lambda change, ch=channel: self.update_display(self.current_downsample_factor), names='value')
                 self.ui_component.contrast_max_controls[channel] = contrast_max_slider
 
-            channel_header = HBox(
-                [visibility_checkbox, color_dropdown],
-                layout=Layout(
-                    display='flex',
-                    align_items='center',
-                    justify_content='flex-start',
-                    gap='6px',
-                    min_height='30px',
-                    overflow='visible',
-                    width='100%',
-                    max_width='99%',
-                    min_width='0',
-                    box_sizing='border-box',
-                )
+            marker_name_label = HTML(
+                value=f"<div style='font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;'>{html_lib.escape(str(channel))}</div>",
+                layout=_channel_marker_label_layout(),
             )
-            channel_widgets.extend([channel_header, contrast_min_slider, contrast_max_slider])
+
+            channel_header = HBox(
+                [visibility_checkbox, marker_name_label, color_dropdown],
+                layout=_channel_header_row_layout()
+            )
+
+            channel_group = VBox(
+                [channel_header, contrast_min_slider, contrast_max_slider],
+                layout=_channel_group_layout(),
+            )
+            channel_widgets.append(channel_group)
 
         if channel_widgets:
             self.ui_component.channel_controls_box.children = tuple(channel_widgets)
@@ -2763,13 +2844,26 @@ class ImageMaskViewer:
                 # Dropdown to select mask color
                 if mask_name in self.ui_component.mask_color_controls:
                     mask_color_dropdown = self.ui_component.mask_color_controls[mask_name]
+                    mask_color_dropdown.layout = Layout(
+                        width='calc(100% - 5px)',
+                        max_width='calc(100% - 5px)',
+                        min_width='0',
+                        box_sizing='border-box',
+                        flex='1 1 auto',
+                    )
                 else:
                     mask_color_dropdown = Dropdown(
                         options=list(self.predefined_colors.keys()),
                         value="White",
                         description=f"Mask {mask_name}",
                         disabled=False,
-                        layout=Layout(width='250px'),
+                        layout=Layout(
+                            width='calc(100% - 5px)',
+                            max_width='calc(100% - 5px)',
+                            min_width='0',
+                            box_sizing='border-box',
+                            flex='1 1 auto',
+                        ),
                         style={'description_width': '150px'}
                     )
                     mask_color_dropdown.observe(lambda change, mn=mask_name: self.update_display(self.current_downsample_factor), names='value')
@@ -4329,7 +4423,7 @@ class ImageMaskViewer:
             return
 
         # Capture current settings
-        selected_channels = list(self.ui_component.channel_selector.value)
+        selected_channels = list(_dedupe_channel_sequence(self.ui_component.channel_selector.value))
         if not selected_channels:
             print("No channels selected to save.")
             return
@@ -4360,7 +4454,7 @@ class ImageMaskViewer:
             return
 
         # Capture current settings
-        selected_channels = list(self.ui_component.channel_selector.value)
+        selected_channels = list(_dedupe_channel_sequence(self.ui_component.channel_selector.value))
         if not selected_channels:
             print("No channels selected to save.")
             return
@@ -4410,7 +4504,7 @@ class ImageMaskViewer:
                 print(f"Marker set '{set_name}' not found.")
             return False
 
-        selected_channels = tuple(marker_set.get('selected_channels', ()))
+        selected_channels = _dedupe_channel_sequence(marker_set.get('selected_channels', ()))
         if not selected_channels:
             if not silent:
                 print(f"Marker set '{set_name}' has no channels saved.")
@@ -4430,8 +4524,11 @@ class ImageMaskViewer:
                 print("Channel selector widget unavailable; cannot load marker set.")
             return False
 
-        selector.value = selected_channels
-        self.update_controls(None)
+        existing_channels = _dedupe_channel_sequence(getattr(selector, 'value', ()))
+        if existing_channels != selected_channels:
+            selector.value = selected_channels
+        else:
+            self.update_controls(None)
 
         color_controls = getattr(self.ui_component, 'color_controls', {}) or {}
         min_controls = getattr(self.ui_component, 'contrast_min_controls', {}) or {}

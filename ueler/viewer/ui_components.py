@@ -110,6 +110,18 @@ def _bounded_panel_layout(**overrides):
     return Layout(**props)
 
 
+def _content_widget_layout(**overrides):
+    """Return a content-widget layout that leaves a small padding buffer."""
+    props = {
+        'width': 'calc(100% - 5px)',
+        'max_width': 'calc(100% - 5px)',
+        'min_width': '0',
+        'box_sizing': 'border-box',
+    }
+    props.update(overrides)
+    return Layout(**props)
+
+
 def build_wide_plugin_pane(control=None, content=None):
     """Compose the standard left/right layout used in the footer tabs."""
     if control is None and content is None:
@@ -425,12 +437,12 @@ class uicomponents:
             value=None,
             description='Select map:',
             disabled=True,
-            layout=_bounded_panel_layout(),
+            layout=_content_widget_layout(),
             style={'description_width': 'auto'},
         )
         self.map_selector.observe(viewer.on_map_selector_change, names='value')
 
-        self.map_summary = HTML(value='', layout=_bounded_panel_layout())
+        self.map_summary = HTML(value='', layout=_content_widget_layout())
         self.map_controls_box = VBox(
             children=(
                 HBox([self.map_mode_toggle], layout=Layout(width='100%')),
@@ -449,15 +461,15 @@ class uicomponents:
             allowed_tags=[],  # This will be updated later
             description='Channels:',
             disabled=False,
-            layout=_bounded_panel_layout()
+            layout=_content_widget_layout()
         )
-        self.channel_selector.observe(viewer.update_controls, names='value')
         self.channel_selector.observe(viewer.on_channel_selection_change, names='value')
 
         # Containers for channel, mask, and annotation controls
         self.channel_controls_box = VBox(
             layout=_bounded_panel_layout(
                 overflow_y='auto',
+                overflow_x='hidden',
                 gap='6px',
                 padding='4px 0',
                 max_height='320px'
@@ -468,14 +480,14 @@ class uicomponents:
             value=True,
             description='Show channel legend',
             disabled=False,
-            layout=Layout(width='99%', min_width='0', box_sizing='border-box'),
+            layout=_content_widget_layout(),
             style={'description_width': 'auto'}
         )
         self.show_channel_legend_checkbox.observe(viewer.on_channel_legend_toggle, names='value')
 
         self.channel_legend_box = HTML(
             value='',
-            layout=_bounded_panel_layout(display='none', overflow_x='hidden')
+            layout=_content_widget_layout(display='none', overflow_x='hidden')
         )
 
         self.channel_legend_panel = VBox(
@@ -487,7 +499,7 @@ class uicomponents:
             value=False,
             description='Channel grid view',
             disabled=False,
-            layout=Layout(width='99%', min_width='0', box_sizing='border-box'),
+            layout=_content_widget_layout(),
             style={'description_width': 'auto'}
         )
         self.grid_view_checkbox.observe(viewer.on_grid_view_toggle, names='value')
@@ -506,7 +518,7 @@ class uicomponents:
             max=10,
             step=1,
             description='Mask outline px:',
-            layout=_bounded_panel_layout(),
+            layout=_content_widget_layout(),
             style={'description_width': '150px'},
             continuous_update=False,
         )
@@ -520,7 +532,7 @@ class uicomponents:
             value=None,
             description='Marker Set:',
             disabled=False,
-            layout=_bounded_panel_layout(),
+            layout=_content_widget_layout(),
             style={'description_width': '95px'},
         )
         self.marker_set_name_input = Text(
@@ -528,7 +540,7 @@ class uicomponents:
             placeholder='Enter marker set name',
             description='Set Name:',
             disabled=False,
-            layout=_bounded_panel_layout(),
+            layout=_content_widget_layout(),
             style={'description_width': '95px'},
         )
 
@@ -537,7 +549,8 @@ class uicomponents:
             disabled=False,
             button_style='',
             tooltip='Load the selected marker set',
-            icon='folder-open'
+            icon='folder-open',
+            layout=Layout(width='auto', min_width='0', flex='1 1 140px', box_sizing='border-box')
         )
         self.load_marker_set_button.on_click(viewer.load_marker_set)
 
@@ -546,7 +559,8 @@ class uicomponents:
             disabled=False,
             button_style='',
             tooltip='Save the current configuration as a new marker set',
-            icon='save'
+            icon='save',
+            layout=Layout(width='auto', min_width='0', flex='1 1 140px', box_sizing='border-box')
         )
         self.save_marker_set_button.on_click(viewer.save_marker_set)
 
@@ -555,7 +569,8 @@ class uicomponents:
             disabled=False,
             button_style='',
             tooltip='Update the selected marker set with current settings',
-            icon='refresh'
+            icon='refresh',
+            layout=Layout(width='auto', min_width='0', flex='1 1 140px', box_sizing='border-box')
         )
         self.update_marker_set_button.on_click(viewer.update_marker_set)
 
@@ -564,14 +579,17 @@ class uicomponents:
             disabled=False,
             button_style='danger',
             tooltip='Delete the selected marker set',
-            icon='trash'
+            icon='trash',
+            layout=Layout(width='auto', min_width='0', flex='1 1 140px', box_sizing='border-box')
         )
         self.delete_marker_set_button.on_click(viewer.delete_marker_set)
 
         self.delete_confirmation_checkbox = Checkbox(
             value=False,
             description='Confirm Deletion',
-            disabled=False
+            disabled=False,
+            layout=_content_widget_layout(),
+            style={'description_width': 'auto'}
         )
 
         channel_selector_layout = _bounded_panel_layout(gap='4px')
@@ -593,22 +611,12 @@ class uicomponents:
 
         marker_set_buttons = HBox(
             children=(
-                VBox(
-                    children=(
-                        self.load_marker_set_button,
-                        self.save_marker_set_button,
-                    ),
-                    layout=_bounded_panel_layout(gap='4px')
-                ),
-                VBox(
-                    children=(
-                        self.update_marker_set_button,
-                        self.delete_marker_set_button,
-                    ),
-                    layout=_bounded_panel_layout(gap='4px')
-                ),
+                self.load_marker_set_button,
+                self.update_marker_set_button,
+                self.save_marker_set_button,
+                self.delete_marker_set_button,
             ),
-            layout=_bounded_panel_layout(gap='8px')
+            layout=_content_widget_layout(gap='6px', flex_flow='row wrap', align_items='stretch')
         )
 
         self.marker_set_controls_panel = VBox(
@@ -754,7 +762,7 @@ class uicomponents:
             value=None,
             description='Annotation:',
             disabled=True,
-            layout=_bounded_panel_layout(),
+            layout=_content_widget_layout(),
             style={'description_width': 'auto'}
         )
         self.annotation_selector.observe(viewer.on_annotation_selection_change, names='value')
@@ -767,7 +775,7 @@ class uicomponents:
             description='Fill alpha:',
             disabled=True,
             continuous_update=False,
-            layout=_bounded_panel_layout(),
+            layout=_content_widget_layout(),
             style={'description_width': 'auto'}
         )
         self.annotation_alpha_slider.observe(viewer.on_annotation_alpha_change, names='value')
@@ -777,7 +785,7 @@ class uicomponents:
             value='id',
             description='Legend labels:',
             disabled=True,
-            layout=_bounded_panel_layout(),
+            layout=_content_widget_layout(),
             style={'description_width': 'auto'}
         )
         self.annotation_label_mode.observe(viewer.on_annotation_label_mode_change, names='value')
@@ -839,7 +847,7 @@ class uicomponents:
             self.annotation_palette_load_path_input = Text(
                 description='File:',
                 placeholder='path/to/file.pixelannotations.json',
-                layout=_bounded_panel_layout(),
+                layout=_content_widget_layout(),
                 style={'description_width': 'auto'}
             )
         self.annotation_palette_load_button = Button(description='Load file', icon='upload')
@@ -855,7 +863,7 @@ class uicomponents:
         self.annotation_palette_saved_sets_dropdown = Dropdown(
             description='Saved sets:',
             options=[('No saved sets', '')],
-            layout=_bounded_panel_layout(),
+            layout=_content_widget_layout(),
             style={'description_width': 'auto'}
         )
         self.annotation_palette_apply_saved_button = Button(description='Apply set')

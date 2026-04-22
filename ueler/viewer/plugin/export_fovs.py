@@ -53,7 +53,7 @@ from ..scale_bar import (
     effective_pixel_size_nm,
 )
 from .plugin_base import PluginBase
-from ..layout_utils import column_block_layout, flex_fill_layout
+from ..layout_utils import column_block_layout, content_widget_layout, flex_fill_layout
 
 PLACEHOLDER_MESSAGE = "Batch export UI is now available."
 
@@ -129,7 +129,7 @@ class BatchExportPlugin(PluginBase):
     # UI construction
     # ------------------------------------------------------------------
     def _build_widgets(self) -> None:
-        full_width = column_block_layout
+        full_width = content_widget_layout
         flex_fill = flex_fill_layout
         style_auto = {"description_width": "auto"}
 
