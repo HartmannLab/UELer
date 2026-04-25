@@ -201,6 +201,20 @@ class _FakeCellGallery:
         self.received = indices
 
 
+class _FakeScatterView:
+    def __init__(self, identifier: str):
+        self.identifier = identifier
+        self.state = SimpleNamespace(title=identifier)
+        self.applied: list[set] = []
+        self.announce_flags: list[bool] = []
+
+    def apply_selection(self, indices, *, announce=True):
+        normalized = set(indices)
+        self.applied.append(normalized)
+        self.announce_flags.append(announce)
+        return normalized
+
+
 def _make_viewer(cell_table: "pd.DataFrame") -> SimpleNamespace:
     """Return a minimal fake viewer that satisfies ChartDisplay requirements."""
     gallery = _FakeCellGallery()
@@ -476,6 +490,25 @@ class TestScatterSelectionMaskHighlights(unittest.TestCase):
         self.image_display.last_mask_ids = [1]
         self.chart._apply_external_selection(set())
         self.assertEqual(self.image_display.last_mask_ids, [])
+
+    def test_scatter_selection_syncs_other_views_and_highlights(self):
+        """Widget-originated selection fans out to sibling scatters and keeps highlights."""
+        scatter_one = _FakeScatterView("s1")
+        scatter_two = _FakeScatterView("s2")
+        self.chart._scatter_views = {
+            scatter_one.identifier: scatter_one,
+            scatter_two.identifier: scatter_two,
+        }
+        self.chart.ui_component.mv_linked_checkbox.value = True
+
+        self.chart._on_scatter_selection({1, 2}, origin="widget")
+
+        self.assertEqual(scatter_one.applied[-1], {1, 2})
+        self.assertEqual(scatter_two.applied[-1], {1, 2})
+        self.assertFalse(scatter_one.announce_flags[-1])
+        self.assertFalse(scatter_two.announce_flags[-1])
+        self.assertIn(2, self.image_display.last_mask_ids)
+        self.assertIn(3, self.image_display.last_mask_ids)
 
 
 if __name__ == "__main__":

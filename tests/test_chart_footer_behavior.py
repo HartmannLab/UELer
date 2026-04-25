@@ -377,6 +377,14 @@ class _DummyScatter:
     def __init__(self, title):
         self.identifier = title
         self.state = SimpleNamespace(title=title)
+        self.applied = []
+        self.announce_flags = []
+
+    def apply_selection(self, indices, *, announce=True):
+        normalized = set(indices)
+        self.applied.append(normalized)
+        self.announce_flags.append(announce)
+        return normalized
 
     def dispose(self):
         return None
@@ -568,6 +576,38 @@ class ChartDisplayFooterTests(unittest.TestCase):
         _args, kwargs = mock_compose.call_args
         self.assertIn("sync_selection", kwargs)
         self.assertFalse(kwargs["sync_selection"])
+
+    def test_widget_selection_syncs_all_active_scatter_views(self):
+        scatter_one = _DummyScatter("s1")
+        scatter_two = _DummyScatter("s2")
+        self.chart._scatter_views = OrderedDict(
+            [
+                (scatter_one.identifier, scatter_one),
+                (scatter_two.identifier, scatter_two),
+            ]
+        )
+
+        self.chart._on_scatter_selection({7, 8}, "widget")
+
+        self.assertEqual(scatter_one.applied[-1], {7, 8})
+        self.assertEqual(scatter_two.applied[-1], {7, 8})
+        self.assertFalse(scatter_one.announce_flags[-1])
+        self.assertFalse(scatter_two.announce_flags[-1])
+
+    def test_empty_selection_clears_all_active_scatter_views(self):
+        scatter_one = _DummyScatter("s1")
+        scatter_two = _DummyScatter("s2")
+        self.chart._scatter_views = OrderedDict(
+            [
+                (scatter_one.identifier, scatter_one),
+                (scatter_two.identifier, scatter_two),
+            ]
+        )
+
+        self.chart._on_scatter_selection(set(), "widget")
+
+        self.assertEqual(scatter_one.applied[-1], set())
+        self.assertEqual(scatter_two.applied[-1], set())
 
 
 class HeatmapFooterPersistenceTests(unittest.TestCase):

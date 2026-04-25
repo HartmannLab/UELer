@@ -337,15 +337,10 @@ class ChartDisplay(PluginBase):
     def _on_scatter_selection(
         self, indices: Set[Union[int, str]], origin: str
     ) -> None:
-        normalized = {
-            int(idx) if isinstance(idx, np.integer) else idx for idx in indices
-        }
-        self._update_single_point_state(normalized)
-        self.selected_indices.value = normalized
-        if self.ui_component.mv_linked_checkbox.value:
-            if len(normalized) == 1:
-                self._focus_main_viewer(next(iter(normalized)))
-            self._sync_mask_highlights_from_selection(normalized)
+        self._commit_scatter_selection(
+            indices,
+            focus_single=(origin == "widget"),
+        )
 
     def _on_scatter_hover(self, index: Optional[Union[int, str]]) -> None:
         # Reserved for future hover-linked integrations.
@@ -354,6 +349,14 @@ class ChartDisplay(PluginBase):
     def _apply_external_selection(
         self, indices: Iterable[Union[int, str]]
     ) -> None:
+        self._commit_scatter_selection(indices)
+
+    def _commit_scatter_selection(
+        self,
+        indices: Iterable[Union[int, str]],
+        *,
+        focus_single: bool = False,
+    ) -> Set[Union[int, str]]:
         normalized = {
             int(idx) if isinstance(idx, np.integer) else idx for idx in indices
         }
@@ -362,7 +365,10 @@ class ChartDisplay(PluginBase):
             scatter.apply_selection(normalized, announce=False)
         self.selected_indices.value = normalized
         if self.ui_component.mv_linked_checkbox.value:
+            if focus_single and len(normalized) == 1:
+                self._focus_main_viewer(next(iter(normalized)))
             self._sync_mask_highlights_from_selection(normalized)
+        return normalized
 
     def apply_color_mapping(
         self,

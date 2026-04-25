@@ -101,6 +101,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### **UELer v0.3.1 Summary**
+- Fixed Chart multi-scatter selection synchronization (#86): selections made in one scatter plot now propagate to all active scatter plots in the same widget while preserving the existing linked mask-highlighting and single-point navigation behavior.
 - Added a seventh #85 refinement pass to fix repeated channel widget rows on marker-set load: marker-set channel lists are now de-duplicated in first-seen order during save/update/apply, and redundant channel-control rebuild calls in the marker-set apply path were removed.
 - Added a sixth #85 refinement pass to enforce parent channel-panel vertical scrolling when channel content exceeds container height by preventing grouped channel rows from shrink-to-fit compression.
 - Added a fifth #85 refinement pass to restore shared scrolling in channel controls (removing per-channel internal scrollbars) and shift the compact color dropdown 5px left in the header row.

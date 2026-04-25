@@ -1,5 +1,11 @@
 ### v0.3.1
 
+**Issue #86 — scatter widget selections now sync across all active plots**
+- Fixed the Chart plugin so a selection made in one scatter plot is immediately propagated to every active scatter plot in the same widget instead of staying local to the originating plot.
+- Kept `jscatter.compose(..., sync_selection=False)` in place to avoid the previously recorded compose-time selection regression and moved synchronization fully into the plugin's own observer pipeline.
+- Refactored `ChartDisplay` so widget-originated and external selections share one commit path for index normalization, per-plot synchronization, single-point state updates, and linked mask-highlight refreshes.
+- Added regression coverage in `tests/test_chart_footer_behavior.py` and `tests/test_chart_cell_gallery_link.py`; validated with `python -m unittest tests.test_chart_footer_behavior tests.test_chart_cell_gallery_link`.
+
 **Reply 7 to issue #85 — marker-set channel dedupe and control rebuild de-duplication**
 - Fixed a follow-up regression where loading saved marker sets could create repeated channel widget rows.
 - Added `_dedupe_channel_sequence(...)` in `main_viewer.py` and applied it to marker-set save/update/apply paths so selected channels are unique (first-seen order preserved).

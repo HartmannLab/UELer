@@ -9,7 +9,13 @@ import tests.bootstrap  # noqa: F401  # Ensure shared test bootstrap runs
 import pandas as pd
 
 
-_SCATTER_WIDGET_PATH = Path(__file__).resolve().parents[1] / "viewer" / "plugin" / "scatter_widget.py"
+_SCATTER_WIDGET_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "ueler"
+    / "viewer"
+    / "plugin"
+    / "scatter_widget.py"
+)
 
 
 class ScatterWidgetDependencyTests(unittest.TestCase):
