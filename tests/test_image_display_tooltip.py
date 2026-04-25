@@ -218,7 +218,10 @@ class UpdatePatchesTests(unittest.TestCase):
         viewer = SimpleNamespace(
             _map_mode_active=False,
             _active_map_id=None,
+            initialized=False,
             current_downsample_factor=4,
+            on_downsample_factor_changed=lambda *_args, **_kwargs: None,
+            update_display=lambda *_args, **_kwargs: None,
             ui_component=SimpleNamespace(image_selector=SimpleNamespace(value="FOV_A")),
             full_resolution_label_masks={"CellMask": mask_array},
             _debug=False,
@@ -253,6 +256,78 @@ class UpdatePatchesTests(unittest.TestCase):
         self.assertTrue(np.allclose(display.combined, base_image))
 
         # Close the Matplotlib figure to avoid resource leaks during the test suite
+        import matplotlib.pyplot as plt
+
+        plt.close(display.fig)
+
+    def test_set_mask_ids_replaces_previous_highlight_overlay(self) -> None:
+        display = ImageDisplay(width=32, height=32)
+
+        class _CaptureImage:
+            def __init__(self):
+                self._array = None
+
+            def set_data(self, array):
+                self._array = np.array(array, copy=True)
+
+            def get_array(self):
+                if self._array is None:
+                    return np.zeros((0, 0, 3), dtype=np.float32)
+                return self._array
+
+            def set_extent(self, *_args, **_kwargs):
+                return None
+
+        capture = _CaptureImage()
+        display.img_display = capture
+
+        mask_array = np.zeros((32, 32), dtype=np.int32)
+        mask_array[2:10, 2:10] = 5
+        mask_array[20:28, 20:28] = 7
+
+        viewer = SimpleNamespace(
+            _map_mode_active=False,
+            _active_map_id=None,
+            initialized=False,
+            current_downsample_factor=1,
+            on_downsample_factor_changed=lambda *_args, **_kwargs: None,
+            update_display=lambda *_args, **_kwargs: None,
+            ui_component=SimpleNamespace(image_selector=SimpleNamespace(value="FOV_A")),
+            full_resolution_label_masks={"CellMask": mask_array},
+            _debug=False,
+        )
+        viewer.image_display = display
+        viewer.width = 32
+        viewer.height = 32
+        display.main_viewer = viewer
+
+        base_image = np.zeros((32, 32, 3), dtype=np.float32)
+        display.combined = base_image.copy()
+        display.img_display.set_data(base_image)
+
+        limits = (0, 32, 0, 32, 0, 32, 0, 32)
+
+        def _fake_find_boundaries(array, mode=None):
+            mask = np.zeros_like(array, dtype=bool)
+            if np.any(array == 5):
+                mask[2, 2] = True
+            if np.any(array == 7):
+                mask[20, 20] = True
+            return mask
+
+        with patch("ueler.viewer.image_display.get_axis_limits_with_padding", return_value=limits), patch(
+            "ueler.viewer.image_display.find_boundaries",
+            side_effect=_fake_find_boundaries,
+        ):
+            display.set_mask_ids("CellMask", [5])
+            first_highlight = capture.get_array().copy()
+            display.set_mask_ids("CellMask", [7])
+
+        replaced_highlight = capture.get_array()
+        self.assertTrue(np.allclose(first_highlight[2, 2], np.ones(3)))
+        self.assertTrue(np.allclose(replaced_highlight[20, 20], np.ones(3)))
+        self.assertTrue(np.allclose(replaced_highlight[2, 2], np.zeros(3)))
+
         import matplotlib.pyplot as plt
 
         plt.close(display.fig)

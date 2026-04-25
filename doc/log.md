@@ -1,5 +1,16 @@
 ### v0.3.1
 
+**Issue #88 — ROI manager advanced tag-filter helper buttons now respond reliably**
+- Fixed the ROI manager advanced-filter helper buttons so operator and tag buttons always mutate the expression field through the Python widget state instead of relying on a front-end-specific JavaScript insertion path.
+- Reduced the browser-side JavaScript helper to a best-effort DOM value/caret synchronization step after backend insertion, which keeps VS Code and other notebook front-ends from turning clicks into silent no-ops.
+- Normalized advanced-filter helper button construction in `roi_manager_plugin.py` and added regression coverage in `tests/test_roi_manager_tags.py` for operator clicks, tag-button clicks, and the JS-success-without-mutation case.
+- Validated with `python -m unittest tests.test_roi_manager_tags -v`.
+
+**Issue #87 — histogram threshold changes now refresh viewer highlights reliably**
+- Fixed stale viewer outlines after repeated histogram cutoff changes by making `ImageDisplay.set_mask_ids()` rebuild replacement highlights from the clean composited image instead of layering them on top of the previous selection overlay.
+- Applied the same replacement-redraw fix to both single-FOV and map-mode programmatic highlight paths.
+- Added regression coverage in `tests/test_image_display_tooltip.py` and `tests/test_chart_cell_gallery_link.py`; validated with `python -m unittest tests.test_image_display_tooltip tests.test_chart_cell_gallery_link -v`.
+
 **Issue #86 — scatter widget selections now sync across all active plots**
 - Fixed the Chart plugin so a selection made in one scatter plot is immediately propagated to every active scatter plot in the same widget instead of staying local to the originating plot.
 - Kept `jscatter.compose(..., sync_selection=False)` in place to avoid the previously recorded compose-time selection regression and moved synchronization fully into the plugin's own observer pipeline.

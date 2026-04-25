@@ -363,6 +363,20 @@ def make_plugin():
     return plugin
 
 
+def trigger_button(button):
+    click = getattr(button, "click", None)
+    if callable(click):
+        click()
+        return
+
+    handler = getattr(button, "_ueler_click_handler", None)
+    if callable(handler):
+        handler(button)
+        return
+
+    raise AssertionError("Button does not expose a callable click handler")
+
+
 class FakeArray:
     def __init__(self, height, width):
         self.shape = (height, width)
@@ -529,6 +543,54 @@ class ROIManagerTagsTests(unittest.TestCase):
 
         self.assertEqual(widget.value, "alpha gamma")
         self.assertEqual(plugin._browser_expression_selection, (11, 11))
+
+    def test_operator_button_click_inserts_snippet(self):
+        plugin = make_plugin()
+        widget = plugin.ui_component.browser_expression_input
+
+        plugin._refresh_browser_gallery = lambda: None
+        widget.value = "alpha beta"
+        plugin._browser_expression_selection = (5, 5)
+
+        button = next(
+            child
+            for child in plugin.ui_component.browser_expression_operator_box.children
+            if getattr(child, "description", "") == "&"
+        )
+        trigger_button(button)
+
+        self.assertEqual(widget.value, "alpha & beta")
+        self.assertEqual(plugin._browser_expression_selection, (7, 7))
+
+    def test_tag_button_click_inserts_snippet(self):
+        plugin = make_plugin()
+        widget = plugin.ui_component.browser_expression_input
+
+        plugin._refresh_browser_gallery = lambda: None
+        widget.value = "alpha"
+        plugin._browser_expression_selection = (len(widget.value), len(widget.value))
+
+        plugin._refresh_expression_tag_buttons(["beta"])
+        button = plugin._browser_tag_buttons["beta"]
+        trigger_button(button)
+
+        self.assertEqual(widget.value, "alpha beta")
+        self.assertEqual(plugin._browser_expression_selection, (10, 10))
+
+    def test_expression_insertion_falls_back_when_js_path_reports_success_without_mutation(self):
+        plugin = make_plugin()
+        widget = plugin.ui_component.browser_expression_input
+
+        plugin._refresh_browser_gallery = lambda: None
+        widget.value = "alpha beta"
+        plugin._browser_expression_selection = (5, 5)
+        plugin._use_browser_expression_js = True
+        plugin._insert_browser_expression_snippet_js = lambda _snippet: True
+
+        plugin._insert_browser_expression_snippet("&")
+
+        self.assertEqual(widget.value, "alpha & beta")
+        self.assertEqual(plugin._browser_expression_selection, (7, 7))
 
     def test_thumbnail_downsample_uses_roi_viewport_dimensions(self):
         plugin = make_plugin()

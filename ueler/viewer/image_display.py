@@ -515,7 +515,7 @@ class ImageDisplay:
                 self.selected_masks_label.add(
                     MaskSelection(fov=str(fov_name), mask=str(mask_name), mask_id=int(mask_id))
                 )
-            self.update_patches(do_not_reset=True)
+            self.update_patches()
             return
 
         selector = getattr(self.main_viewer.ui_component, "image_selector", None)
@@ -543,7 +543,7 @@ class ImageDisplay:
                 MaskSelection(fov=str(current_fov), mask=str(mask_name), mask_id=int(mask_id))
             )
 
-        self.update_patches(do_not_reset=True)
+        self.update_patches()
     
     def set_mask_colors_current_fov(self, mask_name, mask_ids, color=None, cummulative = False):
         cdf = self.main_viewer.current_downsample_factor

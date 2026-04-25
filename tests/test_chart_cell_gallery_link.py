@@ -321,6 +321,18 @@ class TestHistogramCutoffGalleryLink(unittest.TestCase):
         for label in [4, 5]:
             self.assertNotIn(label, image_display.last_mask_ids)
 
+    def test_successive_cutoff_changes_replace_active_fov_highlights(self):
+        """Repeated cutoff changes should replace the current-FOV highlighted IDs."""
+        image_display: _FakeImageDisplay = self.viewer.image_display
+
+        self.chart.cutoff = 4.0
+        self.chart.highlight_cells(push_to_gallery=True)
+        self.assertEqual(set(image_display.last_mask_ids), {2, 3})
+
+        self.chart.cutoff = 8.0
+        self.chart.highlight_cells(push_to_gallery=True)
+        self.assertEqual(set(image_display.last_mask_ids), {3})
+
     def test_no_crash_when_cutoff_is_none(self):
         """highlight_cells() with no cutoff set should return silently."""
         self.chart.cutoff = None

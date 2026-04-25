@@ -101,6 +101,8 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### **UELer v0.3.1 Summary**
+- Fixed ROI Manager advanced tag-filter helper buttons (#88): operator and tag buttons in the advanced filter now insert syntax reliably by using Python-side widget updates as the source of truth, with browser-side JavaScript reduced to best-effort caret synchronization.
+- Fixed histogram threshold highlight refresh (#87): repeated cutoff changes in the Chart plugin now replace previous viewer highlights cleanly instead of leaving stale cell outlines behind, so small threshold adjustments update the highlighted cells reliably.
 - Fixed Chart multi-scatter selection synchronization (#86): selections made in one scatter plot now propagate to all active scatter plots in the same widget while preserving the existing linked mask-highlighting and single-point navigation behavior.
 - Added a seventh #85 refinement pass to fix repeated channel widget rows on marker-set load: marker-set channel lists are now de-duplicated in first-seen order during save/update/apply, and redundant channel-control rebuild calls in the marker-set apply path were removed.
 - Added a sixth #85 refinement pass to enforce parent channel-panel vertical scrolling when channel content exceeds container height by preventing grouped channel rows from shrink-to-fit compression.

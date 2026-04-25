@@ -95,6 +95,7 @@ class ROIManagerPlugin(PluginBase):
         self._browser_expression_selection = None  # type: Optional[Tuple[int, int]]
         self._use_browser_expression_js = True
         self._thumbnail_downsample_cache: Dict[str, int] = {}
+        self._browser_operator_buttons: Dict[str, Button] = {}
 
         self._build_widgets()
         self._build_layout()
@@ -371,13 +372,14 @@ class ROIManagerPlugin(PluginBase):
         )
 
         operator_buttons: List[Button] = []
+        self._browser_operator_buttons = {}
         for symbol in ("(", ")", "&", "|", "!"):
-            operator_button = Button(
-                description=symbol,
+            operator_button = self._make_expression_insert_button(
+                symbol,
                 tooltip=f"Insert '{symbol}'",
                 layout=Layout(width="32px"),
             )
-            operator_button.on_click(lambda _btn, token=symbol: self._insert_browser_expression_snippet(token))
+            self._browser_operator_buttons[symbol] = operator_button
             operator_buttons.append(operator_button)
         self.ui_component.browser_expression_operator_box = HBox(
             operator_buttons,
@@ -962,13 +964,10 @@ class ROIManagerPlugin(PluginBase):
         if not snippet:
             return
 
-        js_enabled = getattr(self, "_use_browser_expression_js", True)
-        inserted = False
-        if js_enabled:
-            inserted = self._insert_browser_expression_snippet_js(snippet)
+        self._insert_browser_expression_snippet_backend(snippet)
 
-        if not inserted:
-            self._insert_browser_expression_snippet_backend(snippet)
+        if getattr(self, "_use_browser_expression_js", True):
+            self._insert_browser_expression_snippet_js(snippet)
 
 
     def _insert_browser_expression_snippet_js(self, snippet: str) -> bool:
@@ -977,46 +976,25 @@ class ROIManagerPlugin(PluginBase):
         if widget is None or output is None:
             return False
 
-        snippet_literal = json.dumps(str(snippet))
+        current_value = str(getattr(widget, "value", "") or "")
+        selection = self._resolve_browser_expression_selection(len(current_value))
+        value_literal = json.dumps(current_value)
+        start_literal = int(selection[0])
+        end_literal = int(selection[1])
         js = (
             "(function() {\n"
             "  const field = document.querySelector('.roi-expression-input input, .roi-expression-input textarea');\n"
             "  if (!field) { console.warn('[roi] expression field not found'); return; }\n"
             "  field.focus();\n"
-            "  const value = field.value || '';\n"
-            "  const start = field.selectionStart == null ? value.length : field.selectionStart;\n"
-            "  const end = field.selectionEnd == null ? start : field.selectionEnd;\n"
-            "  const before = value.slice(0, start);\n"
-            "  const after = value.slice(end);\n"
-            "  const insertion = formatInsertion(before, after, String(" + snippet_literal + "));\n"
-            "  const newValue = before + insertion.text + after;\n"
-            "  if (newValue !== value) {\n"
-            "    field.value = newValue;\n"
+            "  const widgetValue = String(" + value_literal + ");\n"
+            "  if ((field.value || '') !== widgetValue) {\n"
+            "    field.value = widgetValue;\n"
             "    field.dispatchEvent(new Event('input', { bubbles: true }));\n"
             "  }\n"
-            "  const newPos = start + insertion.cursorOffset;\n"
+            "  const start = " + str(start_literal) + ";\n"
+            "  const end = " + str(end_literal) + ";\n"
             "  if (field.setSelectionRange) {\n"
-            "    field.setSelectionRange(newPos, newPos);\n"
-            "  }\n"
-            "  function formatInsertion(before, after, snippet) {\n"
-            "    const beforeChar = before ? before.slice(-1) : '';\n"
-            "    const afterChar = after ? after.slice(0, 1) : '';\n"
-            "    const boundaryLeft = new Set(['', ' ', '\\t', '(', '&', '|', '!']);\n"
-            "    const boundaryRight = new Set(['', ' ', '\\t', ')', '&', '|']);\n"
-            "    const needsLeading = before.length > 0 && !boundaryLeft.has(beforeChar);\n"
-            "    if (snippet === '!') {\n"
-            "      const leading = needsLeading ? ' ' : '';\n"
-            "      return { text: leading + '!', cursorOffset: leading.length + 1 };\n"
-            "    }\n"
-            "    if (snippet === ')') {\n"
-            "      const leading = (needsLeading && ![' ', '('].includes(beforeChar)) ? ' ' : '';\n"
-            "      return { text: leading + ')', cursorOffset: leading.length + 1 };\n"
-            "    }\n"
-            "    const leading = needsLeading ? ' ' : '';\n"
-            "    const afterBoundary = boundaryRight.has(afterChar);\n"
-            "    const needsTrailing = snippet === '(' ? !(afterBoundary || afterChar === ')') : !afterBoundary;\n"
-            "    const trailing = needsTrailing ? ' ' : '';\n"
-            "    return { text: leading + snippet + trailing, cursorOffset: leading.length + snippet.length };\n"
+            "    field.setSelectionRange(start, end);\n"
             "  }\n"
             "})();"
         )
@@ -1133,16 +1111,29 @@ class ROIManagerPlugin(PluginBase):
         self._browser_tag_buttons = {}
         buttons: List[Button] = []
         for tag in tags:
-            button = Button(
-                description=tag,
+            button = self._make_expression_insert_button(
+                tag,
                 tooltip=f"Insert '{tag}'",
                 layout=Layout(width="auto"),
             )
-            button.on_click(lambda _btn, token=tag: self._insert_browser_expression_snippet(token))
             self._browser_tag_buttons[tag] = button
             buttons.append(button)
 
         container.children = tuple(buttons)
+
+    def _make_expression_insert_button(self, token: str, *, tooltip: str, layout: Layout) -> Button:
+        button = Button(
+            description=token,
+            tooltip=tooltip,
+            layout=layout,
+        )
+
+        def _handle_click(_btn, snippet=token):
+            self._insert_browser_expression_snippet(snippet)
+
+        button.on_click(_handle_click)
+        setattr(button, "_ueler_click_handler", _handle_click)
+        return button
 
     def _on_browser_expression_change(self, change) -> None:
         if self._suspend_browser_events or change.get("name") != "value":
