@@ -1,5 +1,42 @@
 ### v0.3.1
 
+**Issue #88 follow-up 5 (Option B) — ROI manager advanced filter replaced with self-contained anywidget expression editor**
+- Replaced all ipywidgets-based expression filter UI (Text input, Apply button, operator HBox, tag HBox, JS Output widget) with a single `ROIExpressionEditorWidget` (`anywidget.AnyWidget` subclass) defined in the new `ueler/viewer/plugin/roi_expression_editor.py`.
+- The widget renders its own DOM (input field, Apply button, operator row, tag row) entirely in ESM JavaScript. `mousedown` + `preventDefault()` on every button keeps the text input focused, so `selectionStart`/`End` are always accurate when `click` fires — no Python comm round-trip needed for insertion.
+- JS `formatInsertion()` replicates the Python `_format_expression_insertion()` spacing rules for all token types.
+- Apply button increments the `apply_requested` traitlet; Python observes the change with `_on_apply_requested_change` and triggers gallery refresh.
+- `_refresh_expression_tag_buttons(tags)` now simply sets `editor.tags = list(tags)` and the JS rebuilds the tag row via `model.on("change:tags", ...)`.
+- A `HasTraits` fallback class (no `anywidget` required) is used automatically in test environments.
+- Removed: `browser_expression_input`, `browser_expression_apply_button`, `browser_expression_operator_box`, `browser_expression_tag_box`, `browser_expression_js_output`, `_make_expression_insert_button`, `_insert_browser_expression_snippet*`, `_use_browser_expression_js`, `_browser_operator_buttons`, JSON import, IPythonJS import.
+- Updated `tests/test_roi_manager_tags.py`: removed 6 obsolete insertion tests, updated 4 Apply button tests to use `browser_expression_editor.expression`, added `test_refresh_tag_buttons_updates_editor_tags`, repurposed `test_expression_insertion_at_end_of_expression` to test `_format_expression_insertion` directly.
+- Validated with `python -m unittest tests.test_roi_manager_tags -v` — 34/34 passed.
+
+**Issue #88 follow-up 4 — ROI manager advanced filter redesigned with JS-only editing and Apply button**
+- Replaced the unreliable JS→Python caret-sync bridge with a fully JS-side expression editor: helper buttons (operators and tag tokens) now emit a self-contained JavaScript snippet per click that reads the live DOM caret, applies the same spacing rules as the Python `_format_expression_insertion()` method, updates the field value in place, and repositions the caret — entirely without a Python round-trip.
+- Added a new "Apply" button beside the expression input that triggers gallery refresh on demand; the Python handler reads `browser_expression_input.value` (auto-synced by ipywidgets) and compiles the expression.
+- Removed: hidden `browser_expression_selection_state` widget, `_install_browser_expression_selection_bridge()`, `_on_browser_expression_selection_state_change()`, `_resolve_browser_expression_selection()`, `_flush_browser_expression_selection_before_click()`, `_insert_browser_expression_snippet_backend()`, `_on_browser_expression_change()`, and `_browser_expression_selection` / `_browser_expression_selection_text` caches.
+- Updated `tests/test_roi_manager_tags.py`: removed five now-obsolete caret-tracking tests, updated five insertion tests to reflect tail-append test-mode behaviour, added five Apply button tests (widget existence, gallery refresh, error feedback, helper buttons do not auto-refresh).
+- Validated with `python -m unittest tests.test_roi_manager_tags -v` — 39/39 passed.
+
+**Issue #88 follow-up 3 — ROI manager helper buttons now honor caret-only reposition before click**
+- Fixed the remaining ROI manager advanced-filter bug where moving the caret inside the expression without editing the text still left helper-button insertion stuck at the older tail position.
+- Extended the browser selection bridge in `roi_manager_plugin.py` so helper buttons flush the live DOM selection on `pointerdown` / `mousedown` before the Python click callback runs.
+- Reinstalled that bridge after dynamic tag-button refreshes and added focused regression coverage in `tests/test_roi_manager_tags.py` for the pre-click caret-sync path.
+- Validated with `python -m unittest tests.test_roi_manager_tags -v`.
+
+**Issue #88 follow-up 2 — ROI manager helper insertions no longer reuse stale positions after manual typing**
+- Fixed a second follow-up bug where the ROI manager's advanced-filter helper buttons could still insert at an older cached position after the user manually typed more text into the expression field.
+- Added `_browser_expression_selection_text` in `roi_manager_plugin.py` so cached selections are tied to a specific expression-text revision.
+- `_on_browser_expression_change()` now collapses stale cached selections to the end of the new text when the expression changes, while the live-caret bridge continues to override that fallback when fresher mid-string caret data is available.
+- Added regression coverage in `tests/test_roi_manager_tags.py` for the exact reported sequence: helper insertion, manual typing, then helper insertion again.
+- Validated with `python -m unittest tests.test_roi_manager_tags -v`.
+
+**Issue #88 follow-up — ROI manager advanced tag-filter insertion now respects the live caret position**
+- Fixed a follow-up regression where advanced-filter helper buttons could still insert at a stale cached position after the user moved the caret in the browser field without editing the text.
+- Added a minimal browser-to-Python caret bridge in `roi_manager_plugin.py`: a hidden selection-state widget plus browser listeners keep `_browser_expression_selection` aligned with the live DOM caret while preserving Python-owned text mutation.
+- Added regression coverage in `tests/test_roi_manager_tags.py` for direct insertion and operator-button clicks that use a tracked mid-string caret position.
+- Validated with `python -m unittest tests.test_roi_manager_tags -v`.
+
 **Issue #88 — ROI manager advanced tag-filter helper buttons now respond reliably**
 - Fixed the ROI manager advanced-filter helper buttons so operator and tag buttons always mutate the expression field through the Python widget state instead of relying on a front-end-specific JavaScript insertion path.
 - Reduced the browser-side JavaScript helper to a best-effort DOM value/caret synchronization step after backend insertion, which keeps VS Code and other notebook front-ends from turning clicks into silent no-ops.

@@ -352,8 +352,6 @@ def make_plugin():
     plugin._browser_expression_cache = None
     plugin._browser_expression_error = None
     plugin._browser_tag_buttons = {}
-    plugin._browser_expression_selection = (0, 0)
-    plugin._use_browser_expression_js = False
     plugin._thumbnail_downsample_cache = {}
     plugin.THUMBNAIL_MAX_EDGE = ROIManagerPlugin.THUMBNAIL_MAX_EDGE
     plugin.width = 6
@@ -364,6 +362,10 @@ def make_plugin():
 
 
 def trigger_button(button):
+    pre_click = getattr(button, "_ueler_pre_click_handler", None)
+    if callable(pre_click):
+        pre_click(button)
+
     click = getattr(button, "click", None)
     if callable(click):
         click()
@@ -491,106 +493,64 @@ class ROIManagerTagsTests(unittest.TestCase):
         self.assertIsNone(invalid)
         self.assertIsNotNone(plugin._browser_expression_error)
 
-    def test_expression_restores_tail_selection_for_backend_updates(self):
+    def test_expression_insertion_at_end_of_expression(self):
+        """Insertion logic is now JS-only; verify _format_expression_insertion still works."""
         plugin = make_plugin()
-        widget = plugin.ui_component.browser_expression_input
+        # Empty field: no leading space needed
+        ins, _ = plugin._format_expression_insertion("", "", "alpha")
+        self.assertEqual(ins, "alpha")
+        # Ends with alphanumeric: leading space added before operator
+        ins, _ = plugin._format_expression_insertion("alpha", "", "&")
+        self.assertEqual(ins, " &")
+        # Ends with boundary char '&': no extra leading space before next token
+        ins, _ = plugin._format_expression_insertion("alpha &", "", "beta")
+        self.assertEqual(ins, "beta")
 
-        # Avoid DataFrame-dependent paths for this focused caret test.
-        plugin._refresh_browser_gallery = lambda: None
-
-        expression = "(good&hi)|~bad"
-        widget.value = expression
-
-        # Simulate a backend-driven value restore while selection is unknown.
-        plugin._browser_expression_selection = None
-        plugin._on_browser_expression_change({
-            "name": "value",
-            "new": expression,
-        })
-
-        expected_tail = (len(expression), len(expression))
-        self.assertEqual(plugin._browser_expression_selection, expected_tail)
-
-        # Inserting an operator should now append at the tail rather than prefixing.
-        plugin._insert_browser_expression_snippet("&")
-        updated_value = plugin.ui_component.browser_expression_input.value
-        self.assertTrue(updated_value.rstrip().endswith("&"))
-
-    def test_expression_insertion_respects_cached_selection(self):
+    def test_refresh_tag_buttons_updates_editor_tags(self):
         plugin = make_plugin()
-        widget = plugin.ui_component.browser_expression_input
+        plugin._refresh_expression_tag_buttons(["alpha", "beta"])
+        self.assertEqual(plugin.ui_component.browser_expression_editor.tags, ["alpha", "beta"])
 
-        plugin._refresh_browser_gallery = lambda: None
-
-        widget.value = "alpha beta"
-        plugin._browser_expression_selection = (5, 5)
-
-        plugin._insert_browser_expression_snippet("&")
-
-        self.assertEqual(widget.value, "alpha & beta")
-        self.assertEqual(plugin._browser_expression_selection, (7, 7))
-
-    def test_expression_insertion_replaces_highlighted_range(self):
+    def test_apply_button_widget_exists(self):
         plugin = make_plugin()
-        widget = plugin.ui_component.browser_expression_input
+        editor = getattr(plugin.ui_component, "browser_expression_editor", None)
+        self.assertIsNotNone(editor)
+
+    def test_apply_button_triggers_gallery_refresh(self):
+        plugin = make_plugin()
+        plugin.ui_component.browser_expression_editor.expression = "alpha & beta"
+
+        refresh_calls = []
+        plugin._refresh_browser_gallery = lambda: refresh_calls.append(1)
+
+        # Switch to advanced mode so _apply_browser_expression triggers refresh
+        plugin.ui_component.browser_filter_tabs.selected_index = 1
+
+        plugin._on_apply_expression_click(None)
+
+        self.assertEqual(len(refresh_calls), 1)
+
+    def test_apply_button_compiles_expression_and_clears_error(self):
+        plugin = make_plugin()
+        plugin.ui_component.browser_expression_editor.expression = "alpha & beta"
 
         plugin._refresh_browser_gallery = lambda: None
+        plugin.ui_component.browser_filter_tabs.selected_index = 1
 
-        widget.value = "alpha beta"
-        plugin._browser_expression_selection = (6, 10)
+        plugin._on_apply_expression_click(None)
 
-        plugin._insert_browser_expression_snippet("gamma")
+        self.assertIsNone(plugin._browser_expression_error)
 
-        self.assertEqual(widget.value, "alpha gamma")
-        self.assertEqual(plugin._browser_expression_selection, (11, 11))
-
-    def test_operator_button_click_inserts_snippet(self):
+    def test_apply_button_shows_error_for_invalid_expression(self):
         plugin = make_plugin()
-        widget = plugin.ui_component.browser_expression_input
+        plugin.ui_component.browser_expression_editor.expression = "alpha & | beta"  # invalid syntax
 
         plugin._refresh_browser_gallery = lambda: None
-        widget.value = "alpha beta"
-        plugin._browser_expression_selection = (5, 5)
+        plugin.ui_component.browser_filter_tabs.selected_index = 1
 
-        button = next(
-            child
-            for child in plugin.ui_component.browser_expression_operator_box.children
-            if getattr(child, "description", "") == "&"
-        )
-        trigger_button(button)
+        plugin._on_apply_expression_click(None)
 
-        self.assertEqual(widget.value, "alpha & beta")
-        self.assertEqual(plugin._browser_expression_selection, (7, 7))
-
-    def test_tag_button_click_inserts_snippet(self):
-        plugin = make_plugin()
-        widget = plugin.ui_component.browser_expression_input
-
-        plugin._refresh_browser_gallery = lambda: None
-        widget.value = "alpha"
-        plugin._browser_expression_selection = (len(widget.value), len(widget.value))
-
-        plugin._refresh_expression_tag_buttons(["beta"])
-        button = plugin._browser_tag_buttons["beta"]
-        trigger_button(button)
-
-        self.assertEqual(widget.value, "alpha beta")
-        self.assertEqual(plugin._browser_expression_selection, (10, 10))
-
-    def test_expression_insertion_falls_back_when_js_path_reports_success_without_mutation(self):
-        plugin = make_plugin()
-        widget = plugin.ui_component.browser_expression_input
-
-        plugin._refresh_browser_gallery = lambda: None
-        widget.value = "alpha beta"
-        plugin._browser_expression_selection = (5, 5)
-        plugin._use_browser_expression_js = True
-        plugin._insert_browser_expression_snippet_js = lambda _snippet: True
-
-        plugin._insert_browser_expression_snippet("&")
-
-        self.assertEqual(widget.value, "alpha & beta")
-        self.assertEqual(plugin._browser_expression_selection, (7, 7))
+        self.assertIsNotNone(plugin._browser_expression_error)
 
     def test_thumbnail_downsample_uses_roi_viewport_dimensions(self):
         plugin = make_plugin()
@@ -661,8 +621,6 @@ class ROIManagerMapModeTests(unittest.TestCase):
         p._browser_expression_cache = None
         p._browser_expression_error = None
         p._browser_tag_buttons = {}
-        p._browser_expression_selection = (0, 0)
-        p._use_browser_expression_js = False
         p._thumbnail_downsample_cache = {}
         p.THUMBNAIL_MAX_EDGE = ROIManagerPlugin.THUMBNAIL_MAX_EDGE
         p.width = 6

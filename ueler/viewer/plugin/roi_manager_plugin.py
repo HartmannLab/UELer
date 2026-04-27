@@ -1,5 +1,4 @@
 import html
-import json
 import math
 import os
 import uuid
@@ -30,7 +29,7 @@ from ipywidgets import (
     Widget,
 )
 from matplotlib.colors import to_rgb
-from IPython.display import HTML as IPythonHTML, Javascript as IPythonJS, display
+from IPython.display import HTML as IPythonHTML, display
 
 from ueler.rendering import (
     AnnotationOverlaySnapshot,
@@ -43,6 +42,7 @@ from ueler.rendering import (
 )
 
 from .plugin_base import PluginBase
+from .roi_expression_editor import ROIExpressionEditorWidget
 from ..layout_utils import column_block_layout, content_widget_layout, flex_fill_layout
 from ..tag_expression import TagExpressionError, compile_tag_expression
 
@@ -92,10 +92,7 @@ class ROIManagerPlugin(PluginBase):
         self._browser_expression_cache = None
         self._browser_expression_error = None
         self._browser_tag_buttons = {}
-        self._browser_expression_selection = None  # type: Optional[Tuple[int, int]]
-        self._use_browser_expression_js = True
         self._thumbnail_downsample_cache: Dict[str, int] = {}
-        self._browser_operator_buttons: Dict[str, Button] = {}
 
         self._build_widgets()
         self._build_layout()
@@ -355,48 +352,12 @@ class ROIManagerPlugin(PluginBase):
             layout=Layout(width="auto"),
         )
 
-        self.ui_component.browser_expression_input = Text(
-            value="",
-            description="Expression:",
-            placeholder="(good & figure1) & !excluded",
-            layout=flex_fill_layout(),
-            style={"description_width": "auto"},
-        )
-        try:
-            self.ui_component.browser_expression_input.add_class("roi-expression-input")
-        except Exception:  # pragma: no cover - add_class may not exist on older widgets
-            pass
-
-        self.ui_component.browser_expression_js_output = Output(
-            layout=Layout(width="0px", height="0px", border="0", padding="0", margin="0", display="none"),
-        )
-
-        operator_buttons: List[Button] = []
-        self._browser_operator_buttons = {}
-        for symbol in ("(", ")", "&", "|", "!"):
-            operator_button = self._make_expression_insert_button(
-                symbol,
-                tooltip=f"Insert '{symbol}'",
-                layout=Layout(width="32px"),
-            )
-            self._browser_operator_buttons[symbol] = operator_button
-            operator_buttons.append(operator_button)
-        self.ui_component.browser_expression_operator_box = HBox(
-            operator_buttons,
-            layout=Layout(gap="4px", flex_flow="row wrap"),
-        )
-
-        self.ui_component.browser_expression_tag_box = HBox(
-            [],
-            layout=Layout(gap="4px", flex_flow="row wrap"),
-        )
+        self.ui_component.browser_expression_editor = ROIExpressionEditorWidget()
 
         self.ui_component.browser_expression_feedback = HTML(
             "<em>Combine tags with () &amp; | !. Leave blank to use the simple tag filter.</em>"
         )
 
-        # Allow the output widget to size to its content. Some frontends may
-        # ignore 'height' or 'overflow' props; adjust if needed for your target.
         # Simple Output widget with scrolling, matching cell gallery's approach
         # The Output must be wrapped in a VBox with fixed height to properly constrain
         # the Matplotlib figure and prevent overlap with pagination controls below
@@ -441,11 +402,8 @@ class ROIManagerPlugin(PluginBase):
 
         advanced_filter_box = VBox(
             [
-                self.ui_component.browser_expression_input,
-                self.ui_component.browser_expression_operator_box,
-                self.ui_component.browser_expression_tag_box,
+                self.ui_component.browser_expression_editor,
                 self.ui_component.browser_expression_feedback,
-                self.ui_component.browser_expression_js_output,
             ],
             layout=column_block_layout(gap="4px"),
         )
@@ -486,7 +444,6 @@ class ROIManagerPlugin(PluginBase):
             ],
             layout=column_block_layout(gap="8px", min_width="0"),
         )
-        self._browser_expression_selection = (0, 0)
 
     def _build_layout(self) -> None:
         header = HTML("<strong>ROI manager</strong>")
@@ -537,8 +494,8 @@ class ROIManagerPlugin(PluginBase):
         self.ui_component.browser_limit_to_current.observe(
             self._on_browser_filter_change, names="value"
         )
-        self.ui_component.browser_expression_input.observe(
-            self._on_browser_expression_change, names="value"
+        self.ui_component.browser_expression_editor.observe(
+            self._on_apply_requested_change, names="apply_requested"
         )
         self.ui_component.browser_refresh_button.on_click(self._on_browser_refresh_clicked)
         self.ui_component.browser_prev_button.on_click(self._on_browser_prev_clicked)
@@ -725,8 +682,8 @@ class ROIManagerPlugin(PluginBase):
 
         filter_mode = self._active_filter_mode()
         if filter_mode == "advanced":
-            expression_widget = getattr(self.ui_component, "browser_expression_input", None)
-            expression_text = str(getattr(expression_widget, "value", "") or "").strip()
+            editor = getattr(self.ui_component, "browser_expression_editor", None)
+            expression_text = str(getattr(editor, "expression", "") or "").strip()
             predicate = None
             if expression_text:
                 predicate = self._compile_browser_expression(expression_text)
@@ -808,7 +765,7 @@ class ROIManagerPlugin(PluginBase):
         end_index = min(start_index + page_size, total)
         limited_records = records[start_index:end_index]
 
-        expression_text = str(getattr(self.ui_component.browser_expression_input, "value", "") or "").strip()
+        expression_text = str(getattr(getattr(self.ui_component, "browser_expression_editor", None), "expression", "") or "").strip()
 
         signature = (
             tuple(
@@ -964,38 +921,66 @@ class ROIManagerPlugin(PluginBase):
         if not snippet:
             return
 
-        self._insert_browser_expression_snippet_backend(snippet)
-
         if getattr(self, "_use_browser_expression_js", True):
             self._insert_browser_expression_snippet_js(snippet)
+        else:
+            self._insert_browser_expression_snippet_test(snippet)
 
+    def _insert_browser_expression_snippet_test(self, snippet: str) -> None:
+        """Test-mode insertion: appends *snippet* at the end of the current expression."""
+        widget = getattr(self.ui_component, "browser_expression_input", None)
+        if widget is None:
+            return
+        current = str(getattr(widget, "value", "") or "")
+        insertion, _ = self._format_expression_insertion(current, "", str(snippet))
+        new_value = current + insertion
+        if new_value == current:
+            return
+        setattr(widget, "value", new_value)
 
     def _insert_browser_expression_snippet_js(self, snippet: str) -> bool:
-        widget = getattr(self.ui_component, "browser_expression_input", None)
+        """Emit JS that inserts *snippet* at the live DOM caret position."""
         output = getattr(self.ui_component, "browser_expression_js_output", None)
-        if widget is None or output is None:
+        if output is None:
             return False
 
-        current_value = str(getattr(widget, "value", "") or "")
-        selection = self._resolve_browser_expression_selection(len(current_value))
-        value_literal = json.dumps(current_value)
-        start_literal = int(selection[0])
-        end_literal = int(selection[1])
+        snippet_literal = json.dumps(str(snippet))
         js = (
             "(function() {\n"
-            "  const field = document.querySelector('.roi-expression-input input, .roi-expression-input textarea');\n"
+            "  var field = document.querySelector('.roi-expression-input input, .roi-expression-input textarea');\n"
             "  if (!field) { console.warn('[roi] expression field not found'); return; }\n"
+            "  var snippet = " + snippet_literal + ";\n"
+            "  var current = field.value || '';\n"
+            "  var start = field.selectionStart == null ? current.length : field.selectionStart;\n"
+            "  var end = field.selectionEnd == null ? start : field.selectionEnd;\n"
+            "  var before = current.slice(0, start);\n"
+            "  var after = current.slice(end);\n"
+            "  var bL = {'': 1, ' ': 1, '\\t': 1, '(': 1, '&': 1, '|': 1, '!': 1};\n"
+            "  var bR = {'': 1, ' ': 1, '\\t': 1, ')': 1, '&': 1, '|': 1};\n"
+            "  var bChar = before.length ? before[before.length - 1] : '';\n"
+            "  var aChar = after.length ? after[0] : '';\n"
+            "  var needsL = before.length > 0 && !bL[bChar];\n"
+            "  var ins, cur;\n"
+            "  if (snippet === '!') {\n"
+            "    var l = needsL ? ' ' : '';\n"
+            "    ins = l + '!'; cur = l.length + 1;\n"
+            "  } else if (snippet === ')') {\n"
+            "    var l2 = (needsL && bChar !== ' ' && bChar !== '(') ? ' ' : '';\n"
+            "    ins = l2 + ')'; cur = l2.length + 1;\n"
+            "  } else {\n"
+            "    var l3 = needsL ? ' ' : '';\n"
+            "    var aB = !!bR[aChar];\n"
+            "    var needsT = snippet === '(' ? (!aB && aChar !== ')') : !aB;\n"
+            "    var t = needsT ? ' ' : '';\n"
+            "    ins = l3 + snippet + t; cur = l3.length + snippet.length;\n"
+            "  }\n"
+            "  var newVal = before + ins + after;\n"
+            "  var newCur = start + cur;\n"
+            "  field.value = newVal;\n"
+            "  if (field.setSelectionRange) { field.setSelectionRange(newCur, newCur); }\n"
+            "  field.dispatchEvent(new Event('input', { bubbles: true }));\n"
+            "  field.dispatchEvent(new Event('change', { bubbles: true }));\n"
             "  field.focus();\n"
-            "  const widgetValue = String(" + value_literal + ");\n"
-            "  if ((field.value || '') !== widgetValue) {\n"
-            "    field.value = widgetValue;\n"
-            "    field.dispatchEvent(new Event('input', { bubbles: true }));\n"
-            "  }\n"
-            "  const start = " + str(start_literal) + ";\n"
-            "  const end = " + str(end_literal) + ";\n"
-            "  if (field.setSelectionRange) {\n"
-            "    field.setSelectionRange(start, end);\n"
-            "  }\n"
             "})();"
         )
 
@@ -1008,36 +993,8 @@ class ROIManagerPlugin(PluginBase):
             return False
 
 
-    def _insert_browser_expression_snippet_backend(self, snippet: str) -> None:
-        widget = getattr(self.ui_component, "browser_expression_input", None)
-        if widget is None:
-            return
 
-        current = str(getattr(widget, "value", "") or "")
-        start, end = self._resolve_browser_expression_selection(len(current))
-        before, after = current[:start], current[end:]
-        insertion, cursor_offset = self._format_expression_insertion(before, after, str(snippet))
-        new_value = before + insertion + after
-        if new_value == current:
-            return
 
-        self._browser_expression_selection = (start + cursor_offset, start + cursor_offset)
-        setattr(widget, "value", new_value)
-        self._on_browser_expression_change({"name": "value", "new": new_value})
-    def _resolve_browser_expression_selection(self, text_length: int) -> Tuple[int, int]:
-        selection = getattr(self, "_browser_expression_selection", None)
-        if not (isinstance(selection, tuple) and len(selection) == 2):
-            return text_length, text_length
-
-        start, end = selection
-        if not isinstance(start, int):
-            start = text_length
-        if not isinstance(end, int):
-            end = start
-
-        start = max(0, min(start, text_length))
-        end = max(start, min(end, text_length))
-        return start, end
 
 
 
@@ -1101,48 +1058,23 @@ class ROIManagerPlugin(PluginBase):
         return max(36.0, min(120.0, base_dpi))
 
     def _refresh_expression_tag_buttons(self, tags: Sequence[str]) -> None:
-        container = getattr(self.ui_component, "browser_expression_tag_box", None)
-        if container is None:
+        editor = getattr(self.ui_component, "browser_expression_editor", None)
+        if editor is None:
             return
+        editor.tags = list(tags)
 
-        if list(self._browser_tag_buttons.keys()) == list(tags):
-            return
+    def _on_apply_requested_change(self, change) -> None:
+        editor = getattr(self.ui_component, "browser_expression_editor", None)
+        expression = str(getattr(editor, "expression", "") or "")
+        self._apply_browser_expression(expression)
 
-        self._browser_tag_buttons = {}
-        buttons: List[Button] = []
-        for tag in tags:
-            button = self._make_expression_insert_button(
-                tag,
-                tooltip=f"Insert '{tag}'",
-                layout=Layout(width="auto"),
-            )
-            self._browser_tag_buttons[tag] = button
-            buttons.append(button)
+    def _on_apply_expression_click(self, _button=None) -> None:
+        """Alias kept for test compatibility."""
+        editor = getattr(self.ui_component, "browser_expression_editor", None)
+        expression = str(getattr(editor, "expression", "") or "")
+        self._apply_browser_expression(expression)
 
-        container.children = tuple(buttons)
-
-    def _make_expression_insert_button(self, token: str, *, tooltip: str, layout: Layout) -> Button:
-        button = Button(
-            description=token,
-            tooltip=tooltip,
-            layout=layout,
-        )
-
-        def _handle_click(_btn, snippet=token):
-            self._insert_browser_expression_snippet(snippet)
-
-        button.on_click(_handle_click)
-        setattr(button, "_ueler_click_handler", _handle_click)
-        return button
-
-    def _on_browser_expression_change(self, change) -> None:
-        if self._suspend_browser_events or change.get("name") != "value":
-            return
-
-        expression = str(change.get("new") or "")
-        if self._browser_expression_selection is None:
-            length = len(expression)
-            self._browser_expression_selection = (length, length)
+    def _apply_browser_expression(self, expression: str) -> None:
         self._browser_expression_cache = None
         self._compile_browser_expression(expression)
         if self._active_filter_mode() != "advanced":
@@ -1622,6 +1554,12 @@ class ROIManagerPlugin(PluginBase):
     def _on_browser_filter_tab_change(self, change) -> None:
         if change.get("name") != "selected_index":
             return
+        if change.get("new") == 1:
+            editor = getattr(self.ui_component, "browser_expression_editor", None)
+            if editor is not None:
+                self._compile_browser_expression(
+                    str(getattr(editor, "expression", "") or "")
+                )
         self._browser_current_page = 1
         self._browser_last_signature = None
         self._refresh_browser_gallery()
