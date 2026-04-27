@@ -1,5 +1,15 @@
 ### v0.3.1
 
+**Issue #89 — Mask Painter UI Layout and Usability Redesign**
+- Replaced the 30%/70% `HBox` split class-color list with a vertical `VBox` (`colors_layout`) placing `TagsInput` and default `ColorPicker` above the per-class scroll area at full width, eliminating chip overflow and label truncation.
+- Replaced per-class `ToggleButtons(options=["outline","fill"])` with a compact `Checkbox(description="fill", layout=Layout(width="60px"))`, saving ~100 px per row and eliminating horizontal overflow.
+- Wrapped palette Save/Load/Manage `Tab` in a collapsed `Accordion` (`selected_index=None`) so it takes zero height until the user expands it.
+- Replaced the `Output` feedback widget with a styled `HTML` label (`feedback_label`) showing ✓ (green) or ⚠️ (orange) messages inline.
+- Redesigned the top bar into two `HBox` rows: row 1 holds `enabled_checkbox` + `identifier_dropdown`; row 2 holds `update_button` + `apply_saved_button` + `saved_sets_dropdown`.
+- Added `_refresh_save_button_state()`, wired to `set_name_input.value` and `identifier_dropdown.value` observers, that keeps `save_button.disabled=True` until both fields are non-empty.
+- Updated `tests/test_mask_painter_mode_visibility.py` for `Checkbox`-based mode controls (replacing `ToggleButtons` bool semantics) and all related assertions.
+- Validated with `python -m unittest tests.test_mask_painter_mode_visibility tests.test_mask_color_sets tests.test_mask_color_overlay -v` — 35/35 passed.
+
 **Issue #88 follow-up 5 (Option B) — ROI manager advanced filter replaced with self-contained anywidget expression editor**
 - Replaced all ipywidgets-based expression filter UI (Text input, Apply button, operator HBox, tag HBox, JS Output widget) with a single `ROIExpressionEditorWidget` (`anywidget.AnyWidget` subclass) defined in the new `ueler/viewer/plugin/roi_expression_editor.py`.
 - The widget renders its own DOM (input field, Apply button, operator row, tag row) entirely in ESM JavaScript. `mousedown` + `preventDefault()` on every button keeps the text input focused, so `selectionStart`/`End` are always accurate when `click` fires — no Python comm round-trip needed for insertion.

@@ -60,14 +60,14 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
             "TypeA": W.ColorPicker(description="TypeA", value="#FF0000"),
             "TypeB": W.ColorPicker(description="TypeB", value="#0000FF"),
         }
-        from ipywidgets import Checkbox, ToggleButtons, Layout
+        from ipywidgets import Checkbox, Layout
         painter.class_visible_controls = {
             "TypeA": Checkbox(value=True, indent=False, layout=Layout(width="30px")),
             "TypeB": Checkbox(value=True, indent=False, layout=Layout(width="30px")),
         }
         painter.class_mode_controls = {
-            "TypeA": ToggleButtons(options=["outline", "fill"], value="outline"),
-            "TypeB": ToggleButtons(options=["outline", "fill"], value="outline"),
+            "TypeA": Checkbox(value=False, description="fill", indent=False, layout=Layout(width="60px")),
+            "TypeB": Checkbox(value=False, description="fill", indent=False, layout=Layout(width="60px")),
         }
         painter.ui_component.show_all_checkbox.value = True
         painter.selected_classes = ["TypeA", "TypeB"]
@@ -110,8 +110,8 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
     def test_get_mode_map_returns_outline_by_default(self):
         """get_mode_map_for_fov returns 'outline' for cells registered with outline mode."""
         painter = self._make_painter()
-        painter.class_mode_controls["TypeA"].value = "outline"
-        painter.class_mode_controls["TypeB"].value = "outline"
+        painter.class_mode_controls["TypeA"].value = False
+        painter.class_mode_controls["TypeB"].value = False
 
         painter.apply_colors_to_masks(None, notify_cell_gallery=False)
 
@@ -124,8 +124,8 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
     def test_get_mode_map_returns_fill_for_fill_class(self):
         """Cells of a class set to fill mode appear in mode_map as 'fill'."""
         painter = self._make_painter()
-        painter.class_mode_controls["TypeA"].value = "fill"
-        painter.class_mode_controls["TypeB"].value = "outline"
+        painter.class_mode_controls["TypeA"].value = True
+        painter.class_mode_controls["TypeB"].value = False
 
         painter.apply_colors_to_masks(None, notify_cell_gallery=False)
 
@@ -139,7 +139,7 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
     def test_mode_cache_cleared_on_cell_table_change(self):
         """_cell_mode_cache and _last_applied_class_modes reset when cell table changes."""
         painter = self._make_painter()
-        painter.class_mode_controls["TypeA"].value = "fill"
+        painter.class_mode_controls["TypeA"].value = True
         painter.apply_colors_to_masks(None, notify_cell_gallery=False)
 
         self.assertTrue(len(painter._cell_mode_cache) > 0)
@@ -151,7 +151,7 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
     def test_mode_change_is_skipped_when_unchanged(self):
         """_last_applied_class_modes caches mode; re-applying same mode is a no-op."""
         painter = self._make_painter()
-        painter.class_mode_controls["TypeA"].value = "fill"
+        painter.class_mode_controls["TypeA"].value = True
         painter.apply_colors_to_masks(None, notify_cell_gallery=False)
 
         before = dict(painter._cell_mode_cache)
@@ -197,8 +197,8 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
         )
 
         painter = self._make_painter()
-        painter.class_mode_controls["TypeA"].value = "fill"
-        painter.class_mode_controls["TypeB"].value = "outline"
+        painter.class_mode_controls["TypeA"].value = True
+        painter.class_mode_controls["TypeB"].value = False
         painter.class_visible_controls["TypeB"].value = False
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -209,7 +209,7 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
                 hidden_cache=painter.hidden_color_cache,
             )
             modes_map = {
-                cls: getattr(painter.class_mode_controls.get(cls), "value", "outline")
+                cls: ("fill" if getattr(painter.class_mode_controls.get(cls), "value", False) else "outline")
                 for cls in class_order
             }
             visible_map = {
@@ -231,14 +231,14 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
             write_color_set_file(path, payload)
 
             # Reset controls before loading
-            painter.class_mode_controls["TypeA"].value = "outline"
+            painter.class_mode_controls["TypeA"].value = False
             painter.class_visible_controls["TypeB"].value = True
 
             painter._load_color_set(path)
 
             # Verify modes restored
-            self.assertEqual(painter.class_mode_controls["TypeA"].value, "fill")
-            self.assertEqual(painter.class_mode_controls["TypeB"].value, "outline")
+            self.assertTrue(painter.class_mode_controls["TypeA"].value)   # fill
+            self.assertFalse(painter.class_mode_controls["TypeB"].value)  # outline
             # Verify visibility restored
             self.assertFalse(painter.class_visible_controls["TypeB"].value)
             self.assertTrue(painter.class_visible_controls["TypeA"].value)

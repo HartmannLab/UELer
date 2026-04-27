@@ -10,17 +10,18 @@ from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 from ipywidgets import (
+    Accordion,
     Button,
     Checkbox,
     ColorPicker,
     Dropdown,
+    HTML,
     HBox,
+    Label,
     Layout,
-    Output,
     Tab,
     TagsInput,
     Text,
-    ToggleButtons,
     VBox,
 )
 
@@ -145,7 +146,7 @@ class MaskPainterDisplay(PluginBase):
         self.ui_component.default_color_picker.observe(self.on_default_color_change, names="value")
         self.class_color_controls: Dict[str, ColorPicker] = {}
         self.class_visible_controls: Dict[str, Checkbox] = {}
-        self.class_mode_controls: Dict[str, ToggleButtons] = {}
+        self.class_mode_controls: Dict[str, Checkbox] = {}
         self.current_classes: List[str] = []
         self.current_identifier: Optional[str] = None
         self.selected_classes: List[str] = []
@@ -189,8 +190,11 @@ class MaskPainterDisplay(PluginBase):
         self.ui_component.apply_saved_button.on_click(self.apply_saved_color_set)
         self.ui_component.overwrite_saved_button.on_click(self.overwrite_saved_color_set)
         self.ui_component.delete_saved_button.on_click(self.delete_saved_color_set)
+        self.ui_component.set_name_input.observe(self._refresh_save_button_state, names="value")
+        self.ui_component.identifier_dropdown.observe(self._refresh_save_button_state, names="value")
 
         self._load_registry_for_folder(self.registry_folder)
+        self._refresh_save_button_state()
         self.initiate_ui()
 
     def _initialise_identifier_options(self) -> None:
@@ -232,15 +236,16 @@ class MaskPainterDisplay(PluginBase):
             )
             vis_cb.observe(self._on_visibility_or_mode_change, names="value")
             self.class_visible_controls[cls] = vis_cb
-            mode_tb = ToggleButtons(
-                options=[("outline", "outline"), ("fill", "fill")],
-                value="outline",
-                layout=Layout(width="160px"),
-                style={"button_width": "70px"},
+            mode_cb = Checkbox(
+                value=False,
+                description="fill",
+                indent=False,
+                layout=Layout(width="60px"),
+                tooltip=f"Render {cls} as filled (unchecked = outline)",
             )
-            mode_tb.observe(self._on_visibility_or_mode_change, names="value")
-            self.class_mode_controls[cls] = mode_tb
-            color_picker_widgets.append(HBox([vis_cb, picker, mode_tb]))
+            mode_cb.observe(self._on_visibility_or_mode_change, names="value")
+            self.class_mode_controls[cls] = mode_cb
+            color_picker_widgets.append(HBox([vis_cb, picker, mode_cb]))
 
         self.ui_component.color_picker_box.children = tuple(color_picker_widgets)
         allowed_tags = list(classes)
@@ -435,7 +440,7 @@ class MaskPainterDisplay(PluginBase):
                 hidden_cache=self.hidden_color_cache,
             )
             modes_map = {
-                cls: getattr(self.class_mode_controls.get(cls), "value", "outline")
+                cls: ("fill" if getattr(self.class_mode_controls.get(cls), "value", False) else "outline")
                 for cls in class_order
             }
             visible_map = {
@@ -508,7 +513,7 @@ class MaskPainterDisplay(PluginBase):
                 hidden_cache=self.hidden_color_cache,
             )
             modes_map = {
-                cls: getattr(self.class_mode_controls.get(cls), "value", "outline")
+                cls: ("fill" if getattr(self.class_mode_controls.get(cls), "value", False) else "outline")
                 for cls in class_order
             }
             visible_map = {
@@ -717,9 +722,9 @@ class MaskPainterDisplay(PluginBase):
         modes_payload = payload.get("modes", {})
         if isinstance(modes_payload, dict):
             for cls, mode in modes_payload.items():
-                tb = self.class_mode_controls.get(str(cls))
-                if tb is not None and mode in ("outline", "fill"):
-                    tb.value = mode
+                cb = self.class_mode_controls.get(str(cls))
+                if cb is not None and mode in ("outline", "fill"):
+                    cb.value = (mode == "fill")
         # Restore per-class visibility
         visible_payload = payload.get("visible", {})
         if isinstance(visible_payload, dict):
@@ -867,8 +872,8 @@ class MaskPainterDisplay(PluginBase):
                 continue
 
             color = picker.value
-            mode_tb = self.class_mode_controls.get(cls_str)
-            mode = getattr(mode_tb, "value", "outline") if mode_tb is not None else "outline"
+            mode_cb = self.class_mode_controls.get(cls_str)
+            mode = ("fill" if mode_cb.value else "outline") if mode_cb is not None else "outline"
             if current_fov:
                 _apply_color_to_current_fov(cls_value, color)
             if register_globally:
@@ -993,19 +998,23 @@ class MaskPainterDisplay(PluginBase):
         return dict(self._cell_mode_cache.get(str(fov), {}))
 
     def initiate_ui(self):
-        controls = HBox([
-            self.ui_component.identifier_dropdown,
-            self.ui_component.update_button,
+        row1 = HBox([
             self.ui_component.enabled_checkbox,
+            self.ui_component.identifier_dropdown,
         ])
-
-        self.ui_component.control_panel = controls
+        row2 = HBox([
+            self.ui_component.update_button,
+            self.ui_component.apply_saved_button,
+            self.ui_component.saved_sets_dropdown,
+        ])
+        self.ui_component.control_panel = VBox([row1, row2])
         self.ui = VBox(
             [
-                controls,
+                self.ui_component.control_panel,
+                HTML("<hr style='margin:4px 0'>"),
                 self.ui_component.colors_layout,
-                self.ui_component.color_set_tab,
-                self.ui_component.feedback_output,
+                self.ui_component.palette_accordion,
+                self.ui_component.feedback_label,
             ],
             layout=Layout(max_height="600px", overflow_y="auto"),
         )
@@ -1039,12 +1048,18 @@ class MaskPainterDisplay(PluginBase):
         self.ui_component.manual_folder_input.value = ""
         self.ui_component.toggle_manual_folder_box(False)
 
+    def _refresh_save_button_state(self, _=None) -> None:
+        """Enable Save set button only when both a name and an identifier are set."""
+        name_val = getattr(self.ui_component.set_name_input, "value", None) or ""
+        has_name = bool(str(name_val).strip())
+        has_identifier = bool(getattr(self.ui_component.identifier_dropdown, "value", None))
+        self.ui_component.save_button.disabled = not (has_name and has_identifier)
+
     def _log(self, message: str, error: bool = False, clear: bool = False) -> None:
-        with self.ui_component.feedback_output:
-            if clear:
-                self.ui_component.feedback_output.clear_output(wait=True)
-            prefix = "⚠️ " if error else ""
-            print(f"{prefix}{message}")
+        if error:
+            self.ui_component.feedback_label.value = f'<span style="color:orange">⚠️ {message}</span>'
+        else:
+            self.ui_component.feedback_label.value = f'<span style="color:green">✓ {message}</span>'
 
     def _determine_storage_folder(self) -> Optional[Path]:
         base_folder = getattr(self.main_viewer, "base_folder", None)
@@ -1152,25 +1167,35 @@ class UiComponent:
         self.SidePlots: Dict[str, object] = {}
 
         self.identifier_dropdown = Dropdown(description="Identifier:")
-        self.update_button = Button(description="Update Colors")
-        self.enabled_checkbox = Checkbox(value=True, description="Enable", tooltip="Enable mask painter")
+        self.update_button = Button(description="Update Colors", button_style="primary")
+        self.enabled_checkbox = Checkbox(value=True, description="Enable", indent=False, tooltip="Enable mask painter")
 
-        self.sorting_items_tagsinput = TagsInput(value=tuple(), allowed_tags=[], description="Items:", allow_duplicates=False)
-        self.show_all_checkbox = Checkbox(description="Show all classes", value=False)
-        self.default_color_picker = ColorPicker(description="Default color", value=DEFAULT_COLOR, layout=Layout(width="auto"))
-        self.color_picker_box = VBox([], layout=Layout(width="70%"))
-
-        self.sorting_container = VBox(
-            [self.sorting_items_tagsinput, self.show_all_checkbox, self.default_color_picker],
-            layout=Layout(width="30%", overflow_x="auto"),
+        self.sorting_items_tagsinput = TagsInput(
+            value=tuple(), allowed_tags=[], description="", allow_duplicates=False,
+            layout=Layout(width="100%"),
         )
-        self.colors_layout = HBox([
-            self.sorting_container,
+        self.show_all_checkbox = Checkbox(
+            description="Show all", value=False, indent=False, layout=Layout(width="auto"),
+        )
+        self.default_color_picker = ColorPicker(
+            description="Default:", value=DEFAULT_COLOR, layout=Layout(width="auto"),
+        )
+        self.color_picker_box = VBox([], layout=Layout(overflow_y="auto", max_height="300px"))
+
+        sorting_header = HBox(
+            [Label("Class order / visible:"), self.show_all_checkbox],
+            layout=Layout(align_items="center"),
+        )
+        self.colors_layout = VBox([
+            sorting_header,
+            self.sorting_items_tagsinput,
+            HBox([self.default_color_picker]),
+            HTML("<hr style='margin:4px 0'>"),
             self.color_picker_box,
         ])
 
         self.set_name_input = Text(description="Name:", placeholder="My palette")
-        self.save_button = Button(description="Save set", icon="save")
+        self.save_button = Button(description="Save set", icon="save", disabled=True)
 
         self.folder_display = Text(description="Folder:", value="", disabled=True, layout=Layout(width="70%"))
         self.change_folder_button = Button(description="Change location", icon="folder-open")
@@ -1207,7 +1232,7 @@ class UiComponent:
         load_box_children.append(self.load_button)
         self.load_box = VBox(load_box_children)
 
-        self.saved_sets_dropdown = Dropdown(description="Saved sets:", options=[("No saved sets", "")])
+        self.saved_sets_dropdown = Dropdown(description="", options=[("No saved sets", "")], layout=Layout(width="auto"))
         self.apply_saved_button = Button(description="Apply set")
         self.overwrite_saved_button = Button(description="Overwrite")
         self.delete_saved_button = Button(description="Delete", button_style="danger")
@@ -1223,7 +1248,10 @@ class UiComponent:
         self.color_set_tab.set_title(1, "Load")
         self.color_set_tab.set_title(2, "Manage")
 
-        self.feedback_output = Output(layout=Layout(max_height="120px", overflow_y="auto"))
+        self.palette_accordion = Accordion(children=[self.color_set_tab], selected_index=None)
+        self.palette_accordion.set_title(0, "Palette: Save / Load / Manage")
+
+        self.feedback_label = HTML(value="")
 
         self.control_panel = None
 
