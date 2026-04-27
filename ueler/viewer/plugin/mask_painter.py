@@ -149,6 +149,7 @@ class MaskPainterDisplay(PluginBase):
         self.class_visible_controls: Dict[str, Checkbox] = {}
         self.class_mode_controls: Dict[str, Checkbox] = {}
         self.current_classes: List[str] = []
+        self._active_classes: List[str] = []
         self.current_identifier: Optional[str] = None
         self.selected_classes: List[str] = []
         self.hidden_color_cache: Dict[str, str] = {}
@@ -198,6 +199,8 @@ class MaskPainterDisplay(PluginBase):
         # Wire anywidget class-list traitlet changes → Python state
         _w = self.ui_component.class_list_widget
         _w.observe(self._pull_from_widget, names=["class_order", "class_colors", "class_visible", "class_fill"])
+        _w.observe(self._on_add_requested, names=["add_requested"])
+        _w.observe(self._on_remove_requested, names=["remove_requested"])
 
         self._load_registry_for_folder(self.registry_folder)
         self._refresh_save_button_state()
@@ -225,6 +228,7 @@ class MaskPainterDisplay(PluginBase):
         classes = column.dropna().astype(str).unique().tolist()
         classes.sort()
         self.current_classes = classes
+        self._active_classes = classes[:min(len(classes), 6)]
 
         self.class_color_controls.clear()
         self.class_visible_controls.clear()
@@ -319,13 +323,7 @@ class MaskPainterDisplay(PluginBase):
         ]
 
     def _get_hidden_classes(self) -> List[str]:
-        """Return classes that are either not selected or have their checkbox unchecked."""
-        if self.ui_component.show_all_checkbox.value:
-            # Only checkbox-hidden classes
-            return [
-                key for key, cb in self.class_visible_controls.items()
-                if not cb.value
-            ]
+        """Return classes that are either not active, or active but with visibility unchecked."""
         visible = set(self._get_visible_classes())
         return [key for key in self.class_color_controls.keys() if key not in visible]
 
@@ -594,6 +592,7 @@ class MaskPainterDisplay(PluginBase):
                 ordered_unique.append(cls)
                 seen.add(cls)
         self.current_classes = ordered_unique
+        self._active_classes = [cls for cls in ordered_unique if cls in self.class_color_controls]
 
         # Restore per-class modes
         modes_payload = payload.get("modes", {})
@@ -800,6 +799,7 @@ class MaskPainterDisplay(PluginBase):
 
     def on_cell_table_change(self):
         self._initialise_identifier_options()
+        self._active_classes = []
         # Clear tracking state when cell table changes
         self._last_applied_fov = None
         self._last_applied_identifier = None
@@ -941,17 +941,20 @@ class MaskPainterDisplay(PluginBase):
         if self._syncing or not self.class_color_controls:
             return
         w = self.ui_component.class_list_widget
-        order = self._get_full_class_order()
-        colors = {cls: (p.value or self.default_color) for cls, p in self.class_color_controls.items()}
-        visible = {cls: cb.value for cls, cb in self.class_visible_controls.items()}
-        fill = {cls: cb.value for cls, cb in self.class_mode_controls.items()}
+        active = list(self._active_classes) if self._active_classes else self._get_full_class_order()
+        active_set = set(active)
+        available = [cls for cls in self.current_classes if cls not in active_set]
+        colors = {cls: (p.value or self.default_color) for cls, p in self.class_color_controls.items() if cls in active_set}
+        visible = {cls: cb.value for cls, cb in self.class_visible_controls.items() if cls in active_set}
+        fill = {cls: cb.value for cls, cb in self.class_mode_controls.items() if cls in active_set}
         self._syncing = True
         try:
-            w.class_order = order
+            w.class_order = active
             w.class_colors = colors
             w.class_visible = visible
             w.class_fill = fill
             w.default_color = self.default_color
+            w.available_classes = available
         finally:
             self._syncing = False
 
@@ -964,7 +967,7 @@ class MaskPainterDisplay(PluginBase):
         self._syncing = True
         try:
             if name == "class_order":
-                self.current_classes = list(w.class_order)
+                self._active_classes = list(w.class_order)
             elif name == "class_colors":
                 for cls, color in w.class_colors.items():
                     picker = self.class_color_controls.get(cls)
@@ -988,6 +991,50 @@ class MaskPainterDisplay(PluginBase):
             self._last_applied_class_modes.clear()
             map_mode = self.main_viewer.get_active_fov() is None
             self.apply_colors_to_masks(None, notify_cell_gallery=False, register_globally=map_mode)
+
+    def _on_add_requested(self, change) -> None:
+        """Called when the JS Add button signals that a class should be made active."""
+        cls = change["new"]
+        if not cls:
+            return
+        w = self.ui_component.class_list_widget
+        if cls not in self.current_classes or cls in self._active_classes:
+            # Invalid or already active — just clear the signal
+            self._syncing = True
+            try:
+                w.add_requested = ""
+            finally:
+                self._syncing = False
+            return
+        self._active_classes.append(cls)
+        self._push_to_widget()
+        self._syncing = True
+        try:
+            w.add_requested = ""
+        finally:
+            self._syncing = False
+
+    def _on_remove_requested(self, change) -> None:
+        """Called when the JS × button signals that a class should be removed from active."""
+        cls = change["new"]
+        if not cls:
+            return
+        w = self.ui_component.class_list_widget
+        if cls not in self._active_classes:
+            # Not active — just clear the signal
+            self._syncing = True
+            try:
+                w.remove_requested = ""
+            finally:
+                self._syncing = False
+            return
+        self._active_classes.remove(cls)
+        self._push_to_widget()
+        self._syncing = True
+        try:
+            w.remove_requested = ""
+        finally:
+            self._syncing = False
 
     def _log(self, message: str, error: bool = False, clear: bool = False) -> None:
         if error:

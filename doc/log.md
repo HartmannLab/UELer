@@ -1,5 +1,20 @@
 ### v0.3.1
 
+**Issue #89 follow-up — Mask Painter Add/Remove class feature**
+- Added three new traitlets to `MaskClassListWidget`: `available_classes: List[str]`, `add_requested: str`, `remove_requested: str` (all `sync=True`; also present in the `HasTraits` fallback for tests).
+- JS: each class row now has a `×` button (`.mask-cl-remove`) that fires `model.set('remove_requested', cls)`. A footer `div.mask-cl-add-row` below the scroll area contains a `<select>.mask-cl-add-select` (populated from `available_classes`) and a `+ Add` button; clicking it fires `model.set('add_requested', <selected_value>)`. The select is disabled (with placeholder text) when `available_classes` is empty.
+- `MaskPainterDisplay` gains `self._active_classes: List[str]` (subset of `current_classes` currently shown in the widget).
+- `on_identifier_change` now caps the initial active set to the first 6 classes: `self._active_classes = classes[:min(len(classes), 6)]`.
+- `_push_to_widget()` now derives `active` from `_active_classes` (falling back to `_get_full_class_order()` when empty), computes `available = [cls for cls in current_classes if cls not in active_set]`, and filters the `colors`/`visible`/`fill` dicts to the active set before syncing. Also sets `w.available_classes`.
+- `_pull_from_widget` `class_order` branch now updates `self._active_classes` (was: `self.current_classes`).
+- New `_on_add_requested(change)` observer: appends the requested class to `_active_classes` and calls `_push_to_widget()`, then clears `add_requested`.
+- New `_on_remove_requested(change)` observer: removes the class from `_active_classes` and calls `_push_to_widget()`, then clears `remove_requested`.
+- `_load_color_set` additionally sets `self._active_classes` from `ordered_unique` after palette load.
+- `on_cell_table_change` now resets `self._active_classes = []`.
+- `_get_hidden_classes()` simplified to `[key for key in class_color_controls if key not in visible]` — inactive (non-active) classes are automatically treated as hidden and receive the `""` sentinel on next apply.
+- Added 4 new tests in `TestMaskPainterAddRemoveClass` (test file: `tests/test_mask_painter_mode_visibility.py`); updated `_make_painter` fixture to set `_active_classes` and call `_push_to_widget()`.
+- Validated: `python -m unittest tests.test_mask_painter_mode_visibility tests.test_mask_color_sets tests.test_mask_color_overlay -v` — 39/39 passed.
+
 **Issue #89 follow-up — Mask Painter class list replaced with anywidget drag-and-drop rows**
 - Replaced the `TagsInput` + `VBox(color_picker_box)` + `show_all_checkbox` combination with a single `MaskClassListWidget` (`anywidget.AnyWidget`) defined in the new `ueler/viewer/plugin/mask_class_list_widget.py`.
 - Each class renders as an inline row: `[≡ drag] [□ vis] [■ <input type="color"> ClassName] [□ fill]`. HTML5 native drag API (`draggable`, `dragstart`, `dragover`, `drop`) reorders rows and syncs `class_order` back to Python via traitlets; targeted DOM-only updates handle color, visibility, and fill changes without a full rebuild.

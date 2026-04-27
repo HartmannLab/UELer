@@ -2,17 +2,23 @@
 
 Each row renders as:
 
-    [≡ drag]  [□ vis]  [■ <color input>  ClassName]  [□ fill]
+    [≡ drag]  [□ vis]  [■ <color input>  ClassName]  [□ fill]  [× remove]
+
+A footer row below the list shows a ``<select>`` of available (inactive) classes
+and an "Add" button so users can expand the active selection on demand.
 
 Drag handles allow the user to reorder rows. Visibility and fill checkboxes,
 and the native ``<input type="color">`` picker, sync to Python via traitlets.
 
 Traitlets (all ``sync=True`` when anywidget is available):
-- ``class_order``   — list of class name strings; defines the row display order
-- ``class_colors``  — dict mapping class name → hex color string
-- ``class_visible`` — dict mapping class name → bool (True = visible/checked)
-- ``class_fill``    — dict mapping class name → bool (True = fill, False = outline)
-- ``default_color`` — the global default color string
+- ``class_order``       — list of active class name strings; defines the row display order
+- ``class_colors``      — dict mapping class name → hex color string
+- ``class_visible``     — dict mapping class name → bool (True = visible/checked)
+- ``class_fill``        — dict mapping class name → bool (True = fill, False = outline)
+- ``default_color``     — the global default color string
+- ``available_classes`` — list of dataset classes not currently in ``class_order``
+- ``add_requested``     — JS→Python signal; set to a class name when "Add" is clicked
+- ``remove_requested``  — JS→Python signal; set to a class name when "×" is clicked
 """
 
 try:
@@ -27,6 +33,9 @@ try:
         class_visible: dict = traitlets.Dict({}).tag(sync=True)
         class_fill: dict = traitlets.Dict({}).tag(sync=True)
         default_color: str = traitlets.Unicode("#ffffff").tag(sync=True)
+        available_classes: list = traitlets.List(traitlets.Unicode()).tag(sync=True)
+        add_requested: str = traitlets.Unicode("").tag(sync=True)
+        remove_requested: str = traitlets.Unicode("").tag(sync=True)
 
         _css = """
 .mask-cl-root {
@@ -98,9 +107,62 @@ try:
     white-space: nowrap;
     user-select: none;
 }
+.mask-cl-remove {
+    flex: 0 0 auto;
+    background: none;
+    border: none;
+    color: var(--jp-error-color1, #c00);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 2px;
+    opacity: 0.6;
+}
+.mask-cl-remove:hover {
+    opacity: 1;
+}
 .mask-cl-scroll {
-    max-height: 320px;
+    max-height: 300px;
     overflow-y: auto;
+}
+.mask-cl-add-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 0 2px 0;
+    border-top: 1px solid var(--jp-border-color2, #e0e0e0);
+    margin-top: 2px;
+}
+.mask-cl-add-select {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 2px 4px;
+    border: 1px solid var(--jp-border-color1, #ccc);
+    border-radius: 3px;
+    background: var(--jp-layout-color1, #fff);
+    color: var(--jp-ui-font-color1, #000);
+    font-size: inherit;
+    font-family: inherit;
+}
+.mask-cl-add-btn {
+    flex: 0 0 auto;
+    padding: 2px 10px;
+    background: var(--jp-brand-color1, #2196f3);
+    color: #fff;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: inherit;
+    font-family: inherit;
+    white-space: nowrap;
+}
+.mask-cl-add-btn:hover {
+    background: var(--jp-brand-color0, #1976d2);
+}
+.mask-cl-add-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
 }
 """
 
@@ -110,10 +172,11 @@ export function render({ model, el }) {
   var _rebuilding = false;
 
   // ---------- helpers ----------
-  function getOrder()   { return (model.get('class_order')   || []).slice(); }
-  function getColors()  { return model.get('class_colors')  || {}; }
-  function getVisible() { return model.get('class_visible') || {}; }
-  function getFill()    { return model.get('class_fill')    || {}; }
+  function getOrder()     { return (model.get('class_order')       || []).slice(); }
+  function getColors()    { return model.get('class_colors')        || {}; }
+  function getVisible()   { return model.get('class_visible')       || {}; }
+  function getFill()      { return model.get('class_fill')          || {}; }
+  function getAvailable() { return (model.get('available_classes')  || []).slice(); }
 
   // ---------- root ----------
   var root = document.createElement('div');
@@ -122,6 +185,52 @@ export function render({ model, el }) {
   var scroll = document.createElement('div');
   scroll.className = 'mask-cl-scroll';
   root.appendChild(scroll);
+
+  // ---------- add-row (rendered once, options updated in place) ----------
+  var addRow = document.createElement('div');
+  addRow.className = 'mask-cl-add-row';
+
+  var addSelect = document.createElement('select');
+  addSelect.className = 'mask-cl-add-select';
+
+  var addBtn = document.createElement('button');
+  addBtn.className = 'mask-cl-add-btn';
+  addBtn.textContent = '+ Add';
+  addBtn.addEventListener('mousedown', function(e) { e.preventDefault(); });
+  addBtn.addEventListener('click', function() {
+    var val = addSelect.value;
+    if (!val) return;
+    model.set('add_requested', val);
+    model.save_changes();
+  });
+
+  addRow.appendChild(addSelect);
+  addRow.appendChild(addBtn);
+  root.appendChild(addRow);
+
+  function rebuildAddOptions() {
+    var avail = getAvailable();
+    while (addSelect.firstChild) { addSelect.removeChild(addSelect.firstChild); }
+    if (avail.length === 0) {
+      addBtn.disabled = true;
+      var placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = '(all classes active)';
+      addSelect.appendChild(placeholder);
+    } else {
+      addBtn.disabled = false;
+      var placeholder2 = document.createElement('option');
+      placeholder2.value = '';
+      placeholder2.textContent = 'Select class to add…';
+      addSelect.appendChild(placeholder2);
+      avail.forEach(function(cls) {
+        var opt = document.createElement('option');
+        opt.value = cls;
+        opt.textContent = cls;
+        addSelect.appendChild(opt);
+      });
+    }
+  }
 
   // ---------- row factory ----------
   function makeRow(cls) {
@@ -237,12 +346,24 @@ export function render({ model, el }) {
     fillLabel.className = 'mask-cl-fill-label';
     fillLabel.textContent = 'fill';
 
+    // --- remove button ---
+    var removeBtn = document.createElement('button');
+    removeBtn.className = 'mask-cl-remove';
+    removeBtn.textContent = '×';
+    removeBtn.title = 'Remove ' + cls + ' from active list';
+    removeBtn.addEventListener('mousedown', function(e) { e.preventDefault(); });
+    removeBtn.addEventListener('click', function() {
+      model.set('remove_requested', cls);
+      model.save_changes();
+    });
+
     row.appendChild(drag);
     row.appendChild(visCb);
     row.appendChild(colorInp);
     row.appendChild(name);
     row.appendChild(fillCb);
     row.appendChild(fillLabel);
+    row.appendChild(removeBtn);
     return row;
   }
 
@@ -287,13 +408,15 @@ export function render({ model, el }) {
   }
 
   // Re-build on order changes; only sync values on color/vis/fill changes.
-  model.on('change:class_order', rebuildRows);
-  model.on('change:class_colors',  syncColors);
-  model.on('change:class_visible', syncVisible);
-  model.on('change:class_fill',    syncFill);
-  model.on('change:default_color', syncColors);
+  model.on('change:class_order',       rebuildRows);
+  model.on('change:class_colors',      syncColors);
+  model.on('change:class_visible',     syncVisible);
+  model.on('change:class_fill',        syncFill);
+  model.on('change:default_color',     syncColors);
+  model.on('change:available_classes', rebuildAddOptions);
 
   rebuildRows();
+  rebuildAddOptions();
   el.appendChild(root);
 }
 """
@@ -311,3 +434,8 @@ except (ImportError, AttributeError):
         class_visible: dict = traitlets.Dict({})
         class_fill: dict = traitlets.Dict({})
         default_color: str = traitlets.Unicode("#ffffff")
+        available_classes: list = traitlets.List(traitlets.Unicode())
+        add_requested: str = traitlets.Unicode("")
+        remove_requested: str = traitlets.Unicode("")
+
+
