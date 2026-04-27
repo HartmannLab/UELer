@@ -223,9 +223,12 @@ class MaskColorPersistenceTests(unittest.TestCase):
         self.assertEqual(display.ui_component.identifier_dropdown.value, "cell_type")
         self.assertEqual(display.class_color_controls["A"].value, "#121212")
         self.assertEqual(display.class_color_controls["B"].value, "#101010")
-        self.assertEqual(display.selected_classes, ["A"])
-        self.assertIn("B", display.hidden_color_cache)
-        self.assertEqual(display.hidden_color_cache["B"], "#101010")
+        # With the anywidget class-list, all classes remain visible in the list;
+        # the hidden_color_cache / selected_classes pruning is no longer used.
+        self.assertIn("A", display.ui_component.class_list_widget.class_order)
+        self.assertIn("B", display.ui_component.class_list_widget.class_order)
+        self.assertEqual(display.ui_component.class_list_widget.class_colors.get("A"), "#121212")
+        self.assertEqual(display.ui_component.class_list_widget.class_colors.get("B"), "#101010")
 
     def _tmpdir(self) -> Path:
         tmp = TemporaryDirectory()

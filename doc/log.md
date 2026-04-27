@@ -1,5 +1,18 @@
 ### v0.3.1
 
+**Issue #89 follow-up — Mask Painter class list replaced with anywidget drag-and-drop rows**
+- Replaced the `TagsInput` + `VBox(color_picker_box)` + `show_all_checkbox` combination with a single `MaskClassListWidget` (`anywidget.AnyWidget`) defined in the new `ueler/viewer/plugin/mask_class_list_widget.py`.
+- Each class renders as an inline row: `[≡ drag] [□ vis] [■ <input type="color"> ClassName] [□ fill]`. HTML5 native drag API (`draggable`, `dragstart`, `dragover`, `drop`) reorders rows and syncs `class_order` back to Python via traitlets; targeted DOM-only updates handle color, visibility, and fill changes without a full rebuild.
+- On the Python side, `_push_to_widget()` syncs all ipywidget state to the anywidget traitlets (`class_order`, `class_colors`, `class_visible`, `class_fill`, `default_color`); `_pull_from_widget(change)` reverses the flow for user interactions in the browser.
+- `_syncing` flag prevents recursive observer loops between the anywidget traitlets and the backing ipywidgets.
+- `on_sorting_items_change`, `on_show_all_toggle`, and `_handle_selection_transition` are now no-ops (kept as stubs for backward compatibility with test setups that manipulate `sorting_items_tagsinput` / `selected_classes` directly).
+- `_get_visible_classes()` uses `class_list_widget.class_order` as the primary source; falls back to `selected_classes` / `sorting_items_tagsinput` for test setups that bypass the anywidget.
+- `_load_color_set` simplified: removed `non_default_classes`/`defaulted_classes` split, `hidden_color_cache` population, and `sorting_items_tagsinput` manipulation; colors and modes are restored directly and `_push_to_widget()` syncs the widget.
+- `_set_default_color` simplified: removed `hidden_color_cache` and `sorting_items_tagsinput` logic; updates pickers with old default color and calls `_push_to_widget()`.
+- `HasTraits` fallback class in `mask_class_list_widget.py` ensures test environments without anywidget work unchanged.
+- Updated `tests/test_mask_color_sets.py`: replaced `selected_classes`/`hidden_color_cache` assertions with widget traitlet assertions on `class_list_widget.class_order` and `class_list_widget.class_colors`.
+- Validated: `python -m unittest tests.test_mask_painter_mode_visibility tests.test_mask_color_sets tests.test_mask_color_overlay -v` — 35/35 passed.
+
 **Issue #89 — Mask Painter UI Layout and Usability Redesign**
 - Replaced the 30%/70% `HBox` split class-color list with a vertical `VBox` (`colors_layout`) placing `TagsInput` and default `ColorPicker` above the per-class scroll area at full width, eliminating chip overflow and label truncation.
 - Replaced per-class `ToggleButtons(options=["outline","fill"])` with a compact `Checkbox(description="fill", layout=Layout(width="60px"))`, saving ~100 px per row and eliminating horizontal overflow.

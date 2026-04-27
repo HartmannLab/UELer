@@ -34,6 +34,7 @@ except Exception:  # pragma: no cover - executed when ipyfilechooser is absent
 FileChooser = getattr(_FileChooserModule, "FileChooser", None)
 
 from ueler.viewer.plugin.plugin_base import PluginBase
+from ueler.viewer.plugin.mask_class_list_widget import MaskClassListWidget
 from ueler.viewer.color_palettes import DEFAULT_COLOR, colors_match, normalize_hex_color
 from ueler.viewer.palette_store import (
     PaletteStoreError,
@@ -155,6 +156,7 @@ class MaskPainterDisplay(PluginBase):
         self.active_color_set_name = ""
         self._cell_mode_cache: Dict[str, Dict[int, str]] = {}  # fov -> {mask_id: mode}
         self._last_applied_class_modes: Dict[str, str] = {}
+        self._syncing: bool = False  # guard against anywidget ↔ ipywidget sync loops
         
         # Track last applied state to avoid unnecessary re-application
         self._last_applied_fov: Optional[str] = None
@@ -193,6 +195,10 @@ class MaskPainterDisplay(PluginBase):
         self.ui_component.set_name_input.observe(self._refresh_save_button_state, names="value")
         self.ui_component.identifier_dropdown.observe(self._refresh_save_button_state, names="value")
 
+        # Wire anywidget class-list traitlet changes → Python state
+        _w = self.ui_component.class_list_widget
+        _w.observe(self._pull_from_widget, names=["class_order", "class_colors", "class_visible", "class_fill"])
+
         self._load_registry_for_folder(self.registry_folder)
         self._refresh_save_button_state()
         self.initiate_ui()
@@ -223,7 +229,6 @@ class MaskPainterDisplay(PluginBase):
         self.class_color_controls.clear()
         self.class_visible_controls.clear()
         self.class_mode_controls.clear()
-        color_picker_widgets: List[HBox] = []
         for cls in classes:
             picker = ColorPicker(description=str(cls), value=self.default_color, layout=Layout(width="200px"))
             self.class_color_controls[cls] = picker
@@ -245,140 +250,40 @@ class MaskPainterDisplay(PluginBase):
             )
             mode_cb.observe(self._on_visibility_or_mode_change, names="value")
             self.class_mode_controls[cls] = mode_cb
-            color_picker_widgets.append(HBox([vis_cb, picker, mode_cb]))
 
-        self.ui_component.color_picker_box.children = tuple(color_picker_widgets)
-        allowed_tags = list(classes)
-        self.ui_component.sorting_items_tagsinput.allowed_tags = allowed_tags
-        default_selection = tuple(classes[: min(len(classes), 6)]) if classes else tuple()
-        self.ui_component.sorting_items_tagsinput.value = default_selection
+        # Sync state to the anywidget list
+        self._push_to_widget()
         self._log(f"Identifier set to '{identifier}' with {len(classes)} classes.", clear=True)
 
     def on_sorting_items_change(self, change):
-        if not self.class_color_controls:
-            return
-
-        new_order = [str(tag) for tag in change["new"]]
-        if self.ui_component.show_all_checkbox.value:
-            self.selected_classes = list(new_order)
-            self._refresh_color_picker_display(preferred_order=new_order)
-            return
-
-        self._handle_selection_transition(new_order)
-        self._refresh_color_picker_display()
+        # Legacy observer; kept for backward compatibility with test setups.
+        # The anywidget handles ordering; this is a no-op when the widget is active.
+        pass
 
     def on_show_all_toggle(self, change):
-        if not self.class_color_controls:
-            return
-
-        if change["new"]:
-            for key, color in list(self.hidden_color_cache.items()):
-                picker = self.class_color_controls.get(key)
-                if picker is not None:
-                    picker.value = color
-            self.hidden_color_cache.clear()
-            # Also make all visibility checkboxes ticked
-            for cb in self.class_visible_controls.values():
-                cb.value = True
-            self.selected_classes = list(self.class_color_controls.keys())
-            self._refresh_color_picker_display()
-        else:
-            current_selection = [str(tag) for tag in self.ui_component.sorting_items_tagsinput.value]
-            self._handle_selection_transition(current_selection)
-            self._refresh_color_picker_display()
+        # Legacy observer; kept for backward compatibility with test setups.
+        pass
 
     def on_default_color_change(self, change):
         self._set_default_color(change.get("new"), update_ui=False)
 
     def _handle_selection_transition(self, new_order: Sequence[str]) -> None:
-        new_set = set(new_order)
-        old_set = set(self.selected_classes)
-
-        # Cache colors for classes leaving the selection
-        for key in old_set - new_set:
-            picker = self.class_color_controls.get(key)
-            if picker is None:
-                continue
-            self.hidden_color_cache[key] = picker.value or self.hidden_color_cache.get(key, self.default_color)
-            picker.value = self.default_color
-
-        # Restore cached colors for classes returning to the selection
-        for key in new_set - old_set:
-            picker = self.class_color_controls.get(key)
-            if picker is None:
-                continue
-            cached = self.hidden_color_cache.pop(key, None)
-            if cached:
-                picker.value = cached
-
+        # Legacy helper; kept for backward compatibility with test setups.
         self.selected_classes = list(new_order)
 
     def _refresh_color_picker_display(self, preferred_order: Optional[Sequence[str]] = None) -> None:
-        if not self.class_color_controls:
-            self.ui_component.color_picker_box.children = tuple()
-            return
-
-        if self.ui_component.show_all_checkbox.value:
-            order = list(preferred_order or self.ui_component.sorting_items_tagsinput.value)
-            visible_keys = [key for key in order if key in self.class_color_controls]
-            visible_keys.extend(
-                key for key in self.class_color_controls.keys() if key not in visible_keys
-            )
-        else:
-            visible_keys = list(self.selected_classes)
-
-        rows: List[HBox] = []
-        for key in visible_keys:
-            if key not in self.class_color_controls:
-                continue
-            vis_cb = self.class_visible_controls.get(key)
-            picker = self.class_color_controls[key]
-            mode_tb = self.class_mode_controls.get(key)
-            parts = [w for w in (vis_cb, picker, mode_tb) if w is not None]
-            rows.append(HBox(parts))
-        self.ui_component.color_picker_box.children = tuple(rows)
+        # With the anywidget, display order is controlled via _push_to_widget().
+        self._push_to_widget()
 
     def _set_default_color(self, new_color: Optional[str], update_ui: bool = True) -> None:
         normalized = normalize_hex_color(new_color) or DEFAULT_COLOR
         old_color = getattr(self, "default_color", DEFAULT_COLOR)
-        if colors_match(normalized, old_color):
-            if update_ui and self.ui_component.default_color_picker.value != normalized:
-                picker = self.ui_component.default_color_picker
-                picker.unobserve(self.on_default_color_change, names="value")
-                try:
-                    picker.value = normalized
-                finally:
-                    picker.observe(self.on_default_color_change, names="value")
-            self.default_color = normalized
-            return
-
         self.default_color = normalized
+
+        # Update any picker that was still showing the old default color
         for picker in self.class_color_controls.values():
             if colors_match(picker.value, old_color):
                 picker.value = normalized
-        for key, value in list(self.hidden_color_cache.items()):
-            if colors_match(value, old_color):
-                self.hidden_color_cache[key] = normalized
-
-        if not self.ui_component.show_all_checkbox.value:
-            defaulted = []
-            for key in list(self.selected_classes):
-                picker = self.class_color_controls.get(key)
-                if picker is not None and colors_match(picker.value, normalized):
-                    defaulted.append(key)
-            if defaulted:
-                for key in defaulted:
-                    picker_widget = self.class_color_controls.get(key)
-                    if picker_widget is not None:
-                        picker_widget.value = normalized
-                    self.hidden_color_cache[key] = normalized
-                self.selected_classes = [key for key in self.selected_classes if key not in defaulted]
-                tags_input = self.ui_component.sorting_items_tagsinput
-                tags_input.unobserve(self.on_sorting_items_change, names="value")
-                try:
-                    tags_input.value = tuple(self.selected_classes)
-                finally:
-                    tags_input.observe(self.on_sorting_items_change, names="value")
 
         if update_ui:
             picker = self.ui_component.default_color_picker
@@ -388,25 +293,29 @@ class MaskPainterDisplay(PluginBase):
             finally:
                 picker.observe(self.on_default_color_change, names="value")
 
-        self._refresh_color_picker_display()
+        self._push_to_widget()
 
     def _get_visible_classes(self) -> List[str]:
-        """Return classes that are currently visible (checkbox ticked)."""
-        if self.ui_component.show_all_checkbox.value:
-            order = list(self.ui_component.sorting_items_tagsinput.value)
-            if not order:
-                order = list(self.class_color_controls.keys())
-            remainder = [
-                key for key in self.class_color_controls.keys() if key not in order
-            ]
-            candidates = order + remainder
-        else:
-            candidates = list(self.selected_classes or self.ui_component.sorting_items_tagsinput.value)
+        """Return classes that are currently visible (vis checkbox ticked), in display order."""
+        # Use the anywidget order when available; fall back to selected_classes or
+        # sorting_items_tagsinput for test setups that bypass the anywidget.
+        order = list(self.ui_component.class_list_widget.class_order)
+        if not order:
+            if self.ui_component.show_all_checkbox.value:
+                ti_order = list(self.ui_component.sorting_items_tagsinput.value)
+                order = ti_order + [
+                    k for k in self.class_color_controls if k not in set(ti_order)
+                ]
+            else:
+                order = list(self.selected_classes or self.ui_component.sorting_items_tagsinput.value)
         # Filter by per-class visibility checkbox
         return [
-            key for key in candidates
-            if self.class_visible_controls.get(key, None) is None
-            or self.class_visible_controls[key].value
+            key for key in order
+            if key in self.class_color_controls
+            and (
+                self.class_visible_controls.get(key) is None
+                or self.class_visible_controls[key].value
+            )
         ]
 
     def _get_hidden_classes(self) -> List[str]:
@@ -672,8 +581,10 @@ class MaskPainterDisplay(PluginBase):
         if not incoming_classes:
             incoming_classes = list(self.class_color_controls.keys())
 
-        ordered_unique = []
-        seen = set()
+        # Build a deduplicated order that respects the saved order first,
+        # then appends any extra classes from the current controls.
+        ordered_unique: List[str] = []
+        seen: set = set()
         for cls in incoming_classes:
             if cls not in seen:
                 ordered_unique.append(cls)
@@ -682,42 +593,8 @@ class MaskPainterDisplay(PluginBase):
             if cls not in seen:
                 ordered_unique.append(cls)
                 seen.add(cls)
+        self.current_classes = ordered_unique
 
-        current_colors = {
-            key: self.class_color_controls[key].value
-            for key in ordered_unique
-            if key in self.class_color_controls
-        }
-        non_default_classes, defaulted_classes = split_default_classes(
-            ordered_unique,
-            current_colors,
-            self.default_color,
-        )
-
-        allowed = list(self.ui_component.sorting_items_tagsinput.allowed_tags)
-        combined_allowed = sorted(set(allowed) | set(ordered_unique))
-        self.ui_component.sorting_items_tagsinput.allowed_tags = combined_allowed
-
-        selection = [cls for cls in non_default_classes if cls in combined_allowed]
-        tags_input = self.ui_component.sorting_items_tagsinput
-        tags_input.unobserve(self.on_sorting_items_change, names="value")
-        try:
-            tags_input.value = tuple(selection)
-        finally:
-            tags_input.observe(self.on_sorting_items_change, names="value")
-
-        if self.ui_component.show_all_checkbox.value:
-            self.hidden_color_cache.clear()
-            self.selected_classes = list(selection)
-        else:
-            self._handle_selection_transition(selection)
-            for key in defaulted_classes:
-                picker = self.class_color_controls.get(key)
-                if picker is not None:
-                    picker.value = self.default_color
-
-        self._refresh_color_picker_display()
-        self._log(f"Loaded color set '{payload.get('name', path.stem)}' from {path}.", clear=True)
         # Restore per-class modes
         modes_payload = payload.get("modes", {})
         if isinstance(modes_payload, dict):
@@ -725,6 +602,7 @@ class MaskPainterDisplay(PluginBase):
                 cb = self.class_mode_controls.get(str(cls))
                 if cb is not None and mode in ("outline", "fill"):
                     cb.value = (mode == "fill")
+
         # Restore per-class visibility
         visible_payload = payload.get("visible", {})
         if isinstance(visible_payload, dict):
@@ -732,6 +610,9 @@ class MaskPainterDisplay(PluginBase):
                 cb = self.class_visible_controls.get(str(cls))
                 if cb is not None:
                     cb.value = bool(vis)
+
+        self._push_to_widget()
+        self._log(f"Loaded color set '{payload.get('name', path.stem)}' from {path}.", clear=True)
         if self.ui_component.enabled_checkbox.value:
             self.apply_colors_to_masks(None)
 
@@ -1055,6 +936,59 @@ class MaskPainterDisplay(PluginBase):
         has_identifier = bool(getattr(self.ui_component.identifier_dropdown, "value", None))
         self.ui_component.save_button.disabled = not (has_name and has_identifier)
 
+    def _push_to_widget(self, _=None) -> None:
+        """Push the current Python-side state (colors, visibility, order) to the anywidget."""
+        if self._syncing or not self.class_color_controls:
+            return
+        w = self.ui_component.class_list_widget
+        order = self._get_full_class_order()
+        colors = {cls: (p.value or self.default_color) for cls, p in self.class_color_controls.items()}
+        visible = {cls: cb.value for cls, cb in self.class_visible_controls.items()}
+        fill = {cls: cb.value for cls, cb in self.class_mode_controls.items()}
+        self._syncing = True
+        try:
+            w.class_order = order
+            w.class_colors = colors
+            w.class_visible = visible
+            w.class_fill = fill
+            w.default_color = self.default_color
+        finally:
+            self._syncing = False
+
+    def _pull_from_widget(self, change) -> None:
+        """Pull anywidget traitlet changes back into the Python-side ipywidgets."""
+        if self._syncing:
+            return
+        w = self.ui_component.class_list_widget
+        name = change["name"]
+        self._syncing = True
+        try:
+            if name == "class_order":
+                self.current_classes = list(w.class_order)
+            elif name == "class_colors":
+                for cls, color in w.class_colors.items():
+                    picker = self.class_color_controls.get(cls)
+                    if picker is not None and picker.value != color:
+                        picker.value = color
+            elif name == "class_visible":
+                for cls, vis in w.class_visible.items():
+                    cb = self.class_visible_controls.get(cls)
+                    if cb is not None and cb.value != bool(vis):
+                        cb.value = bool(vis)
+            elif name == "class_fill":
+                for cls, fill_val in w.class_fill.items():
+                    cb = self.class_mode_controls.get(cls)
+                    if cb is not None and cb.value != bool(fill_val):
+                        cb.value = bool(fill_val)
+        finally:
+            self._syncing = False
+        # Visibility or fill changes need an immediate re-apply when painter is active
+        if name in ("class_visible", "class_fill") and self.ui_component.enabled_checkbox.value:
+            self._last_applied_class_colors.clear()
+            self._last_applied_class_modes.clear()
+            map_mode = self.main_viewer.get_active_fov() is None
+            self.apply_colors_to_masks(None, notify_cell_gallery=False, register_globally=map_mode)
+
     def _log(self, message: str, error: bool = False, clear: bool = False) -> None:
         if error:
             self.ui_component.feedback_label.value = f'<span style="color:orange">⚠️ {message}</span>'
@@ -1170,6 +1104,8 @@ class UiComponent:
         self.update_button = Button(description="Update Colors", button_style="primary")
         self.enabled_checkbox = Checkbox(value=True, description="Enable", indent=False, tooltip="Enable mask painter")
 
+        # Keep TagsInput and show_all_checkbox for backward compatibility with tests
+        # that manipulate them directly; they are no longer rendered in the main UI.
         self.sorting_items_tagsinput = TagsInput(
             value=tuple(), allowed_tags=[], description="", allow_duplicates=False,
             layout=Layout(width="100%"),
@@ -1180,18 +1116,16 @@ class UiComponent:
         self.default_color_picker = ColorPicker(
             description="Default:", value=DEFAULT_COLOR, layout=Layout(width="auto"),
         )
+        # Kept for compatibility; no longer the primary class-row container.
         self.color_picker_box = VBox([], layout=Layout(overflow_y="auto", max_height="300px"))
 
-        sorting_header = HBox(
-            [Label("Class order / visible:"), self.show_all_checkbox],
-            layout=Layout(align_items="center"),
-        )
+        # The anywidget renders drag-sortable rows with color picker + vis/fill checkboxes.
+        self.class_list_widget = MaskClassListWidget()
+
         self.colors_layout = VBox([
-            sorting_header,
-            self.sorting_items_tagsinput,
             HBox([self.default_color_picker]),
             HTML("<hr style='margin:4px 0'>"),
-            self.color_picker_box,
+            self.class_list_widget,
         ])
 
         self.set_name_input = Text(description="Name:", placeholder="My palette")
