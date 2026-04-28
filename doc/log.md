@@ -1,5 +1,13 @@
 ### v0.3.1
 
+**Issue #90 — Mask Painter redraw visibility fix (commit TBD)**
+- Fixed the single-FOV mask painter render path so zoom/pan redraws use the current UI state directly during `_compose_fov_image()` instead of relying on post-render plugin timing.
+- Added `get_effective_color_map_for_fov()` and `get_effective_mode_map_for_fov()` to `MaskPainterDisplay`, and updated `main_viewer.py` to pass that state into `apply_registry_colors(...)` for the painter-controlled mask overlay.
+- Changed Mask Painter to start disabled by default and added an enable/disable observer that invalidates stale painter state and triggers a viewer redraw when the plugin is toggled.
+- Updated active/inactive class semantics: only active unchecked classes are hidden; inactive classes remain visible with the default color while preserving their stored custom color for later re-activation.
+- Updated issue #89 follow-up expectations in the mask painter tests so removed/filtered classes now retain the default color instead of receiving the hidden sentinel.
+- Validated: `python -m unittest tests.test_mask_painter_mode_visibility tests.test_mask_color_overlay tests.test_mask_color_sets` — 47/47 passed.
+
 **Issue #89 follow-up — Mask Painter "Only specified" toggle (commit TBD)**
 - Added `only_specified_checkbox` (`Checkbox`, `description="Only specified"`) to `UiComponent`, placed inline with `default_color_picker` in `colors_layout`.
 - New method `_on_only_specified_toggle(change)` on `MaskPainterDisplay`: when ON, filters `_active_classes` to classes whose color differs from `default_color` (via `colors_match()`); when OFF, restores all classes in `current_classes` to active. Calls `_push_to_widget()` to sync.

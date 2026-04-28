@@ -5,7 +5,9 @@ import os
 import types
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+import numpy as np
 import pandas as pd
 
 from ueler.rendering import get_cell_color, clear_cell_colors
@@ -17,6 +19,32 @@ def _make_viewer():
         "fov": ["FOV_001", "FOV_001", "FOV_002", "FOV_002"],
         "label": [1, 2, 3, 4],
         "cell_type": ["TypeA", "TypeB", "TypeA", "TypeB"],
+    })
+    viewer = types.SimpleNamespace()
+    viewer.cell_table = cell_table
+    viewer.fov_key = "fov"
+    viewer.label_key = "label"
+    viewer.mask_key = "cell"
+    viewer.base_folder = Path.cwd()
+
+    ui_component = types.SimpleNamespace()
+    ui_component.image_selector = types.SimpleNamespace()
+    ui_component.image_selector.value = "FOV_001"
+    viewer.ui_component = ui_component
+
+    image_display = types.SimpleNamespace()
+    image_display.set_mask_colors_current_fov = lambda **kwargs: None
+    viewer.image_display = image_display
+
+    viewer.get_active_fov = lambda: ui_component.image_selector.value
+    return viewer
+
+
+def _make_viewer_with_three_classes():
+    cell_table = pd.DataFrame({
+        "fov": ["FOV_001", "FOV_001", "FOV_001", "FOV_002"],
+        "label": [1, 2, 3, 4],
+        "cell_type": ["TypeA", "TypeB", "TypeC", "TypeC"],
     })
     viewer = types.SimpleNamespace()
     viewer.cell_table = cell_table
@@ -184,6 +212,82 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
         visible = painter._get_visible_classes()
         self.assertNotIn("TypeB", visible)
 
+    def test_mask_painter_starts_disabled(self):
+        """Issue #90 requires the mask painter to be disabled by default."""
+        painter = self._make_painter()
+        self.assertFalse(painter.ui_component.enabled_checkbox.value)
+
+    def test_inactive_class_is_not_treated_as_hidden(self):
+        """Inactive classes should remain visible with the default color, not be hidden."""
+        from ipywidgets import Checkbox, ColorPicker, Layout
+
+        viewer = _make_viewer_with_three_classes()
+        from ueler.viewer.plugin.mask_painter import MaskPainterDisplay
+
+        painter = MaskPainterDisplay(viewer, width=400, height=300)
+        painter.ui_component.identifier_dropdown.value = "cell_type"
+        painter.current_identifier = "cell_type"
+        painter.current_classes = ["TypeA", "TypeB", "TypeC"]
+        painter.class_color_controls = {
+            "TypeA": ColorPicker(description="TypeA", value="#FF0000"),
+            "TypeB": ColorPicker(description="TypeB", value="#0000FF"),
+            "TypeC": ColorPicker(description="TypeC", value="#00FF00"),
+        }
+        painter.class_visible_controls = {
+            "TypeA": Checkbox(value=True, indent=False, layout=Layout(width="30px")),
+            "TypeB": Checkbox(value=False, indent=False, layout=Layout(width="30px")),
+            "TypeC": Checkbox(value=True, indent=False, layout=Layout(width="30px")),
+        }
+        painter.class_mode_controls = {
+            "TypeA": Checkbox(value=False, description="fill", indent=False, layout=Layout(width="60px")),
+            "TypeB": Checkbox(value=False, description="fill", indent=False, layout=Layout(width="60px")),
+            "TypeC": Checkbox(value=True, description="fill", indent=False, layout=Layout(width="60px")),
+        }
+        painter._active_classes = ["TypeA", "TypeB"]
+        painter.selected_classes = ["TypeA", "TypeB"]
+        painter._push_to_widget()
+
+        hidden = painter._get_hidden_classes()
+
+        self.assertIn("TypeB", hidden)
+        self.assertNotIn("TypeC", hidden)
+
+    def test_effective_color_map_uses_default_color_for_inactive_classes(self):
+        """Current-FOV painter state should keep inactive classes visible in the default color."""
+        from ipywidgets import Checkbox, ColorPicker, Layout
+
+        viewer = _make_viewer_with_three_classes()
+        from ueler.viewer.plugin.mask_painter import MaskPainterDisplay
+
+        painter = MaskPainterDisplay(viewer, width=400, height=300)
+        painter.ui_component.identifier_dropdown.value = "cell_type"
+        painter.current_identifier = "cell_type"
+        painter.current_classes = ["TypeA", "TypeB", "TypeC"]
+        painter.class_color_controls = {
+            "TypeA": ColorPicker(description="TypeA", value="#FF0000"),
+            "TypeB": ColorPicker(description="TypeB", value="#0000FF"),
+            "TypeC": ColorPicker(description="TypeC", value="#00FF00"),
+        }
+        painter.class_visible_controls = {
+            "TypeA": Checkbox(value=True, indent=False, layout=Layout(width="30px")),
+            "TypeB": Checkbox(value=False, indent=False, layout=Layout(width="30px")),
+            "TypeC": Checkbox(value=True, indent=False, layout=Layout(width="30px")),
+        }
+        painter.class_mode_controls = {
+            "TypeA": Checkbox(value=False, description="fill", indent=False, layout=Layout(width="60px")),
+            "TypeB": Checkbox(value=False, description="fill", indent=False, layout=Layout(width="60px")),
+            "TypeC": Checkbox(value=True, description="fill", indent=False, layout=Layout(width="60px")),
+        }
+        painter._active_classes = ["TypeA", "TypeB"]
+        painter.selected_classes = ["TypeA", "TypeB"]
+        painter._push_to_widget()
+
+        color_map = painter.get_effective_color_map_for_fov("FOV_001")
+
+        self.assertEqual(color_map[1], "#FF0000")
+        self.assertEqual(color_map[2], "")
+        self.assertEqual(color_map[3], painter.default_color)
+
     # ------------------------------------------------------------------
     # Phase 8 – persistence round-trip
     # ------------------------------------------------------------------
@@ -328,8 +432,8 @@ class TestMaskPainterAddRemoveClass(unittest.TestCase):
         self.assertEqual(len(w.class_order), 5)
         self.assertEqual(len(w.available_classes), 5)
 
-    def test_removed_class_gets_sentinel_in_apply(self):
-        """A class removed from the active list receives '' sentinel color when colors are applied."""
+    def test_removed_class_uses_default_color_in_apply(self):
+        """A class removed from the active list remains visible with the default color."""
         import ipywidgets as W
         from ipywidgets import Checkbox, Layout
         from ueler.viewer.plugin.mask_painter import MaskPainterDisplay
@@ -359,12 +463,63 @@ class TestMaskPainterAddRemoveClass(unittest.TestCase):
         # Apply colors
         painter.apply_colors_to_masks(None, notify_cell_gallery=False)
 
-        # TypeB cells (labels 2, 4 per the cell_table) get "" sentinel
-        # Using the real cell_table rows for TypeB:
+        # TypeB cells (labels 2, 4 per the cell_table) keep the default color
         typeb_rows = self.viewer.cell_table[self.viewer.cell_table["cell_type"] == "TypeB"]
         for _, row in typeb_rows.iterrows():
             color = get_cell_color(row["fov"], int(row["label"]))
-            self.assertEqual(color, "", f"Expected '' for TypeB cell {row['label']}, got {color!r}")
+            self.assertEqual(color, painter.default_color)
+
+
+class TestMaskPainterRenderPath(unittest.TestCase):
+    """Tests for issue #90 render-path integration in main_viewer._compose_fov_image."""
+
+    def test_compose_fov_image_uses_current_mask_painter_state(self):
+        """Single-FOV redraw must pass explicit current painter state into apply_registry_colors."""
+        from ueler.viewer.main_viewer import ImageMaskViewer
+
+        fake_painter = types.SimpleNamespace(
+            get_effective_color_map_for_fov=lambda fov: {1: "#FF0000", 2: ""},
+            get_effective_mode_map_for_fov=lambda fov: {1: "fill"},
+        )
+        viewer = types.SimpleNamespace(
+            image_cache={"FOV_001": {"ch1": np.zeros((2, 2), dtype=np.uint16)}},
+            ui_component=types.SimpleNamespace(
+                color_controls={"ch1": types.SimpleNamespace(value="Red")},
+                contrast_min_controls={"ch1": types.SimpleNamespace(value=0.0)},
+                contrast_max_controls={"ch1": types.SimpleNamespace(value=1.0)},
+                mask_display_controls={"cell": types.SimpleNamespace(value=True)},
+                mask_color_controls={},
+            ),
+            predefined_colors={"Red": "#FF0000"},
+            annotations_available=False,
+            annotation_display_enabled=False,
+            active_annotation_name=None,
+            masks_available=True,
+            mask_key="cell",
+            mask_outline_thickness=1,
+            label_masks_cache={"FOV_001": {"cell": {1: np.array([[1, 0], [0, 2]], dtype=np.int32)}}},
+            image_display=types.SimpleNamespace(selected_cells=[]),
+        )
+        viewer.load_fov = lambda _fov, _channels: None
+        viewer._get_label_mask_at_factor = lambda _fov, _mask, _ds: np.array([[1, 0], [0, 2]], dtype=np.int32)
+        viewer._is_mask_painter_enabled = lambda: True
+        viewer._get_mask_painter = lambda: fake_painter
+
+        with patch("ueler.viewer.main_viewer.render_fov_to_array", return_value=np.zeros((2, 2, 3), dtype=np.float32)), \
+             patch("ueler.viewer.main_viewer.collect_mask_regions", return_value={"cell": np.array([[1, 0], [0, 2]], dtype=np.int32)}), \
+             patch("ueler.viewer.main_viewer.apply_registry_colors", side_effect=lambda image, **kwargs: image) as mock_apply:
+            ImageMaskViewer._compose_fov_image(
+                viewer,
+                "FOV_001",
+                ("ch1",),
+                1,
+                (0, 2, 0, 2),
+                (0, 2, 0, 2),
+            )
+
+        kwargs = mock_apply.call_args.kwargs
+        self.assertEqual(kwargs["color_map"], {1: "#FF0000", 2: ""})
+        self.assertEqual(kwargs["mode_map"], {1: "fill"})
 
 
 class TestMaskPainterOnlySpecified(unittest.TestCase):
@@ -460,8 +615,8 @@ class TestMaskPainterOnlySpecified(unittest.TestCase):
         self.assertIn("TypeB", w.class_order)
         self.assertEqual(len(w.available_classes), 0)
 
-    def test_only_specified_filtered_class_gets_sentinel_on_apply(self):
-        """Classes removed by 'Only specified' receive '' sentinel when colors are applied."""
+    def test_only_specified_filtered_class_uses_default_color_on_apply(self):
+        """Classes removed from the active list still render with the default color."""
         painter = self._make_painter_with_custom_colors()
         # Call handler directly (bootstrap stub Checkbox.observe() is a no-op)
         painter._on_only_specified_toggle({"new": True})
@@ -471,9 +626,9 @@ class TestMaskPainterOnlySpecified(unittest.TestCase):
         # TypeA (custom color) should be colored
         color_a = get_cell_color("FOV_001", 1)
         self.assertEqual(color_a, "#FF0000")
-        # TypeB (default color, filtered out) should be invisible
+        # TypeB (default color, filtered out) should still use the default color
         color_b = get_cell_color("FOV_001", 2)
-        self.assertEqual(color_b, "")
+        self.assertEqual(color_b, painter.default_color)
 
 
 if __name__ == "__main__":

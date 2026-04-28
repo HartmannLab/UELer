@@ -3904,6 +3904,20 @@ class ImageMaskViewer:
                     mode=self.annotation_overlay_mode,
                 )
 
+        painter = self._get_mask_painter() if self._is_mask_painter_enabled() else None
+        painter_color_map = None
+        painter_mode_map = None
+        if painter is not None:
+            color_helper = getattr(painter, "get_effective_color_map_for_fov", None)
+            if callable(color_helper):
+                painter_color_map = color_helper(fov_name)
+            mode_helper = getattr(painter, "get_effective_mode_map_for_fov", None)
+            if callable(mode_helper):
+                painter_mode_map = mode_helper(fov_name)
+            elif hasattr(painter, "get_mode_map_for_fov"):
+                painter_mode_map = painter.get_mode_map_for_fov(fov_name)
+        painter_controls_primary_mask = bool(painter_color_map)
+
         mask_settings = []
         mask_regions = {}
         if self.masks_available:
@@ -3912,13 +3926,12 @@ class ImageMaskViewer:
                 for mask_name, cb in controls.mask_display_controls.items()
                 if getattr(cb, "value", False)
             ]
-            painter_enabled_early = self._is_mask_painter_enabled()
             painter_mask_key = getattr(self, "mask_key", None)
             for mask_name in selected_masks:
                 # When the painter is active it takes exclusive rendering control
                 # of the primary mask key — skip it here so the painter's per-cell
                 # coloring is the only contribution for that mask layer.
-                if painter_enabled_early and painter_mask_key and mask_name == painter_mask_key:
+                if painter_controls_primary_mask and painter_mask_key and mask_name == painter_mask_key:
                     continue
                 label_mask_ds = self._get_label_mask_at_factor(fov_name, mask_name, downsample_factor)
                 if label_mask_ds is None:
@@ -3965,15 +3978,12 @@ class ImageMaskViewer:
             masks=mask_settings,
         )
 
-        painter_enabled = self._is_mask_painter_enabled()
-        if painter_enabled and mask_regions:
+        if painter_controls_primary_mask and mask_regions:
             excluded = (
                 set(self.image_display.selected_cells)
                 if hasattr(self.image_display, "selected_cells")
                 else set()
             )
-            painter = self._get_mask_painter()
-            mode_map = painter.get_mode_map_for_fov(fov_name) if painter is not None else None
             combined = apply_registry_colors(
                 combined,
                 fov=fov_name,
@@ -3981,7 +3991,8 @@ class ImageMaskViewer:
                 outline_thickness=int(self.mask_outline_thickness),
                 downsample_factor=downsample_factor,
                 exclude_ids=excluded,
-                mode_map=mode_map,
+                color_map=painter_color_map,
+                mode_map=painter_mode_map,
             )
 
         return combined

@@ -196,6 +196,7 @@ class MaskPainterDisplay(PluginBase):
         self.ui_component.set_name_input.observe(self._refresh_save_button_state, names="value")
         self.ui_component.identifier_dropdown.observe(self._refresh_save_button_state, names="value")
         self.ui_component.only_specified_checkbox.observe(self._on_only_specified_toggle, names="value")
+        self.ui_component.enabled_checkbox.observe(self._on_enabled_toggle, names="value")
 
         # Wire anywidget class-list traitlet changes → Python state
         _w = self.ui_component.class_list_widget
@@ -300,33 +301,94 @@ class MaskPainterDisplay(PluginBase):
 
         self._push_to_widget()
 
+    def _get_active_classes(self) -> List[str]:
+        """Return the classes currently surfaced in the UI, preserving order."""
+        order = list(self.ui_component.class_list_widget.class_order)
+        if order:
+            return [key for key in order if key in self.class_color_controls]
+        if self.ui_component.show_all_checkbox.value:
+            ti_order = list(self.ui_component.sorting_items_tagsinput.value)
+            return ti_order + [
+                key for key in self.class_color_controls.keys()
+                if key not in set(ti_order)
+            ]
+        fallback = list(self.selected_classes or self.ui_component.sorting_items_tagsinput.value)
+        return [key for key in fallback if key in self.class_color_controls]
+
     def _get_visible_classes(self) -> List[str]:
         """Return classes that are currently visible (vis checkbox ticked), in display order."""
-        # Use the anywidget order when available; fall back to selected_classes or
-        # sorting_items_tagsinput for test setups that bypass the anywidget.
-        order = list(self.ui_component.class_list_widget.class_order)
-        if not order:
-            if self.ui_component.show_all_checkbox.value:
-                ti_order = list(self.ui_component.sorting_items_tagsinput.value)
-                order = ti_order + [
-                    k for k in self.class_color_controls if k not in set(ti_order)
-                ]
-            else:
-                order = list(self.selected_classes or self.ui_component.sorting_items_tagsinput.value)
-        # Filter by per-class visibility checkbox
+        order = self._get_active_classes()
         return [
             key for key in order
-            if key in self.class_color_controls
-            and (
+            if (
                 self.class_visible_controls.get(key) is None
                 or self.class_visible_controls[key].value
             )
         ]
 
     def _get_hidden_classes(self) -> List[str]:
-        """Return classes that are either not active, or active but with visibility unchecked."""
+        """Return active classes whose visibility checkbox is unchecked."""
         visible = set(self._get_visible_classes())
-        return [key for key in self.class_color_controls.keys() if key not in visible]
+        return [key for key in self._get_active_classes() if key not in visible]
+
+    def _get_inactive_classes(self) -> List[str]:
+        """Return classes present in the dataset but not currently surfaced in the UI."""
+        active = set(self._get_active_classes())
+        return [key for key in self.current_classes if key not in active]
+
+    def get_effective_color_map_for_fov(self, fov: Optional[str] = None) -> Dict[int, str]:
+        """Build the current single-FOV painter color map directly from UI state."""
+        current_fov = fov or self.main_viewer.get_active_fov()
+        identifier = self.ui_component.identifier_dropdown.value
+        if not current_fov or not identifier or self.main_viewer.cell_table is None:
+            return {}
+
+        active_visible = set(self._get_visible_classes())
+        active_hidden = set(self._get_hidden_classes())
+        inactive = set(self._get_inactive_classes())
+        current_rows = self.main_viewer.cell_table.loc[
+            self.main_viewer.cell_table[self.main_viewer.fov_key] == current_fov,
+            [self.main_viewer.label_key, identifier],
+        ]
+        if current_rows.empty:
+            return {}
+
+        color_map: Dict[int, str] = {}
+        for _, row in current_rows.iterrows():
+            cls_key = str(row[identifier])
+            mask_id = int(row[self.main_viewer.label_key])
+            if cls_key in active_hidden:
+                color_map[mask_id] = ""
+            elif cls_key in inactive:
+                color_map[mask_id] = self.default_color
+            else:
+                picker = self.class_color_controls.get(cls_key)
+                color_map[mask_id] = getattr(picker, "value", None) or self.default_color
+        return color_map
+
+    def get_effective_mode_map_for_fov(self, fov: Optional[str] = None) -> Dict[int, str]:
+        """Build the current single-FOV painter mode map directly from UI state."""
+        current_fov = fov or self.main_viewer.get_active_fov()
+        identifier = self.ui_component.identifier_dropdown.value
+        if not current_fov or not identifier or self.main_viewer.cell_table is None:
+            return {}
+
+        active_visible = set(self._get_visible_classes())
+        current_rows = self.main_viewer.cell_table.loc[
+            self.main_viewer.cell_table[self.main_viewer.fov_key] == current_fov,
+            [self.main_viewer.label_key, identifier],
+        ]
+        if current_rows.empty:
+            return {}
+
+        mode_map: Dict[int, str] = {}
+        for _, row in current_rows.iterrows():
+            cls_key = str(row[identifier])
+            if cls_key not in active_visible:
+                continue
+            cb = self.class_mode_controls.get(cls_key)
+            mode_map[int(row[self.main_viewer.label_key])] = "fill" if getattr(cb, "value", False) else "outline"
+        return mode_map
 
     # ------------------------------------------------------------------
     # Persistence helpers
@@ -690,6 +752,8 @@ class MaskPainterDisplay(PluginBase):
         converted_visible = [(cls, _convert(cls)) for cls in visible_classes]
         hidden_classes = self._get_hidden_classes()
         converted_hidden = [(cls, _convert(cls)) for cls in hidden_classes]
+        inactive_classes = self._get_inactive_classes()
+        converted_inactive = [(cls, _convert(cls)) for cls in inactive_classes]
 
         def _apply_color_to_current_fov(cls_value, color):
             """Apply color to masks in the currently loaded FOV (viewer display only)."""
@@ -769,6 +833,14 @@ class MaskPainterDisplay(PluginBase):
                 if register_globally:
                     _register_color_globally(cls_str, cls_value, "")
 
+        # Inactive classes stay visible with the default color.
+        if inactive_classes:
+            for cls_str, cls_value in converted_inactive:
+                if current_fov:
+                    _apply_color_to_current_fov(cls_value, self.default_color)
+                if register_globally:
+                    _register_color_globally(cls_str, cls_value, self.default_color)
+
         self._log("Masks updated with class-based colors.")
         
         # Track the applied state
@@ -797,6 +869,27 @@ class MaskPainterDisplay(PluginBase):
             notify_cell_gallery=False,
             register_globally=map_mode,
         )
+
+    def _on_enabled_toggle(self, change):
+        """Refresh the viewer immediately when the mask painter is enabled or disabled."""
+        self._last_applied_fov = None
+        self._last_applied_identifier = None
+        self._last_applied_classes = None
+        self._last_applied_class_colors.clear()
+        self._last_applied_class_modes.clear()
+
+        if change.get("new"):
+            map_mode = self.main_viewer.get_active_fov() is None
+            self.apply_colors_to_masks(
+                None,
+                notify_cell_gallery=False,
+                register_globally=map_mode,
+            )
+
+        update_display = getattr(self.main_viewer, "update_display", None)
+        current_ds = getattr(self.main_viewer, "current_downsample_factor", 1)
+        if callable(update_display):
+            update_display(current_ds)
 
     def on_cell_table_change(self):
         self._initialise_identifier_options()
@@ -1171,7 +1264,7 @@ class UiComponent:
 
         self.identifier_dropdown = Dropdown(description="Identifier:")
         self.update_button = Button(description="Update Colors", button_style="primary")
-        self.enabled_checkbox = Checkbox(value=True, description="Enable", indent=False, tooltip="Enable mask painter")
+        self.enabled_checkbox = Checkbox(value=False, description="Enable", indent=False, tooltip="Enable mask painter")
 
         # Keep TagsInput and show_all_checkbox for backward compatibility with tests
         # that manipulate them directly; they are no longer rendered in the main UI.
