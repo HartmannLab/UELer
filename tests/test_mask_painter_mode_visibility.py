@@ -367,5 +367,114 @@ class TestMaskPainterAddRemoveClass(unittest.TestCase):
             self.assertEqual(color, "", f"Expected '' for TypeB cell {row['label']}, got {color!r}")
 
 
+class TestMaskPainterOnlySpecified(unittest.TestCase):
+    """Tests for the 'Only specified' toggle in MaskPainterDisplay."""
+
+    def setUp(self):
+        clear_cell_colors()
+        self.viewer = _make_viewer()
+
+    def tearDown(self):
+        clear_cell_colors()
+
+    def _make_painter_with_custom_colors(self):
+        """Painter with TypeA customized and TypeB still at default color."""
+        import ipywidgets as W
+        from ipywidgets import Checkbox, Layout
+        from ueler.viewer.plugin.mask_painter import MaskPainterDisplay
+        painter = MaskPainterDisplay(self.viewer, width=400, height=300)
+        painter.ui_component.identifier_dropdown.value = "cell_type"
+        painter.current_identifier = "cell_type"
+        painter.current_classes = ["TypeA", "TypeB"]
+        painter.class_color_controls = {
+            "TypeA": W.ColorPicker(description="TypeA", value="#FF0000"),  # custom
+            "TypeB": W.ColorPicker(description="TypeB", value=painter.default_color),  # default
+        }
+        painter.class_visible_controls = {
+            "TypeA": Checkbox(value=True, indent=False, layout=Layout(width="30px")),
+            "TypeB": Checkbox(value=True, indent=False, layout=Layout(width="30px")),
+        }
+        painter.class_mode_controls = {
+            "TypeA": Checkbox(value=False, description="fill", indent=False, layout=Layout(width="60px")),
+            "TypeB": Checkbox(value=False, description="fill", indent=False, layout=Layout(width="60px")),
+        }
+        painter._active_classes = ["TypeA", "TypeB"]
+        painter._push_to_widget()
+        return painter
+
+    def test_only_specified_on_filters_default_color_classes(self):
+        """Enabling 'Only specified' removes classes at default color from class_order."""
+        painter = self._make_painter_with_custom_colors()
+        w = painter.ui_component.class_list_widget
+        # Before toggle: both classes active
+        self.assertIn("TypeB", w.class_order)
+
+        # Call handler directly (bootstrap stub Checkbox.observe() is a no-op)
+        painter._on_only_specified_toggle({"new": True})
+
+        self.assertIn("TypeA", w.class_order)
+        self.assertNotIn("TypeB", w.class_order)
+        self.assertIn("TypeB", w.available_classes)
+
+    def test_only_specified_off_restores_all_classes(self):
+        """Disabling 'Only specified' restores all current_classes to active."""
+        painter = self._make_painter_with_custom_colors()
+        w = painter.ui_component.class_list_widget
+
+        # Turn on then off (call handler directly; bootstrap stub Checkbox.observe() is a no-op)
+        painter._on_only_specified_toggle({"new": True})
+        painter._on_only_specified_toggle({"new": False})
+
+        self.assertIn("TypeA", w.class_order)
+        self.assertIn("TypeB", w.class_order)
+        self.assertEqual(len(w.available_classes), 0)
+
+    def test_only_specified_when_all_custom_shows_all(self):
+        """If all classes have custom colors, 'Only specified' keeps all classes active."""
+        import ipywidgets as W
+        from ipywidgets import Checkbox, Layout
+        from ueler.viewer.plugin.mask_painter import MaskPainterDisplay
+        painter = MaskPainterDisplay(self.viewer, width=400, height=300)
+        painter.current_classes = ["TypeA", "TypeB"]
+        painter.current_identifier = "cell_type"
+        painter.class_color_controls = {
+            "TypeA": W.ColorPicker(description="TypeA", value="#FF0000"),
+            "TypeB": W.ColorPicker(description="TypeB", value="#00FF00"),
+        }
+        painter.class_visible_controls = {
+            "TypeA": Checkbox(value=True, indent=False, layout=Layout(width="30px")),
+            "TypeB": Checkbox(value=True, indent=False, layout=Layout(width="30px")),
+        }
+        painter.class_mode_controls = {
+            "TypeA": Checkbox(value=False, description="fill", indent=False, layout=Layout(width="60px")),
+            "TypeB": Checkbox(value=False, description="fill", indent=False, layout=Layout(width="60px")),
+        }
+        painter._active_classes = ["TypeA", "TypeB"]
+        painter._push_to_widget()
+
+        # Call handler directly (bootstrap stub Checkbox.observe() is a no-op)
+        painter._on_only_specified_toggle({"new": True})
+
+        w = painter.ui_component.class_list_widget
+        self.assertIn("TypeA", w.class_order)
+        self.assertIn("TypeB", w.class_order)
+        self.assertEqual(len(w.available_classes), 0)
+
+    def test_only_specified_filtered_class_gets_sentinel_on_apply(self):
+        """Classes removed by 'Only specified' receive '' sentinel when colors are applied."""
+        painter = self._make_painter_with_custom_colors()
+        # Call handler directly (bootstrap stub Checkbox.observe() is a no-op)
+        painter._on_only_specified_toggle({"new": True})
+
+        painter.apply_colors_to_masks(None, notify_cell_gallery=False)
+
+        # TypeA (custom color) should be colored
+        color_a = get_cell_color("FOV_001", 1)
+        self.assertEqual(color_a, "#FF0000")
+        # TypeB (default color, filtered out) should be invisible
+        color_b = get_cell_color("FOV_001", 2)
+        self.assertEqual(color_b, "")
+
+
 if __name__ == "__main__":
     unittest.main()

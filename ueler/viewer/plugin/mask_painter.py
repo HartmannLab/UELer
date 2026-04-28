@@ -195,6 +195,7 @@ class MaskPainterDisplay(PluginBase):
         self.ui_component.delete_saved_button.on_click(self.delete_saved_color_set)
         self.ui_component.set_name_input.observe(self._refresh_save_button_state, names="value")
         self.ui_component.identifier_dropdown.observe(self._refresh_save_button_state, names="value")
+        self.ui_component.only_specified_checkbox.observe(self._on_only_specified_toggle, names="value")
 
         # Wire anywidget class-list traitlet changes → Python state
         _w = self.ui_component.class_list_widget
@@ -1036,6 +1037,27 @@ class MaskPainterDisplay(PluginBase):
         finally:
             self._syncing = False
 
+    def _on_only_specified_toggle(self, change) -> None:
+        """Recompute active classes based on the 'Only specified' checkbox.
+
+        When ON  → keep only classes whose color differs from the default color.
+        When OFF → restore all classes in ``current_classes`` to active.
+        """
+        if change["new"]:
+            # Filter to classes with a custom (non-default) color
+            self._active_classes = [
+                cls for cls in self.current_classes
+                if cls in self.class_color_controls
+                and not colors_match(self.class_color_controls[cls].value, self.default_color)
+            ]
+        else:
+            # Show all classes
+            self._active_classes = [
+                cls for cls in self.current_classes
+                if cls in self.class_color_controls
+            ]
+        self._push_to_widget()
+
     def _log(self, message: str, error: bool = False, clear: bool = False) -> None:
         if error:
             self.ui_component.feedback_label.value = f'<span style="color:orange">⚠️ {message}</span>'
@@ -1169,8 +1191,16 @@ class UiComponent:
         # The anywidget renders drag-sortable rows with color picker + vis/fill checkboxes.
         self.class_list_widget = MaskClassListWidget()
 
+        self.only_specified_checkbox = Checkbox(
+            value=False,
+            description="Only specified",
+            indent=False,
+            layout=Layout(width="auto"),
+            tooltip="Show only classes whose color differs from the default color",
+        )
+
         self.colors_layout = VBox([
-            HBox([self.default_color_picker]),
+            HBox([self.default_color_picker, self.only_specified_checkbox]),
             HTML("<hr style='margin:4px 0'>"),
             self.class_list_widget,
         ])

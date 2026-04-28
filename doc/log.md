@@ -1,5 +1,12 @@
 ### v0.3.1
 
+**Issue #89 follow-up — Mask Painter "Only specified" toggle (commit TBD)**
+- Added `only_specified_checkbox` (`Checkbox`, `description="Only specified"`) to `UiComponent`, placed inline with `default_color_picker` in `colors_layout`.
+- New method `_on_only_specified_toggle(change)` on `MaskPainterDisplay`: when ON, filters `_active_classes` to classes whose color differs from `default_color` (via `colors_match()`); when OFF, restores all classes in `current_classes` to active. Calls `_push_to_widget()` to sync.
+- Observer registered in `MaskPainterDisplay.__init__` via `only_specified_checkbox.observe(self._on_only_specified_toggle, names="value")`.
+- Added `TestMaskPainterOnlySpecified` class with 4 tests to `tests/test_mask_painter_mode_visibility.py`. Tests call `_on_only_specified_toggle({"new": True/False})` directly because the bootstrap stub's `Widget.observe()` is a no-op (real ipywidgets traitlets are not available in the test environment for Checkbox-based callbacks).
+- Validated: `python -m unittest tests.test_mask_painter_mode_visibility tests.test_mask_color_sets tests.test_mask_color_overlay -v` — 43/43 passed.
+
 **Issue #89 follow-up — Mask Painter Add/Remove class feature**
 - Added three new traitlets to `MaskClassListWidget`: `available_classes: List[str]`, `add_requested: str`, `remove_requested: str` (all `sync=True`; also present in the `HasTraits` fallback for tests).
 - JS: each class row now has a `×` button (`.mask-cl-remove`) that fires `model.set('remove_requested', cls)`. A footer `div.mask-cl-add-row` below the scroll area contains a `<select>.mask-cl-add-select` (populated from `available_classes`) and a `+ Add` button; clicking it fires `model.set('add_requested', <selected_value>)`. The select is disabled (with placeholder text) when `available_classes` is empty.
