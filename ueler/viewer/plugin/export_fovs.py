@@ -1576,6 +1576,17 @@ class BatchExportPlugin(PluginBase):
         if image is None or not image.size:
             raise ValueError("Map region render returned an empty array.")
 
+        image = self.main_viewer.apply_overlay_snapshot_to_map_array(
+            image,
+            layer=layer,
+            xmin_um=xmin_um,
+            xmax_um=xmax_um,
+            ymin_um=ymin_um,
+            ymax_um=ymax_um,
+            downsample_factor=ds,
+            snapshot=overlay_snapshot,
+        )
+
         # pixel_size_nm for the scale bar: base pixel is base_px_um µm, scaled by ds.
         pixel_size_nm = base_px_um * 1000.0 * ds
 

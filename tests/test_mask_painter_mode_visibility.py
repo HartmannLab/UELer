@@ -30,7 +30,9 @@ def _make_viewer():
     ui_component = types.SimpleNamespace()
     ui_component.image_selector = types.SimpleNamespace()
     ui_component.image_selector.value = "FOV_001"
+    ui_component.mask_color_controls = {"cell": types.SimpleNamespace(value="Green")}
     viewer.ui_component = ui_component
+    viewer.predefined_colors = {"Green": "#00FF00", "White": "#FFFFFF", "Red": "#FF0000", "Blue": "#0000FF"}
 
     image_display = types.SimpleNamespace()
     image_display.set_mask_colors_current_fov = lambda **kwargs: None
@@ -56,7 +58,9 @@ def _make_viewer_with_three_classes():
     ui_component = types.SimpleNamespace()
     ui_component.image_selector = types.SimpleNamespace()
     ui_component.image_selector.value = "FOV_001"
+    ui_component.mask_color_controls = {"cell": types.SimpleNamespace(value="Green")}
     viewer.ui_component = ui_component
+    viewer.predefined_colors = {"Green": "#00FF00", "White": "#FFFFFF", "Red": "#FF0000", "Blue": "#0000FF"}
 
     image_display = types.SimpleNamespace()
     image_display.set_mask_colors_current_fov = lambda **kwargs: None
@@ -220,6 +224,8 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
         self.assertEqual(snapshot.class_opacity["TypeA"], 55)
         self.assertEqual(snapshot.global_fill_opacity, 40)
         self.assertEqual(snapshot.show_borders_on_filled, True)
+        self.assertEqual(snapshot.border_color_mode, "mask_type_color")
+        self.assertEqual(snapshot.mask_type_color, "#00ff00")
         self.assertEqual(snapshot.outline_thickness, 3)
 
     def test_apply_snapshot_restores_saved_state(self):
@@ -246,6 +252,8 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
                 default_color="#FFFFFF",
                 global_fill_opacity=45,
                 show_borders_on_filled=True,
+                border_color_mode="mask_type_color",
+                mask_type_color="#00FF00",
                 outline_thickness=2,
             )
         )
@@ -258,6 +266,8 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
         self.assertEqual(painter.class_opacity_controls["TypeA"].value, 65)
         self.assertEqual(painter.ui_component.global_fill_opacity_input.value, 45)
         self.assertEqual(painter.ui_component.show_fill_borders_checkbox.value, True)
+        self.assertEqual(painter.ui_component.border_color_mode_dropdown.value, "mask_type_color")
+        self.assertEqual(self.viewer.ui_component.mask_color_controls["cell"].value, "Green")
 
     def test_mode_cache_cleared_on_cell_table_change(self):
         """_cell_mode_cache and _last_applied_class_modes reset when cell table changes."""
@@ -589,6 +599,7 @@ class TestMaskPainterRenderPath(unittest.TestCase):
 
         fake_painter = types.SimpleNamespace(
             get_effective_color_map_for_fov=lambda fov: {1: "#FF0000", 2: ""},
+            get_effective_border_color_map_for_fov=lambda fov: {1: "#00FF00"},
             get_effective_mode_map_for_fov=lambda fov: {1: "fill"},
             get_effective_opacity_map_for_fov=lambda fov: {1: 0.7},
             get_show_borders_on_filled=lambda: True,
@@ -631,6 +642,7 @@ class TestMaskPainterRenderPath(unittest.TestCase):
 
         kwargs = mock_apply.call_args.kwargs
         self.assertEqual(kwargs["color_map"], {1: "#FF0000", 2: ""})
+        self.assertEqual(kwargs["border_color_map"], {1: "#00FF00"})
         self.assertEqual(kwargs["mode_map"], {1: "fill"})
         self.assertEqual(kwargs["opacity_map"], {1: 0.7})
         self.assertTrue(kwargs["show_borders_on_filled"])

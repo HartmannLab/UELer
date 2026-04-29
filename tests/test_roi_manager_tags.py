@@ -889,6 +889,56 @@ class ROIManagerMapModeTests(unittest.TestCase):
         self.assertAlmostEqual(ymin_um, 4040.0, msg="ymin_um must include bounds origin")
         self.assertAlmostEqual(ymax_um, 4140.0, msg="ymax_um must include bounds origin")
 
+    def test_render_map_roi_tile_replays_saved_painter_snapshot(self):
+        """Map-mode ROI thumbnails should replay the saved painter snapshot onto the stitched image."""
+        import numpy as np
+
+        plugin = self._make_plugin(map_mode_active=True)
+
+        class _StubLayer:
+            _allowed_downsample = (1, 2, 4)
+            _viewport = None
+
+            def base_pixel_size_um(self):
+                return 1.0
+
+            def map_bounds(self):
+                return (0.0, 10.0, 0.0, 10.0)
+
+            def set_viewport(self, xmin_um, xmax_um, ymin_um, ymax_um, *, downsample_factor):
+                self._viewport = (xmin_um, xmax_um, ymin_um, ymax_um, downsample_factor)
+
+            def render(self, channels):
+                return np.zeros((6, 6, 3), dtype=np.float32)
+
+        stub_layer = _StubLayer()
+        plugin.main_viewer._active_map_id = "slide-1"
+        plugin.main_viewer._get_map_layer = lambda _mid: stub_layer
+        snapshot = SimpleNamespace(mask_painter=object())
+        plugin._build_overlay_snapshot = lambda *_args, **_kwargs: snapshot
+
+        replay_calls = []
+
+        def _apply_map_snapshot(image, **kwargs):
+            replay_calls.append(kwargs)
+            return image + 0.25
+
+        plugin.main_viewer.apply_overlay_snapshot_to_map_array = _apply_map_snapshot
+
+        profile = _MarkerProfile(
+            name="test",
+            selected_channels=("CHANNEL",),
+            channel_settings={},
+        )
+        record = {"fov": "", "map_id": "slide-1", "x_min": 5.0, "x_max": 25.0, "y_min": 10.0, "y_max": 30.0}
+
+        result = plugin._render_map_roi_tile(record, profile)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(len(replay_calls), 1)
+        self.assertIs(replay_calls[0]["snapshot"], snapshot)
+        self.assertTrue(np.allclose(result, 0.25))
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

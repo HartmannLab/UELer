@@ -58,3 +58,28 @@ Extend the existing mask painter state model once, then reuse it everywhere.
 - If live painter rendering and snapshot replay derive their state differently, viewer and export behavior can fork. Mitigation: centralize painter state building in `mask_painter.py`.
 - Extending the anywidget row layout with another per-class control can widen the UI again. Mitigation: keep the first pass narrow and validate panel width before widening the control surface further.
 - ROI schema changes can regress older CSV payloads. Mitigation: add backward-compatible defaults in `ueler/viewer/roi_manager.py`.
+
+## Follow-up: reply-to-#91 scope
+
+### Problem
+The first implementation preserved painter state for single-FOV ROI thumbnails and downstream replay, but two follow-up gaps remained:
+
+- map-mode ROI thumbnails still returned the raw stitched map render without replaying the saved painter snapshot
+- filled-mask borders always reused the fill color, so users could not keep borders aligned with the left-panel mask color when fill colors changed
+
+### Required behavior
+- ROI thumbnails and center-on-ROI playback should continue to reflect the painter snapshot captured with the ROI, including in map mode.
+- Filled-mask borders should support two modes:
+  - `mask_type_color`: use the left-panel mask color captured with the snapshot
+  - `same_as_fill`: reuse the class fill color
+
+### Follow-up approach
+1. Extend the painter snapshot model with border-color mode plus the resolved mask-type color.
+2. Teach `apply_registry_colors(...)` to accept a distinct `border_color_map` for fill-border rendering.
+3. Forward that border-color map through live viewer rendering and snapshot replay.
+4. Reuse a shared stitched-map replay helper for map-mode ROI thumbnails and map ROI export.
+5. Add focused regressions for overlay rendering, painter snapshot capture/restore, map-mode ROI thumbnail replay, cell gallery replay, and map ROI export.
+
+### Follow-up validation
+- `python -m unittest tests.test_mask_color_overlay tests.test_mask_painter_mode_visibility tests.test_roi_manager_tags tests.test_cell_gallery`
+- `python -m unittest tests.test_export_fovs_batch.BatchExportMapROIItemsTests.test_export_map_roi_worker_calls_render_map_region_direct tests.test_export_fovs_batch.BatchExportMapROIItemsTests.test_export_map_roi_worker_applies_map_bounds_offset tests.test_export_fovs_batch.BatchExportMapROIItemsTests.test_export_map_roi_worker_raises_on_empty_roi`

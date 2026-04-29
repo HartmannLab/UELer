@@ -51,6 +51,8 @@ COLOR_SET_FILE_SUFFIX = ".maskcolors.json"
 REGISTRY_FILENAME = "mask_color_sets_index.json"
 COLOR_SET_VERSION = "1.0.0"
 FILL_OPACITY_DEFAULT_PERCENT = 35
+BORDER_COLOR_MODE_MASK_TYPE = "mask_type_color"
+BORDER_COLOR_MODE_SAME_AS_FILL = "same_as_fill"
 
 
 def _normalise_opacity_percent(value: object, default: int = FILL_OPACITY_DEFAULT_PERCENT) -> int:
@@ -63,6 +65,43 @@ def _normalise_opacity_percent(value: object, default: int = FILL_OPACITY_DEFAUL
 
 def _opacity_percent_to_alpha(value: object, default: int = FILL_OPACITY_DEFAULT_PERCENT) -> float:
     return _normalise_opacity_percent(value, default) / 100.0
+
+
+def _resolve_mask_type_color(main_viewer, mask_name: Optional[str], fallback: str = DEFAULT_COLOR) -> str:
+    if not mask_name:
+        return fallback
+
+    controls = getattr(getattr(main_viewer, "ui_component", None), "mask_color_controls", {}) or {}
+    widget = controls.get(str(mask_name))
+    raw_value = getattr(widget, "value", None)
+    if not raw_value:
+        return fallback
+
+    predefined = getattr(main_viewer, "predefined_colors", {}) or {}
+    resolved = predefined.get(raw_value, raw_value)
+    return normalize_hex_color(resolved) or resolved or fallback
+
+
+def _resolve_color_dropdown_option(main_viewer, stored_value: object) -> Optional[str]:
+    if stored_value is None:
+        return None
+
+    value = str(stored_value).strip()
+    if not value:
+        return None
+
+    predefined = getattr(main_viewer, "predefined_colors", {}) or {}
+    if value in predefined:
+        return value
+
+    normalized = normalize_hex_color(value)
+    if normalized is None:
+        return None
+
+    for option, colour_hex in predefined.items():
+        if normalize_hex_color(colour_hex) == normalized:
+            return option
+    return None
 
 
 class ColorSetError(PaletteStoreError):
@@ -135,17 +174,19 @@ def build_painter_state_maps_for_fov(
     class_opacity: Mapping[str, int],
     default_color: str,
     global_fill_opacity: int,
-) -> Tuple[Dict[int, str], Dict[int, str], Dict[int, float]]:
+    border_color_mode: str = BORDER_COLOR_MODE_MASK_TYPE,
+    mask_type_color: str = DEFAULT_COLOR,
+) -> Tuple[Dict[int, str], Dict[int, str], Dict[int, str], Dict[int, float]]:
     """Resolve effective painter color/mode/opacity maps for one FOV."""
     if cell_table is None or not fov or not identifier or identifier not in cell_table.columns:
-        return {}, {}, {}
+        return {}, {}, {}, {}
 
     current_rows = cell_table.loc[
         cell_table[fov_key] == fov,
         [label_key, identifier],
     ]
     if current_rows.empty:
-        return {}, {}, {}
+        return {}, {}, {}, {}
 
     active_set = {str(cls) for cls in active_classes}
     hidden_set = {
@@ -155,8 +196,12 @@ def build_painter_state_maps_for_fov(
     default_percent = _normalise_opacity_percent(global_fill_opacity)
 
     color_map: Dict[int, str] = {}
+    border_map: Dict[int, str] = {}
     mode_map: Dict[int, str] = {}
     opacity_map: Dict[int, float] = {}
+
+    resolved_border_mode = str(border_color_mode or BORDER_COLOR_MODE_MASK_TYPE)
+    resolved_mask_type_color = normalize_hex_color(mask_type_color) or mask_type_color or default_color
 
     for _, row in current_rows.iterrows():
         cls_key = str(row[identifier])
@@ -168,9 +213,15 @@ def build_painter_state_maps_for_fov(
             color_map[mask_id] = default_color
             continue
 
-        color_map[mask_id] = class_colors.get(cls_key, default_color) or default_color
+        class_color = class_colors.get(cls_key, default_color) or default_color
+        color_map[mask_id] = class_color
         if bool(class_fill.get(cls_key, False)):
             mode_map[mask_id] = "fill"
+            border_map[mask_id] = (
+                class_color
+                if resolved_border_mode == BORDER_COLOR_MODE_SAME_AS_FILL
+                else resolved_mask_type_color
+            )
             opacity_map[mask_id] = _opacity_percent_to_alpha(
                 class_opacity.get(cls_key, default_percent),
                 default_percent,
@@ -178,7 +229,7 @@ def build_painter_state_maps_for_fov(
         else:
             mode_map[mask_id] = "outline"
 
-    return color_map, mode_map, opacity_map
+    return color_map, border_map, mode_map, opacity_map
 
 
 def write_color_set_file(path: Path, payload: Mapping[str, object]) -> Path:
@@ -276,6 +327,7 @@ class MaskPainterDisplay(PluginBase):
         self.ui_component.enabled_checkbox.observe(self._on_enabled_toggle, names="value")
         self.ui_component.global_fill_opacity_input.observe(self._on_global_fill_opacity_change, names="value")
         self.ui_component.show_fill_borders_checkbox.observe(self._on_fill_border_toggle, names="value")
+        self.ui_component.border_color_mode_dropdown.observe(self._on_fill_border_toggle, names="value")
 
         # Wire anywidget class-list traitlet changes → Python state
         _w = self.ui_component.class_list_widget
@@ -427,7 +479,7 @@ class MaskPainterDisplay(PluginBase):
     def get_effective_color_map_for_fov(self, fov: Optional[str] = None) -> Dict[int, str]:
         """Build the current single-FOV painter color map directly from UI state."""
         current_fov = fov or self.main_viewer.get_active_fov()
-        color_map, _, _ = build_painter_state_maps_for_fov(
+        color_map, _, _, _ = build_painter_state_maps_for_fov(
             cell_table=self.main_viewer.cell_table,
             fov_key=self.main_viewer.fov_key,
             label_key=self.main_viewer.label_key,
@@ -440,13 +492,36 @@ class MaskPainterDisplay(PluginBase):
             class_opacity={cls: _normalise_opacity_percent(getattr(widget, "value", FILL_OPACITY_DEFAULT_PERCENT)) for cls, widget in self.class_opacity_controls.items()},
             default_color=self.default_color,
             global_fill_opacity=_normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
+            border_color_mode=self.get_border_color_mode(),
+            mask_type_color=self.get_mask_type_color(),
         )
         return color_map
+
+    def get_effective_border_color_map_for_fov(self, fov: Optional[str] = None) -> Dict[int, str]:
+        """Build the current single-FOV painter border color map directly from UI state."""
+        current_fov = fov or self.main_viewer.get_active_fov()
+        _, border_map, _, _ = build_painter_state_maps_for_fov(
+            cell_table=self.main_viewer.cell_table,
+            fov_key=self.main_viewer.fov_key,
+            label_key=self.main_viewer.label_key,
+            fov=current_fov,
+            identifier=self.ui_component.identifier_dropdown.value,
+            active_classes=self._get_active_classes(),
+            class_colors={cls: getattr(widget, "value", self.default_color) for cls, widget in self.class_color_controls.items()},
+            class_visible={cls: bool(getattr(widget, "value", True)) for cls, widget in self.class_visible_controls.items()},
+            class_fill={cls: bool(getattr(widget, "value", False)) for cls, widget in self.class_mode_controls.items()},
+            class_opacity={cls: _normalise_opacity_percent(getattr(widget, "value", FILL_OPACITY_DEFAULT_PERCENT)) for cls, widget in self.class_opacity_controls.items()},
+            default_color=self.default_color,
+            global_fill_opacity=_normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
+            border_color_mode=self.get_border_color_mode(),
+            mask_type_color=self.get_mask_type_color(),
+        )
+        return border_map
 
     def get_effective_mode_map_for_fov(self, fov: Optional[str] = None) -> Dict[int, str]:
         """Build the current single-FOV painter mode map directly from UI state."""
         current_fov = fov or self.main_viewer.get_active_fov()
-        _, mode_map, _ = build_painter_state_maps_for_fov(
+        _, _, mode_map, _ = build_painter_state_maps_for_fov(
             cell_table=self.main_viewer.cell_table,
             fov_key=self.main_viewer.fov_key,
             label_key=self.main_viewer.label_key,
@@ -459,13 +534,15 @@ class MaskPainterDisplay(PluginBase):
             class_opacity={cls: _normalise_opacity_percent(getattr(widget, "value", FILL_OPACITY_DEFAULT_PERCENT)) for cls, widget in self.class_opacity_controls.items()},
             default_color=self.default_color,
             global_fill_opacity=_normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
+            border_color_mode=self.get_border_color_mode(),
+            mask_type_color=self.get_mask_type_color(),
         )
         return mode_map
 
     def get_effective_opacity_map_for_fov(self, fov: Optional[str] = None) -> Dict[int, float]:
         """Build the current single-FOV painter opacity map directly from UI state."""
         current_fov = fov or self.main_viewer.get_active_fov()
-        _, _, opacity_map = build_painter_state_maps_for_fov(
+        _, _, _, opacity_map = build_painter_state_maps_for_fov(
             cell_table=self.main_viewer.cell_table,
             fov_key=self.main_viewer.fov_key,
             label_key=self.main_viewer.label_key,
@@ -478,6 +555,8 @@ class MaskPainterDisplay(PluginBase):
             class_opacity={cls: _normalise_opacity_percent(getattr(widget, "value", FILL_OPACITY_DEFAULT_PERCENT)) for cls, widget in self.class_opacity_controls.items()},
             default_color=self.default_color,
             global_fill_opacity=_normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
+            border_color_mode=self.get_border_color_mode(),
+            mask_type_color=self.get_mask_type_color(),
         )
         return opacity_map
 
@@ -487,10 +566,25 @@ class MaskPainterDisplay(PluginBase):
     def get_show_borders_on_filled(self) -> bool:
         return bool(getattr(self.ui_component.show_fill_borders_checkbox, "value", False))
 
+    def get_border_color_mode(self) -> str:
+        value = getattr(self.ui_component.border_color_mode_dropdown, "value", BORDER_COLOR_MODE_MASK_TYPE)
+        if value == BORDER_COLOR_MODE_SAME_AS_FILL:
+            return BORDER_COLOR_MODE_SAME_AS_FILL
+        return BORDER_COLOR_MODE_MASK_TYPE
+
+    def get_mask_type_color(self) -> str:
+        return _resolve_mask_type_color(
+            self.main_viewer,
+            getattr(self.main_viewer, "mask_key", None),
+            fallback=self.default_color,
+        )
+
     def capture_snapshot(self) -> Optional[MaskPainterSnapshot]:
         identifier = self.ui_component.identifier_dropdown.value
         if not identifier or not self.class_color_controls:
             return None
+
+        mask_type_color = self.get_mask_type_color()
 
         return MaskPainterSnapshot(
             mask_name=str(getattr(self.main_viewer, "mask_key", "") or ""),
@@ -503,6 +597,8 @@ class MaskPainterDisplay(PluginBase):
             default_color=self.default_color,
             global_fill_opacity=_normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
             show_borders_on_filled=bool(self.ui_component.show_fill_borders_checkbox.value),
+            border_color_mode=self.get_border_color_mode(),
+            mask_type_color=mask_type_color,
             outline_thickness=int(getattr(self.main_viewer, "mask_outline_thickness", 1)),
         )
 
@@ -544,6 +640,17 @@ class MaskPainterDisplay(PluginBase):
             self.ui_component.show_fill_borders_checkbox.value = bool(
                 getattr(snapshot, "show_borders_on_filled", False)
             )
+            self.ui_component.border_color_mode_dropdown.value = str(
+                getattr(snapshot, "border_color_mode", BORDER_COLOR_MODE_MASK_TYPE) or BORDER_COLOR_MODE_MASK_TYPE
+            )
+
+            mask_name = str(getattr(snapshot, "mask_name", "") or getattr(self.main_viewer, "mask_key", "") or "")
+            if mask_name:
+                color_controls = getattr(getattr(self.main_viewer, "ui_component", None), "mask_color_controls", {}) or {}
+                mask_color_control = color_controls.get(mask_name)
+                mask_option = _resolve_color_dropdown_option(self.main_viewer, getattr(snapshot, "mask_type_color", ""))
+                if mask_color_control is not None and mask_option is not None:
+                    mask_color_control.value = mask_option
 
             for cls in self.current_classes:
                 cls_key = str(cls)
@@ -620,6 +727,7 @@ class MaskPainterDisplay(PluginBase):
                 },
                 "global_fill_opacity": _normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
                 "show_fill_borders": bool(self.ui_component.show_fill_borders_checkbox.value),
+                "border_color_mode": self.get_border_color_mode(),
                 "saved_at": timestamp,
             }
 
@@ -699,6 +807,7 @@ class MaskPainterDisplay(PluginBase):
                 },
                 "global_fill_opacity": _normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
                 "show_fill_borders": bool(self.ui_component.show_fill_borders_checkbox.value),
+                "border_color_mode": self.get_border_color_mode(),
                 "saved_at": timestamp,
             }
 
@@ -874,6 +983,9 @@ class MaskPainterDisplay(PluginBase):
             payload.get("global_fill_opacity", self.ui_component.global_fill_opacity_input.value)
         )
         self.ui_component.show_fill_borders_checkbox.value = bool(payload.get("show_fill_borders", False))
+        self.ui_component.border_color_mode_dropdown.value = str(
+            payload.get("border_color_mode", BORDER_COLOR_MODE_MASK_TYPE) or BORDER_COLOR_MODE_MASK_TYPE
+        )
 
         opacity_payload = payload.get("opacities", {})
         if isinstance(opacity_payload, dict):
@@ -1572,6 +1684,15 @@ class UiComponent:
             max=100,
             step=1,
         )
+        self.border_color_mode_dropdown = Dropdown(
+            options=[
+                ("Mask color", BORDER_COLOR_MODE_MASK_TYPE),
+                ("Same as fill", BORDER_COLOR_MODE_SAME_AS_FILL),
+            ],
+            value=BORDER_COLOR_MODE_MASK_TYPE,
+            description="Border color:",
+            layout=Layout(width="auto"),
+        )
         self.show_fill_borders_checkbox = Checkbox(
             value=False,
             description="Borders on filled",
@@ -1596,6 +1717,7 @@ class UiComponent:
         self.colors_layout = VBox([
             HBox([self.default_color_picker, self.only_specified_checkbox]),
             HBox([self.global_fill_opacity_input, self.show_fill_borders_checkbox]),
+            HBox([self.border_color_mode_dropdown]),
             HTML("<hr style='margin:4px 0'>"),
             self.class_list_widget,
         ])

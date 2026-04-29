@@ -774,6 +774,7 @@ def _render_tile_for_index(df, index: int, context: _RenderContext):
             if mask_array is not None:
                 painter_snapshot = getattr(context.overlay_snapshot, "mask_painter", None)
                 painter_color_map = {}
+                painter_border_color_map = {}
                 painter_mode_map = {}
                 painter_opacity_map = {}
                 show_borders_on_filled = False
@@ -782,6 +783,7 @@ def _render_tile_for_index(df, index: int, context: _RenderContext):
                     if callable(resolver):
                         (
                             painter_color_map,
+                            painter_border_color_map,
                             painter_mode_map,
                             painter_opacity_map,
                             show_borders_on_filled,
@@ -790,6 +792,7 @@ def _render_tile_for_index(df, index: int, context: _RenderContext):
                 def _append_cell_mask(cell_id: int, cell_color, thickness: int) -> None:
                     cell_mode = painter_mode_map.get(int(cell_id), "outline")
                     cell_alpha = float(painter_opacity_map.get(int(cell_id), 0.0))
+                    border_color = painter_border_color_map.get(int(cell_id), cell_color)
                     mask_region = mask_array == cell_id
                     if cell_mode == "fill":
                         if cell_alpha > 0.0:
@@ -807,7 +810,7 @@ def _render_tile_for_index(df, index: int, context: _RenderContext):
                             masks.append(
                                 MaskRenderSettings(
                                     array=mask_region,
-                                    color=cell_color,
+                                    color=to_rgb(border_color) if isinstance(border_color, str) else border_color,
                                     mode="outline",
                                     outline_thickness=thickness,
                                     downsample_factor=context.downsample_factor,

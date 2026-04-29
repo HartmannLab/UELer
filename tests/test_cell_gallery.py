@@ -337,7 +337,7 @@ class TestCellGalleryColors(unittest.TestCase):
         context = self._create_render_context(use_uniform_color=False, include_overlay=False)
         context.overlay_snapshot = SimpleNamespace(mask_painter=object())
         self.viewer.resolve_mask_painter_snapshot_for_fov = MagicMock(
-            return_value=({1: "#00ff00"}, {1: "fill"}, {1: 0.6}, True)
+            return_value=({1: "#00ff00"}, {1: "#0000ff"}, {1: "fill"}, {1: 0.6}, True)
         )
 
         captured = {}
@@ -354,6 +354,7 @@ class TestCellGalleryColors(unittest.TestCase):
         self.assertEqual(captured["masks"][0].mode, "fill")
         self.assertAlmostEqual(captured["masks"][0].alpha, 0.6)
         self.assertEqual(captured["masks"][1].mode, "outline")
+        self.assertEqual(captured["masks"][1].color, (0.0, 0.0, 1.0))
         self.assertEqual(captured["masks"][1].outline_thickness, context.outline_thickness)
 
     def test_colors_persist_across_fovs(self):

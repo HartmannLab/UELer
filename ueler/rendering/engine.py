@@ -122,6 +122,8 @@ class MaskPainterSnapshot:
     default_color: str
     global_fill_opacity: int = 35
     show_borders_on_filled: bool = False
+    border_color_mode: str = "mask_type_color"
+    mask_type_color: str = "#FFFFFF"
     outline_thickness: int = 1
 
 

@@ -103,6 +103,7 @@ def apply_registry_colors(
     outline_thickness: int,
     downsample_factor: int,
     color_map: Optional[Mapping[int, str]] = None,
+    border_color_map: Optional[Mapping[int, str]] = None,
     enable: bool = True,
     exclude_ids: Optional[set] = None,
     mode_map: Optional[Mapping[int, str]] = None,
@@ -119,6 +120,8 @@ def apply_registry_colors(
         outline_thickness: Thickness of mask outlines
         downsample_factor: Current downsample factor
         color_map: Optional explicit color mapping (overrides registry)
+        border_color_map: Optional explicit border color mapping. Cells absent
+            from this mapping fall back to ``color_map`` / registry colors.
         enable: Whether to apply colors at all
         exclude_ids: Set of mask IDs to skip (e.g., currently selected cells)
         mode_map: Optional per-cell render mode mapping (mask_id -> "outline" | "fill").
@@ -135,6 +138,8 @@ def apply_registry_colors(
     if not registry:
         return image
 
+    border_registry = dict(border_color_map or {})
+
     dilation = _resolve_outline_dilation(outline_thickness, downsample_factor)
     result = np.array(image, copy=True)
     excluded = exclude_ids or set()
@@ -146,6 +151,7 @@ def apply_registry_colors(
             result,
             np.asarray(region),
             registry,
+            border_registry,
             dilation,
             excluded,
             resolved_mode_map,
@@ -169,6 +175,7 @@ def _apply_region_colors(
     canvas: np.ndarray,
     region_array: np.ndarray,
     registry: Mapping[int, str],
+    border_registry: Mapping[int, str],
     dilation: int,
     exclude_ids: set,
     mode_map: Mapping[int, str],
@@ -187,6 +194,9 @@ def _apply_region_colors(
         rgb = _to_rgb_safe(colour_hex)
         if rgb is None:
             continue
+        border_rgb = _to_rgb_safe(border_registry.get(int(raw_mask_id), colour_hex))
+        if border_rgb is None:
+            border_rgb = rgb
 
         mask_bool = region_array == raw_mask_id
         if not np.any(mask_bool):
@@ -209,7 +219,7 @@ def _apply_region_colors(
                 if dilation > 0:
                     edges = thicken_outline(edges, dilation)
                 if np.any(edges):
-                    canvas[edges] = rgb
+                    canvas[edges] = border_rgb
         else:
             edges = find_boundaries(mask_bool, mode="inner")
             if dilation > 0:

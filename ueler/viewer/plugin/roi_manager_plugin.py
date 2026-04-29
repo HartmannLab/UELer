@@ -1257,6 +1257,19 @@ class ROIManagerPlugin(PluginBase):
 
         if image is None or not image.size:
             return None
+
+        snapshot = self._build_overlay_snapshot(record, "")
+        if snapshot is not None:
+            image = self.main_viewer.apply_overlay_snapshot_to_map_array(
+                image,
+                layer=layer,
+                xmin_um=xmin_um,
+                xmax_um=xmax_um,
+                ymin_um=ymin_um,
+                ymax_um=ymax_um,
+                downsample_factor=ds,
+                snapshot=snapshot,
+            )
         return np.clip(image.astype(np.float32), 0.0, 1.0)
 
     def _resolve_roi_overlays(
@@ -1329,6 +1342,8 @@ class ROIManagerPlugin(PluginBase):
                 default_color=str(data.get("default_color") or "#FFFFFF"),
                 global_fill_opacity=int(data.get("global_fill_opacity", 35) or 35),
                 show_borders_on_filled=bool(data.get("show_borders_on_filled", False)),
+                border_color_mode=str(data.get("border_color_mode") or "mask_type_color"),
+                mask_type_color=str(data.get("mask_type_color") or "#FFFFFF"),
                 outline_thickness=int(data.get("outline_thickness", getattr(self.main_viewer, "mask_outline_thickness", 1)) or 1),
             )
         except Exception:  # pragma: no cover - invalid payload content

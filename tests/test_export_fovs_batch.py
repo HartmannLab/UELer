@@ -333,6 +333,7 @@ class _BatchExportViewerStub:
             mask_color_controls={"MASK": SimpleNamespace(value="Red")},
             image_selector=SimpleNamespace(value=None),
         )
+        self.apply_overlay_snapshot_to_map_array = lambda image, **kwargs: image
 
     def get_active_fov(self):
         if self._map_mode_active:
@@ -1180,7 +1181,15 @@ class BatchExportMapROIItemsTests(unittest.TestCase):
 
         viewer = _BatchExportViewerStub(self.base_path)
         viewer._active_map_id = "slide-1"
-        viewer._get_map_layer = lambda _: _StubLayer()
+        stub_layer = _StubLayer()
+        viewer._get_map_layer = lambda _: stub_layer
+        replay_calls = []
+
+        def _replay(image, **kwargs):
+            replay_calls.append(kwargs)
+            return image
+
+        viewer.apply_overlay_snapshot_to_map_array = _replay
 
         plugin = BatchExportPlugin.__new__(BatchExportPlugin)
         plugin.main_viewer = viewer
@@ -1230,6 +1239,8 @@ class BatchExportMapROIItemsTests(unittest.TestCase):
         self.assertEqual(len(write_calls), 1)
         self.assertEqual(write_calls[0]["path"], output_file)
         self.assertEqual(write_calls[0]["fmt"], "png")
+        self.assertEqual(len(replay_calls), 1)
+        self.assertIs(replay_calls[0]["layer"], stub_layer)
 
         self.assertEqual(result["output_path"], output_file)
 

@@ -239,6 +239,48 @@ class OverlayFillRenderingTests(unittest.TestCase):
         self.assertAlmostEqual(float(result[2, 2, 0]), 0.5, places=4)
         self.assertAlmostEqual(float(result[1, 1, 0]), 1.0, places=4)
 
+    def test_fill_with_border_can_use_distinct_border_color(self):
+        image = np.zeros((5, 5, 3), dtype=np.float32)
+        region = np.array(
+            [
+                [0, 0, 0, 0, 0],
+                [0, 1, 1, 1, 0],
+                [0, 1, 1, 1, 0],
+                [0, 1, 1, 1, 0],
+                [0, 0, 0, 0, 0],
+            ],
+            dtype=np.int32,
+        )
+        edges = np.array(
+            [
+                [False, False, False, False, False],
+                [False, True, True, True, False],
+                [False, True, False, True, False],
+                [False, True, True, True, False],
+                [False, False, False, False, False],
+            ],
+            dtype=bool,
+        )
+
+        with patch("ueler.viewer.mask_color_overlay.find_boundaries", return_value=edges):
+            result = apply_registry_colors(
+                image,
+                fov="FOV_001",
+                mask_regions={"cell": region},
+                outline_thickness=1,
+                downsample_factor=1,
+                color_map={1: "#FF0000"},
+                border_color_map={1: "#00FF00"},
+                mode_map={1: "fill"},
+                opacity_map={1: 0.5},
+                show_borders_on_filled=True,
+            )
+
+        self.assertAlmostEqual(float(result[2, 2, 0]), 0.5, places=4)
+        self.assertAlmostEqual(float(result[2, 2, 1]), 0.0, places=4)
+        self.assertAlmostEqual(float(result[1, 1, 0]), 0.0, places=4)
+        self.assertAlmostEqual(float(result[1, 1, 1]), 1.0, places=4)
+
 
 # ---------------------------------------------------------------------------
 # _register_color_globally: bulk write path (mask_painter integration)

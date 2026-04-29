@@ -101,6 +101,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### **UELer v0.3.1 Summary**
+- Added a follow-up pass for Mask Painter ROI replay and filled-border colors (#91): map-mode ROI thumbnails and map ROI export now replay the saved painter snapshot, and filled-mask borders can either use the left-panel mask color or the fill color while preserving the captured mask-type color in ROI/gallery/export replay.
 - Added Mask Painter opacity and fill-border controls (#91): each active class can now store its own fill opacity, the global opacity control updates classes still linked to the previous global value, and a new border toggle keeps outlines visible on filled masks. The same painter state now propagates through the live viewer, cell gallery, ROI snapshots, and batch export.
 - Fixed Mask Painter redraw visibility (#90): single-FOV zoom/pan redraws now consume the current painter UI state directly during `_compose_fov_image()`, so shown classes stay visible, hidden active classes stay hidden, and the plugin starts disabled by default.
 - Added "Only specified" toggle to Mask Painter (#89 follow-up): a new `only_specified_checkbox` placed inline with the default color picker; when ON, the active class list is filtered to classes whose assigned color differs from the default color; when OFF, all `current_classes` are restored to active. Classes removed from the active list now remain visible with the default color until they are re-activated.

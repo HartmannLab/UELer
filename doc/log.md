@@ -1,5 +1,11 @@
 ### v0.3.1
 
+**Issue #91 follow-up — ROI thumbnail painter replay and border-color modes (commit TBD)**
+- Fixed map-mode ROI thumbnail/export replay so saved mask painter snapshots are re-applied onto stitched map renders instead of falling back to the raw map image.
+- Added mask painter border-color modes so filled-mask borders can either follow the left-panel mask color or reuse the fill color, and replayed snapshots now preserve the captured mask-type color as a resolved hex value.
+- Updated the live viewer and cell gallery to honor distinct filled-border colors in the same overlay path used by snapshot replay.
+- Validated: `python -m unittest tests.test_mask_color_overlay tests.test_mask_painter_mode_visibility tests.test_roi_manager_tags tests.test_cell_gallery` and `python -m unittest tests.test_export_fovs_batch.BatchExportMapROIItemsTests.test_export_map_roi_worker_calls_render_map_region_direct tests.test_export_fovs_batch.BatchExportMapROIItemsTests.test_export_map_roi_worker_applies_map_bounds_offset tests.test_export_fovs_batch.BatchExportMapROIItemsTests.test_export_map_roi_worker_raises_on_empty_roi`.
+
 **Issue #91 — Mask Painter opacity and borders on filled masks (commit TBD)**
 - Added per-class fill opacity controls plus a global linked opacity control to Mask Painter, and added a "Show borders on filled masks" toggle so filled classes can keep visible boundaries.
 - Extended the live viewer render path, map-mode painter overlay, and overlay helper to honor per-class fill opacity and optional fill borders in the same compose logic.
