@@ -106,7 +106,9 @@ def apply_registry_colors(
     enable: bool = True,
     exclude_ids: Optional[set] = None,
     mode_map: Optional[Mapping[int, str]] = None,
+    opacity_map: Optional[Mapping[int, float]] = None,
     fill_alpha: float = FILL_ALPHA_DEFAULT,
+    show_borders_on_filled: bool = False,
 ) -> np.ndarray:
     """Overlay painted mask colors onto an image array.
 
@@ -121,7 +123,10 @@ def apply_registry_colors(
         exclude_ids: Set of mask IDs to skip (e.g., currently selected cells)
         mode_map: Optional per-cell render mode mapping (mask_id -> "outline" | "fill").
             Cells absent from this mapping default to "outline".
+        opacity_map: Optional per-cell fill alpha mapping (mask_id -> 0-1).
+            Cells absent from this mapping fall back to ``fill_alpha``.
         fill_alpha: Alpha used when blending filled cells onto the image (0–1).
+        show_borders_on_filled: Whether filled masks should also render an outline.
     """
     if not enable or not mask_regions:
         return image
@@ -134,6 +139,7 @@ def apply_registry_colors(
     result = np.array(image, copy=True)
     excluded = exclude_ids or set()
     resolved_mode_map: Mapping[int, str] = mode_map or {}
+    resolved_opacity_map: Mapping[int, float] = opacity_map or {}
 
     for region in mask_regions.values():
         _apply_region_colors(
@@ -143,7 +149,9 @@ def apply_registry_colors(
             dilation,
             excluded,
             resolved_mode_map,
+            resolved_opacity_map,
             fill_alpha,
+            show_borders_on_filled,
         )
 
     return result
@@ -164,7 +172,9 @@ def _apply_region_colors(
     dilation: int,
     exclude_ids: set,
     mode_map: Mapping[int, str],
+    opacity_map: Mapping[int, float],
     fill_alpha: float,
+    show_borders_on_filled: bool,
 ) -> None:
     if region_array.size == 0:
         return
@@ -184,10 +194,22 @@ def _apply_region_colors(
 
         render_mode = mode_map.get(int(raw_mask_id), "outline")
         if render_mode == "fill":
+            resolved_alpha = opacity_map.get(int(raw_mask_id), fill_alpha)
+            try:
+                resolved_alpha = max(0.0, min(1.0, float(resolved_alpha)))
+            except (TypeError, ValueError):
+                resolved_alpha = fill_alpha
             rgb_arr = np.array(rgb, dtype=np.float32)
-            canvas[mask_bool] = (
-                (1.0 - fill_alpha) * canvas[mask_bool] + fill_alpha * rgb_arr
-            ).astype(canvas.dtype)
+            if resolved_alpha > 0.0:
+                canvas[mask_bool] = (
+                    (1.0 - resolved_alpha) * canvas[mask_bool] + resolved_alpha * rgb_arr
+                ).astype(canvas.dtype)
+            if show_borders_on_filled or resolved_alpha <= 0.0:
+                edges = find_boundaries(mask_bool, mode="inner")
+                if dilation > 0:
+                    edges = thicken_outline(edges, dilation)
+                if np.any(edges):
+                    canvas[edges] = rgb
         else:
             edges = find_boundaries(mask_bool, mode="inner")
             if dilation > 0:

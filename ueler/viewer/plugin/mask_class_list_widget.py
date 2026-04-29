@@ -15,6 +15,7 @@ Traitlets (all ``sync=True`` when anywidget is available):
 - ``class_colors``      — dict mapping class name → hex color string
 - ``class_visible``     — dict mapping class name → bool (True = visible/checked)
 - ``class_fill``        — dict mapping class name → bool (True = fill, False = outline)
+- ``class_opacity``     — dict mapping class name → int fill opacity percentage (0-100)
 - ``default_color``     — the global default color string
 - ``available_classes`` — list of dataset classes not currently in ``class_order``
 - ``add_requested``     — JS→Python signal; set to a class name when "Add" is clicked
@@ -32,6 +33,7 @@ try:
         class_colors: dict = traitlets.Dict({}).tag(sync=True)
         class_visible: dict = traitlets.Dict({}).tag(sync=True)
         class_fill: dict = traitlets.Dict({}).tag(sync=True)
+        class_opacity: dict = traitlets.Dict({}).tag(sync=True)
         default_color: str = traitlets.Unicode("#ffffff").tag(sync=True)
         available_classes: list = traitlets.List(traitlets.Unicode()).tag(sync=True)
         add_requested: str = traitlets.Unicode("").tag(sync=True)
@@ -107,6 +109,26 @@ try:
     white-space: nowrap;
     user-select: none;
 }
+.mask-cl-opacity {
+  flex: 0 0 58px;
+  width: 58px;
+  min-width: 58px;
+  padding: 2px 4px;
+  border: 1px solid var(--jp-border-color1, #ccc);
+  border-radius: 3px;
+  background: var(--jp-layout-color1, #fff);
+  color: var(--jp-ui-font-color1, #000);
+  font-size: 12px;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+.mask-cl-opacity-label {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--jp-ui-font-color2, #888);
+  white-space: nowrap;
+  user-select: none;
+}
 .mask-cl-remove {
     flex: 0 0 auto;
     background: none;
@@ -176,6 +198,7 @@ export function render({ model, el }) {
   function getColors()    { return model.get('class_colors')        || {}; }
   function getVisible()   { return model.get('class_visible')       || {}; }
   function getFill()      { return model.get('class_fill')          || {}; }
+  function getOpacity()   { return model.get('class_opacity')       || {}; }
   function getAvailable() { return (model.get('available_classes')  || []).slice(); }
 
   // ---------- root ----------
@@ -237,9 +260,14 @@ export function render({ model, el }) {
     var colors  = getColors();
     var visible = getVisible();
     var fill    = getFill();
+    var opacity = getOpacity();
     var color   = colors[cls]  || model.get('default_color') || '#ffffff';
     var vis     = visible[cls] !== false;
     var fillOn  = !!fill[cls];
+    var opacityPct = opacity[cls];
+    if (typeof opacityPct !== 'number' || Number.isNaN(opacityPct)) {
+      opacityPct = 35;
+    }
 
     var row = document.createElement('div');
     row.className = 'mask-cl-row';
@@ -346,6 +374,33 @@ export function render({ model, el }) {
     fillLabel.className = 'mask-cl-fill-label';
     fillLabel.textContent = 'fill';
 
+    // --- opacity input ---
+    var opacityInp = document.createElement('input');
+    opacityInp.type = 'number';
+    opacityInp.className = 'mask-cl-opacity';
+    opacityInp.min = '0';
+    opacityInp.max = '100';
+    opacityInp.step = '1';
+    opacityInp.value = String(opacityPct);
+    opacityInp.title = 'Fill opacity (%) for ' + cls;
+    opacityInp.addEventListener('change', function() {
+      if (_rebuilding) return;
+      var next = parseInt(opacityInp.value, 10);
+      if (!Number.isFinite(next)) {
+        next = 35;
+      }
+      next = Math.max(0, Math.min(100, next));
+      opacityInp.value = String(next);
+      var d = Object.assign({}, getOpacity());
+      d[cls] = next;
+      model.set('class_opacity', d);
+      model.save_changes();
+    });
+
+    var opacityLabel = document.createElement('span');
+    opacityLabel.className = 'mask-cl-opacity-label';
+    opacityLabel.textContent = '%';
+
     // --- remove button ---
     var removeBtn = document.createElement('button');
     removeBtn.className = 'mask-cl-remove';
@@ -361,6 +416,8 @@ export function render({ model, el }) {
     row.appendChild(visCb);
     row.appendChild(colorInp);
     row.appendChild(name);
+    row.appendChild(opacityInp);
+    row.appendChild(opacityLabel);
     row.appendChild(fillCb);
     row.appendChild(fillLabel);
     row.appendChild(removeBtn);
@@ -407,11 +464,21 @@ export function render({ model, el }) {
     });
   }
 
+  function syncOpacity() {
+    var opacity = getOpacity();
+    scroll.querySelectorAll('.mask-cl-row').forEach(function(row) {
+      var cls = row.dataset.cls;
+      var inp = row.querySelector('.mask-cl-opacity');
+      if (inp && cls in opacity) { inp.value = String(opacity[cls]); }
+    });
+  }
+
   // Re-build on order changes; only sync values on color/vis/fill changes.
   model.on('change:class_order',       rebuildRows);
   model.on('change:class_colors',      syncColors);
   model.on('change:class_visible',     syncVisible);
   model.on('change:class_fill',        syncFill);
+  model.on('change:class_opacity',     syncOpacity);
   model.on('change:default_color',     syncColors);
   model.on('change:available_classes', rebuildAddOptions);
 
@@ -433,6 +500,7 @@ except (ImportError, AttributeError):
         class_colors: dict = traitlets.Dict({})
         class_visible: dict = traitlets.Dict({})
         class_fill: dict = traitlets.Dict({})
+        class_opacity: dict = traitlets.Dict({})
         default_color: str = traitlets.Unicode("#ffffff")
         available_classes: list = traitlets.List(traitlets.Unicode())
         add_requested: str = traitlets.Unicode("")

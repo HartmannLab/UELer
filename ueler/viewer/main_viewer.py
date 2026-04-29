@@ -58,12 +58,13 @@ from ueler.viewer.color_palettes import (
     merge_palette_updates,
     normalize_hex_color,
 )
-from ueler.viewer.mask_color_overlay import apply_registry_colors, collect_mask_regions, FILL_ALPHA_DEFAULT
+from ueler.viewer.mask_color_overlay import apply_registry_colors, collect_mask_regions
 from ueler.rendering import (
     AnnotationOverlaySnapshot,
     AnnotationRenderSettings,
     ChannelRenderSettings,
     MaskOverlaySnapshot,
+    MaskPainterSnapshot,
     MaskRenderSettings,
     OverlaySnapshot,
     render_fov_to_array,
@@ -1769,65 +1770,30 @@ class ImageMaskViewer:
             if section_view.size == 0:
                 continue
 
-            # Group mask IDs by (color, mode) for efficient rendering
             painter = self._get_mask_painter()
             mode_map_for_fov = painter.get_mode_map_for_fov(str(fov_name)) if painter is not None else {}
-            fill_alpha = FILL_ALPHA_DEFAULT
+            opacity_map_for_fov = painter.get_opacity_map_for_fov(str(fov_name)) if painter is not None else {}
+            show_borders_on_filled = painter.get_show_borders_on_filled() if painter is not None else False
 
-            color_mode_to_ids: dict = {}
-            for mask_id, color_hex in cell_colors.items():
-                if not color_hex:
-                    continue
-                render_mode = mode_map_for_fov.get(int(mask_id), "outline")
-                color_mode_to_ids.setdefault((color_hex, render_mode), []).append(mask_id)
+            rows = min(section_view.shape[0], mask_region_ds.shape[0])
+            cols = min(section_view.shape[1], mask_region_ds.shape[1])
+            if rows <= 0 or cols <= 0:
+                continue
 
-            for (color_hex, render_mode), mask_ids_for_group in color_mode_to_ids.items():
-                try:
-                    color_rgb = list(to_rgb(color_hex))
-                except Exception:
-                    continue
-
-                group_mask = np.isin(mask_region_ds, mask_ids_for_group)
-                if not np.any(group_mask):
-                    continue
-
-                if render_mode == "fill":
-                    rows = min(section_view.shape[0], group_mask.shape[0])
-                    cols = min(section_view.shape[1], group_mask.shape[1])
-                    if rows <= 0 or cols <= 0:
-                        continue
-                    target = section_view[:rows, :cols]
-                    pixels = group_mask[:rows, :cols]
-                    color_arr = np.array(color_rgb, dtype=np.float32)
-                    target[pixels] = (
-                        (1.0 - fill_alpha) * target[pixels] + fill_alpha * color_arr
-                    ).astype(target.dtype)
-                    applied = True
-                else:
-                    try:
-                        edges = find_boundaries(group_mask, mode="inner")
-                    except Exception:
-                        edges = group_mask
-                    if not np.any(edges):
-                        edges = group_mask
-
-                    outline_thickness = scale_outline_thickness(
-                        getattr(self, "mask_outline_thickness", 1),
-                        downsample,
-                    )
-                    if outline_thickness > 1:
-                        try:
-                            edges = thicken_outline(edges, outline_thickness - 1)
-                        except Exception:
-                            pass
-
-                    rows = min(section_view.shape[0], edges.shape[0])
-                    cols = min(section_view.shape[1], edges.shape[1])
-                    if rows <= 0 or cols <= 0:
-                        continue
-
-                    section_view[:rows, :cols][edges[:rows, :cols]] = color_rgb
-                    applied = True
+            painted = apply_registry_colors(
+                section_view[:rows, :cols],
+                fov=str(fov_name),
+                mask_regions={str(mask_key): mask_region_ds[:rows, :cols]},
+                outline_thickness=int(getattr(self, "mask_outline_thickness", 1)),
+                downsample_factor=downsample,
+                color_map=cell_colors,
+                mode_map=mode_map_for_fov,
+                opacity_map=opacity_map_for_fov,
+                show_borders_on_filled=show_borders_on_filled,
+            )
+            if np.any(painted != section_view[:rows, :cols]):
+                section_view[:rows, :cols] = painted
+                applied = True
 
         if applied:
             # Update combined so _update_map_mask_highlights builds on top of
@@ -3907,6 +3873,8 @@ class ImageMaskViewer:
         painter = self._get_mask_painter() if self._is_mask_painter_enabled() else None
         painter_color_map = None
         painter_mode_map = None
+        painter_opacity_map = None
+        painter_show_borders_on_filled = False
         if painter is not None:
             color_helper = getattr(painter, "get_effective_color_map_for_fov", None)
             if callable(color_helper):
@@ -3916,6 +3884,12 @@ class ImageMaskViewer:
                 painter_mode_map = mode_helper(fov_name)
             elif hasattr(painter, "get_mode_map_for_fov"):
                 painter_mode_map = painter.get_mode_map_for_fov(fov_name)
+            opacity_helper = getattr(painter, "get_effective_opacity_map_for_fov", None)
+            if callable(opacity_helper):
+                painter_opacity_map = opacity_helper(fov_name)
+            border_helper = getattr(painter, "get_show_borders_on_filled", None)
+            if callable(border_helper):
+                painter_show_borders_on_filled = bool(border_helper())
         painter_controls_primary_mask = bool(painter_color_map)
 
         mask_settings = []
@@ -3993,6 +3967,8 @@ class ImageMaskViewer:
                 exclude_ids=excluded,
                 color_map=painter_color_map,
                 mode_map=painter_mode_map,
+                opacity_map=painter_opacity_map,
+                show_borders_on_filled=painter_show_borders_on_filled,
             )
 
         return combined
@@ -4112,8 +4088,17 @@ class ImageMaskViewer:
             )
 
         mask_snapshots: list[MaskOverlaySnapshot] = []
+        painter_snapshot: Optional[MaskPainterSnapshot] = None
         use_masks = bool(include_masks and self.masks_available)
         if use_masks:
+            painter = self._get_mask_painter() if self._is_mask_painter_enabled() else None
+            if painter is not None:
+                capture_painter = getattr(painter, "capture_snapshot", None)
+                if callable(capture_painter):
+                    try:
+                        painter_snapshot = capture_painter()
+                    except Exception:
+                        painter_snapshot = None
             mask_controls = getattr(self.ui_component, "mask_display_controls", {})
             color_controls = getattr(self.ui_component, "mask_color_controls", {})
             for mask_name, checkbox in mask_controls.items():
@@ -4140,6 +4125,92 @@ class ImageMaskViewer:
             include_masks=use_masks,
             annotation=annotation_snapshot,
             masks=tuple(mask_snapshots),
+            mask_painter=painter_snapshot,
+        )
+
+    def resolve_mask_painter_snapshot_for_fov(
+        self,
+        snapshot: Optional[MaskPainterSnapshot],
+        fov_name: str,
+    ) -> tuple[Dict[int, str], Dict[int, str], Dict[int, float], bool]:
+        if snapshot is None or self.cell_table is None:
+            return {}, {}, {}, False
+
+        from ueler.viewer.plugin.mask_painter import build_painter_state_maps_for_fov
+
+        color_map, mode_map, opacity_map = build_painter_state_maps_for_fov(
+            cell_table=self.cell_table,
+            fov_key=self.fov_key,
+            label_key=self.label_key,
+            fov=fov_name,
+            identifier=snapshot.identifier,
+            active_classes=snapshot.active_classes,
+            class_colors=snapshot.class_colors,
+            class_visible=snapshot.class_visible,
+            class_fill=snapshot.class_fill,
+            class_opacity=snapshot.class_opacity,
+            default_color=snapshot.default_color,
+            global_fill_opacity=snapshot.global_fill_opacity,
+        )
+        return color_map, mode_map, opacity_map, bool(snapshot.show_borders_on_filled)
+
+    def apply_overlay_snapshot_to_array(
+        self,
+        array: np.ndarray,
+        *,
+        fov_name: str,
+        downsample_factor: int,
+        snapshot: Optional[OverlaySnapshot],
+        region_ds: Optional[tuple[int, int, int, int]] = None,
+    ) -> np.ndarray:
+        painter_snapshot = getattr(snapshot, "mask_painter", None)
+        if snapshot is None or painter_snapshot is None:
+            return array
+
+        mask_name = str(getattr(painter_snapshot, "mask_name", "") or getattr(self, "mask_key", "") or "")
+        if not mask_name:
+            return array
+
+        label_mask_ds = self._get_label_mask_at_factor(fov_name, mask_name, downsample_factor)
+        if label_mask_ds is None:
+            raw_mask = self.mask_cache.get(fov_name, {}).get(mask_name)
+            if raw_mask is not None:
+                label_mask_ds = raw_mask[::downsample_factor, ::downsample_factor]
+        if label_mask_ds is None:
+            return array
+
+        try:
+            mask_array = label_mask_ds.compute()
+        except AttributeError:
+            mask_array = np.asarray(label_mask_ds)
+        if mask_array.size == 0:
+            return array
+
+        if region_ds is not None:
+            xmin_ds, xmax_ds, ymin_ds, ymax_ds = region_ds
+            mask_region = mask_array[ymin_ds:ymax_ds, xmin_ds:xmax_ds]
+        else:
+            mask_region = mask_array
+        if mask_region.size == 0:
+            return array
+
+        color_map, mode_map, opacity_map, show_borders = self.resolve_mask_painter_snapshot_for_fov(
+            painter_snapshot,
+            fov_name,
+        )
+        if not color_map:
+            return array
+
+        return apply_registry_colors(
+            array,
+            fov=fov_name,
+            mask_regions={mask_name: mask_region},
+            outline_thickness=int(getattr(painter_snapshot, "outline_thickness", getattr(self, "mask_outline_thickness", 1))),
+            downsample_factor=downsample_factor,
+            color_map=color_map,
+            mode_map=mode_map,
+            opacity_map=opacity_map,
+            show_borders_on_filled=show_borders,
         )
 
     def build_overlay_settings_from_snapshot(

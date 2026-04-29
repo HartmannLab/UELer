@@ -1,5 +1,12 @@
 ### v0.3.1
 
+**Issue #91 — Mask Painter opacity and borders on filled masks (commit TBD)**
+- Added per-class fill opacity controls plus a global linked opacity control to Mask Painter, and added a "Show borders on filled masks" toggle so filled classes can keep visible boundaries.
+- Extended the live viewer render path, map-mode painter overlay, and overlay helper to honor per-class fill opacity and optional fill borders in the same compose logic.
+- Added painter snapshot capture/replay so cell gallery, ROI thumbnails/presets, and batch export reuse the saved painter state instead of falling back to outline-only rendering.
+- Persisted painter snapshot payloads in ROI records so each ROI keeps the mask painter settings captured with it.
+- Validated: `python -m unittest tests.test_mask_painter_mode_visibility tests.test_mask_color_overlay tests.test_cell_gallery tests.test_roi_manager_tags` and `python -m unittest tests.test_export_fovs_batch.ExportFOVsBatchTests.test_batch_export_snapshot_preserves_mask_painter_outline_thickness`.
+
 **Issue #90 — Mask Painter redraw visibility fix (commit TBD)**
 - Fixed the single-FOV mask painter render path so zoom/pan redraws use the current UI state directly during `_compose_fov_image()` instead of relying on post-render plugin timing.
 - Added `get_effective_color_map_for_fov()` and `get_effective_mode_map_for_fov()` to `MaskPainterDisplay`, and updated `main_viewer.py` to pass that state into `apply_registry_colors(...)` for the painter-controlled mask overlay.

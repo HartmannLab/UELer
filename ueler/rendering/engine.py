@@ -111,11 +111,27 @@ class MaskOverlaySnapshot:
 
 
 @dataclass(frozen=True)
+class MaskPainterSnapshot:
+    mask_name: str
+    identifier: str
+    active_classes: Tuple[str, ...]
+    class_colors: Mapping[str, str]
+    class_visible: Mapping[str, bool]
+    class_fill: Mapping[str, bool]
+    class_opacity: Mapping[str, int]
+    default_color: str
+    global_fill_opacity: int = 35
+    show_borders_on_filled: bool = False
+    outline_thickness: int = 1
+
+
+@dataclass(frozen=True)
 class OverlaySnapshot:
     include_annotations: bool
     include_masks: bool
     annotation: Optional[AnnotationOverlaySnapshot] = None
     masks: Tuple[MaskOverlaySnapshot, ...] = ()
+    mask_painter: Optional[MaskPainterSnapshot] = None
 
 
 def _infer_region(channel_arrays: Mapping[str, object], selected: Sequence[str]) -> Region:
@@ -636,6 +652,7 @@ __all__ = [
     "AnnotationRenderSettings",
     "ChannelRenderSettings",
     "MaskOverlaySnapshot",
+    "MaskPainterSnapshot",
     "MaskRenderSettings",
     "OverlaySnapshot",
     "scale_outline_thickness",

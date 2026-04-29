@@ -11,6 +11,7 @@ from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 import numpy as np
 from ipywidgets import (
     Accordion,
+    BoundedIntText,
     Button,
     Checkbox,
     ColorPicker,
@@ -45,10 +46,23 @@ from ueler.viewer.palette_store import (
     slugify_name as shared_slugify_name,
     write_palette_file,
 )
-from ueler.rendering import set_cell_color, get_cell_color, clear_cell_colors, set_cell_colors_bulk
+from ueler.rendering import MaskPainterSnapshot, set_cell_color, get_cell_color, clear_cell_colors, set_cell_colors_bulk
 COLOR_SET_FILE_SUFFIX = ".maskcolors.json"
 REGISTRY_FILENAME = "mask_color_sets_index.json"
 COLOR_SET_VERSION = "1.0.0"
+FILL_OPACITY_DEFAULT_PERCENT = 35
+
+
+def _normalise_opacity_percent(value: object, default: int = FILL_OPACITY_DEFAULT_PERCENT) -> int:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        numeric = float(default)
+    return max(0, min(100, int(round(numeric))))
+
+
+def _opacity_percent_to_alpha(value: object, default: int = FILL_OPACITY_DEFAULT_PERCENT) -> float:
+    return _normalise_opacity_percent(value, default) / 100.0
 
 
 class ColorSetError(PaletteStoreError):
@@ -107,6 +121,66 @@ def split_default_classes(
     return non_default, defaulted
 
 
+def build_painter_state_maps_for_fov(
+    *,
+    cell_table,
+    fov_key: str,
+    label_key: str,
+    fov: Optional[str],
+    identifier: Optional[str],
+    active_classes: Sequence[str],
+    class_colors: Mapping[str, str],
+    class_visible: Mapping[str, bool],
+    class_fill: Mapping[str, bool],
+    class_opacity: Mapping[str, int],
+    default_color: str,
+    global_fill_opacity: int,
+) -> Tuple[Dict[int, str], Dict[int, str], Dict[int, float]]:
+    """Resolve effective painter color/mode/opacity maps for one FOV."""
+    if cell_table is None or not fov or not identifier or identifier not in cell_table.columns:
+        return {}, {}, {}
+
+    current_rows = cell_table.loc[
+        cell_table[fov_key] == fov,
+        [label_key, identifier],
+    ]
+    if current_rows.empty:
+        return {}, {}, {}
+
+    active_set = {str(cls) for cls in active_classes}
+    hidden_set = {
+        cls for cls in active_set
+        if not bool(class_visible.get(cls, True))
+    }
+    default_percent = _normalise_opacity_percent(global_fill_opacity)
+
+    color_map: Dict[int, str] = {}
+    mode_map: Dict[int, str] = {}
+    opacity_map: Dict[int, float] = {}
+
+    for _, row in current_rows.iterrows():
+        cls_key = str(row[identifier])
+        mask_id = int(row[label_key])
+        if cls_key in hidden_set:
+            color_map[mask_id] = ""
+            continue
+        if cls_key not in active_set:
+            color_map[mask_id] = default_color
+            continue
+
+        color_map[mask_id] = class_colors.get(cls_key, default_color) or default_color
+        if bool(class_fill.get(cls_key, False)):
+            mode_map[mask_id] = "fill"
+            opacity_map[mask_id] = _opacity_percent_to_alpha(
+                class_opacity.get(cls_key, default_percent),
+                default_percent,
+            )
+        else:
+            mode_map[mask_id] = "outline"
+
+    return color_map, mode_map, opacity_map
+
+
 def write_color_set_file(path: Path, payload: Mapping[str, object]) -> Path:
     return write_palette_file(path, payload)
 
@@ -148,6 +222,7 @@ class MaskPainterDisplay(PluginBase):
         self.class_color_controls: Dict[str, ColorPicker] = {}
         self.class_visible_controls: Dict[str, Checkbox] = {}
         self.class_mode_controls: Dict[str, Checkbox] = {}
+        self.class_opacity_controls: Dict[str, BoundedIntText] = {}
         self.current_classes: List[str] = []
         self._active_classes: List[str] = []
         self.current_identifier: Optional[str] = None
@@ -156,7 +231,9 @@ class MaskPainterDisplay(PluginBase):
         self.registry_records: Dict[str, Dict[str, str]] = {}
         self.active_color_set_name = ""
         self._cell_mode_cache: Dict[str, Dict[int, str]] = {}  # fov -> {mask_id: mode}
+        self._cell_opacity_cache: Dict[str, Dict[int, float]] = {}  # fov -> {mask_id: alpha}
         self._last_applied_class_modes: Dict[str, str] = {}
+        self._last_applied_class_opacities: Dict[str, float] = {}
         self._syncing: bool = False  # guard against anywidget ↔ ipywidget sync loops
         
         # Track last applied state to avoid unnecessary re-application
@@ -197,10 +274,12 @@ class MaskPainterDisplay(PluginBase):
         self.ui_component.identifier_dropdown.observe(self._refresh_save_button_state, names="value")
         self.ui_component.only_specified_checkbox.observe(self._on_only_specified_toggle, names="value")
         self.ui_component.enabled_checkbox.observe(self._on_enabled_toggle, names="value")
+        self.ui_component.global_fill_opacity_input.observe(self._on_global_fill_opacity_change, names="value")
+        self.ui_component.show_fill_borders_checkbox.observe(self._on_fill_border_toggle, names="value")
 
         # Wire anywidget class-list traitlet changes → Python state
         _w = self.ui_component.class_list_widget
-        _w.observe(self._pull_from_widget, names=["class_order", "class_colors", "class_visible", "class_fill"])
+        _w.observe(self._pull_from_widget, names=["class_order", "class_colors", "class_visible", "class_fill", "class_opacity"])
         _w.observe(self._on_add_requested, names=["add_requested"])
         _w.observe(self._on_remove_requested, names=["remove_requested"])
 
@@ -235,6 +314,7 @@ class MaskPainterDisplay(PluginBase):
         self.class_color_controls.clear()
         self.class_visible_controls.clear()
         self.class_mode_controls.clear()
+        self.class_opacity_controls.clear()
         for cls in classes:
             picker = ColorPicker(description=str(cls), value=self.default_color, layout=Layout(width="200px"))
             self.class_color_controls[cls] = picker
@@ -256,6 +336,14 @@ class MaskPainterDisplay(PluginBase):
             )
             mode_cb.observe(self._on_visibility_or_mode_change, names="value")
             self.class_mode_controls[cls] = mode_cb
+            opacity_input = BoundedIntText(
+                value=_normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
+                min=0,
+                max=100,
+                step=1,
+            )
+            opacity_input.observe(self._on_visibility_or_mode_change, names="value")
+            self.class_opacity_controls[cls] = opacity_input
 
         # Sync state to the anywidget list
         self._push_to_widget()
@@ -339,56 +427,153 @@ class MaskPainterDisplay(PluginBase):
     def get_effective_color_map_for_fov(self, fov: Optional[str] = None) -> Dict[int, str]:
         """Build the current single-FOV painter color map directly from UI state."""
         current_fov = fov or self.main_viewer.get_active_fov()
-        identifier = self.ui_component.identifier_dropdown.value
-        if not current_fov or not identifier or self.main_viewer.cell_table is None:
-            return {}
-
-        active_visible = set(self._get_visible_classes())
-        active_hidden = set(self._get_hidden_classes())
-        inactive = set(self._get_inactive_classes())
-        current_rows = self.main_viewer.cell_table.loc[
-            self.main_viewer.cell_table[self.main_viewer.fov_key] == current_fov,
-            [self.main_viewer.label_key, identifier],
-        ]
-        if current_rows.empty:
-            return {}
-
-        color_map: Dict[int, str] = {}
-        for _, row in current_rows.iterrows():
-            cls_key = str(row[identifier])
-            mask_id = int(row[self.main_viewer.label_key])
-            if cls_key in active_hidden:
-                color_map[mask_id] = ""
-            elif cls_key in inactive:
-                color_map[mask_id] = self.default_color
-            else:
-                picker = self.class_color_controls.get(cls_key)
-                color_map[mask_id] = getattr(picker, "value", None) or self.default_color
+        color_map, _, _ = build_painter_state_maps_for_fov(
+            cell_table=self.main_viewer.cell_table,
+            fov_key=self.main_viewer.fov_key,
+            label_key=self.main_viewer.label_key,
+            fov=current_fov,
+            identifier=self.ui_component.identifier_dropdown.value,
+            active_classes=self._get_active_classes(),
+            class_colors={cls: getattr(widget, "value", self.default_color) for cls, widget in self.class_color_controls.items()},
+            class_visible={cls: bool(getattr(widget, "value", True)) for cls, widget in self.class_visible_controls.items()},
+            class_fill={cls: bool(getattr(widget, "value", False)) for cls, widget in self.class_mode_controls.items()},
+            class_opacity={cls: _normalise_opacity_percent(getattr(widget, "value", FILL_OPACITY_DEFAULT_PERCENT)) for cls, widget in self.class_opacity_controls.items()},
+            default_color=self.default_color,
+            global_fill_opacity=_normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
+        )
         return color_map
 
     def get_effective_mode_map_for_fov(self, fov: Optional[str] = None) -> Dict[int, str]:
         """Build the current single-FOV painter mode map directly from UI state."""
         current_fov = fov or self.main_viewer.get_active_fov()
-        identifier = self.ui_component.identifier_dropdown.value
-        if not current_fov or not identifier or self.main_viewer.cell_table is None:
-            return {}
-
-        active_visible = set(self._get_visible_classes())
-        current_rows = self.main_viewer.cell_table.loc[
-            self.main_viewer.cell_table[self.main_viewer.fov_key] == current_fov,
-            [self.main_viewer.label_key, identifier],
-        ]
-        if current_rows.empty:
-            return {}
-
-        mode_map: Dict[int, str] = {}
-        for _, row in current_rows.iterrows():
-            cls_key = str(row[identifier])
-            if cls_key not in active_visible:
-                continue
-            cb = self.class_mode_controls.get(cls_key)
-            mode_map[int(row[self.main_viewer.label_key])] = "fill" if getattr(cb, "value", False) else "outline"
+        _, mode_map, _ = build_painter_state_maps_for_fov(
+            cell_table=self.main_viewer.cell_table,
+            fov_key=self.main_viewer.fov_key,
+            label_key=self.main_viewer.label_key,
+            fov=current_fov,
+            identifier=self.ui_component.identifier_dropdown.value,
+            active_classes=self._get_active_classes(),
+            class_colors={cls: getattr(widget, "value", self.default_color) for cls, widget in self.class_color_controls.items()},
+            class_visible={cls: bool(getattr(widget, "value", True)) for cls, widget in self.class_visible_controls.items()},
+            class_fill={cls: bool(getattr(widget, "value", False)) for cls, widget in self.class_mode_controls.items()},
+            class_opacity={cls: _normalise_opacity_percent(getattr(widget, "value", FILL_OPACITY_DEFAULT_PERCENT)) for cls, widget in self.class_opacity_controls.items()},
+            default_color=self.default_color,
+            global_fill_opacity=_normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
+        )
         return mode_map
+
+    def get_effective_opacity_map_for_fov(self, fov: Optional[str] = None) -> Dict[int, float]:
+        """Build the current single-FOV painter opacity map directly from UI state."""
+        current_fov = fov or self.main_viewer.get_active_fov()
+        _, _, opacity_map = build_painter_state_maps_for_fov(
+            cell_table=self.main_viewer.cell_table,
+            fov_key=self.main_viewer.fov_key,
+            label_key=self.main_viewer.label_key,
+            fov=current_fov,
+            identifier=self.ui_component.identifier_dropdown.value,
+            active_classes=self._get_active_classes(),
+            class_colors={cls: getattr(widget, "value", self.default_color) for cls, widget in self.class_color_controls.items()},
+            class_visible={cls: bool(getattr(widget, "value", True)) for cls, widget in self.class_visible_controls.items()},
+            class_fill={cls: bool(getattr(widget, "value", False)) for cls, widget in self.class_mode_controls.items()},
+            class_opacity={cls: _normalise_opacity_percent(getattr(widget, "value", FILL_OPACITY_DEFAULT_PERCENT)) for cls, widget in self.class_opacity_controls.items()},
+            default_color=self.default_color,
+            global_fill_opacity=_normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
+        )
+        return opacity_map
+
+    def get_opacity_map_for_fov(self, fov: str) -> Dict[int, float]:
+        return dict(self._cell_opacity_cache.get(str(fov), {}))
+
+    def get_show_borders_on_filled(self) -> bool:
+        return bool(getattr(self.ui_component.show_fill_borders_checkbox, "value", False))
+
+    def capture_snapshot(self) -> Optional[MaskPainterSnapshot]:
+        identifier = self.ui_component.identifier_dropdown.value
+        if not identifier or not self.class_color_controls:
+            return None
+
+        return MaskPainterSnapshot(
+            mask_name=str(getattr(self.main_viewer, "mask_key", "") or ""),
+            identifier=str(identifier),
+            active_classes=tuple(str(cls) for cls in self._get_active_classes()),
+            class_colors={cls: getattr(widget, "value", self.default_color) or self.default_color for cls, widget in self.class_color_controls.items()},
+            class_visible={cls: bool(getattr(widget, "value", True)) for cls, widget in self.class_visible_controls.items()},
+            class_fill={cls: bool(getattr(widget, "value", False)) for cls, widget in self.class_mode_controls.items()},
+            class_opacity={cls: _normalise_opacity_percent(getattr(widget, "value", FILL_OPACITY_DEFAULT_PERCENT)) for cls, widget in self.class_opacity_controls.items()},
+            default_color=self.default_color,
+            global_fill_opacity=_normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
+            show_borders_on_filled=bool(self.ui_component.show_fill_borders_checkbox.value),
+            outline_thickness=int(getattr(self.main_viewer, "mask_outline_thickness", 1)),
+        )
+
+    def apply_snapshot(self, snapshot: Optional[MaskPainterSnapshot]) -> bool:
+        if snapshot is None:
+            return False
+
+        identifier = str(getattr(snapshot, "identifier", "") or "")
+        if not identifier:
+            return False
+
+        options = tuple(getattr(self.ui_component.identifier_dropdown, "options", ()) or ())
+        if identifier not in options:
+            return False
+
+        self.default_color = getattr(snapshot, "default_color", self.default_color) or self.default_color
+        if self.ui_component.identifier_dropdown.value != identifier:
+            self.ui_component.identifier_dropdown.value = identifier
+        elif not self.class_color_controls:
+            self.on_identifier_change({"new": identifier})
+
+        if not self.class_color_controls:
+            return False
+
+        active_set = {str(cls) for cls in getattr(snapshot, "active_classes", ())}
+        available = tuple(
+            cls for cls in self.current_classes
+            if str(cls) in active_set
+        )
+
+        self._syncing = True
+        try:
+            class_selector = getattr(self.ui_component, "class_selector", None)
+            if class_selector is not None:
+                class_selector.value = available
+            self.ui_component.global_fill_opacity_input.value = _normalise_opacity_percent(
+                getattr(snapshot, "global_fill_opacity", FILL_OPACITY_DEFAULT_PERCENT)
+            )
+            self.ui_component.show_fill_borders_checkbox.value = bool(
+                getattr(snapshot, "show_borders_on_filled", False)
+            )
+
+            for cls in self.current_classes:
+                cls_key = str(cls)
+                color_picker = self.class_color_controls.get(cls_key)
+                if color_picker is not None:
+                    color_picker.value = snapshot.class_colors.get(cls_key, self.default_color) or self.default_color
+                visible_control = self.class_visible_controls.get(cls_key)
+                if visible_control is not None:
+                    visible_control.value = bool(snapshot.class_visible.get(cls_key, True))
+                mode_control = self.class_mode_controls.get(cls_key)
+                if mode_control is not None:
+                    mode_control.value = bool(snapshot.class_fill.get(cls_key, False))
+                opacity_control = self.class_opacity_controls.get(cls_key)
+                if opacity_control is not None:
+                    opacity_control.value = _normalise_opacity_percent(
+                        snapshot.class_opacity.get(cls_key, FILL_OPACITY_DEFAULT_PERCENT)
+                    )
+
+            self._active_classes = [cls for cls in self.current_classes if str(cls) in active_set]
+        finally:
+            self._syncing = False
+
+        self._push_to_widget()
+        self._last_applied_class_opacities = {
+            cls: float(getattr(widget, "value", FILL_OPACITY_DEFAULT_PERCENT))
+            for cls, widget in self.class_opacity_controls.items()
+        }
+        self._cell_opacity_cache.clear()
+        self.apply_colors_to_masks(None)
+        return True
 
     # ------------------------------------------------------------------
     # Persistence helpers
@@ -429,6 +614,12 @@ class MaskPainterDisplay(PluginBase):
                 "colors": color_map,
                 "modes": modes_map,
                 "visible": visible_map,
+                "opacities": {
+                    cls: _normalise_opacity_percent(getattr(self.class_opacity_controls.get(cls), "value", FILL_OPACITY_DEFAULT_PERCENT))
+                    for cls in class_order
+                },
+                "global_fill_opacity": _normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
+                "show_fill_borders": bool(self.ui_component.show_fill_borders_checkbox.value),
                 "saved_at": timestamp,
             }
 
@@ -502,6 +693,12 @@ class MaskPainterDisplay(PluginBase):
                 "colors": color_map,
                 "modes": modes_map,
                 "visible": visible_map,
+                "opacities": {
+                    cls: _normalise_opacity_percent(getattr(self.class_opacity_controls.get(cls), "value", FILL_OPACITY_DEFAULT_PERCENT))
+                    for cls in class_order
+                },
+                "global_fill_opacity": _normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
+                "show_fill_borders": bool(self.ui_component.show_fill_borders_checkbox.value),
                 "saved_at": timestamp,
             }
 
@@ -673,6 +870,18 @@ class MaskPainterDisplay(PluginBase):
                 if cb is not None:
                     cb.value = bool(vis)
 
+        self.ui_component.global_fill_opacity_input.value = _normalise_opacity_percent(
+            payload.get("global_fill_opacity", self.ui_component.global_fill_opacity_input.value)
+        )
+        self.ui_component.show_fill_borders_checkbox.value = bool(payload.get("show_fill_borders", False))
+
+        opacity_payload = payload.get("opacities", {})
+        if isinstance(opacity_payload, dict):
+            for cls, opacity in opacity_payload.items():
+                widget = self.class_opacity_controls.get(str(cls))
+                if widget is not None:
+                    widget.value = _normalise_opacity_percent(opacity)
+
         self._push_to_widget()
         self._log(f"Loaded color set '{payload.get('name', path.stem)}' from {path}.", clear=True)
         if self.ui_component.enabled_checkbox.value:
@@ -809,6 +1018,21 @@ class MaskPainterDisplay(PluginBase):
                 self._cell_mode_cache.setdefault(str(fov), {})[int(mid)] = mode
             self._last_applied_class_modes[cls_str] = mode
 
+        def _register_opacity_globally(cls_str, cls_value, alpha):
+            """Register fill alpha for all cells of this class across all FOVs."""
+            alpha = max(0.0, min(1.0, float(alpha)))
+            if self._last_applied_class_opacities.get(cls_str) == alpha:
+                return
+            matching_cells = self.main_viewer.cell_table.loc[
+                self.main_viewer.cell_table[identifier] == cls_value,
+                [self.main_viewer.fov_key, self.main_viewer.label_key],
+            ]
+            fov_arr = matching_cells[self.main_viewer.fov_key].to_numpy()
+            mid_arr = matching_cells[self.main_viewer.label_key].to_numpy()
+            for fov, mid in zip(fov_arr, mid_arr):
+                self._cell_opacity_cache.setdefault(str(fov), {})[int(mid)] = alpha
+            self._last_applied_class_opacities[cls_str] = alpha
+
         # Apply colors to visible classes
         for cls_str, cls_value in reversed(converted_visible):
             picker = self.class_color_controls.get(cls_str)
@@ -819,11 +1043,17 @@ class MaskPainterDisplay(PluginBase):
             color = picker.value
             mode_cb = self.class_mode_controls.get(cls_str)
             mode = ("fill" if mode_cb.value else "outline") if mode_cb is not None else "outline"
+            opacity_control = self.class_opacity_controls.get(cls_str)
+            opacity_alpha = _opacity_percent_to_alpha(
+                getattr(opacity_control, "value", self.ui_component.global_fill_opacity_input.value),
+                _normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
+            )
             if current_fov:
                 _apply_color_to_current_fov(cls_value, color)
             if register_globally:
                 _register_color_globally(cls_str, cls_value, color)
                 _register_mode_globally(cls_str, cls_value, mode)
+                _register_opacity_globally(cls_str, cls_value, opacity_alpha if mode == "fill" else 0.0)
 
         # Apply empty-string sentinel to hidden classes so they are invisible
         if hidden_classes:
@@ -832,6 +1062,8 @@ class MaskPainterDisplay(PluginBase):
                     _apply_color_to_current_fov(cls_value, "")
                 if register_globally:
                     _register_color_globally(cls_str, cls_value, "")
+                    _register_mode_globally(cls_str, cls_value, "outline")
+                    _register_opacity_globally(cls_str, cls_value, 0.0)
 
         # Inactive classes stay visible with the default color.
         if inactive_classes:
@@ -840,6 +1072,8 @@ class MaskPainterDisplay(PluginBase):
                     _apply_color_to_current_fov(cls_value, self.default_color)
                 if register_globally:
                     _register_color_globally(cls_str, cls_value, self.default_color)
+                    _register_mode_globally(cls_str, cls_value, "outline")
+                    _register_opacity_globally(cls_str, cls_value, 0.0)
 
         self._log("Masks updated with class-based colors.")
         
@@ -851,8 +1085,14 @@ class MaskPainterDisplay(PluginBase):
         if notify_cell_gallery:
             self._notify_cell_gallery_update()
 
+        if self.ui_component.enabled_checkbox.value:
+            update_display = getattr(self.main_viewer, "update_display", None)
+            current_ds = getattr(self.main_viewer, "current_downsample_factor", 1)
+            if callable(update_display):
+                update_display(current_ds)
+
     def _on_visibility_or_mode_change(self, _change):
-        """Called when any per-class visibility checkbox or mode ToggleButtons changes.
+        """Called when any per-class visibility, mode, or opacity control changes.
 
         Forces ``apply_colors_to_masks`` to re-run so hidden classes immediately
         receive the ``""`` sentinel and visible classes get their current color/mode.
@@ -863,12 +1103,43 @@ class MaskPainterDisplay(PluginBase):
         # Invalidate caches so apply_colors_to_masks doesn't skip the re-write
         self._last_applied_class_colors.clear()
         self._last_applied_class_modes.clear()
+        self._last_applied_class_opacities.clear()
         map_mode = self.main_viewer.get_active_fov() is None
         self.apply_colors_to_masks(
             None,
             notify_cell_gallery=False,
             register_globally=map_mode,
         )
+
+    def _on_global_fill_opacity_change(self, change):
+        old = _normalise_opacity_percent(change.get("old", FILL_OPACITY_DEFAULT_PERCENT))
+        new = _normalise_opacity_percent(change.get("new", old))
+        if old == new:
+            return
+        self._syncing = True
+        try:
+            for widget in self.class_opacity_controls.values():
+                if _normalise_opacity_percent(getattr(widget, "value", old), old) == old:
+                    widget.value = new
+            self._push_to_widget()
+        finally:
+            self._syncing = False
+        if self.ui_component.enabled_checkbox.value:
+            self._last_applied_class_opacities.clear()
+            map_mode = self.main_viewer.get_active_fov() is None
+            self.apply_colors_to_masks(
+                None,
+                notify_cell_gallery=False,
+                register_globally=map_mode,
+            )
+
+    def _on_fill_border_toggle(self, _change):
+        if not self.ui_component.enabled_checkbox.value:
+            return
+        update_display = getattr(self.main_viewer, "update_display", None)
+        current_ds = getattr(self.main_viewer, "current_downsample_factor", 1)
+        if callable(update_display):
+            update_display(current_ds)
 
     def _on_enabled_toggle(self, change):
         """Refresh the viewer immediately when the mask painter is enabled or disabled."""
@@ -877,6 +1148,7 @@ class MaskPainterDisplay(PluginBase):
         self._last_applied_classes = None
         self._last_applied_class_colors.clear()
         self._last_applied_class_modes.clear()
+        self._last_applied_class_opacities.clear()
 
         if change.get("new"):
             map_mode = self.main_viewer.get_active_fov() is None
@@ -900,7 +1172,9 @@ class MaskPainterDisplay(PluginBase):
         self._last_applied_classes = None
         self._last_applied_class_colors = {}
         self._last_applied_class_modes = {}
+        self._last_applied_class_opacities = {}
         self._cell_mode_cache = {}
+        self._cell_opacity_cache = {}
 
     def on_mv_update_display(self):
         """Handle main viewer display updates.
@@ -1041,12 +1315,18 @@ class MaskPainterDisplay(PluginBase):
         colors = {cls: (p.value or self.default_color) for cls, p in self.class_color_controls.items() if cls in active_set}
         visible = {cls: cb.value for cls, cb in self.class_visible_controls.items() if cls in active_set}
         fill = {cls: cb.value for cls, cb in self.class_mode_controls.items() if cls in active_set}
+        opacity = {
+            cls: _normalise_opacity_percent(getattr(widget, "value", FILL_OPACITY_DEFAULT_PERCENT))
+            for cls, widget in self.class_opacity_controls.items()
+            if cls in active_set
+        }
         self._syncing = True
         try:
             w.class_order = active
             w.class_colors = colors
             w.class_visible = visible
             w.class_fill = fill
+            w.class_opacity = opacity
             w.default_color = self.default_color
             w.available_classes = available
         finally:
@@ -1077,12 +1357,19 @@ class MaskPainterDisplay(PluginBase):
                     cb = self.class_mode_controls.get(cls)
                     if cb is not None and cb.value != bool(fill_val):
                         cb.value = bool(fill_val)
+            elif name == "class_opacity":
+                for cls, opacity in w.class_opacity.items():
+                    widget = self.class_opacity_controls.get(cls)
+                    next_value = _normalise_opacity_percent(opacity)
+                    if widget is not None and widget.value != next_value:
+                        widget.value = next_value
         finally:
             self._syncing = False
         # Visibility or fill changes need an immediate re-apply when painter is active
-        if name in ("class_visible", "class_fill") and self.ui_component.enabled_checkbox.value:
+        if name in ("class_visible", "class_fill", "class_opacity") and self.ui_component.enabled_checkbox.value:
             self._last_applied_class_colors.clear()
             self._last_applied_class_modes.clear()
+            self._last_applied_class_opacities.clear()
             map_mode = self.main_viewer.get_active_fov() is None
             self.apply_colors_to_masks(None, notify_cell_gallery=False, register_globally=map_mode)
 
@@ -1278,6 +1565,20 @@ class UiComponent:
         self.default_color_picker = ColorPicker(
             description="Default:", value=DEFAULT_COLOR, layout=Layout(width="auto"),
         )
+        self.global_fill_opacity_input = BoundedIntText(
+            description="Fill opacity (%):",
+            value=FILL_OPACITY_DEFAULT_PERCENT,
+            min=0,
+            max=100,
+            step=1,
+        )
+        self.show_fill_borders_checkbox = Checkbox(
+            value=False,
+            description="Borders on filled",
+            indent=False,
+            layout=Layout(width="auto"),
+            tooltip="Render a border on top of filled masks",
+        )
         # Kept for compatibility; no longer the primary class-row container.
         self.color_picker_box = VBox([], layout=Layout(overflow_y="auto", max_height="300px"))
 
@@ -1294,6 +1595,7 @@ class UiComponent:
 
         self.colors_layout = VBox([
             HBox([self.default_color_picker, self.only_specified_checkbox]),
+            HBox([self.global_fill_opacity_input, self.show_fill_borders_checkbox]),
             HTML("<hr style='margin:4px 0'>"),
             self.class_list_widget,
         ])

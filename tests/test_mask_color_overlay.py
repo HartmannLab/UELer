@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import MagicMock, patch, call
 
 import pandas as pd
+import numpy as np
 
 from ueler.rendering import (
     set_cell_color,
@@ -19,6 +20,7 @@ from ueler.rendering import (
     clear_cell_colors,
 )
 from ueler.rendering.engine import _CELL_COLOR_REGISTRY
+from ueler.viewer.mask_color_overlay import apply_registry_colors
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +130,114 @@ class BulkWriteTests(unittest.TestCase):
     def test_bulk_write_empty_entries_is_noop(self):
         set_cell_colors_bulk({})
         self.assertEqual(_CELL_COLOR_REGISTRY, {})
+
+
+class OverlayFillRenderingTests(unittest.TestCase):
+    """Verify painter overlay rendering supports per-cell fill opacity and borders."""
+
+    def test_apply_registry_colors_uses_per_cell_opacity(self):
+        image = np.zeros((3, 3, 3), dtype=np.float32)
+        region = np.array(
+            [
+                [0, 0, 0],
+                [0, 1, 1],
+                [0, 1, 1],
+            ],
+            dtype=np.int32,
+        )
+
+        result = apply_registry_colors(
+            image,
+            fov="FOV_001",
+            mask_regions={"cell": region},
+            outline_thickness=1,
+            downsample_factor=1,
+            color_map={1: "#FF0000"},
+            mode_map={1: "fill"},
+            opacity_map={1: 0.5},
+        )
+
+        self.assertAlmostEqual(float(result[1, 1, 0]), 0.5, places=4)
+        self.assertAlmostEqual(float(result[1, 1, 1]), 0.0, places=4)
+        self.assertAlmostEqual(float(result[1, 1, 2]), 0.0, places=4)
+
+    def test_zero_fill_opacity_falls_back_to_outline_only(self):
+        image = np.zeros((5, 5, 3), dtype=np.float32)
+        region = np.array(
+            [
+                [0, 0, 0, 0, 0],
+                [0, 1, 1, 1, 0],
+                [0, 1, 1, 1, 0],
+                [0, 1, 1, 1, 0],
+                [0, 0, 0, 0, 0],
+            ],
+            dtype=np.int32,
+        )
+        edges = np.array(
+            [
+                [False, False, False, False, False],
+                [False, True, True, True, False],
+                [False, True, False, True, False],
+                [False, True, True, True, False],
+                [False, False, False, False, False],
+            ],
+            dtype=bool,
+        )
+
+        with patch("ueler.viewer.mask_color_overlay.find_boundaries", return_value=edges):
+            result = apply_registry_colors(
+                image,
+                fov="FOV_001",
+                mask_regions={"cell": region},
+                outline_thickness=1,
+                downsample_factor=1,
+                color_map={1: "#FF0000"},
+                mode_map={1: "fill"},
+                opacity_map={1: 0.0},
+                show_borders_on_filled=False,
+            )
+
+        self.assertAlmostEqual(float(result[2, 2, 0]), 0.0, places=4)
+        self.assertTrue(np.any(result[:, :, 0] == 1.0))
+
+    def test_fill_with_border_preserves_outline_on_top(self):
+        image = np.zeros((5, 5, 3), dtype=np.float32)
+        region = np.array(
+            [
+                [0, 0, 0, 0, 0],
+                [0, 1, 1, 1, 0],
+                [0, 1, 1, 1, 0],
+                [0, 1, 1, 1, 0],
+                [0, 0, 0, 0, 0],
+            ],
+            dtype=np.int32,
+        )
+        edges = np.array(
+            [
+                [False, False, False, False, False],
+                [False, True, True, True, False],
+                [False, True, False, True, False],
+                [False, True, True, True, False],
+                [False, False, False, False, False],
+            ],
+            dtype=bool,
+        )
+
+        with patch("ueler.viewer.mask_color_overlay.find_boundaries", return_value=edges):
+            result = apply_registry_colors(
+                image,
+                fov="FOV_001",
+                mask_regions={"cell": region},
+                outline_thickness=1,
+                downsample_factor=1,
+                color_map={1: "#FF0000"},
+                mode_map={1: "fill"},
+                opacity_map={1: 0.5},
+                show_borders_on_filled=True,
+            )
+
+        self.assertAlmostEqual(float(result[2, 2, 0]), 0.5, places=4)
+        self.assertAlmostEqual(float(result[1, 1, 0]), 1.0, places=4)
 
 
 # ---------------------------------------------------------------------------

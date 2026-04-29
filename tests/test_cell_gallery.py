@@ -1,6 +1,6 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
@@ -331,6 +331,30 @@ class TestCellGalleryColors(unittest.TestCase):
         for mask_id in range(1, 6):
             color = get_cell_color('FOV_001', mask_id)
             self.assertIsNone(color, f"Cell {mask_id} should have no painted color")
+
+    def test_painted_mode_uses_snapshot_fill_and_border_settings(self):
+        """Captured painter snapshots should drive painted gallery tiles, including fill-plus-border rendering."""
+        context = self._create_render_context(use_uniform_color=False, include_overlay=False)
+        context.overlay_snapshot = SimpleNamespace(mask_painter=object())
+        self.viewer.resolve_mask_painter_snapshot_for_fov = MagicMock(
+            return_value=({1: "#00ff00"}, {1: "fill"}, {1: 0.6}, True)
+        )
+
+        captured = {}
+
+        def _capture_render(*args, **kwargs):
+            captured["masks"] = kwargs.get("masks")
+            return np.zeros((20, 20, 3), dtype=np.float32)
+
+        with patch("ueler.viewer.plugin.cell_gallery.render_crop_to_array", side_effect=_capture_render):
+            tile = _render_tile_for_index(self.df, 0, context)
+
+        self.assertIsNotNone(tile)
+        self.assertEqual(len(captured["masks"]), 2)
+        self.assertEqual(captured["masks"][0].mode, "fill")
+        self.assertAlmostEqual(captured["masks"][0].alpha, 0.6)
+        self.assertEqual(captured["masks"][1].mode, "outline")
+        self.assertEqual(captured["masks"][1].outline_thickness, context.outline_thickness)
 
     def test_colors_persist_across_fovs(self):
         """Verify color assignments are global across FOVs.

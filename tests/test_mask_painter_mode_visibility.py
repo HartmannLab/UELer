@@ -166,6 +166,99 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
         # mask_id 2 belongs to TypeB
         self.assertEqual(mode_map.get(2, "outline"), "outline")
 
+    def test_get_effective_opacity_map_returns_fill_opacity_for_fill_class(self):
+        """Active visible fill classes should expose a per-cell opacity map."""
+        import ipywidgets as W
+
+        painter = self._make_painter()
+        painter.class_mode_controls["TypeA"].value = True
+        painter.class_opacity_controls = {
+            "TypeA": W.BoundedIntText(value=70, min=0, max=100),
+            "TypeB": W.BoundedIntText(value=35, min=0, max=100),
+        }
+
+        opacity_map = painter.get_effective_opacity_map_for_fov("FOV_001")
+
+        self.assertAlmostEqual(opacity_map[1], 0.70, places=4)
+        self.assertNotIn(2, opacity_map)
+
+    def test_global_fill_opacity_updates_only_linked_classes(self):
+        """Only classes still linked to the previous global opacity should move with it."""
+        import ipywidgets as W
+
+        painter = self._make_painter()
+        painter.class_opacity_controls = {
+            "TypeA": W.BoundedIntText(value=35, min=0, max=100),
+            "TypeB": W.BoundedIntText(value=80, min=0, max=100),
+        }
+        painter.ui_component.global_fill_opacity_input.value = 35
+
+        painter._on_global_fill_opacity_change({"old": 35, "new": 60})
+
+        self.assertEqual(painter.class_opacity_controls["TypeA"].value, 60)
+        self.assertEqual(painter.class_opacity_controls["TypeB"].value, 80)
+
+    def test_capture_snapshot_records_modes_opacity_and_border_state(self):
+        """Painter snapshots should preserve the per-class rendering state needed by downstream consumers."""
+        import ipywidgets as W
+
+        painter = self._make_painter()
+        painter.class_mode_controls["TypeA"].value = True
+        painter.class_opacity_controls = {
+            "TypeA": W.BoundedIntText(value=55, min=0, max=100),
+            "TypeB": W.BoundedIntText(value=35, min=0, max=100),
+        }
+        painter.ui_component.global_fill_opacity_input.value = 40
+        painter.ui_component.show_fill_borders_checkbox.value = True
+        self.viewer.mask_outline_thickness = 3
+
+        snapshot = painter.capture_snapshot()
+
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(snapshot.identifier, "cell_type")
+        self.assertEqual(snapshot.class_fill["TypeA"], True)
+        self.assertEqual(snapshot.class_opacity["TypeA"], 55)
+        self.assertEqual(snapshot.global_fill_opacity, 40)
+        self.assertEqual(snapshot.show_borders_on_filled, True)
+        self.assertEqual(snapshot.outline_thickness, 3)
+
+    def test_apply_snapshot_restores_saved_state(self):
+        """ROI replay should be able to restore a previously captured painter snapshot."""
+        from ueler.rendering import MaskPainterSnapshot
+        import ipywidgets as W
+
+        self.viewer.update_display = lambda _factor: None
+        painter = self._make_painter()
+        painter.class_opacity_controls = {
+            "TypeA": W.BoundedIntText(value=35, min=0, max=100),
+            "TypeB": W.BoundedIntText(value=35, min=0, max=100),
+        }
+
+        restored = painter.apply_snapshot(
+            MaskPainterSnapshot(
+                mask_name="cell",
+                identifier="cell_type",
+                active_classes=("TypeA",),
+                class_colors={"TypeA": "#00FF00", "TypeB": "#0000FF"},
+                class_visible={"TypeA": True, "TypeB": False},
+                class_fill={"TypeA": True, "TypeB": False},
+                class_opacity={"TypeA": 65, "TypeB": 35},
+                default_color="#FFFFFF",
+                global_fill_opacity=45,
+                show_borders_on_filled=True,
+                outline_thickness=2,
+            )
+        )
+
+        self.assertTrue(restored)
+        self.assertEqual(tuple(painter._active_classes), ("TypeA",))
+        self.assertEqual(painter.class_color_controls["TypeA"].value, "#00FF00")
+        self.assertEqual(painter.class_visible_controls["TypeB"].value, False)
+        self.assertEqual(painter.class_mode_controls["TypeA"].value, True)
+        self.assertEqual(painter.class_opacity_controls["TypeA"].value, 65)
+        self.assertEqual(painter.ui_component.global_fill_opacity_input.value, 45)
+        self.assertEqual(painter.ui_component.show_fill_borders_checkbox.value, True)
+
     def test_mode_cache_cleared_on_cell_table_change(self):
         """_cell_mode_cache and _last_applied_class_modes reset when cell table changes."""
         painter = self._make_painter()
@@ -292,9 +385,10 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
     # Phase 8 – persistence round-trip
     # ------------------------------------------------------------------
 
-    def test_save_and_load_modes_and_visibility(self):
-        """Saving and loading a color set preserves mode and visible flags."""
+    def test_save_and_load_modes_visibility_and_opacity(self):
+        """Saving and loading a color set preserves mode, visibility, and opacity state."""
         import tempfile
+        import ipywidgets as W
         from pathlib import Path
         from ueler.viewer.plugin.mask_painter import (
             write_color_set_file,
@@ -306,6 +400,12 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
         painter.class_mode_controls["TypeA"].value = True
         painter.class_mode_controls["TypeB"].value = False
         painter.class_visible_controls["TypeB"].value = False
+        painter.class_opacity_controls = {
+            "TypeA": W.BoundedIntText(value=70, min=0, max=100),
+            "TypeB": W.BoundedIntText(value=20, min=0, max=100),
+        }
+        painter.ui_component.global_fill_opacity_input.value = 35
+        painter.ui_component.show_fill_borders_checkbox.value = True
 
         with tempfile.TemporaryDirectory() as tmpdir:
             # Manually build and write a payload as save_current_color_set would
@@ -332,6 +432,9 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
                 "colors": color_map,
                 "modes": modes_map,
                 "visible": visible_map,
+                "opacities": {"TypeA": 70, "TypeB": 20},
+                "global_fill_opacity": 35,
+                "show_fill_borders": True,
                 "saved_at": "2024-01-01T00:00:00Z",
             }
             write_color_set_file(path, payload)
@@ -339,6 +442,9 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
             # Reset controls before loading
             painter.class_mode_controls["TypeA"].value = False
             painter.class_visible_controls["TypeB"].value = True
+            painter.class_opacity_controls["TypeA"].value = 35
+            painter.class_opacity_controls["TypeB"].value = 35
+            painter.ui_component.show_fill_borders_checkbox.value = False
 
             painter._load_color_set(path)
 
@@ -348,6 +454,10 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
             # Verify visibility restored
             self.assertFalse(painter.class_visible_controls["TypeB"].value)
             self.assertTrue(painter.class_visible_controls["TypeA"].value)
+            self.assertEqual(painter.class_opacity_controls["TypeA"].value, 70)
+            self.assertEqual(painter.class_opacity_controls["TypeB"].value, 20)
+            self.assertEqual(painter.ui_component.global_fill_opacity_input.value, 35)
+            self.assertTrue(painter.ui_component.show_fill_borders_checkbox.value)
 
 
 class TestMaskPainterAddRemoveClass(unittest.TestCase):
@@ -480,6 +590,8 @@ class TestMaskPainterRenderPath(unittest.TestCase):
         fake_painter = types.SimpleNamespace(
             get_effective_color_map_for_fov=lambda fov: {1: "#FF0000", 2: ""},
             get_effective_mode_map_for_fov=lambda fov: {1: "fill"},
+            get_effective_opacity_map_for_fov=lambda fov: {1: 0.7},
+            get_show_borders_on_filled=lambda: True,
         )
         viewer = types.SimpleNamespace(
             image_cache={"FOV_001": {"ch1": np.zeros((2, 2), dtype=np.uint16)}},
@@ -520,6 +632,8 @@ class TestMaskPainterRenderPath(unittest.TestCase):
         kwargs = mock_apply.call_args.kwargs
         self.assertEqual(kwargs["color_map"], {1: "#FF0000", 2: ""})
         self.assertEqual(kwargs["mode_map"], {1: "fill"})
+        self.assertEqual(kwargs["opacity_map"], {1: 0.7})
+        self.assertTrue(kwargs["show_borders_on_filled"])
 
 
 class TestMaskPainterOnlySpecified(unittest.TestCase):

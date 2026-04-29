@@ -1,3 +1,4 @@
+import json
 import math
 import os
 import sys
@@ -6,6 +7,7 @@ import unittest
 
 from types import SimpleNamespace
 from ipywidgets import Output, VBox
+from ueler.rendering import MaskPainterSnapshot
 
 # Provide lightweight stubs for heavy optional dependencies used by the plugin.
 if "cv2" not in sys.modules:
@@ -389,6 +391,48 @@ class ROIManagerTagsTests(unittest.TestCase):
         plugin = make_plugin()
         tags_widget = plugin.ui_component.tags
         self.assertTrue(getattr(tags_widget, "allow_new", False))
+
+    def test_capture_and_apply_roi_preserves_mask_painter_payload(self):
+        plugin = make_plugin()
+        applied = {}
+        plugin.refresh_roi_table = lambda *args, **kwargs: None
+        plugin.set_status = lambda *args, **kwargs: None
+
+        class _PainterStub:
+            def capture_snapshot(self):
+                return MaskPainterSnapshot(
+                    mask_name="cell",
+                    identifier="cell_type",
+                    active_classes=("Tumor",),
+                    class_colors={"Tumor": "#00ff00"},
+                    class_visible={"Tumor": True},
+                    class_fill={"Tumor": True},
+                    class_opacity={"Tumor": 60},
+                    default_color="#ffffff",
+                    global_fill_opacity=35,
+                    show_borders_on_filled=True,
+                    outline_thickness=2,
+                )
+
+            def apply_snapshot(self, snapshot):
+                applied["snapshot"] = snapshot
+                return True
+
+        plugin.main_viewer.mask_painter_plugin = _PainterStub()
+
+        plugin._capture_current_view(None)
+        payload = plugin.main_viewer.roi_manager.last_added["mask_painter_state"]
+
+        self.assertTrue(payload)
+        decoded = json.loads(payload)
+        self.assertEqual(decoded["identifier"], "cell_type")
+
+        ok, missing = plugin._apply_roi_presets({"mask_painter_state": payload})
+
+        self.assertTrue(ok)
+        self.assertEqual(missing, [])
+        self.assertIsNotNone(applied.get("snapshot"))
+        self.assertEqual(applied["snapshot"].class_opacity["Tumor"], 60)
 
     def test_browser_output_widget_scrolls_within_fixed_height(self):
         plugin = make_plugin()

@@ -772,6 +772,59 @@ def _render_tile_for_index(df, index: int, context: _RenderContext):
             # If no painted colors exist, falls back to viewer's mask overlay settings
             # Maintains same two-pass z-order logic as uniform mode
             if mask_array is not None:
+                painter_snapshot = getattr(context.overlay_snapshot, "mask_painter", None)
+                painter_color_map = {}
+                painter_mode_map = {}
+                painter_opacity_map = {}
+                show_borders_on_filled = False
+                if painter_snapshot is not None:
+                    resolver = getattr(viewer, "resolve_mask_painter_snapshot_for_fov", None)
+                    if callable(resolver):
+                        (
+                            painter_color_map,
+                            painter_mode_map,
+                            painter_opacity_map,
+                            show_borders_on_filled,
+                        ) = resolver(painter_snapshot, fov)
+
+                def _append_cell_mask(cell_id: int, cell_color, thickness: int) -> None:
+                    cell_mode = painter_mode_map.get(int(cell_id), "outline")
+                    cell_alpha = float(painter_opacity_map.get(int(cell_id), 0.0))
+                    mask_region = mask_array == cell_id
+                    if cell_mode == "fill":
+                        if cell_alpha > 0.0:
+                            masks.append(
+                                MaskRenderSettings(
+                                    array=mask_region,
+                                    color=cell_color,
+                                    mode="fill",
+                                    alpha=cell_alpha,
+                                    outline_thickness=thickness,
+                                    downsample_factor=context.downsample_factor,
+                                )
+                            )
+                        if show_borders_on_filled or cell_alpha <= 0.0:
+                            masks.append(
+                                MaskRenderSettings(
+                                    array=mask_region,
+                                    color=cell_color,
+                                    mode="outline",
+                                    outline_thickness=thickness,
+                                    downsample_factor=context.downsample_factor,
+                                )
+                            )
+                        return
+
+                    masks.append(
+                        MaskRenderSettings(
+                            array=mask_region,
+                            color=cell_color,
+                            mode="outline",
+                            outline_thickness=thickness,
+                            downsample_factor=context.downsample_factor,
+                        )
+                    )
+
                 # Calculate crop region bounds
                 half_size = max(1, int(context.crop_width) // 2)
                 center_x = int(round(center_xy[0]))
@@ -796,8 +849,7 @@ def _render_tile_for_index(df, index: int, context: _RenderContext):
                 
                 # First pass: Add all neighboring cells with painted colors
                 for cell_id in unique_ids:
-                    # Check if this cell has a user-painted color from ROI manager
-                    painted_color = get_cell_color(fov, int(cell_id))
+                    painted_color = painter_color_map.get(int(cell_id)) or get_cell_color(fov, int(cell_id))
                     
                     if painted_color:
                         # This cell has a user-painted color - convert to RGB tuple
@@ -809,15 +861,7 @@ def _render_tile_for_index(df, index: int, context: _RenderContext):
                                 centered_cell_data = (cell_id, cell_color, context.outline_thickness)
                             else:
                                 # Add neighbor immediately - uses neighbor thickness (from global setting)
-                                masks.append(
-                                    MaskRenderSettings(
-                                        array=mask_array == cell_id,
-                                        color=cell_color,
-                                        mode="outline",
-                                        outline_thickness=context.neighbor_outline_thickness,
-                                        downsample_factor=context.downsample_factor,
-                                    )
-                                )
+                                _append_cell_mask(int(cell_id), cell_color, context.neighbor_outline_thickness)
                                 cells_with_colors += 1
                         except (ValueError, TypeError):
                             # Skip cells with invalid colors
@@ -826,15 +870,7 @@ def _render_tile_for_index(df, index: int, context: _RenderContext):
                 # Second pass: Add centered cell LAST so it renders on top
                 if centered_cell_data is not None:
                     cell_id, cell_color, thickness = centered_cell_data
-                    masks.append(
-                        MaskRenderSettings(
-                            array=mask_array == cell_id,
-                            color=cell_color,
-                            mode="outline",
-                            outline_thickness=thickness,
-                            downsample_factor=context.downsample_factor,
-                        )
-                    )
+                    _append_cell_mask(int(cell_id), cell_color, thickness)
                     cells_with_colors += 1
                 
                 # If no cells have painted colors, fall back to viewer overlays

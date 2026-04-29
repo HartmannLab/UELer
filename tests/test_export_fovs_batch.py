@@ -259,7 +259,7 @@ for widget_name in (
 
 from ueler.viewer.main_viewer import ImageMaskViewer
 from ueler.viewer.plugin.export_fovs import BatchExportPlugin
-from ueler.rendering import OverlaySnapshot
+from ueler.rendering import MaskPainterSnapshot, OverlaySnapshot
 
 
 class _StubWidget:
@@ -526,6 +526,37 @@ class ExportFOVsBatchTests(unittest.TestCase):
         snapshot_disabled = viewer.capture_overlay_snapshot(include_annotations=False, include_masks=False)
         self.assertFalse(snapshot_disabled.include_annotations)
         self.assertFalse(snapshot_disabled.include_masks)
+
+    def test_batch_export_snapshot_preserves_mask_painter_outline_thickness(self) -> None:
+        viewer_stub = _BatchExportViewerStub(self.base_path, mask_outline_thickness=4)
+        viewer_stub.capture_overlay_snapshot = lambda **_kwargs: OverlaySnapshot(
+            include_annotations=False,
+            include_masks=True,
+            annotation=None,
+            masks=(),
+            mask_painter=MaskPainterSnapshot(
+                mask_name="MASK",
+                identifier="cell_type",
+                active_classes=("Tumor",),
+                class_colors={"Tumor": "#00ff00"},
+                class_visible={"Tumor": True},
+                class_fill={"Tumor": True},
+                class_opacity={"Tumor": 50},
+                default_color="#ffffff",
+                global_fill_opacity=35,
+                show_borders_on_filled=True,
+                outline_thickness=1,
+            ),
+        )
+
+        _viewer, plugin = self._make_export_plugin(viewer_stub)
+        plugin._mask_outline_thickness = 7
+
+        snapshot = plugin._capture_overlay_snapshot(include_masks=True, include_annotations=False)
+
+        self.assertIsNotNone(snapshot)
+        self.assertIsNotNone(snapshot.mask_painter)
+        self.assertEqual(snapshot.mask_painter.outline_thickness, 7)
 
     def test_export_fovs_batch_writes_file(self) -> None:
         viewer = self._make_viewer()

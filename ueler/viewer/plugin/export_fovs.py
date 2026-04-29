@@ -6,7 +6,7 @@ import asyncio
 import os
 import re
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
@@ -40,12 +40,14 @@ from ueler.rendering import (
     AnnotationRenderSettings,
     ChannelRenderSettings,
     MaskOverlaySnapshot,
+    MaskPainterSnapshot,
     MaskRenderSettings,
     OverlaySnapshot,
     render_crop_to_array,
     render_fov_to_array,
     render_roi_to_array,
 )
+from ueler.viewer.mask_color_overlay import compute_crop_regions, derive_downsampled_region
 from ..scale_bar import (
     ScaleBarSpec,
     add_scale_bar,
@@ -946,7 +948,7 @@ class BatchExportPlugin(PluginBase):
             include_masks=include_masks,
             include_annotations=include_annotations,
         )
-        if include_masks and snapshot.masks:
+        if include_masks and (snapshot.masks or getattr(snapshot, "mask_painter", None) is not None):
             adjusted_masks: list[MaskOverlaySnapshot] = []
             for mask_snapshot in snapshot.masks:
                 adjusted_masks.append(
@@ -963,6 +965,11 @@ class BatchExportPlugin(PluginBase):
                 include_masks=snapshot.include_masks,
                 annotation=snapshot.annotation,
                 masks=tuple(adjusted_masks),
+                mask_painter=(
+                    replace(snapshot.mask_painter, outline_thickness=self._mask_outline_thickness)
+                    if getattr(snapshot, "mask_painter", None) is not None
+                    else None
+                ),
             )
         self._overlay_snapshot = snapshot
         self._overlay_cache.clear()
@@ -1348,6 +1355,12 @@ class BatchExportPlugin(PluginBase):
             annotation=annotation_settings,
             masks=mask_settings,
         )
+        array = self.main_viewer.apply_overlay_snapshot_to_array(
+            array,
+            fov_name=fov_name,
+            downsample_factor=downsample,
+            snapshot=overlay_snapshot,
+        )
         image, spec = self._finalise_array(
             array,
             include_scale_bar=include_scale_bar,
@@ -1400,6 +1413,21 @@ class BatchExportPlugin(PluginBase):
             annotation=annotation_settings,
             masks=mask_settings,
         )
+        bounds = None
+        for candidate in channel_arrays.values():
+            shape = getattr(candidate, "shape", None)
+            if shape and len(shape) >= 2:
+                bounds = (0, int(shape[1]), 0, int(shape[0]))
+                break
+        if bounds is not None:
+            _, region_ds = compute_crop_regions(center_xy, crop_size, bounds, downsample)
+            array = self.main_viewer.apply_overlay_snapshot_to_array(
+                array,
+                fov_name=fov_name,
+                downsample_factor=downsample,
+                snapshot=overlay_snapshot,
+                region_ds=region_ds,
+            )
         image, spec = self._finalise_array(
             array,
             include_scale_bar=include_scale_bar,
@@ -1596,6 +1624,20 @@ class BatchExportPlugin(PluginBase):
             annotation=annotation_settings,
             masks=mask_settings,
         )
+        region_xy = (
+            int(float(roi.get("x_min") or 0.0)),
+            int(float(roi.get("x_max") or 0.0)),
+            int(float(roi.get("y_min") or 0.0)),
+            int(float(roi.get("y_max") or 0.0)),
+        )
+        if region_xy[1] > region_xy[0] and region_xy[3] > region_xy[2]:
+            array = self.main_viewer.apply_overlay_snapshot_to_array(
+                array,
+                fov_name=fov_name,
+                downsample_factor=downsample,
+                snapshot=overlay_snapshot,
+                region_ds=derive_downsampled_region(region_xy, downsample),
+            )
         image, spec = self._finalise_array(
             array,
             include_scale_bar=include_scale_bar,

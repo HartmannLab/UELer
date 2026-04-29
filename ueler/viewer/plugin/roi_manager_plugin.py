@@ -1,8 +1,9 @@
 import html
+import json
 import math
 import os
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from types import SimpleNamespace
 from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
@@ -36,10 +37,12 @@ from ueler.rendering import (
     AnnotationRenderSettings,
     ChannelRenderSettings,
     MaskOverlaySnapshot,
+    MaskPainterSnapshot,
     MaskRenderSettings,
     OverlaySnapshot,
     render_roi_to_array,
 )
+from ueler.viewer.mask_color_overlay import derive_downsampled_region
 
 from .plugin_base import PluginBase
 from .roi_expression_editor import ROIExpressionEditorWidget
@@ -1167,6 +1170,23 @@ class ROIManagerPlugin(PluginBase):
         except Exception:  # pragma: no cover - rendering failures
             return None
 
+        snapshot = self._build_overlay_snapshot(record, fov_name)
+        if snapshot is not None:
+            region_xy = (
+                int(float(record.get("x_min") or 0.0)),
+                int(float(record.get("x_max") or 0.0)),
+                int(float(record.get("y_min") or 0.0)),
+                int(float(record.get("y_max") or 0.0)),
+            )
+            if region_xy[1] > region_xy[0] and region_xy[3] > region_xy[2]:
+                array = self.main_viewer.apply_overlay_snapshot_to_array(
+                    array,
+                    fov_name=fov_name,
+                    downsample_factor=factor,
+                    snapshot=snapshot,
+                    region_ds=derive_downsampled_region(region_xy, factor),
+                )
+
         return np.clip(array, 0.0, 1.0)
 
     def _render_map_roi_tile(
@@ -1265,14 +1285,54 @@ class ROIManagerPlugin(PluginBase):
     ) -> Optional[OverlaySnapshot]:
         annotation_snapshot = self._resolve_annotation_overlay(record)
         mask_snapshots = self._resolve_mask_overlays(record, fov_name)
-        if annotation_snapshot is None and not mask_snapshots:
+        painter_snapshot = self._resolve_mask_painter_snapshot(record)
+        if annotation_snapshot is None and not mask_snapshots and painter_snapshot is None:
             return None
         return OverlaySnapshot(
             include_annotations=annotation_snapshot is not None,
-            include_masks=bool(mask_snapshots),
+            include_masks=bool(mask_snapshots) or painter_snapshot is not None,
             annotation=annotation_snapshot,
             masks=mask_snapshots,
+            mask_painter=painter_snapshot,
         )
+
+    def _resolve_mask_painter_snapshot(
+        self,
+        record: Mapping[str, object],
+    ) -> Optional[MaskPainterSnapshot]:
+        payload = str(record.get("mask_painter_state") or "").strip()
+        if not payload:
+            return None
+        try:
+            data = json.loads(payload)
+        except Exception:  # pragma: no cover - malformed payload
+            return None
+        if not isinstance(data, dict):
+            return None
+        try:
+            active_classes = tuple(str(item) for item in data.get("active_classes", ()))
+            class_colors = {str(key): str(value) for key, value in dict(data.get("class_colors") or {}).items()}
+            class_visible = {str(key): bool(value) for key, value in dict(data.get("class_visible") or {}).items()}
+            class_fill = {str(key): bool(value) for key, value in dict(data.get("class_fill") or {}).items()}
+            class_opacity = {
+                str(key): int(value)
+                for key, value in dict(data.get("class_opacity") or {}).items()
+            }
+            return MaskPainterSnapshot(
+                mask_name=str(data.get("mask_name") or ""),
+                identifier=str(data.get("identifier") or ""),
+                active_classes=active_classes,
+                class_colors=class_colors,
+                class_visible=class_visible,
+                class_fill=class_fill,
+                class_opacity=class_opacity,
+                default_color=str(data.get("default_color") or "#FFFFFF"),
+                global_fill_opacity=int(data.get("global_fill_opacity", 35) or 35),
+                show_borders_on_filled=bool(data.get("show_borders_on_filled", False)),
+                outline_thickness=int(data.get("outline_thickness", getattr(self.main_viewer, "mask_outline_thickness", 1)) or 1),
+            )
+        except Exception:  # pragma: no cover - invalid payload content
+            return None
 
     def _resolve_annotation_overlay(self, record: Mapping[str, object]) -> Optional[AnnotationOverlaySnapshot]:
         palette_name = str(record.get("annotation_palette") or "").strip()
@@ -1651,6 +1711,11 @@ class ROIManagerPlugin(PluginBase):
             if not self._apply_mask_visibility(mask_visibility_payload):
                 missing.append("mask visibility")
 
+        mask_painter_payload = str(record.get("mask_painter_state") or "").strip()
+        if mask_painter_payload:
+            if not self._apply_mask_painter_payload(mask_painter_payload):
+                missing.append("mask painter")
+
         return not missing, missing
 
     def _apply_marker_preset(self, marker_ref: str) -> bool:
@@ -1766,6 +1831,24 @@ class ROIManagerPlugin(PluginBase):
         except Exception:  # pragma: no cover - serialization errors
             return ""
 
+    def _get_mask_painter_payload(self) -> str:
+        painter = getattr(self.main_viewer, "mask_painter_plugin", None)
+        if painter is None:
+            return ""
+        capture = getattr(painter, "capture_snapshot", None)
+        if not callable(capture):
+            return ""
+        try:
+            snapshot = capture()
+        except Exception:  # pragma: no cover - defensive
+            return ""
+        if snapshot is None:
+            return ""
+        try:
+            return json.dumps(asdict(snapshot), sort_keys=True)
+        except Exception:  # pragma: no cover - serialization errors
+            return ""
+
     def _apply_mask_visibility(self, payload: str) -> bool:
         if not payload:
             return True
@@ -1780,6 +1863,23 @@ class ROIManagerPlugin(PluginBase):
             return False
         try:
             return bool(applier(state))
+        except Exception:  # pragma: no cover - downstream errors
+            return False
+
+    def _apply_mask_painter_payload(self, payload: str) -> bool:
+        if not payload:
+            return True
+        snapshot = self._resolve_mask_painter_snapshot({"mask_painter_state": payload})
+        if snapshot is None:
+            return False
+        painter = getattr(self.main_viewer, "mask_painter_plugin", None)
+        if painter is None:
+            return False
+        applier = getattr(painter, "apply_snapshot", None)
+        if not callable(applier):
+            return False
+        try:
+            return bool(applier(snapshot))
         except Exception:  # pragma: no cover - downstream errors
             return False
 
@@ -1803,6 +1903,7 @@ class ROIManagerPlugin(PluginBase):
             "annotation_palette": self._get_active_annotation_palette(),
             "mask_color_set": self._get_active_mask_color_set(),
             "mask_visibility": self._get_mask_visibility_payload(),
+            "mask_painter_state": self._get_mask_painter_payload(),
         }
 
         result = self.main_viewer.roi_manager.add_roi(record)
@@ -1835,6 +1936,7 @@ class ROIManagerPlugin(PluginBase):
             "annotation_palette": self._get_active_annotation_palette(),
             "mask_color_set": self._get_active_mask_color_set(),
             "mask_visibility": self._get_mask_visibility_payload(),
+            "mask_painter_state": self._get_mask_painter_payload(),
         }
 
         updated = self.main_viewer.roi_manager.update_roi(self._selected_roi_id, updates)
