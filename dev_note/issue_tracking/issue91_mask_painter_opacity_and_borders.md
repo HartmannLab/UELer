@@ -83,3 +83,20 @@ The first implementation preserved painter state for single-FOV ROI thumbnails a
 ### Follow-up validation
 - `python -m unittest tests.test_mask_color_overlay tests.test_mask_painter_mode_visibility tests.test_roi_manager_tags tests.test_cell_gallery`
 - `python -m unittest tests.test_export_fovs_batch.BatchExportMapROIItemsTests.test_export_map_roi_worker_calls_render_map_region_direct tests.test_export_fovs_batch.BatchExportMapROIItemsTests.test_export_map_roi_worker_applies_map_bounds_offset tests.test_export_fovs_batch.BatchExportMapROIItemsTests.test_export_map_roi_worker_raises_on_empty_roi`
+
+## Follow-up: reply 2 scope
+
+### Problem
+`MaskPainterDisplay.apply_colors_to_masks()` still uses `ImageDisplay.set_mask_colors_current_fov()` for the immediate current-FOV redraw path. That code assumed the sliced label mask and generated edge mask always provided `.compute()`, but the current masking path can already return a NumPy array. The result is an `AttributeError` during recoloring even though the data is already materialized.
+
+### Required behavior
+- Applying mask painter colors in the current FOV must work for both NumPy-backed and lazy label-mask inputs.
+- The immediate highlight path should keep using the same edge-generation logic without forcing callers to know the backing array type.
+
+### Follow-up approach
+1. Materialize array-like inputs inside `ImageDisplay.set_mask_colors_current_fov()` right before `np.where(...)` and right after `generate_edges(...)`.
+2. Keep the fix local to the owning image-display method rather than branching in `MaskPainterDisplay.apply_colors_to_masks()`.
+3. Add a regression that exercises `set_mask_colors_current_fov()` with a NumPy mask and a NumPy edge mask.
+
+### Follow-up validation
+- `python -m unittest tests.test_image_display_tooltip tests.test_mask_painter_mode_visibility`

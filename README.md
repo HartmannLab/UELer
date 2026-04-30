@@ -101,6 +101,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### **UELer v0.3.1 Summary**
+- Fixed Mask Painter current-FOV recoloring for NumPy-backed masks (#91 reply 2): the immediate highlight path in `ImageDisplay.set_mask_colors_current_fov()` now materializes either eager or lazy arrays before edge generation, so `apply_colors_to_masks()` no longer crashes when the label slice is already a NumPy array.
 - Added a follow-up pass for Mask Painter ROI replay and filled-border colors (#91): map-mode ROI thumbnails and map ROI export now replay the saved painter snapshot, and filled-mask borders can either use the left-panel mask color or the fill color while preserving the captured mask-type color in ROI/gallery/export replay.
 - Added Mask Painter opacity and fill-border controls (#91): each active class can now store its own fill opacity, the global opacity control updates classes still linked to the previous global value, and a new border toggle keeps outlines visible on filled masks. The same painter state now propagates through the live viewer, cell gallery, ROI snapshots, and batch export.
 - Fixed Mask Painter redraw visibility (#90): single-FOV zoom/pan redraws now consume the current painter UI state directly during `_compose_fov_image()`, so shown classes stay visible, hidden active classes stay hidden, and the plugin starts disabled by default.

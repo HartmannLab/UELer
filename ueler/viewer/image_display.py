@@ -88,6 +88,13 @@ class ImageDisplay:
 
         return np.array(data, copy=True)
 
+    @staticmethod
+    def _materialize_array(data):
+        """Return a NumPy array for either eager or lazy array-like inputs."""
+        if hasattr(data, "compute"):
+            return np.array(data.compute(), copy=False)
+        return np.array(data, copy=False)
+
     def update_scale_bar(
         self,
         spec,
@@ -569,15 +576,17 @@ class ImageDisplay:
                         mask_label_ds = mask_label_ds[ymin_ds:ymax_ds, xmin_ds:xmax_ds]
 
                         # In the `selected_mask_label_ds`, Keep only labels in mask_ids
+                        mask_label_ds = self._materialize_array(mask_label_ds)
                         mask_label_ds = np.where(np.isin(mask_label_ds, mask_ids), mask_label_ds, 0)
                         print(f"sum(mask_label_ds): {np.sum(mask_label_ds)}")
 
                         # Find contours in the downsampled mask
                         edge_mask = generate_edges(
-                            mask_label_ds.compute(),
+                            mask_label_ds,
                             thickness=getattr(self.main_viewer, "mask_outline_thickness", 1),
                             downsample=cdf,
                         )
+                        edge_mask = self._materialize_array(edge_mask)
                         if cummulative:
                             combined = self.img_display.get_array().copy()
                         else:
@@ -587,7 +596,7 @@ class ImageDisplay:
 
                         # print the type of edge_mask
                         print(f"edge_mask: {type(edge_mask)}")
-                        combined[edge_mask.compute()] = color_rgb
+                        combined[edge_mask] = color_rgb
                         self.img_display.set_data(combined)
 
                         self.fig.canvas.draw_idle()

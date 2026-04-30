@@ -13,6 +13,18 @@ if "ueler.image_utils" not in sys.modules:
     def _calculate_downsample_factor(*_args, **_kwargs):
         return 1
 
+    def _select_downsample_factor(*_args, **_kwargs):
+        return 1
+
+    def _color_one_image(*_args, **_kwargs):
+        return np.zeros((1, 1, 3), dtype=np.float32)
+
+    def _estimate_color_range(*_args, **_kwargs):
+        return (0.0, 1.0)
+
+    def _process_single_crop(*_args, **_kwargs):
+        return np.zeros((1, 1, 3), dtype=np.float32)
+
     class _EdgeComputation:
         def __init__(self, mask):
             self._mask = mask
@@ -27,6 +39,10 @@ if "ueler.image_utils" not in sys.modules:
         return (0, 0, 0, 0, 0, 0, 0, 0)
 
     image_utils_stub.calculate_downsample_factor = _calculate_downsample_factor  # type: ignore[attr-defined]
+    image_utils_stub.select_downsample_factor = _select_downsample_factor  # type: ignore[attr-defined]
+    image_utils_stub.color_one_image = _color_one_image  # type: ignore[attr-defined]
+    image_utils_stub.estimate_color_range = _estimate_color_range  # type: ignore[attr-defined]
+    image_utils_stub.process_single_crop = _process_single_crop  # type: ignore[attr-defined]
     image_utils_stub.generate_edges = _generate_edges  # type: ignore[attr-defined]
     image_utils_stub.get_axis_limits_with_padding = _get_axis_limits_with_padding  # type: ignore[attr-defined]
     sys.modules["ueler.image_utils"] = image_utils_stub
@@ -256,6 +272,69 @@ class UpdatePatchesTests(unittest.TestCase):
         self.assertTrue(np.allclose(display.combined, base_image))
 
         # Close the Matplotlib figure to avoid resource leaks during the test suite
+        import matplotlib.pyplot as plt
+
+        plt.close(display.fig)
+
+    def test_set_mask_colors_current_fov_accepts_numpy_masks(self) -> None:
+        display = ImageDisplay(width=16, height=16)
+
+        class _CaptureImage:
+            def __init__(self):
+                self._array = None
+
+            def set_data(self, array):
+                self._array = np.array(array, copy=True)
+
+            def get_array(self):
+                if self._array is None:
+                    return np.zeros((0, 0, 3), dtype=np.float32)
+                return self._array
+
+            def set_extent(self, *_args, **_kwargs):
+                return None
+
+        capture = _CaptureImage()
+        display.img_display = capture
+
+        mask_array = np.zeros((16, 16), dtype=np.int32)
+        mask_array[4:8, 4:8] = 5
+
+        viewer = SimpleNamespace(
+            _map_mode_active=False,
+            _active_map_id=None,
+            initialized=False,
+            current_downsample_factor=1,
+            on_downsample_factor_changed=lambda *_args, **_kwargs: None,
+            update_display=lambda *_args, **_kwargs: None,
+            ui_component=SimpleNamespace(
+                image_selector=SimpleNamespace(value="FOV_A"),
+                mask_display_controls={"CellMask": SimpleNamespace(value=True)},
+            ),
+            mask_cache={"FOV_A": {"CellMask": mask_array}},
+            _get_label_mask_at_factor=lambda *_args, **_kwargs: mask_array,
+            mask_outline_thickness=1,
+            _debug=False,
+        )
+        viewer.image_display = display
+        display.main_viewer = viewer
+
+        base_image = np.zeros((16, 16, 3), dtype=np.float32)
+        display.combined = base_image.copy()
+        display.img_display.set_data(base_image)
+
+        edge_mask = np.zeros((16, 16), dtype=bool)
+        edge_mask[4, 4] = True
+
+        with patch("ueler.viewer.image_display.get_axis_limits_with_padding", return_value=(0, 16, 0, 16, 0, 16, 0, 16)), patch(
+            "ueler.viewer.image_display.generate_edges",
+            return_value=edge_mask,
+        ):
+            display.set_mask_colors_current_fov("CellMask", [5], color="#ff0000", cummulative=False)
+
+        highlighted = capture.get_array()
+        self.assertTrue(np.allclose(highlighted[4, 4], np.array([1.0, 0.0, 0.0], dtype=np.float32)))
+
         import matplotlib.pyplot as plt
 
         plt.close(display.fig)

@@ -1,5 +1,10 @@
 ### v0.3.1
 
+**Issue #91 reply 2 — NumPy-backed mask highlight fix (commit TBD)**
+- Fixed `ImageDisplay.set_mask_colors_current_fov()` so the immediate current-FOV highlight path accepts either NumPy arrays or lazy arrays that expose `.compute()`, instead of assuming both the masked label slice and generated edge mask are always lazy.
+- Added a focused regression in `tests/test_image_display_tooltip.py` that reproduces the NumPy-backed mask path hit by `MaskPainterDisplay.apply_colors_to_masks()`.
+- Validated: `python -m unittest tests.test_image_display_tooltip tests.test_mask_painter_mode_visibility`.
+
 **Issue #91 follow-up — ROI thumbnail painter replay and border-color modes (commit TBD)**
 - Fixed map-mode ROI thumbnail/export replay so saved mask painter snapshots are re-applied onto stitched map renders instead of falling back to the raw map image.
 - Added mask painter border-color modes so filled-mask borders can either follow the left-panel mask color or reuse the fill color, and replayed snapshots now preserve the captured mask-type color as a resolved hex value.
