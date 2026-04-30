@@ -100,3 +100,20 @@ The first implementation preserved painter state for single-FOV ROI thumbnails a
 
 ### Follow-up validation
 - `python -m unittest tests.test_image_display_tooltip tests.test_mask_painter_mode_visibility`
+
+## Follow-up: reply 3 scope
+
+### Problem
+Single-FOV live rendering already resolves mask painter state directly from the current UI via `get_effective_*_for_fov(...)`, but the live map-mode overlay still painted from the last globally registered registry/mode/opacity state. That creates a parity gap: map mode can lag behind the current Mask Painter settings and diverge from the single-FOV display.
+
+### Required behavior
+- Live map-mode rendering must use the same effective painter state as single-FOV rendering.
+- Color, fill/outline mode, opacity, and filled-border color should all come from the current UI-derived painter state during map-mode redraw.
+
+### Follow-up approach
+1. Update `_apply_map_painter_overlay()` to resolve per-FOV painter color/mode/opacity/border maps via the same `get_effective_*_for_fov(...)` helpers used by `_compose_fov_image()`.
+2. Keep the old registry lookup only as a fallback when the effective helper is unavailable.
+3. Add a regression that fails if map-mode live rendering uses stale registry values instead of the current effective painter state.
+
+### Follow-up validation
+- `python -m unittest tests.test_mask_painter_mode_visibility`

@@ -647,6 +647,67 @@ class TestMaskPainterRenderPath(unittest.TestCase):
         self.assertEqual(kwargs["opacity_map"], {1: 0.7})
         self.assertTrue(kwargs["show_borders_on_filled"])
 
+    def test_apply_map_painter_overlay_uses_current_mask_painter_state(self):
+        """Map-mode redraw must use the effective live painter state, not stale cached registry values."""
+        from ueler.viewer.main_viewer import ImageMaskViewer
+
+        fake_painter = types.SimpleNamespace(
+            get_effective_color_map_for_fov=lambda fov: {1: "#FF0000"},
+            get_effective_border_color_map_for_fov=lambda fov: {1: "#00FF00"},
+            get_effective_mode_map_for_fov=lambda fov: {1: "fill"},
+            get_effective_opacity_map_for_fov=lambda fov: {1: 0.4},
+            get_mode_map_for_fov=lambda fov: {1: "outline"},
+            get_opacity_map_for_fov=lambda fov: {1: 0.0},
+            get_show_borders_on_filled=lambda: True,
+        )
+
+        class _ImageHandle:
+            def __init__(self):
+                self._data = None
+
+            def set_data(self, data):
+                self._data = np.array(data, copy=True)
+
+        image_handle = _ImageHandle()
+        viewer = types.SimpleNamespace(
+            _map_mode_active=True,
+            _active_map_id="slide-1",
+            _is_mask_painter_enabled=lambda: True,
+            _get_mask_painter=lambda: fake_painter,
+            _get_map_layer=lambda _map_id: types.SimpleNamespace(
+                last_tile_viewports=lambda: {
+                    "FOV_001": types.SimpleNamespace(
+                        region_xy=(0, 2, 0, 2),
+                        downsample_factor=1,
+                        dest_x0=0,
+                        dest_x1=2,
+                        dest_y0=0,
+                        dest_y1=2,
+                    )
+                }
+            ),
+            _get_mask_array=lambda _fov, _mask: np.array([[1, 0], [0, 0]], dtype=np.int32),
+            mask_key="cell",
+            mask_outline_thickness=1,
+            image_display=types.SimpleNamespace(
+                _materialize_combined=lambda: np.zeros((2, 2, 3), dtype=np.float32),
+                combined=None,
+                img_display=image_handle,
+                fig=types.SimpleNamespace(canvas=types.SimpleNamespace(draw_idle=lambda: None)),
+            ),
+        )
+
+        with patch("ueler.viewer.main_viewer.get_all_cell_colors_for_fov", return_value={1: "#0000FF"}), \
+             patch("ueler.viewer.main_viewer.apply_registry_colors", side_effect=lambda image, **kwargs: image) as mock_apply:
+            ImageMaskViewer._apply_map_painter_overlay(viewer)
+
+        kwargs = mock_apply.call_args.kwargs
+        self.assertEqual(kwargs["color_map"], {1: "#FF0000"})
+        self.assertEqual(kwargs["border_color_map"], {1: "#00FF00"})
+        self.assertEqual(kwargs["mode_map"], {1: "fill"})
+        self.assertEqual(kwargs["opacity_map"], {1: 0.4})
+        self.assertTrue(kwargs["show_borders_on_filled"])
+
 
 class TestMaskPainterOnlySpecified(unittest.TestCase):
     """Tests for the 'Only specified' toggle in MaskPainterDisplay."""

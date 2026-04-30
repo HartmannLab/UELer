@@ -1,5 +1,10 @@
 ### v0.3.1
 
+**Issue #91 reply 3 — map-mode painter parity (commit TBD)**
+- Fixed the live map-mode painter overlay so it resolves the same effective per-FOV color, border-color, mode, and opacity maps from the current Mask Painter UI state that single-FOV rendering already uses.
+- Added a focused regression proving `_apply_map_painter_overlay()` prefers the current effective painter state over stale cached registry values.
+- Validated: `python -m unittest tests.test_mask_painter_mode_visibility`.
+
 **Issue #91 reply 2 — NumPy-backed mask highlight fix (commit TBD)**
 - Fixed `ImageDisplay.set_mask_colors_current_fov()` so the immediate current-FOV highlight path accepts either NumPy arrays or lazy arrays that expose `.compute()`, instead of assuming both the masked label slice and generated edge mask are always lazy.
 - Added a focused regression in `tests/test_image_display_tooltip.py` that reproduces the NumPy-backed mask path hit by `MaskPainterDisplay.apply_colors_to_masks()`.

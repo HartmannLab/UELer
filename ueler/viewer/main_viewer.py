@@ -1721,9 +1721,14 @@ class ImageMaskViewer:
 
         overlay = np.array(base_image, copy=True)
         applied = False
+        painter = self._get_mask_painter()
 
         for fov_name, viewport_info in tile_viewports.items():
-            cell_colors = get_all_cell_colors_for_fov(str(fov_name))
+            color_helper = getattr(painter, "get_effective_color_map_for_fov", None) if painter is not None else None
+            if callable(color_helper):
+                cell_colors = color_helper(str(fov_name))
+            else:
+                cell_colors = get_all_cell_colors_for_fov(str(fov_name))
             if not cell_colors:
                 continue
 
@@ -1770,10 +1775,24 @@ class ImageMaskViewer:
             if section_view.size == 0:
                 continue
 
-            painter = self._get_mask_painter()
-            mode_map_for_fov = painter.get_mode_map_for_fov(str(fov_name)) if painter is not None else {}
-            opacity_map_for_fov = painter.get_opacity_map_for_fov(str(fov_name)) if painter is not None else {}
-            border_color_map_for_fov = painter.get_effective_border_color_map_for_fov(str(fov_name)) if painter is not None else {}
+            mode_helper = getattr(painter, "get_effective_mode_map_for_fov", None) if painter is not None else None
+            if callable(mode_helper):
+                mode_map_for_fov = mode_helper(str(fov_name))
+            else:
+                mode_map_for_fov = painter.get_mode_map_for_fov(str(fov_name)) if painter is not None else {}
+
+            opacity_helper = getattr(painter, "get_effective_opacity_map_for_fov", None) if painter is not None else None
+            if callable(opacity_helper):
+                opacity_map_for_fov = opacity_helper(str(fov_name))
+            else:
+                opacity_map_for_fov = painter.get_opacity_map_for_fov(str(fov_name)) if painter is not None else {}
+
+            border_color_helper = getattr(painter, "get_effective_border_color_map_for_fov", None) if painter is not None else None
+            if callable(border_color_helper):
+                border_color_map_for_fov = border_color_helper(str(fov_name))
+            else:
+                border_color_map_for_fov = {}
+
             show_borders_on_filled = painter.get_show_borders_on_filled() if painter is not None else False
 
             rows = min(section_view.shape[0], mask_region_ds.shape[0])
