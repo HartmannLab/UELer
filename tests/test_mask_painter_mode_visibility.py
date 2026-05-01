@@ -202,6 +202,23 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
         self.assertEqual(painter.class_opacity_controls["TypeA"].value, 60)
         self.assertEqual(painter.class_opacity_controls["TypeB"].value, 80)
 
+    def test_global_fill_toggle_updates_only_linked_classes(self):
+        """Only classes explicitly linked to the global fill mode should move with it."""
+        from ipywidgets import Checkbox, Layout
+
+        painter = self._make_painter()
+        painter.class_mode_controls = {
+            "TypeA": Checkbox(value=False, description="fill", indent=False, layout=Layout(width="60px")),
+            "TypeB": Checkbox(value=False, description="fill", indent=False, layout=Layout(width="60px")),
+        }
+        painter.ui_component.global_fill_checkbox.value = False
+        painter._linked_fill_classes = {"TypeA"}
+
+        painter._on_global_fill_toggle({"old": False, "new": True})
+
+        self.assertEqual(painter.class_mode_controls["TypeA"].value, True)
+        self.assertEqual(painter.class_mode_controls["TypeB"].value, False)
+
     def test_capture_snapshot_records_modes_opacity_and_border_state(self):
         """Painter snapshots should preserve the per-class rendering state needed by downstream consumers."""
         import ipywidgets as W
@@ -833,6 +850,39 @@ class TestMaskPainterOnlySpecified(unittest.TestCase):
         self.assertIn("TypeA", w.class_order)
         self.assertNotIn("TypeB", w.class_order)
         self.assertIn("TypeB", w.available_classes)
+
+    def test_only_specified_keeps_custom_class_order(self):
+        """Only specified should keep customized classes at the top in their configured order."""
+        import ipywidgets as W
+        from ipywidgets import Checkbox, Layout
+        from ueler.viewer.plugin.mask_painter import MaskPainterDisplay
+
+        painter = MaskPainterDisplay(self.viewer, width=400, height=300)
+        painter.current_classes = ["TypeB", "TypeC", "TypeA"]
+        painter.current_identifier = "cell_type"
+        painter.class_color_controls = {
+            "TypeA": W.ColorPicker(description="TypeA", value="#FF0000"),
+            "TypeB": W.ColorPicker(description="TypeB", value=painter.default_color),
+            "TypeC": W.ColorPicker(description="TypeC", value="#00FF00"),
+        }
+        painter.class_visible_controls = {
+            "TypeA": Checkbox(value=True, indent=False, layout=Layout(width="30px")),
+            "TypeB": Checkbox(value=True, indent=False, layout=Layout(width="30px")),
+            "TypeC": Checkbox(value=True, indent=False, layout=Layout(width="30px")),
+        }
+        painter.class_mode_controls = {
+            "TypeA": Checkbox(value=False, description="fill", indent=False, layout=Layout(width="60px")),
+            "TypeB": Checkbox(value=False, description="fill", indent=False, layout=Layout(width="60px")),
+            "TypeC": Checkbox(value=False, description="fill", indent=False, layout=Layout(width="60px")),
+        }
+        painter._active_classes = ["TypeB", "TypeC", "TypeA"]
+        painter._push_to_widget()
+
+        painter._on_only_specified_toggle({"new": True})
+
+        w = painter.ui_component.class_list_widget
+        self.assertEqual(list(w.class_order), ["TypeC", "TypeA"])
+        self.assertEqual(list(w.available_classes), ["TypeB"])
 
     def test_only_specified_off_restores_all_classes(self):
         """Disabling 'Only specified' restores all current_classes to active."""

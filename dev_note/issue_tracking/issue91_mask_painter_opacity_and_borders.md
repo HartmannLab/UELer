@@ -158,3 +158,28 @@ The viewer can already suppress channel selection entirely, but that path return
 ### Follow-up validation
 - `python -m unittest tests.test_rendering.RenderingHelpersTests.test_render_fov_to_array_skips_image_layer_but_preserves_masks tests.test_rendering.RenderingHelpersTests.test_render_fov_to_array_without_channels_can_render_overlays tests.test_mask_painter_mode_visibility.TestMaskPainterRenderPath`
 - `python -m unittest tests.test_export_fovs_batch.ExportFOVsBatchTests.test_capture_overlay_snapshot_and_rebuild tests.test_export_fovs_batch.BatchExportMapROIItemsTests.test_export_map_roi_worker_calls_render_map_region_direct tests.test_export_fovs_batch.BatchExportMapROIItemsTests.test_render_map_region_direct_uses_render_fov_to_array_per_tile tests.test_export_fovs_batch.BatchExportMapROIItemsTests.test_export_map_roi_worker_applies_map_bounds_offset tests.test_cell_gallery.TestCellGalleryColors.test_gallery_forwards_skip_image_layer_from_snapshot tests.test_roi_manager_tags.ROIManagerMapModeTests.test_build_overlay_snapshot_carries_no_image_mode`
+
+## Follow-up: reply 5 scope
+
+### Problem
+The Mask Painter still had a few state-model gaps after reply 4:
+
+- changing the global fill opacity only matched classes by raw value, so inherited classes could drift when per-class widgets were rebuilt or coincidentally shared the same value
+- there was no global fill toggle for classes still inheriting the default fill behavior
+- saved palettes did not preserve the active class list, `Only specified` state, or the difference between globally linked classes and classes that merely matched the same value
+
+### Required behavior
+- Global fill opacity changes should update only classes that are still linked to the inherited global opacity behavior.
+- Add a global fill toggle beside the global opacity control, scoped to classes still inheriting the global/default fill mode.
+- Keep customized classes surfaced first when `Only specified` is enabled.
+- Save and reload the full Mask Painter display state, while older palettes continue to load with sensible defaults.
+
+### Follow-up approach
+1. Track linked fill classes and linked opacity classes explicitly inside `MaskPainterDisplay`, with a value-based fallback only when old/manual control replacements leave no tracked linkage for the current controls.
+2. Add a `Global fill` checkbox to the Mask Painter control row and route it through the same linked-class update logic used by the global opacity control.
+3. Persist reply-5 state in `.maskcolors.json`: `active_classes`, `only_specified`, `global_fill`, `linked_fill_classes`, and `linked_opacity_classes`, alongside the already-saved per-class color/mode/visibility/opacity and border settings.
+4. Restore missing reply-5 fields from current defaults when loading older palettes, and guard palette restore with `_syncing` so partial widget updates do not trigger intermediate handlers.
+5. Add focused regressions for linked global fill propagation, `Only specified` ordering, full palette round-trip, and older-palette fallback behavior.
+
+### Follow-up validation
+- `python -m unittest tests.test_mask_painter_mode_visibility tests.test_mask_color_sets`

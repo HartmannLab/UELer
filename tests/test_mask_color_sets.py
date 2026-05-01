@@ -54,13 +54,17 @@ if "ipywidgets" not in sys.modules:
 
     widgets.Layout = _Layout
     for _name in [
+        "Accordion",
+        "BoundedIntText",
         "Button",
         "Checkbox",
         "ColorPicker",
         "Dropdown",
         "FloatSlider",
+        "HTML",
         "HBox",
         "IntText",
+        "Label",
         "Output",
         "Tab",
         "TagsInput",
@@ -73,8 +77,10 @@ if "ipywidgets" not in sys.modules:
     sys.modules["ipywidgets"] = widgets
 
 from ueler.viewer.plugin.mask_painter import (
+    BORDER_COLOR_MODE_SAME_AS_FILL,
     COLOR_SET_FILE_SUFFIX,
     DEFAULT_COLOR,
+    FILL_OPACITY_DEFAULT_PERCENT,
     MaskPainterDisplay,
     colors_match,
     load_registry,
@@ -90,6 +96,24 @@ from ueler.viewer.plugin.mask_painter import (
 class DummyPicker:
     def __init__(self, value):
         self.value = value
+
+
+def _make_dummy_viewer(base_folder):
+    viewer = types.SimpleNamespace()
+    viewer.base_folder = str(base_folder)
+    viewer.cell_table = None
+    viewer._debug = False
+    viewer.ui_component = types.SimpleNamespace(
+        image_selector=types.SimpleNamespace(value="FOV_001"),
+        mask_color_controls={"cell": types.SimpleNamespace(value="Green")},
+    )
+    viewer.fov_key = "fov"
+    viewer.label_key = "label"
+    viewer.mask_key = "cell"
+    viewer.predefined_colors = {"Green": "#00FF00", "White": "#FFFFFF", "Red": "#FF0000", "Blue": "#0000FF"}
+    viewer.image_display = types.SimpleNamespace(set_mask_colors_current_fov=lambda **_: None)
+    viewer.get_active_fov = lambda: viewer.ui_component.image_selector.value
+    return viewer
 
 
 class MaskColorPersistenceTests(unittest.TestCase):
@@ -172,21 +196,7 @@ class MaskColorPersistenceTests(unittest.TestCase):
     def test_load_applies_identifier_and_default_color(self):
         tmp_dir = self._tmpdir()
 
-        class DummyViewer:
-            def __init__(self, base_folder):
-                self.base_folder = str(base_folder)
-                self.cell_table = None
-                self._debug = False
-                dummy_widget = sys.modules["ipywidgets"].Widget()
-                self.ui_component = types.SimpleNamespace(image_selector=dummy_widget)
-                self.fov_key = "fov"
-                self.label_key = "label"
-                self.mask_key = "mask"
-                self.image_display = types.SimpleNamespace(
-                    set_mask_colors_current_fov=lambda **_: None
-                )
-
-        viewer = DummyViewer(tmp_dir)
+        viewer = _make_dummy_viewer(tmp_dir)
         display = MaskPainterDisplay(viewer, width=400, height=300)
 
         widgets = sys.modules["ipywidgets"]
@@ -229,6 +239,134 @@ class MaskColorPersistenceTests(unittest.TestCase):
         self.assertIn("B", display.ui_component.class_list_widget.class_order)
         self.assertEqual(display.ui_component.class_list_widget.class_colors.get("A"), "#121212")
         self.assertEqual(display.ui_component.class_list_widget.class_colors.get("B"), "#101010")
+
+    def test_save_and_load_round_trip_preserves_reply5_fields(self):
+        tmp_dir = self._tmpdir()
+        viewer = _make_dummy_viewer(tmp_dir)
+        display = MaskPainterDisplay(viewer, width=400, height=300)
+        widgets = sys.modules["ipywidgets"]
+
+        display.ui_component.identifier_dropdown.options = ["cell_type"]
+        display.ui_component.identifier_dropdown.value = "cell_type"
+        display.current_identifier = "cell_type"
+        display.current_classes = ["B", "C", "A"]
+        display.class_color_controls = {
+            "A": widgets.ColorPicker(description="A", value="#FF0000"),
+            "B": widgets.ColorPicker(description="B", value=DEFAULT_COLOR),
+            "C": widgets.ColorPicker(description="C", value="#00FF00"),
+        }
+        display.class_visible_controls = {
+            "A": widgets.Checkbox(value=True),
+            "B": widgets.Checkbox(value=False),
+            "C": widgets.Checkbox(value=True),
+        }
+        display.class_mode_controls = {
+            "A": widgets.Checkbox(value=True),
+            "B": widgets.Checkbox(value=False),
+            "C": widgets.Checkbox(value=False),
+        }
+        display.class_opacity_controls = {
+            "A": widgets.BoundedIntText(value=75, min=0, max=100),
+            "B": widgets.BoundedIntText(value=40, min=0, max=100),
+            "C": widgets.BoundedIntText(value=40, min=0, max=100),
+        }
+        display._active_classes = ["C", "A"]
+        display._linked_fill_classes = {"B", "C"}
+        display._linked_opacity_classes = {"B"}
+        display.ui_component.only_specified_checkbox.value = True
+        display.ui_component.global_fill_checkbox.value = False
+        display.ui_component.global_fill_opacity_input.value = 40
+        display.ui_component.show_fill_borders_checkbox.value = True
+        display.ui_component.border_color_mode_dropdown.value = BORDER_COLOR_MODE_SAME_AS_FILL
+        display.ui_component.set_name_input.value = "Example"
+        display._push_to_widget()
+
+        display.save_current_color_set(None)
+
+        saved_path = Path(display.registry_records["Example"]["path"])
+        payload = read_color_set_file(saved_path)
+        self.assertEqual(payload["active_classes"], ["C", "A"])
+        self.assertEqual(payload["only_specified"], True)
+        self.assertEqual(payload["global_fill"], False)
+        self.assertEqual(payload["linked_fill_classes"], ["B", "C"])
+        self.assertEqual(payload["linked_opacity_classes"], ["B"])
+        self.assertEqual(payload["border_color_mode"], BORDER_COLOR_MODE_SAME_AS_FILL)
+
+        display.class_color_controls["A"].value = DEFAULT_COLOR
+        display.class_visible_controls["B"].value = True
+        display.class_mode_controls["A"].value = False
+        display.class_opacity_controls["A"].value = 5
+        display._active_classes = ["A", "B", "C"]
+        display._linked_fill_classes = set()
+        display._linked_opacity_classes = set()
+        display.ui_component.only_specified_checkbox.value = False
+        display.ui_component.global_fill_checkbox.value = True
+        display.ui_component.global_fill_opacity_input.value = 10
+        display.ui_component.show_fill_borders_checkbox.value = False
+        display.ui_component.border_color_mode_dropdown.value = "mask_type_color"
+
+        display._load_color_set(saved_path)
+
+        self.assertEqual(display.class_color_controls["A"].value, "#FF0000")
+        self.assertEqual(display.class_visible_controls["B"].value, False)
+        self.assertEqual(display.class_mode_controls["A"].value, True)
+        self.assertEqual(display.class_opacity_controls["A"].value, 75)
+        self.assertEqual(display.ui_component.global_fill_checkbox.value, False)
+        self.assertEqual(display.ui_component.global_fill_opacity_input.value, 40)
+        self.assertEqual(display.ui_component.show_fill_borders_checkbox.value, True)
+        self.assertEqual(display.ui_component.border_color_mode_dropdown.value, BORDER_COLOR_MODE_SAME_AS_FILL)
+        self.assertEqual(display.ui_component.only_specified_checkbox.value, True)
+        self.assertEqual(list(display.ui_component.class_list_widget.class_order), ["C", "A"])
+        self.assertEqual(list(display.ui_component.class_list_widget.available_classes), ["B"])
+        self.assertEqual(display._linked_fill_classes, {"B", "C"})
+        self.assertEqual(display._linked_opacity_classes, {"B"})
+
+    def test_load_old_palette_defaults_new_reply5_fields(self):
+        tmp_dir = self._tmpdir()
+        viewer = _make_dummy_viewer(tmp_dir)
+        display = MaskPainterDisplay(viewer, width=400, height=300)
+        widgets = sys.modules["ipywidgets"]
+
+        display.ui_component.identifier_dropdown.options = ["cell_type"]
+        display.ui_component.identifier_dropdown.value = "cell_type"
+        display.current_identifier = "cell_type"
+        display.current_classes = ["A", "B"]
+        display.class_color_controls = {
+            "A": widgets.ColorPicker(description="A", value="#999999"),
+            "B": widgets.ColorPicker(description="B", value="#999999"),
+        }
+        display.class_visible_controls = {
+            "A": widgets.Checkbox(value=True),
+            "B": widgets.Checkbox(value=True),
+        }
+        display.class_mode_controls = {
+            "A": widgets.Checkbox(value=False),
+            "B": widgets.Checkbox(value=False),
+        }
+        display.class_opacity_controls = {
+            "A": widgets.BoundedIntText(value=FILL_OPACITY_DEFAULT_PERCENT, min=0, max=100),
+            "B": widgets.BoundedIntText(value=FILL_OPACITY_DEFAULT_PERCENT, min=0, max=100),
+        }
+        display._active_classes = ["A", "B"]
+
+        path = tmp_dir / "legacy.maskcolors.json"
+        write_color_set_file(path, {
+            "name": "Legacy",
+            "version": "1.0.0",
+            "identifier": "cell_type",
+            "default_color": "#101010",
+            "class_order": ["A", "B"],
+            "colors": {"A": "#121212", "B": "#101010"},
+            "saved_at": "2025-10-02T00:00:00Z",
+        })
+
+        display._load_color_set(path)
+
+        self.assertEqual(display.ui_component.global_fill_checkbox.value, False)
+        self.assertEqual(display.ui_component.global_fill_opacity_input.value, FILL_OPACITY_DEFAULT_PERCENT)
+        self.assertEqual(display.ui_component.only_specified_checkbox.value, False)
+        self.assertEqual(display._linked_fill_classes, {"A", "B"})
+        self.assertEqual(display._linked_opacity_classes, {"A", "B"})
 
     def _tmpdir(self) -> Path:
         tmp = TemporaryDirectory()

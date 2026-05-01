@@ -1,5 +1,12 @@
 ### v0.3.1
 
+**Issue #91 reply 5 — Mask Painter linked global state and palette persistence**
+- Added a `Global fill` toggle beside the existing global fill opacity control, and both global controls now update only classes that are still explicitly linked to the inherited/default painter behavior.
+- Saved mask-color sets now persist the active class list, `Only specified` state, global fill toggle, linked fill/opacity classes, and the existing per-class mode/opacity/visibility and border settings.
+- Loading older palettes stays backward-compatible by restoring missing reply-5 fields to the current global defaults and rebuilding inherited-class linkage from the restored controls.
+- Added focused regressions for linked global fill propagation, customized-class ordering under `Only specified`, full reply-5 palette round-trip, and old-palette fallbacks.
+- Validated: `python -m unittest tests.test_mask_painter_mode_visibility tests.test_mask_color_sets`.
+
 **Issue #91 reply 4 — no-image mask mode**
 - Added a new left-panel `No image (masks only)` checkbox that skips the image-layer composite while preserving mask and annotation overlays on a black background.
 - Routed the new state through the shared rendering engine and viewer map-mode cache signature so both single-FOV rendering and stitched-map tiles redraw consistently when the mode changes.
