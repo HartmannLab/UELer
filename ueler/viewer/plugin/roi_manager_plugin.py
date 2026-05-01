@@ -118,6 +118,12 @@ class ROIManagerPlugin(PluginBase):
         self._build_editor_widgets()
         self._build_browser_widgets()
 
+    def on_no_image_toggle(self):  # type: ignore[override]
+        try:
+            self.refresh_roi_table(force_refresh=True, preserve_page=True)
+        except Exception:  # pragma: no cover - best-effort UI refresh only
+            return
+
     def _build_editor_widgets(self) -> None:
         full_width = content_widget_layout
         button_layout = Layout(width="auto", flex="1 1 auto")
@@ -1166,6 +1172,7 @@ class ROIManagerPlugin(PluginBase):
                 downsample_factor=factor,
                 annotation=annotation_settings,
                 masks=mask_settings,
+                skip_image_layer=bool(getattr(snapshot, "skip_image_layer", False)) if snapshot is not None else False,
             )
         except Exception:  # pragma: no cover - rendering failures
             return None
@@ -1304,6 +1311,7 @@ class ROIManagerPlugin(PluginBase):
         return OverlaySnapshot(
             include_annotations=annotation_snapshot is not None,
             include_masks=bool(mask_snapshots) or painter_snapshot is not None,
+            skip_image_layer=bool(getattr(self.main_viewer, "is_no_image_mode_enabled", lambda: False)()),
             annotation=annotation_snapshot,
             masks=mask_snapshots,
             mask_painter=painter_snapshot,

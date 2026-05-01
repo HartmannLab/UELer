@@ -136,3 +136,25 @@ With `show_borders_on_filled=True`, thickened filled-mask borders could alter ne
 ### Follow-up validation
 - `python -m unittest tests.test_mask_color_overlay`
 - `python -m unittest tests.test_mask_painter_mode_visibility`
+
+## Follow-up: reply 4 scope
+
+### Problem
+The viewer can already suppress channel selection entirely, but that path returns a plain black canvas and bypasses mask/annotation rendering. Reply 4 needs a true `No image (masks only)` mode that skips image compositing work while still rendering overlays, and it must stay consistent beyond the live viewer.
+
+### Required behavior
+- Add a left-panel checkbox labeled `No image (masks only)` above the channel settings.
+- Disable the checkbox when masks are unavailable.
+- When enabled, do not render the image layer at all; instead render masks and annotations over a black background.
+- Keep the same behavior in single-FOV mode, map mode, export, ROI thumbnails, and the cell gallery.
+
+### Follow-up approach
+1. Add a shared `skip_image_layer` render flag to `ueler/rendering/engine.py` so `render_fov_to_array(...)`, `render_crop_to_array(...)`, and `render_roi_to_array(...)` can start from a black base while still applying annotation and mask overlays.
+2. Add a viewer-level checkbox and callback in `ueler/viewer/ui_components.py` and `ueler/viewer/main_viewer.py`, and include the flag in `_map_state_signature(...)` so stitched-map tiles redraw when the mode changes.
+3. Capture the flag in `OverlaySnapshot` for downstream consumers that already rely on snapshot replay.
+4. Forward the flag through export workers and gallery/ROI render helpers so downstream renders honor the same no-image state.
+5. Add focused regressions for shared rendering, viewer forwarding, export propagation, gallery propagation, and ROI snapshot propagation.
+
+### Follow-up validation
+- `python -m unittest tests.test_rendering.RenderingHelpersTests.test_render_fov_to_array_skips_image_layer_but_preserves_masks tests.test_rendering.RenderingHelpersTests.test_render_fov_to_array_without_channels_can_render_overlays tests.test_mask_painter_mode_visibility.TestMaskPainterRenderPath`
+- `python -m unittest tests.test_export_fovs_batch.ExportFOVsBatchTests.test_capture_overlay_snapshot_and_rebuild tests.test_export_fovs_batch.BatchExportMapROIItemsTests.test_export_map_roi_worker_calls_render_map_region_direct tests.test_export_fovs_batch.BatchExportMapROIItemsTests.test_render_map_region_direct_uses_render_fov_to_array_per_tile tests.test_export_fovs_batch.BatchExportMapROIItemsTests.test_export_map_roi_worker_applies_map_bounds_offset tests.test_cell_gallery.TestCellGalleryColors.test_gallery_forwards_skip_image_layer_from_snapshot tests.test_roi_manager_tags.ROIManagerMapModeTests.test_build_overlay_snapshot_carries_no_image_mode`

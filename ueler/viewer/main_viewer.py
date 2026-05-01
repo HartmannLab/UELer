@@ -279,6 +279,7 @@ class ImageMaskViewer:
         self._map_pixel_size_nm = None
         self._map_canvas_size = None
         self._last_viewport_px: Optional[Tuple[float, float, float, float, int]] = None
+        self._skip_image_layer = False
         # When True, update_display returns immediately without rendering.
         # Used to suppress the cascade of renders triggered by widget observers
         # during load_widget_states (which fires one observer per widget).
@@ -1219,6 +1220,25 @@ class ImageMaskViewer:
                 if self._debug:
                     print(f"[viewer] Failed to invalidate map cache for {fov_name}")
 
+    def _invalidate_all_map_tiles(self) -> None:
+        self._map_tile_cache.clear()
+
+    def is_no_image_mode_enabled(self) -> bool:
+        checkbox = getattr(getattr(self, "ui_component", None), "no_image_checkbox", None)
+        if checkbox is not None:
+            try:
+                return bool(getattr(checkbox, "value", False))
+            except Exception:
+                return bool(getattr(self, "_skip_image_layer", False))
+        return bool(getattr(self, "_skip_image_layer", False))
+
+    def on_no_image_toggle(self, change):
+        self._skip_image_layer = bool(change.get("new"))
+        if self._map_mode_active:
+            self._invalidate_all_map_tiles()
+        self.update_display(self.current_downsample_factor)
+        self.inform_plugins('on_no_image_toggle')
+
     def _map_state_signature(
         self,
         selected_channels: Tuple[str, ...],
@@ -1315,8 +1335,9 @@ class ImageMaskViewer:
         painter_signature = (bool(self._is_mask_painter_enabled()), painter_selected)
 
         return (
-            "v1",
+            "v2",
             int(downsample_factor),
+            bool(self.is_no_image_mode_enabled()),
             tuple(channel_entries),
             mask_signature,
             annotation_signature,
@@ -3838,13 +3859,17 @@ class ImageMaskViewer:
         region_xy: Tuple[int, int, int, int],
         region_ds: Tuple[int, int, int, int],
     ) -> np.ndarray:
-        if not selected_channels:
+        skip_image_layer = bool(self.is_no_image_mode_enabled())
+        if not selected_channels and not skip_image_layer:
             height = max(1, region_ds[3] - region_ds[2])
             width = max(1, region_ds[1] - region_ds[0])
             return np.zeros((height, width, 3), dtype=np.float32)
 
-        self.load_fov(fov_name, selected_channels)
-        fov_images = self.image_cache[fov_name]
+        if selected_channels:
+            self.load_fov(fov_name, selected_channels)
+            fov_images = self.image_cache[fov_name]
+        else:
+            fov_images = self.image_cache.get(fov_name, {})
 
         controls = self.ui_component
         channel_settings = {}
@@ -3975,6 +4000,7 @@ class ImageMaskViewer:
             region_ds=region_ds,
             annotation=annotation_settings,
             masks=mask_settings,
+            skip_image_layer=skip_image_layer,
         )
 
         if painter_controls_primary_mask and mask_regions:
@@ -4149,6 +4175,7 @@ class ImageMaskViewer:
         return OverlaySnapshot(
             include_annotations=use_annotations,
             include_masks=use_masks,
+            skip_image_layer=bool(self.is_no_image_mode_enabled()),
             annotation=annotation_snapshot,
             masks=tuple(mask_snapshots),
             mask_painter=painter_snapshot,
@@ -4434,15 +4461,16 @@ class ImageMaskViewer:
         self._refresh_channel_legend(visible_channels)
 
         if not visible_channels:
-            # If no channels selected, display black image sized to the current viewport
-            viewport_height = max(1, int(xym_ds[3] - xym_ds[2]))
-            viewport_width = max(1, int(xym_ds[1] - xym_ds[0]))
-            blank = np.zeros((viewport_height, viewport_width, 3), dtype=np.float32)
-            self.image_display.img_display.set_data(blank)
-            self.image_display.img_display.set_extent(xym_r)
-            self.image_display.combined = blank
-            self.image_display.fig.canvas.draw_idle()
-            return
+            if not self.is_no_image_mode_enabled():
+                # If no channels selected, display black image sized to the current viewport
+                viewport_height = max(1, int(xym_ds[3] - xym_ds[2]))
+                viewport_width = max(1, int(xym_ds[1] - xym_ds[0]))
+                blank = np.zeros((viewport_height, viewport_width, 3), dtype=np.float32)
+                self.image_display.img_display.set_data(blank)
+                self.image_display.img_display.set_extent(xym_r)
+                self.image_display.combined = blank
+                self.image_display.fig.canvas.draw_idle()
+                return
 
         visible_fovs: Tuple[str, ...] = ()
         if self._map_mode_active and self._active_map_id:
@@ -4878,6 +4906,11 @@ class ImageMaskViewer:
         # Save additional viewer attributes
         state['marker_sets'] = self.marker_sets
         
+        no_image_checkbox = getattr(self.ui_component, "no_image_checkbox", None)
+        if no_image_checkbox is not None:
+            no_image_checkbox.disabled = not self.masks_available
+            if no_image_checkbox.disabled and bool(getattr(no_image_checkbox, "value", False)):
+                no_image_checkbox.value = False
         if self.masks_available:
             state['mask_names'] = self.mask_names
 

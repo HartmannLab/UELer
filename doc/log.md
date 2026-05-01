@@ -1,5 +1,12 @@
 ### v0.3.1
 
+**Issue #91 reply 4 — no-image mask mode**
+- Added a new left-panel `No image (masks only)` checkbox that skips the image-layer composite while preserving mask and annotation overlays on a black background.
+- Routed the new state through the shared rendering engine and viewer map-mode cache signature so both single-FOV rendering and stitched-map tiles redraw consistently when the mode changes.
+- Propagated the same state to export, ROI thumbnail, and cell-gallery render paths via overlay snapshots or direct render forwarding, so downstream views can render masks without the underlying image data as well.
+- Added focused regressions for the shared render flag, viewer forwarding, export propagation, gallery propagation, and ROI snapshot propagation.
+- Validated: `python -m unittest tests.test_rendering.RenderingHelpersTests.test_render_fov_to_array_skips_image_layer_but_preserves_masks tests.test_rendering.RenderingHelpersTests.test_render_fov_to_array_without_channels_can_render_overlays tests.test_mask_painter_mode_visibility.TestMaskPainterRenderPath tests.test_export_fovs_batch.ExportFOVsBatchTests.test_capture_overlay_snapshot_and_rebuild tests.test_export_fovs_batch.BatchExportMapROIItemsTests.test_export_map_roi_worker_calls_render_map_region_direct tests.test_export_fovs_batch.BatchExportMapROIItemsTests.test_render_map_region_direct_uses_render_fov_to_array_per_tile tests.test_export_fovs_batch.BatchExportMapROIItemsTests.test_export_map_roi_worker_applies_map_bounds_offset tests.test_cell_gallery.TestCellGalleryColors.test_gallery_forwards_skip_image_layer_from_snapshot tests.test_roi_manager_tags.ROIManagerMapModeTests.test_build_overlay_snapshot_carries_no_image_mode`.
+
 **Issue #91 — filled-border dimming fix**
 - Fixed the shared mask painter overlay helper so filled-mask borders are painted after all fills and their thickened border mask is clipped back to the owning filled cell.
 - This prevents filled-border rendering from spilling into neighboring cells and altering adjacent fill colors while preserving the intended border-overwrites-fill behavior inside the same cell.

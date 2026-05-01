@@ -69,6 +69,11 @@ class PluginBase:
 
         pass
 
+    def on_no_image_toggle(self):
+        """Hook invoked when the viewer toggles image-layer rendering."""
+
+        pass
+
     def on_widget_value_change(self, change):  # NOSONAR - legacy signature
         """Callback function to handle widget value changes."""
         if self.initialized:

@@ -404,6 +404,7 @@ class ExportFOVsBatchTests(unittest.TestCase):
             color_controls={"DNA": SimpleNamespace(value="Red")},
             contrast_min_controls={"DNA": SimpleNamespace(value=0.0)},
             contrast_max_controls={"DNA": SimpleNamespace(value=2.0)},
+            no_image_checkbox=SimpleNamespace(value=False),
             mask_display_controls={},
             mask_color_controls={},
         )
@@ -504,10 +505,12 @@ class ExportFOVsBatchTests(unittest.TestCase):
     def test_capture_overlay_snapshot_and_rebuild(self) -> None:
         viewer = self._make_viewer()
         self._configure_overlays(viewer)
+        viewer.ui_component.no_image_checkbox.value = True
 
         snapshot = viewer.capture_overlay_snapshot(include_annotations=True, include_masks=True)
         self.assertTrue(snapshot.include_annotations)
         self.assertTrue(snapshot.include_masks)
+        self.assertTrue(snapshot.skip_image_layer)
         self.assertIsNotNone(snapshot.annotation)
         self.assertEqual(snapshot.masks[0].name, "MASK1")
 
@@ -527,6 +530,7 @@ class ExportFOVsBatchTests(unittest.TestCase):
         snapshot_disabled = viewer.capture_overlay_snapshot(include_annotations=False, include_masks=False)
         self.assertFalse(snapshot_disabled.include_annotations)
         self.assertFalse(snapshot_disabled.include_masks)
+        self.assertTrue(snapshot_disabled.skip_image_layer)
 
     def test_batch_export_snapshot_preserves_mask_painter_outline_thickness(self) -> None:
         viewer_stub = _BatchExportViewerStub(self.base_path, mask_outline_thickness=4)
@@ -1073,10 +1077,11 @@ class BatchExportMapROIItemsTests(unittest.TestCase):
             channel_settings={"DNA": ChannelRenderSettings(color=(1.0, 0.0, 0.0), contrast_min=0.0, contrast_max=1.0)},
         )
 
-    def _make_overlay_snapshot(self):
+    def _make_overlay_snapshot(self, *, skip_image_layer: bool = False):
         return OverlaySnapshot(
             include_annotations=False,
             include_masks=False,
+            skip_image_layer=skip_image_layer,
             annotation=None,
             masks=(),
         )
@@ -1161,7 +1166,7 @@ class BatchExportMapROIItemsTests(unittest.TestCase):
 
         # Patch _render_map_region_direct to record the call and return a known canvas.
         def _fake_render_map_region_direct(
-            _self, layer, xmin_um, xmax_um, ymin_um, ymax_um, ds, channels, channel_settings
+            _self, layer, xmin_um, xmax_um, ymin_um, ymax_um, ds, channels, channel_settings, *, skip_image_layer=False
         ):
             region_direct_calls.append({
                 "xmin_um": xmin_um,
@@ -1171,6 +1176,7 @@ class BatchExportMapROIItemsTests(unittest.TestCase):
                 "ds": ds,
                 "channels": channels,
                 "channel_settings": channel_settings,
+                "skip_image_layer": skip_image_layer,
             })
             return rendered_tile
 
@@ -1220,7 +1226,7 @@ class BatchExportMapROIItemsTests(unittest.TestCase):
                 dpi=300,
                 include_scale_bar=False,
                 scale_ratio=10.0,
-                overlay_snapshot=self._make_overlay_snapshot(),
+                overlay_snapshot=self._make_overlay_snapshot(skip_image_layer=True),
             )
 
         # _render_map_region_direct must be called once with um-space coordinates.
@@ -1234,6 +1240,7 @@ class BatchExportMapROIItemsTests(unittest.TestCase):
 
         # The marker profile's channel_settings must be forwarded (not UI widget values).
         self.assertIs(call["channel_settings"], profile.channel_settings)
+        self.assertTrue(call["skip_image_layer"])
 
         # _write_image must be called with the output path.
         self.assertEqual(len(write_calls), 1)
@@ -1292,8 +1299,8 @@ class BatchExportMapROIItemsTests(unittest.TestCase):
 
         render_calls = []
 
-        def _fake_render_fov_to_array(fov_name, arrays, chans, ch_settings, *, downsample_factor, region_xy, region_ds=None):
-            render_calls.append({"fov": fov_name, "channel_settings": ch_settings})
+        def _fake_render_fov_to_array(fov_name, arrays, chans, ch_settings, *, downsample_factor, region_xy, region_ds=None, skip_image_layer=False):
+            render_calls.append({"fov": fov_name, "channel_settings": ch_settings, "skip_image_layer": skip_image_layer})
             return rendered_tile_array
 
         with mock.patch("ueler.viewer.plugin.export_fovs.render_fov_to_array", _fake_render_fov_to_array):
@@ -1303,12 +1310,14 @@ class BatchExportMapROIItemsTests(unittest.TestCase):
                 1,
                 channels,
                 channel_settings,
+                skip_image_layer=True,
             )
 
         self.assertEqual(len(render_calls), 1)
         self.assertEqual(render_calls[0]["fov"], "FOV_A")
         # The supplied channel_settings are passed through unmodified
         self.assertIs(render_calls[0]["channel_settings"], channel_settings)
+        self.assertTrue(render_calls[0]["skip_image_layer"])
 
     def test_export_map_roi_worker_applies_map_bounds_offset(self):
         """_export_map_roi_worker adds the layer's physical bounds origin to canvas-pixel
@@ -1319,7 +1328,7 @@ class BatchExportMapROIItemsTests(unittest.TestCase):
         region_direct_calls = []
         rendered_tile = np.ones((10, 10, 3), dtype=np.float32) * 0.5
 
-        def _fake_render(self_, layer, xmin_um, xmax_um, ymin_um, ymax_um, ds, channels, ch_settings):
+        def _fake_render(self_, layer, xmin_um, xmax_um, ymin_um, ymax_um, ds, channels, ch_settings, *, skip_image_layer=False):
             region_direct_calls.append((xmin_um, xmax_um, ymin_um, ymax_um))
             return rendered_tile
 

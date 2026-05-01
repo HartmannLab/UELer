@@ -504,6 +504,15 @@ class uicomponents:
         )
         self.grid_view_checkbox.observe(viewer.on_grid_view_toggle, names='value')
 
+        self.no_image_checkbox = Checkbox(
+            value=False,
+            description='No image (masks only)',
+            disabled=not bool(getattr(viewer, 'masks_available', False)),
+            layout=_content_widget_layout(),
+            style={'description_width': 'auto'}
+        )
+        self.no_image_checkbox.observe(viewer.on_no_image_toggle, names='value')
+
         self.mask_controls_box = VBox(
             layout=_bounded_panel_layout(
                 overflow_y='auto',
@@ -632,6 +641,7 @@ class uicomponents:
             children=(
                 self.channel_selection_panel,
                 self.marker_set_controls_panel,
+                self.no_image_checkbox,
                 self.channel_controls_box,
                 self.channel_legend_panel,
                 self.grid_view_checkbox,

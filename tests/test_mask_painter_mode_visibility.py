@@ -622,6 +622,7 @@ class TestMaskPainterRenderPath(unittest.TestCase):
             mask_outline_thickness=1,
             label_masks_cache={"FOV_001": {"cell": {1: np.array([[1, 0], [0, 2]], dtype=np.int32)}}},
             image_display=types.SimpleNamespace(selected_cells=[]),
+            is_no_image_mode_enabled=lambda: False,
         )
         viewer.load_fov = lambda _fov, _channels: None
         viewer._get_label_mask_at_factor = lambda _fov, _mask, _ds: np.array([[1, 0], [0, 2]], dtype=np.int32)
@@ -646,6 +647,81 @@ class TestMaskPainterRenderPath(unittest.TestCase):
         self.assertEqual(kwargs["mode_map"], {1: "fill"})
         self.assertEqual(kwargs["opacity_map"], {1: 0.7})
         self.assertTrue(kwargs["show_borders_on_filled"])
+
+    def test_compose_fov_image_forwards_no_image_mode(self):
+        from ueler.viewer.main_viewer import ImageMaskViewer
+
+        viewer = types.SimpleNamespace(
+            image_cache={"FOV_001": {"ch1": np.zeros((2, 2), dtype=np.uint16)}},
+            ui_component=types.SimpleNamespace(
+                color_controls={"ch1": types.SimpleNamespace(value="Red"), "no_image_checkbox": types.SimpleNamespace(value=True)},
+                contrast_min_controls={"ch1": types.SimpleNamespace(value=0.0)},
+                contrast_max_controls={"ch1": types.SimpleNamespace(value=1.0)},
+                mask_display_controls={},
+                mask_color_controls={},
+                no_image_checkbox=types.SimpleNamespace(value=True),
+            ),
+            predefined_colors={"Red": "#FF0000"},
+            annotations_available=False,
+            annotation_display_enabled=False,
+            active_annotation_name=None,
+            masks_available=False,
+            mask_key="cell",
+            mask_outline_thickness=1,
+            image_display=types.SimpleNamespace(selected_cells=[]),
+            is_no_image_mode_enabled=lambda: True,
+        )
+        viewer.load_fov = lambda _fov, _channels: None
+        viewer._get_label_mask_at_factor = lambda _fov, _mask, _ds: None
+        viewer._is_mask_painter_enabled = lambda: False
+        viewer._get_mask_painter = lambda: None
+
+        with patch("ueler.viewer.main_viewer.render_fov_to_array", return_value=np.zeros((2, 2, 3), dtype=np.float32)) as mock_render:
+            ImageMaskViewer._compose_fov_image(
+                viewer,
+                "FOV_001",
+                ("ch1",),
+                1,
+                (0, 2, 0, 2),
+                (0, 2, 0, 2),
+            )
+
+        self.assertTrue(mock_render.call_args.kwargs["skip_image_layer"])
+
+    def test_map_state_signature_includes_no_image_mode(self):
+        from ueler.viewer.main_viewer import ImageMaskViewer
+
+        viewer = types.SimpleNamespace(
+            _map_mode_enabled=True,
+            ui_component=types.SimpleNamespace(
+                color_controls={"ch1": types.SimpleNamespace(value="Red")},
+                contrast_min_controls={"ch1": types.SimpleNamespace(value=0.0)},
+                contrast_max_controls={"ch1": types.SimpleNamespace(value=1.0)},
+                mask_display_controls={},
+                mask_color_controls={},
+                no_image_checkbox=types.SimpleNamespace(value=False),
+            ),
+            predefined_colors={"Red": "#FF0000"},
+            masks_available=False,
+            annotations_available=False,
+            annotation_display_enabled=False,
+            active_annotation_name=None,
+            annotation_palettes={},
+            annotation_class_labels={},
+            annotation_overlay_alpha=0.5,
+            annotation_overlay_mode="combined",
+            annotation_label_display_mode="legend",
+            mask_outline_thickness=1,
+            image_display=types.SimpleNamespace(selected_cells=[]),
+            _is_mask_painter_enabled=lambda: False,
+        )
+        viewer.is_no_image_mode_enabled = lambda: bool(getattr(viewer.ui_component.no_image_checkbox, "value", False))
+
+        signature_with_image = ImageMaskViewer._map_state_signature(viewer, ("ch1",), 1)
+        viewer.ui_component.no_image_checkbox.value = True
+        signature_without_image = ImageMaskViewer._map_state_signature(viewer, ("ch1",), 1)
+
+        self.assertNotEqual(signature_with_image, signature_without_image)
 
     def test_apply_map_painter_overlay_uses_current_mask_painter_state(self):
         """Map-mode redraw must use the effective live painter state, not stale cached registry values."""

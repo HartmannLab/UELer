@@ -939,6 +939,18 @@ class ROIManagerMapModeTests(unittest.TestCase):
         self.assertIs(replay_calls[0]["snapshot"], snapshot)
         self.assertTrue(np.allclose(result, 0.25))
 
+    def test_build_overlay_snapshot_carries_no_image_mode(self):
+        plugin = self._make_plugin(map_mode_active=True)
+        plugin.main_viewer.is_no_image_mode_enabled = lambda: True
+        plugin._resolve_annotation_overlay = lambda _record: None
+        plugin._resolve_mask_overlays = lambda _record, _fov: ()
+        plugin._resolve_mask_painter_snapshot = lambda _record: object()
+
+        snapshot = plugin._build_overlay_snapshot({"fov": "FOV1"}, "FOV1")
+
+        self.assertIsNotNone(snapshot)
+        self.assertTrue(snapshot.skip_image_layer)
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

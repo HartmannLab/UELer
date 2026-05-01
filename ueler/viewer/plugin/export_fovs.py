@@ -963,6 +963,7 @@ class BatchExportPlugin(PluginBase):
             snapshot = OverlaySnapshot(
                 include_annotations=snapshot.include_annotations,
                 include_masks=snapshot.include_masks,
+                skip_image_layer=getattr(snapshot, "skip_image_layer", False),
                 annotation=snapshot.annotation,
                 masks=tuple(adjusted_masks),
                 mask_painter=(
@@ -1354,6 +1355,7 @@ class BatchExportPlugin(PluginBase):
             downsample_factor=downsample,
             annotation=annotation_settings,
             masks=mask_settings,
+            skip_image_layer=bool(getattr(overlay_snapshot, "skip_image_layer", False)),
         )
         array = self.main_viewer.apply_overlay_snapshot_to_array(
             array,
@@ -1412,6 +1414,7 @@ class BatchExportPlugin(PluginBase):
             downsample_factor=downsample,
             annotation=annotation_settings,
             masks=mask_settings,
+            skip_image_layer=bool(getattr(overlay_snapshot, "skip_image_layer", False)),
         )
         bounds = None
         for candidate in channel_arrays.values():
@@ -1451,6 +1454,8 @@ class BatchExportPlugin(PluginBase):
         downsample_factor: int,
         channels: tuple,
         channel_settings: Mapping[str, Any],
+        *,
+        skip_image_layer: bool = False,
     ) -> np.ndarray:
         """Render a rectangular region of the stitched map using explicit channel settings.
 
@@ -1484,6 +1489,7 @@ class BatchExportPlugin(PluginBase):
                 channel_settings,
                 downsample_factor=downsample_factor,
                 region_xy=region_xy,
+                skip_image_layer=skip_image_layer,
                 # Do NOT pass region_ds here: it is in absolute downsampled coordinates
                 # (non-zero origin), but render_fov_to_array uses it to set the canvas
                 # shape.  Let render_fov_to_array derive region_ds from region_xy so
@@ -1571,6 +1577,7 @@ class BatchExportPlugin(PluginBase):
             ds,
             channels,
             marker_profile.channel_settings,
+            skip_image_layer=bool(getattr(overlay_snapshot, "skip_image_layer", False)),
         )
 
         if image is None or not image.size:
@@ -1634,6 +1641,7 @@ class BatchExportPlugin(PluginBase):
             downsample_factor=downsample,
             annotation=annotation_settings,
             masks=mask_settings,
+            skip_image_layer=bool(getattr(overlay_snapshot, "skip_image_layer", False)),
         )
         region_xy = (
             int(float(roi.get("x_min") or 0.0)),

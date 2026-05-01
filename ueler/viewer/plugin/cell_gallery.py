@@ -457,6 +457,12 @@ class CellGalleryDisplay(PluginBase):
         if selected:
             self.plot_gellery()
 
+    def on_no_image_toggle(self) -> None:
+        self._last_rendered_cells = None
+        selected = getattr(self.data.selected_cells, "value", None)
+        if selected:
+            self.plot_gellery()
+
 
 class UiComponent:
     def __init__(self):
@@ -890,6 +896,7 @@ def _render_tile_for_index(df, index: int, context: _RenderContext):
             downsample_factor=context.downsample_factor,
             annotation=annotation_settings,
             masks=tuple(masks),
+            skip_image_layer=bool(getattr(context.overlay_snapshot, "skip_image_layer", False)),
         )
         return np.clip(tile, 0.0, 1.0)
     

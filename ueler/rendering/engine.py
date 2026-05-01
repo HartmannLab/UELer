@@ -131,6 +131,7 @@ class MaskPainterSnapshot:
 class OverlaySnapshot:
     include_annotations: bool
     include_masks: bool
+    skip_image_layer: bool = False
     annotation: Optional[AnnotationOverlaySnapshot] = None
     masks: Tuple[MaskOverlaySnapshot, ...] = ()
     mask_painter: Optional[MaskPainterSnapshot] = None
@@ -466,18 +467,26 @@ def render_fov_to_array(
     region_ds: Optional[Region] = None,
     annotation: Optional[AnnotationRenderSettings] = None,
     masks: Optional[Iterable[MaskRenderSettings]] = None,
+    skip_image_layer: bool = False,
 ) -> np.ndarray:
     if downsample_factor < 1:
         raise ValueError("downsample_factor must be >= 1")
 
-    missing_channels = [ch for ch in selected_channels if ch not in channel_arrays]
+    selected_tuple = tuple(selected_channels)
+    missing_channels = [ch for ch in selected_tuple if ch not in channel_arrays]
     if missing_channels:
         raise KeyError(
             f"FOV '{fov_name}' does not provide channels: {', '.join(missing_channels)}"
         )
 
-    bounds = _infer_region(channel_arrays, selected_channels)
-    region_xy = _ensure_region_within_bounds(region_xy or bounds, bounds)
+    if selected_tuple:
+        bounds = _infer_region(channel_arrays, selected_tuple)
+        region_xy = _ensure_region_within_bounds(region_xy or bounds, bounds)
+    elif region_xy is None:
+        raise ValueError(
+            "region_xy is required when rendering without selected channels"
+        )
+
     region_ds = region_ds or _derive_downsampled_region(region_xy, downsample_factor)
 
     ymin_ds, ymax_ds = region_ds[2], region_ds[3]
@@ -485,15 +494,18 @@ def render_fov_to_array(
     height = max(1, ymax_ds - ymin_ds)
     width = max(1, xmax_ds - xmin_ds)
 
-    composite = _composite_channels(
-        channel_arrays,
-        selected_channels,
-        channel_settings,
-        region_xy,
-        downsample_factor,
-        (height, width),
-        region_ds=region_ds,
-    )
+    if skip_image_layer or not selected_tuple:
+        composite = np.zeros((height, width, 3), dtype=np.float32)
+    else:
+        composite = _composite_channels(
+            channel_arrays,
+            selected_tuple,
+            channel_settings,
+            region_xy,
+            downsample_factor,
+            (height, width),
+            region_ds=region_ds,
+        )
     composite = _apply_annotation_overlay(composite, annotation, region_ds)
     composite = _apply_mask_overlays(composite, masks, region_ds)
     return composite.astype(np.float32, copy=False)
@@ -510,6 +522,7 @@ def render_crop_to_array(
     downsample_factor: int,
     annotation: Optional[AnnotationRenderSettings] = None,
     masks: Optional[Iterable[MaskRenderSettings]] = None,
+    skip_image_layer: bool = False,
 ) -> np.ndarray:
     bounds = _infer_region(channel_arrays, selected_channels)
     half_size = max(1, int(size_px) // 2)
@@ -533,6 +546,7 @@ def render_crop_to_array(
         region_ds=region_ds,
         annotation=annotation,
         masks=masks,
+        skip_image_layer=skip_image_layer,
     )
 
 
@@ -546,6 +560,7 @@ def render_roi_to_array(
     downsample_factor: int,
     annotation: Optional[AnnotationRenderSettings] = None,
     masks: Optional[Iterable[MaskRenderSettings]] = None,
+    skip_image_layer: bool = False,
 ) -> np.ndarray:
     has_bounds = {"x_min", "x_max", "y_min", "y_max"}.issubset(roi_definition)
     has_center = {"x", "y", "width", "height"}.issubset(roi_definition)
@@ -568,6 +583,7 @@ def render_roi_to_array(
         region_ds=region_ds,
         annotation=annotation,
         masks=masks,
+        skip_image_layer=skip_image_layer,
     )
 
 

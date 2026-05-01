@@ -89,6 +89,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 - **Cache Size**: Defines the number of images that can be loaded into memory at one time.  
 - **Select Image**: Choose an image to display in the main viewer.  
 - **Channel Selection**: Select the channels you want to display. You can select multiple channels by holding down the **Shift** key and clicking.  
+- **No image (masks only)**: When masks are available, enable this checkbox to skip rendering the image layer and show masks plus annotations on a black background. This also reduces image-compositing work when you only need spatial mask context.
 - **Marker Set**: Load a pre-defined marker set, which includes channels, colors, and color ranges.
 - **Control sections**: Channel, annotation, and mask controls now live in a collapsible accordion so you can jump straight to the section you need. When annotations are available, their controls appear ahead of masks, and each pane scrolls independently to keep the palette tools in reach even with dozens of channels.
 - **Annotations**: When `<base_folder>/annotations` contains rasters named `<fov>_<annotation>.tif(f)`, enable the overlay toggle to color pixels by class. Choose between mask outlines, annotation fills, or a combined view, adjust fill opacity, and launch the palette editor to customize class colors and display labels. Annotation names can include spaces (for example, `Simple Segmentation`)—they remain selectable and the **Edit palette…** button now activates as soon as such an entry loads.
@@ -101,6 +102,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### **UELer v0.3.1 Summary**
+- Added `No image (masks only)` mode (#91 reply 4): a new left-panel checkbox skips image-layer rendering entirely while keeping masks and annotations visible on a black background. The same state now propagates through single-FOV rendering, map mode, export, ROI thumbnails, and the cell gallery.
 - Fixed Mask Painter filled-border dimming (#91 follow-up): thickened filled-mask borders are now clipped to the owning cell and painted after all fill blending, so enabling borders no longer alters neighboring fill colors or makes adjacent filled cells look dimmer.
 - Fixed Mask Painter map-mode parity (#91 reply 3): the live stitched-map overlay now resolves the same effective color, fill, opacity, and filled-border state from the current Mask Painter UI that single-FOV rendering uses, so map mode no longer depends on stale cached painter registry values.
 - Fixed Mask Painter current-FOV recoloring for NumPy-backed masks (#91 reply 2): the immediate highlight path in `ImageDisplay.set_mask_colors_current_fov()` now materializes either eager or lazy arrays before edge generation, so `apply_colors_to_masks()` no longer crashes when the label slice is already a NumPy array.

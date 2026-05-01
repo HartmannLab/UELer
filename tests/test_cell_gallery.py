@@ -357,6 +357,22 @@ class TestCellGalleryColors(unittest.TestCase):
         self.assertEqual(captured["masks"][1].color, (0.0, 0.0, 1.0))
         self.assertEqual(captured["masks"][1].outline_thickness, context.outline_thickness)
 
+    def test_gallery_forwards_skip_image_layer_from_snapshot(self):
+        context = self._create_render_context(use_uniform_color=False, include_overlay=False)
+        context.overlay_snapshot = SimpleNamespace(skip_image_layer=True, mask_painter=None)
+
+        captured = {}
+
+        def _capture_render(*args, **kwargs):
+            captured["skip_image_layer"] = kwargs.get("skip_image_layer")
+            return np.zeros((20, 20, 3), dtype=np.float32)
+
+        with patch("ueler.viewer.plugin.cell_gallery.render_crop_to_array", side_effect=_capture_render):
+            tile = _render_tile_for_index(self.df, 0, context)
+
+        self.assertIsNotNone(tile)
+        self.assertTrue(captured["skip_image_layer"])
+
     def test_colors_persist_across_fovs(self):
         """Verify color assignments are global across FOVs.
         
