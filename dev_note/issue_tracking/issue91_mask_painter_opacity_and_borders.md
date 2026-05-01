@@ -117,3 +117,22 @@ Single-FOV live rendering already resolves mask painter state directly from the 
 
 ### Follow-up validation
 - `python -m unittest tests.test_mask_painter_mode_visibility`
+
+## Follow-up: filled-border dimming regression
+
+### Problem
+With `show_borders_on_filled=True`, thickened filled-mask borders could alter neighboring filled cells and make their fill colors look dimmer or less saturated. The issue is in the shared helper that every live/snapshot painter path uses: it allowed thickened border masks to spill outside the owning cell and interleaved per-cell fill and border compositing.
+
+### Required behavior
+- Filled-mask borders and their thickened pixels should overwrite only the owning cell's fill pixels.
+- Enabling filled borders must not change adjacent cells' fill values.
+- The fix must apply everywhere that reuses `apply_registry_colors(...)`: live FOV rendering, live map mode, ROI replay, and export replay.
+
+### Follow-up approach
+1. Add an adjacent-cell regression that simulates a thickened filled border reaching into a neighbor cell and asserts the neighbor's interior fill value remains unchanged.
+2. Refactor `ueler/viewer/mask_color_overlay.py` so fill blending happens before border painting.
+3. Clip thickened filled-border masks back to `mask_bool` before painting, preserving overwrite-on-top semantics inside the same cell while preventing spill into adjacent cells.
+
+### Follow-up validation
+- `python -m unittest tests.test_mask_color_overlay`
+- `python -m unittest tests.test_mask_painter_mode_visibility`

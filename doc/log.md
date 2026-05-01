@@ -1,29 +1,35 @@
 ### v0.3.1
 
-**Issue #91 reply 3 — map-mode painter parity (commit TBD)**
+**Issue #91 — filled-border dimming fix**
+- Fixed the shared mask painter overlay helper so filled-mask borders are painted after all fills and their thickened border mask is clipped back to the owning filled cell.
+- This prevents filled-border rendering from spilling into neighboring cells and altering adjacent fill colors while preserving the intended border-overwrites-fill behavior inside the same cell.
+- Added a focused adjacent-cell regression in `tests/test_mask_color_overlay.py` and revalidated the painter integration suite.
+- Validated: `python -m unittest tests.test_mask_color_overlay` and `python -m unittest tests.test_mask_painter_mode_visibility`.
+
+**Issue #91 reply 3 — map-mode painter parity**
 - Fixed the live map-mode painter overlay so it resolves the same effective per-FOV color, border-color, mode, and opacity maps from the current Mask Painter UI state that single-FOV rendering already uses.
 - Added a focused regression proving `_apply_map_painter_overlay()` prefers the current effective painter state over stale cached registry values.
 - Validated: `python -m unittest tests.test_mask_painter_mode_visibility`.
 
-**Issue #91 reply 2 — NumPy-backed mask highlight fix (commit TBD)**
+**Issue #91 reply 2 — NumPy-backed mask highlight fix**
 - Fixed `ImageDisplay.set_mask_colors_current_fov()` so the immediate current-FOV highlight path accepts either NumPy arrays or lazy arrays that expose `.compute()`, instead of assuming both the masked label slice and generated edge mask are always lazy.
 - Added a focused regression in `tests/test_image_display_tooltip.py` that reproduces the NumPy-backed mask path hit by `MaskPainterDisplay.apply_colors_to_masks()`.
 - Validated: `python -m unittest tests.test_image_display_tooltip tests.test_mask_painter_mode_visibility`.
 
-**Issue #91 follow-up — ROI thumbnail painter replay and border-color modes (commit TBD)**
+**Issue #91 follow-up — ROI thumbnail painter replay and border-color modes**
 - Fixed map-mode ROI thumbnail/export replay so saved mask painter snapshots are re-applied onto stitched map renders instead of falling back to the raw map image.
 - Added mask painter border-color modes so filled-mask borders can either follow the left-panel mask color or reuse the fill color, and replayed snapshots now preserve the captured mask-type color as a resolved hex value.
 - Updated the live viewer and cell gallery to honor distinct filled-border colors in the same overlay path used by snapshot replay.
 - Validated: `python -m unittest tests.test_mask_color_overlay tests.test_mask_painter_mode_visibility tests.test_roi_manager_tags tests.test_cell_gallery` and `python -m unittest tests.test_export_fovs_batch.BatchExportMapROIItemsTests.test_export_map_roi_worker_calls_render_map_region_direct tests.test_export_fovs_batch.BatchExportMapROIItemsTests.test_export_map_roi_worker_applies_map_bounds_offset tests.test_export_fovs_batch.BatchExportMapROIItemsTests.test_export_map_roi_worker_raises_on_empty_roi`.
 
-**Issue #91 — Mask Painter opacity and borders on filled masks (commit TBD)**
+**Issue #91 — Mask Painter opacity and borders on filled masks**
 - Added per-class fill opacity controls plus a global linked opacity control to Mask Painter, and added a "Show borders on filled masks" toggle so filled classes can keep visible boundaries.
 - Extended the live viewer render path, map-mode painter overlay, and overlay helper to honor per-class fill opacity and optional fill borders in the same compose logic.
 - Added painter snapshot capture/replay so cell gallery, ROI thumbnails/presets, and batch export reuse the saved painter state instead of falling back to outline-only rendering.
 - Persisted painter snapshot payloads in ROI records so each ROI keeps the mask painter settings captured with it.
 - Validated: `python -m unittest tests.test_mask_painter_mode_visibility tests.test_mask_color_overlay tests.test_cell_gallery tests.test_roi_manager_tags` and `python -m unittest tests.test_export_fovs_batch.ExportFOVsBatchTests.test_batch_export_snapshot_preserves_mask_painter_outline_thickness`.
 
-**Issue #90 — Mask Painter redraw visibility fix (commit TBD)**
+**Issue #90 — Mask Painter redraw visibility fix**
 - Fixed the single-FOV mask painter render path so zoom/pan redraws use the current UI state directly during `_compose_fov_image()` instead of relying on post-render plugin timing.
 - Added `get_effective_color_map_for_fov()` and `get_effective_mode_map_for_fov()` to `MaskPainterDisplay`, and updated `main_viewer.py` to pass that state into `apply_registry_colors(...)` for the painter-controlled mask overlay.
 - Changed Mask Painter to start disabled by default and added an enable/disable observer that invalidates stale painter state and triggers a viewer redraw when the plugin is toggled.
@@ -31,7 +37,7 @@
 - Updated issue #89 follow-up expectations in the mask painter tests so removed/filtered classes now retain the default color instead of receiving the hidden sentinel.
 - Validated: `python -m unittest tests.test_mask_painter_mode_visibility tests.test_mask_color_overlay tests.test_mask_color_sets` — 47/47 passed.
 
-**Issue #89 follow-up — Mask Painter "Only specified" toggle (commit TBD)**
+**Issue #89 follow-up — Mask Painter "Only specified" toggle**
 - Added `only_specified_checkbox` (`Checkbox`, `description="Only specified"`) to `UiComponent`, placed inline with `default_color_picker` in `colors_layout`.
 - New method `_on_only_specified_toggle(change)` on `MaskPainterDisplay`: when ON, filters `_active_classes` to classes whose color differs from `default_color` (via `colors_match()`); when OFF, restores all classes in `current_classes` to active. Calls `_push_to_widget()` to sync.
 - Observer registered in `MaskPainterDisplay.__init__` via `only_specified_checkbox.observe(self._on_only_specified_toggle, names="value")`.

@@ -101,6 +101,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### **UELer v0.3.1 Summary**
+- Fixed Mask Painter filled-border dimming (#91 follow-up): thickened filled-mask borders are now clipped to the owning cell and painted after all fill blending, so enabling borders no longer alters neighboring fill colors or makes adjacent filled cells look dimmer.
 - Fixed Mask Painter map-mode parity (#91 reply 3): the live stitched-map overlay now resolves the same effective color, fill, opacity, and filled-border state from the current Mask Painter UI that single-FOV rendering uses, so map mode no longer depends on stale cached painter registry values.
 - Fixed Mask Painter current-FOV recoloring for NumPy-backed masks (#91 reply 2): the immediate highlight path in `ImageDisplay.set_mask_colors_current_fov()` now materializes either eager or lazy arrays before edge generation, so `apply_colors_to_masks()` no longer crashes when the label slice is already a NumPy array.
 - Added a follow-up pass for Mask Painter ROI replay and filled-border colors (#91): map-mode ROI thumbnails and map ROI export now replay the saved painter snapshot, and filled-mask borders can either use the left-panel mask color or the fill color while preserving the captured mask-type color in ROI/gallery/export replay.

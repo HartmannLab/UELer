@@ -281,6 +281,72 @@ class OverlayFillRenderingTests(unittest.TestCase):
         self.assertAlmostEqual(float(result[1, 1, 0]), 0.0, places=4)
         self.assertAlmostEqual(float(result[1, 1, 1]), 1.0, places=4)
 
+    def test_thickened_fill_border_does_not_reblend_neighbor_fill(self):
+        image = np.zeros((5, 8, 3), dtype=np.float32)
+        region = np.array(
+            [
+                [0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 1, 1, 1, 2, 2, 2, 0],
+                [0, 1, 1, 1, 2, 2, 2, 0],
+                [0, 1, 1, 1, 2, 2, 2, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0],
+            ],
+            dtype=np.int32,
+        )
+        cell1_edges = np.array(
+            [
+                [False, False, False, False, False, False, False, False],
+                [False, True, True, True, False, False, False, False],
+                [False, True, False, True, False, False, False, False],
+                [False, True, True, True, False, False, False, False],
+                [False, False, False, False, False, False, False, False],
+            ],
+            dtype=bool,
+        )
+        cell2_edges = np.array(
+            [
+                [False, False, False, False, False, False, False, False],
+                [False, False, False, False, True, True, True, False],
+                [False, False, False, False, True, False, True, False],
+                [False, False, False, False, True, True, True, False],
+                [False, False, False, False, False, False, False, False],
+            ],
+            dtype=bool,
+        )
+        cell1_expanded = cell1_edges.copy()
+        cell1_expanded[2, 5] = True
+        cell2_expanded = cell2_edges.copy()
+
+        def _fake_find_boundaries(mask_bool, mode=None):
+            if np.any(mask_bool[:, 1:4]):
+                return cell1_edges
+            return cell2_edges
+
+        def _fake_thicken_outline(edges, dilation):
+            if np.array_equal(edges, cell1_edges):
+                return cell1_expanded
+            if np.array_equal(edges, cell2_edges):
+                return cell2_expanded
+            return edges
+
+        with patch("ueler.viewer.mask_color_overlay.find_boundaries", side_effect=_fake_find_boundaries), \
+             patch("ueler.viewer.mask_color_overlay.thicken_outline", side_effect=_fake_thicken_outline):
+            result = apply_registry_colors(
+                image,
+                fov="FOV_001",
+                mask_regions={"cell": region},
+                outline_thickness=2,
+                downsample_factor=1,
+                color_map={1: "#FF0000", 2: "#0000FF"},
+                mode_map={1: "fill", 2: "fill"},
+                opacity_map={1: 0.5, 2: 0.5},
+                show_borders_on_filled=True,
+            )
+
+        self.assertAlmostEqual(float(result[2, 5, 0]), 0.0, places=4)
+        self.assertAlmostEqual(float(result[2, 5, 1]), 0.0, places=4)
+        self.assertAlmostEqual(float(result[2, 5, 2]), 0.5, places=4)
+
 
 # ---------------------------------------------------------------------------
 # _register_color_globally: bulk write path (mask_painter integration)

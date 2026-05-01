@@ -186,6 +186,8 @@ def _apply_region_colors(
     if region_array.size == 0:
         return
 
+    pending_edges: list[tuple[np.ndarray, np.ndarray]] = []
+
     for raw_mask_id, colour_hex in _iter_mask_region_ids(region_array, registry):
         # Skip excluded IDs (e.g., currently selected cells)
         if raw_mask_id in exclude_ids:
@@ -218,14 +220,18 @@ def _apply_region_colors(
                 edges = find_boundaries(mask_bool, mode="inner")
                 if dilation > 0:
                     edges = thicken_outline(edges, dilation)
+                edges = np.logical_and(edges, mask_bool)
                 if np.any(edges):
-                    canvas[edges] = border_rgb
+                    pending_edges.append((edges, np.array(border_rgb, dtype=np.float32)))
         else:
             edges = find_boundaries(mask_bool, mode="inner")
             if dilation > 0:
                 edges = thicken_outline(edges, dilation)
             if np.any(edges):
-                canvas[edges] = rgb
+                pending_edges.append((edges, np.array(rgb, dtype=np.float32)))
+
+    for edges, edge_rgb in pending_edges:
+        canvas[edges] = edge_rgb.astype(canvas.dtype, copy=False)
 
 
 def _iter_mask_region_ids(
