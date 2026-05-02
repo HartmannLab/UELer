@@ -173,6 +173,7 @@ def build_painter_state_maps_for_fov(
     class_fill: Mapping[str, bool],
     class_opacity: Mapping[str, int],
     default_color: str,
+    global_fill: bool = False,
     global_fill_opacity: int,
     border_color_mode: str = BORDER_COLOR_MODE_MASK_TYPE,
     mask_type_color: str = DEFAULT_COLOR,
@@ -202,6 +203,7 @@ def build_painter_state_maps_for_fov(
 
     resolved_border_mode = str(border_color_mode or BORDER_COLOR_MODE_MASK_TYPE)
     resolved_mask_type_color = normalize_hex_color(mask_type_color) or mask_type_color or default_color
+    default_fill_enabled = bool(global_fill)
 
     for _, row in current_rows.iterrows():
         cls_key = str(row[identifier])
@@ -211,6 +213,16 @@ def build_painter_state_maps_for_fov(
             continue
         if cls_key not in active_set:
             color_map[mask_id] = default_color
+            if default_fill_enabled:
+                mode_map[mask_id] = "fill"
+                border_map[mask_id] = (
+                    default_color
+                    if resolved_border_mode == BORDER_COLOR_MODE_SAME_AS_FILL
+                    else resolved_mask_type_color
+                )
+                opacity_map[mask_id] = _opacity_percent_to_alpha(default_percent, default_percent)
+            else:
+                mode_map[mask_id] = "outline"
             continue
 
         class_color = class_colors.get(cls_key, default_color) or default_color
@@ -492,6 +504,21 @@ class MaskPainterDisplay(PluginBase):
         active = set(self._get_active_classes())
         return [key for key in self.current_classes if key not in active]
 
+    def _get_customized_first_class_order(self) -> List[str]:
+        color_map = {
+            cls: getattr(widget, "value", self.default_color)
+            for cls, widget in self.class_color_controls.items()
+        }
+        customized, defaulted = split_default_classes(
+            self.current_classes,
+            color_map,
+            self.default_color,
+        )
+        return [
+            cls for cls in (customized + defaulted)
+            if cls in self.class_color_controls
+        ]
+
     def _resolve_tracked_class_key(self, change, control_map: Mapping[int, str]) -> Optional[str]:
         owner = change.get("owner") if isinstance(change, dict) else None
         if owner is None:
@@ -579,6 +606,7 @@ class MaskPainterDisplay(PluginBase):
             class_fill={cls: bool(getattr(widget, "value", False)) for cls, widget in self.class_mode_controls.items()},
             class_opacity={cls: _normalise_opacity_percent(getattr(widget, "value", FILL_OPACITY_DEFAULT_PERCENT)) for cls, widget in self.class_opacity_controls.items()},
             default_color=self.default_color,
+            global_fill=bool(self.ui_component.global_fill_checkbox.value),
             global_fill_opacity=_normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
             border_color_mode=self.get_border_color_mode(),
             mask_type_color=self.get_mask_type_color(),
@@ -600,6 +628,7 @@ class MaskPainterDisplay(PluginBase):
             class_fill={cls: bool(getattr(widget, "value", False)) for cls, widget in self.class_mode_controls.items()},
             class_opacity={cls: _normalise_opacity_percent(getattr(widget, "value", FILL_OPACITY_DEFAULT_PERCENT)) for cls, widget in self.class_opacity_controls.items()},
             default_color=self.default_color,
+            global_fill=bool(self.ui_component.global_fill_checkbox.value),
             global_fill_opacity=_normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
             border_color_mode=self.get_border_color_mode(),
             mask_type_color=self.get_mask_type_color(),
@@ -621,6 +650,7 @@ class MaskPainterDisplay(PluginBase):
             class_fill={cls: bool(getattr(widget, "value", False)) for cls, widget in self.class_mode_controls.items()},
             class_opacity={cls: _normalise_opacity_percent(getattr(widget, "value", FILL_OPACITY_DEFAULT_PERCENT)) for cls, widget in self.class_opacity_controls.items()},
             default_color=self.default_color,
+            global_fill=bool(self.ui_component.global_fill_checkbox.value),
             global_fill_opacity=_normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
             border_color_mode=self.get_border_color_mode(),
             mask_type_color=self.get_mask_type_color(),
@@ -642,6 +672,7 @@ class MaskPainterDisplay(PluginBase):
             class_fill={cls: bool(getattr(widget, "value", False)) for cls, widget in self.class_mode_controls.items()},
             class_opacity={cls: _normalise_opacity_percent(getattr(widget, "value", FILL_OPACITY_DEFAULT_PERCENT)) for cls, widget in self.class_opacity_controls.items()},
             default_color=self.default_color,
+            global_fill=bool(self.ui_component.global_fill_checkbox.value),
             global_fill_opacity=_normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
             border_color_mode=self.get_border_color_mode(),
             mask_type_color=self.get_mask_type_color(),
@@ -683,6 +714,7 @@ class MaskPainterDisplay(PluginBase):
             class_fill={cls: bool(getattr(widget, "value", False)) for cls, widget in self.class_mode_controls.items()},
             class_opacity={cls: _normalise_opacity_percent(getattr(widget, "value", FILL_OPACITY_DEFAULT_PERCENT)) for cls, widget in self.class_opacity_controls.items()},
             default_color=self.default_color,
+            global_fill=bool(self.ui_component.global_fill_checkbox.value),
             global_fill_opacity=_normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
             show_borders_on_filled=bool(self.ui_component.show_fill_borders_checkbox.value),
             border_color_mode=self.get_border_color_mode(),
@@ -722,6 +754,9 @@ class MaskPainterDisplay(PluginBase):
             class_selector = getattr(self.ui_component, "class_selector", None)
             if class_selector is not None:
                 class_selector.value = available
+            self.ui_component.global_fill_checkbox.value = bool(
+                getattr(snapshot, "global_fill", False)
+            )
             self.ui_component.global_fill_opacity_input.value = _normalise_opacity_percent(
                 getattr(snapshot, "global_fill_opacity", FILL_OPACITY_DEFAULT_PERCENT)
             )
@@ -1222,13 +1257,20 @@ class MaskPainterDisplay(PluginBase):
 
         # Inactive classes stay visible with the default color.
         if inactive_classes:
+            inactive_mode = "fill" if bool(self.ui_component.global_fill_checkbox.value) else "outline"
+            inactive_alpha = (
+                _opacity_percent_to_alpha(
+                    self.ui_component.global_fill_opacity_input.value,
+                    _normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
+                )
+                if inactive_mode == "fill"
+                else 0.0
+            )
             for cls_str, cls_value in converted_inactive:
-                if current_fov:
-                    _apply_color_to_current_fov(cls_value, self.default_color)
                 if register_globally:
                     _register_color_globally(cls_str, cls_value, self.default_color)
-                    _register_mode_globally(cls_str, cls_value, "outline")
-                    _register_opacity_globally(cls_str, cls_value, 0.0)
+                    _register_mode_globally(cls_str, cls_value, inactive_mode)
+                    _register_opacity_globally(cls_str, cls_value, inactive_alpha)
 
         self._log("Masks updated with class-based colors.")
         
@@ -1300,25 +1342,10 @@ class MaskPainterDisplay(PluginBase):
         new = bool(change.get("new", old))
         if old == new:
             return
-        self._syncing = True
-        try:
-            linked_fill_classes = set(self._linked_fill_classes)
-            allow_fill_fallback = not any(cls in self.class_mode_controls for cls in linked_fill_classes)
-            for cls in self._get_full_class_order():
-                widget = self.class_mode_controls.get(cls)
-                if widget is not None:
-                    if cls not in linked_fill_classes and (
-                        not allow_fill_fallback or bool(getattr(widget, "value", old)) != old
-                    ):
-                        continue
-                    widget.value = new
-                    linked_fill_classes.add(cls)
-            self._linked_fill_classes = linked_fill_classes
-            self._push_to_widget()
-        finally:
-            self._syncing = False
+        self._push_to_widget()
         if self.ui_component.enabled_checkbox.value:
             self._last_applied_class_modes.clear()
+            self._last_applied_class_opacities.clear()
             map_mode = self.main_viewer.get_active_fov() is None
             self.apply_colors_to_masks(
                 None,
@@ -1335,20 +1362,12 @@ class MaskPainterDisplay(PluginBase):
             return
         self._syncing = True
         try:
-            linked_opacity_classes = set(self._linked_opacity_classes)
-            allow_opacity_fallback = not any(cls in self.class_opacity_controls for cls in linked_opacity_classes)
-            for cls in self._get_full_class_order():
-                widget = self.class_opacity_controls.get(cls)
+            for widget in self.class_opacity_controls.values():
                 if widget is None:
                     continue
-                if cls not in linked_opacity_classes and (
-                    not allow_opacity_fallback
-                    or _normalise_opacity_percent(getattr(widget, "value", old), old) != old
-                ):
+                if _normalise_opacity_percent(getattr(widget, "value", old), old) != old:
                     continue
                 widget.value = new
-                linked_opacity_classes.add(cls)
-            self._linked_opacity_classes = linked_opacity_classes
             self._push_to_widget()
         finally:
             self._syncing = False
@@ -1653,19 +1672,16 @@ class MaskPainterDisplay(PluginBase):
         """
         if self._syncing:
             return
+        ordered_classes = self._get_customized_first_class_order()
         if change["new"]:
             non_default, _ = split_default_classes(
-                self.current_classes,
+                ordered_classes,
                 {cls: getattr(widget, "value", self.default_color) for cls, widget in self.class_color_controls.items()},
                 self.default_color,
             )
             self._active_classes = [cls for cls in non_default if cls in self.class_color_controls]
         else:
-            # Show all classes
-            self._active_classes = [
-                cls for cls in self.current_classes
-                if cls in self.class_color_controls
-            ]
+            self._active_classes = ordered_classes
         self._push_to_widget()
 
     def _log(self, message: str, error: bool = False, clear: bool = False) -> None:
@@ -1796,12 +1812,14 @@ class UiComponent:
             description="Default:", value=DEFAULT_COLOR, layout=Layout(width="auto"),
         )
         self.global_fill_opacity_input = BoundedIntText(
-            description="Fill opacity (%):",
+            description="Opacity (%):",
             value=FILL_OPACITY_DEFAULT_PERCENT,
             min=0,
             max=100,
             step=1,
         )
+        self.global_fill_opacity_input.layout.width = "150px"
+        self.global_fill_opacity_input.layout.min_width = "150px"
         self.global_fill_checkbox = Checkbox(
             value=False,
             description="Global fill",
@@ -1841,7 +1859,15 @@ class UiComponent:
 
         self.colors_layout = VBox([
             HBox([self.default_color_picker, self.only_specified_checkbox]),
-            HBox([self.global_fill_checkbox, self.global_fill_opacity_input, self.show_fill_borders_checkbox]),
+            HBox(
+                [
+                    self.global_fill_checkbox,
+                    HTML("<div style='width:12px'></div>"),
+                    self.global_fill_opacity_input,
+                    self.show_fill_borders_checkbox,
+                ],
+                layout=Layout(align_items="center"),
+            ),
             HBox([self.border_color_mode_dropdown]),
             HTML("<hr style='margin:4px 0'>"),
             self.class_list_widget,

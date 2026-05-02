@@ -96,12 +96,14 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 - **Masks**: Load segmentation rasters, edit per-class colours, and save or recall `.maskcolors.json` sets—default colours are tracked automatically, and optional `ipyfilechooser` dialogs speed up import/export.
 
 ### Tools & Plugins
-- **Mask Painter**: Focus on edited classes, reuse colour sets, switch globally linked classes between outline/fill, and restore saved per-class opacity, border, and filtered-list state without leaving the plugin.
+- **Mask Painter**: Focus on edited classes, reuse colour sets, let inactive classes follow the global default fill mode, and restore saved per-class opacity, border, and filtered-list state without leaving the plugin.
 - **ROI Manager**: Capture, centre, and tag regions of interest with persistent storage in `<base_folder>/.UELer/roi_manager.csv`; combo-box tagging keeps new labels available for future sessions.
 - **Wide Plugins**: Enable "Horizontal layout" (for example, in the heatmap plugin) to undock the tool into the footer while keeping the accordion available for other controls.
 
 ## New Update  
 ### **UELer v0.3.1 Summary**
+- Fixed Global fill toggle-off for inactive classes (#91 reply 7): toggling `Global fill` off now reverts inactive classes to separate per-cell outlines instead of leaving fills in place and merging adjacent same-class outlines into a shared blob.
+- Fixed Mask Painter reply-6 follow-up behavior (#91): global fill opacity once again updates classes whose current opacity still matches the previous global value, inactive classes now follow the `Global fill` default mode without altering active class modes, `Only specified` restores the full list with customized classes first, and the global fill row now has clearer spacing plus a narrower opacity input.
 - Fixed Mask Painter reply-5 state handling (#91): globally linked fill opacity and the new global fill toggle now update only classes still inheriting the global/default behavior, `Only specified` keeps customized classes surfaced first, and saved mask-color sets now round-trip the full painter display state with backward-compatible defaults for older palettes.
 - Added `No image (masks only)` mode (#91 reply 4): a new left-panel checkbox skips image-layer rendering entirely while keeping masks and annotations visible on a black background. The same state now propagates through single-FOV rendering, map mode, export, ROI thumbnails, and the cell gallery.
 - Fixed Mask Painter filled-border dimming (#91 follow-up): thickened filled-mask borders are now clipped to the owning cell and painted after all fill blending, so enabling borders no longer alters neighboring fill colors or makes adjacent filled cells look dimmer.

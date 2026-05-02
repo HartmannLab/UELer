@@ -1348,6 +1348,7 @@ class ROIManagerPlugin(PluginBase):
                 class_fill=class_fill,
                 class_opacity=class_opacity,
                 default_color=str(data.get("default_color") or "#FFFFFF"),
+                global_fill=bool(data.get("global_fill", False)),
                 global_fill_opacity=int(data.get("global_fill_opacity", 35) or 35),
                 show_borders_on_filled=bool(data.get("show_borders_on_filled", False)),
                 border_color_mode=str(data.get("border_color_mode") or "mask_type_color"),

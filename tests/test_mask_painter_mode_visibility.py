@@ -203,7 +203,7 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
         self.assertEqual(painter.class_opacity_controls["TypeB"].value, 80)
 
     def test_global_fill_toggle_updates_only_linked_classes(self):
-        """Only classes explicitly linked to the global fill mode should move with it."""
+        """Global fill should no longer mutate active class mode controls directly."""
         from ipywidgets import Checkbox, Layout
 
         painter = self._make_painter()
@@ -216,8 +216,42 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
 
         painter._on_global_fill_toggle({"old": False, "new": True})
 
-        self.assertEqual(painter.class_mode_controls["TypeA"].value, True)
+        self.assertEqual(painter.class_mode_controls["TypeA"].value, False)
         self.assertEqual(painter.class_mode_controls["TypeB"].value, False)
+
+    def test_global_fill_toggle_applies_to_inactive_classes(self):
+        """Inactive classes should resolve to the global fill mode and opacity."""
+        import ipywidgets as W
+
+        painter = self._make_painter()
+        painter.current_classes = ["TypeA", "TypeB"]
+        painter._active_classes = ["TypeA"]
+        painter.class_opacity_controls = {
+            "TypeA": W.BoundedIntText(value=50, min=0, max=100),
+            "TypeB": W.BoundedIntText(value=35, min=0, max=100),
+        }
+        painter.ui_component.global_fill_checkbox.value = True
+        painter.ui_component.global_fill_opacity_input.value = 65
+        painter._push_to_widget()
+
+        mode_map = painter.get_effective_mode_map_for_fov("FOV_001")
+        opacity_map = painter.get_effective_opacity_map_for_fov("FOV_001")
+
+        self.assertEqual(mode_map[1], "outline")
+        self.assertEqual(mode_map[2], "fill")
+        self.assertAlmostEqual(opacity_map[2], 0.65, places=4)
+
+    def test_global_fill_toggle_off_preserves_active_outline_mode(self):
+        """Turning global fill off should not change active class modes."""
+        painter = self._make_painter()
+        painter.class_mode_controls["TypeA"].value = True
+        painter._active_classes = ["TypeA"]
+        painter.ui_component.global_fill_checkbox.value = True
+        painter._push_to_widget()
+
+        painter._on_global_fill_toggle({"old": True, "new": False})
+
+        self.assertEqual(painter.class_mode_controls["TypeA"].value, True)
 
     def test_capture_snapshot_records_modes_opacity_and_border_state(self):
         """Painter snapshots should preserve the per-class rendering state needed by downstream consumers."""
@@ -884,6 +918,50 @@ class TestMaskPainterOnlySpecified(unittest.TestCase):
         self.assertEqual(list(w.class_order), ["TypeC", "TypeA"])
         self.assertEqual(list(w.available_classes), ["TypeB"])
 
+    def test_only_specified_off_restores_customized_classes_first(self):
+        """Disabling Only specified should restore the full list with customized classes first."""
+        import ipywidgets as W
+        from ipywidgets import Checkbox, Layout
+        from ueler.viewer.plugin.mask_painter import MaskPainterDisplay
+
+        painter = MaskPainterDisplay(self.viewer, width=400, height=300)
+        painter.current_classes = ["TypeB", "TypeC", "TypeA"]
+        painter.current_identifier = "cell_type"
+        painter.class_color_controls = {
+            "TypeA": W.ColorPicker(description="TypeA", value="#FF0000"),
+            "TypeB": W.ColorPicker(description="TypeB", value=painter.default_color),
+            "TypeC": W.ColorPicker(description="TypeC", value="#00FF00"),
+        }
+        painter.class_visible_controls = {
+            "TypeA": Checkbox(value=True, indent=False, layout=Layout(width="30px")),
+            "TypeB": Checkbox(value=True, indent=False, layout=Layout(width="30px")),
+            "TypeC": Checkbox(value=True, indent=False, layout=Layout(width="30px")),
+        }
+        painter.class_mode_controls = {
+            "TypeA": Checkbox(value=False, description="fill", indent=False, layout=Layout(width="60px")),
+            "TypeB": Checkbox(value=False, description="fill", indent=False, layout=Layout(width="60px")),
+            "TypeC": Checkbox(value=False, description="fill", indent=False, layout=Layout(width="60px")),
+        }
+        painter._active_classes = ["TypeB", "TypeC", "TypeA"]
+        painter._push_to_widget()
+
+        painter._on_only_specified_toggle({"new": True})
+        painter._on_only_specified_toggle({"new": False})
+
+        w = painter.ui_component.class_list_widget
+        self.assertEqual(list(w.class_order), ["TypeC", "TypeA", "TypeB"])
+        self.assertEqual(list(w.available_classes), [])
+
+    def test_global_fill_layout_uses_spacing_and_narrow_opacity_input(self):
+        """Global fill controls should have a spacer and a compact opacity input width."""
+        from ueler.viewer.plugin.mask_painter import MaskPainterDisplay
+
+        painter = MaskPainterDisplay(self.viewer, width=400, height=300)
+        global_fill_row = painter.ui_component.colors_layout.children[1]
+
+        self.assertEqual(painter.ui_component.global_fill_opacity_input.layout.width, "95px")
+        self.assertEqual(len(global_fill_row.children), 4)
+
     def test_only_specified_off_restores_all_classes(self):
         """Disabling 'Only specified' restores all current_classes to active."""
         painter = self._make_painter_with_custom_colors()
@@ -942,6 +1020,101 @@ class TestMaskPainterOnlySpecified(unittest.TestCase):
         # TypeB (default color, filtered out) should still use the default color
         color_b = get_cell_color("FOV_001", 2)
         self.assertEqual(color_b, painter.default_color)
+
+
+class TestGlobalFillToggleOff(unittest.TestCase):
+    """Regression tests for Reply 7 to Issue #91: Global fill toggle OFF."""
+
+    def setUp(self):
+        clear_cell_colors()
+        self.viewer = _make_viewer()
+
+    def tearDown(self):
+        clear_cell_colors()
+
+    def _make_painter_with_inactive(self):
+        """Painter with TypeA active, TypeB inactive (not in _active_classes)."""
+        from ueler.viewer.plugin.mask_painter import MaskPainterDisplay
+        import ipywidgets as W
+        from ipywidgets import Checkbox, Layout
+
+        painter = MaskPainterDisplay(self.viewer, width=400, height=300)
+        painter.ui_component.identifier_dropdown.value = "cell_type"
+        painter.current_identifier = "cell_type"
+        painter.current_classes = ["TypeA", "TypeB"]
+        painter.class_color_controls = {
+            "TypeA": W.ColorPicker(description="TypeA", value="#FF0000"),
+            "TypeB": W.ColorPicker(description="TypeB", value="#0000FF"),
+        }
+        painter.class_visible_controls = {
+            "TypeA": Checkbox(value=True, indent=False, layout=Layout(width="30px")),
+            "TypeB": Checkbox(value=True, indent=False, layout=Layout(width="30px")),
+        }
+        painter.class_mode_controls = {
+            "TypeA": Checkbox(value=False, description="fill", indent=False, layout=Layout(width="60px")),
+            "TypeB": Checkbox(value=False, description="fill", indent=False, layout=Layout(width="60px")),
+        }
+        # Only TypeA is active; TypeB is inactive (uses default color and global fill state)
+        painter._active_classes = ["TypeA"]
+        painter._push_to_widget()
+        return painter
+
+    def test_toggle_global_fill_off_sets_outline_mode_for_inactive_cells(self):
+        """After toggling global fill OFF, inactive cells must resolve to outline mode."""
+        painter = self._make_painter_with_inactive()
+        painter.ui_component.global_fill_opacity_input.value = 65
+
+        # Turn global fill ON then OFF
+        painter.ui_component.global_fill_checkbox.value = True
+        painter._push_to_widget()
+        mode_map_on = painter.get_effective_mode_map_for_fov("FOV_001")
+        # Pre-condition: TypeB cell (label 2) is fill when ON
+        self.assertEqual(mode_map_on[2], "fill")
+
+        painter.ui_component.global_fill_checkbox.value = False
+        painter._push_to_widget()
+        mode_map_off = painter.get_effective_mode_map_for_fov("FOV_001")
+
+        # TypeB cell (label 2) must revert to outline when global fill is OFF
+        self.assertEqual(mode_map_off[2], "outline")
+        # TypeA cell (label 1) is an active class with its own mode control (outline)
+        self.assertEqual(mode_map_off[1], "outline")
+
+    def test_toggle_global_fill_off_does_not_call_set_mask_colors_for_inactive_classes(self):
+        """Toggling global fill OFF must not call set_mask_colors_current_fov for inactive classes.
+
+        The intermediate direct-canvas path produced merged outlines for adjacent same-class
+        cells; the fix removes that call so inactive classes are only rendered via the correct
+        full update_display -> _compose_fov_image -> apply_registry_colors path.
+        """
+        call_log = []
+        self.viewer.image_display.set_mask_colors_current_fov = lambda **kwargs: call_log.append(kwargs)
+
+        painter = self._make_painter_with_inactive()
+        painter.ui_component.global_fill_opacity_input.value = 65
+        # Prevent update_display from running (no main_viewer.update_display in stub)
+        self.viewer.update_display = lambda _: None
+
+        # Turn global fill ON
+        painter.ui_component.global_fill_checkbox.value = True
+        painter._push_to_widget()
+        call_log.clear()
+
+        # Turn global fill OFF — the inactive class (TypeB, label 2) must not trigger
+        # a direct canvas update via set_mask_colors_current_fov
+        painter.ui_component.global_fill_checkbox.value = False
+        painter._push_to_widget()
+        painter._on_global_fill_toggle({"old": True, "new": False})
+
+        # Extract mask_ids passed to set_mask_colors_current_fov
+        called_mask_ids = set()
+        for call in call_log:
+            mask_ids = call.get("mask_ids", [])
+            called_mask_ids.update(mask_ids)
+
+        # Label 2 belongs to inactive TypeB — must not have been directly recolored
+        self.assertNotIn(2, called_mask_ids,
+                         "set_mask_colors_current_fov should not be called for inactive class cells")
 
 
 if __name__ == "__main__":

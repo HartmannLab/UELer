@@ -120,6 +120,7 @@ class MaskPainterSnapshot:
     class_fill: Mapping[str, bool]
     class_opacity: Mapping[str, int]
     default_color: str
+    global_fill: bool = False
     global_fill_opacity: int = 35
     show_borders_on_filled: bool = False
     border_color_mode: str = "mask_type_color"

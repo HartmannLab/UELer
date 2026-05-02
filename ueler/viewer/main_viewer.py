@@ -4203,6 +4203,7 @@ class ImageMaskViewer:
             class_fill=snapshot.class_fill,
             class_opacity=snapshot.class_opacity,
             default_color=snapshot.default_color,
+            global_fill=getattr(snapshot, "global_fill", False),
             global_fill_opacity=snapshot.global_fill_opacity,
             border_color_mode=getattr(snapshot, "border_color_mode", "mask_type_color"),
             mask_type_color=getattr(snapshot, "mask_type_color", snapshot.default_color),

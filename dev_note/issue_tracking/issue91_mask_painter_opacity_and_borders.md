@@ -183,3 +183,43 @@ The Mask Painter still had a few state-model gaps after reply 4:
 
 ### Follow-up validation
 - `python -m unittest tests.test_mask_painter_mode_visibility tests.test_mask_color_sets`
+
+## Follow-up: reply 6 implementation
+
+### Implemented behavior
+- Global fill opacity now uses live value-based linkage again: any class whose current opacity still matches the previous global opacity value is updated when the global value changes.
+- `Global fill` now governs the effective mode of inactive classes only. Inactive classes still use the default color, but when `Global fill` is enabled they resolve as filled with the global opacity; when it is disabled they resolve as outlines.
+- Active class mode controls are no longer batch-mutated by the `Global fill` toggle, which preserves the original outline/fill choice for customized active classes.
+- `Only specified` now restores the full list in a customized-first order after a toggle cycle instead of reverting to the original unsorted order.
+- The Global fill control row now has explicit spacing and a narrower opacity input.
+
+### Implementation notes
+1. Updated `build_painter_state_maps_for_fov(...)` and `apply_colors_to_masks(...)` together so single-FOV effective rendering, map-mode replay, and globally registered painter state all resolve inactive/default-state classes the same way.
+2. Added `global_fill` to `MaskPainterSnapshot` so ROI preset capture/apply and other snapshot-based consumers retain the inactive-class default-mode semantics.
+3. Left reply-5 palette fields backward-compatible while changing runtime behavior to rely on live widget/default-state values instead of the saved linked-opacity metadata.
+
+### Validation
+- `python -m unittest tests.test_mask_painter_mode_visibility tests.test_mask_color_sets`
+- `python -m unittest tests.test_roi_manager_tags.ROIManagerTagsTests.test_capture_and_apply_roi_preserves_mask_painter_payload`
+
+## Follow-up: reply 7 — Global fill toggle-off for inactive classes
+
+### Problem
+Toggling `Global fill` OFF caused inactive classes to display as a "fused blob of fill with shared outline" instead of reverting to separate per-cell outlines. Two bugs: (1) the fill was not removed, and (2) the outlines of adjacent same-class inactive cells merged.
+
+### Root cause
+Inside `apply_colors_to_masks`, inactive classes were handled by calling `_apply_color_to_current_fov` (which calls `ImageDisplay.set_mask_colors_current_fov`). That function:
+1. Added outlines on top of the existing canvas via `cummulative=True` without clearing prior fills.
+2. Passed a combined multi-label integer array to `generate_edges` → `find_boundaries(mode="inner")`, which only detects the outer boundary of the combined foreground, not per-cell boundaries, merging adjacent same-class cells into one outline.
+
+While the subsequent `update_display → _compose_fov_image → apply_registry_colors` call at the end of `apply_colors_to_masks` would have produced the correct per-cell rendering, the intermediate wrong state could persist in Jupyter widget environments where the first `draw_idle()` fired before the second.
+
+### Fix
+Removed the `_apply_color_to_current_fov(cls_value, self.default_color)` call from the inactive-class loop in `apply_colors_to_masks`. Inactive classes are now rendered exclusively via `update_display → _compose_fov_image → apply_registry_colors`, which resolves fresh per-cell outline/fill state from `get_effective_mode_map_for_fov()` on every redraw.
+
+### Implementation notes
+1. Change is in `apply_colors_to_masks` in `ueler/viewer/plugin/mask_painter.py` (~lines 1269–1273): removed two lines from the inactive-class loop.
+2. Active classes are unaffected; their `_apply_color_to_current_fov` calls remain.
+
+### Validation
+- `python -m unittest tests.test_mask_painter_mode_visibility tests.test_mask_color_sets`

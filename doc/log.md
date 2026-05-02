@@ -1,5 +1,17 @@
 ### v0.3.1
 
+**Issue #91 reply 7 — Fix Global fill toggle-off for inactive classes**
+- Removed the intermediate direct-canvas update (`_apply_color_to_current_fov`) for inactive classes inside `apply_colors_to_masks`. The call used `find_boundaries(mode="inner")` on a combined multi-label integer array, which produced merged outer outlines for adjacent same-class cells and did not clear fills from the previous global-fill-ON state. Inactive classes are now rendered exclusively via the correct `update_display → _compose_fov_image → apply_registry_colors` path, which resolves fresh per-cell outlines from the current `global_fill` state.
+- Added two regression tests in `TestGlobalFillToggleOff`: one verifies `get_effective_mode_map_for_fov()` returns `"outline"` for inactive cells after toggling OFF, and one verifies `set_mask_colors_current_fov` is not called for inactive class cells during the toggle.
+- Validated: `python -m unittest tests.test_mask_painter_mode_visibility tests.test_mask_color_sets`.
+
+**Issue #91 reply 6 — Mask Painter inactive defaults, restored opacity linkage, and ordering/layout fixes**
+- Reworked the Mask Painter default-state model so inactive classes now derive their effective fill-vs-outline mode from `Global fill` instead of always falling back to outline mode, while active class mode controls remain untouched.
+- Restored value-based global opacity linkage by updating classes whose current opacity still matches the previous global opacity value, rather than relying on persisted linked-opacity bookkeeping as the runtime source of truth.
+- Fixed `Only specified` restore ordering so toggling the filter off brings back the full list with customized classes first and default-colored classes afterward.
+- Added spacing between `Global fill` and the opacity input, narrowed the opacity control, and carried the new `global_fill` painter state through snapshot replay so ROI preset capture/apply keeps the same inactive-class semantics.
+- Validated: `python -m unittest tests.test_mask_painter_mode_visibility tests.test_mask_color_sets` and `python -m unittest tests.test_roi_manager_tags.ROIManagerTagsTests.test_capture_and_apply_roi_preserves_mask_painter_payload`.
+
 **Issue #91 reply 5 — Mask Painter linked global state and palette persistence**
 - Added a `Global fill` toggle beside the existing global fill opacity control, and both global controls now update only classes that are still explicitly linked to the inherited/default painter behavior.
 - Saved mask-color sets now persist the active class list, `Only specified` state, global fill toggle, linked fill/opacity classes, and the existing per-class mode/opacity/visibility and border settings.
