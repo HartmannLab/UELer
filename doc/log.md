@@ -1,7 +1,7 @@
 ### v0.3.1
 
 **Issue #92 reply — Batch export follow-up: mask outline color fix, output folder in config, and UI refinements**
-- Fixed `_snapshot_from_palette_payload` so the `mask_type_color` field in the export painter snapshot is taken from the live viewer's left-panel mask overlay color instead of the palette's fallback fill color; this ensures "Show borders on filled masks" with `border_color_mode="mask_type_color"` uses the correct overlay color rather than the default class color.
+- Fixed batch export border color for palette overrides: `_capture_overlay_snapshot` now reads the left-panel mask overlay color via `_resolve_mask_type_color` as a fallback when the Mask Painter plugin is disabled or returns no snapshot (previously the export silently fell back to the palette's `default_color`). When the painter is active its snapshot's `mask_type_color` is preferred; otherwise the left-panel color control is read directly, so `Show borders on filled masks` with `border_color_mode="mask_type_color"` always reflects the correct overlay color.
 - Added `output_path` to the batch export config template: the `Output folder` field is now captured on save and restored on load alongside all other export settings.
 - Replaced the `mode_selector` `ToggleButtons` widget with the existing `mode_tabs` `Tab` widget as the sole mode selector; the active tab now determines the export mode directly, removing the redundant toggle-buttons bar.
 - Added horizontal separator lines below the DPI field and the Scale bar % width slider for clearer visual grouping.

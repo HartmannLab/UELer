@@ -1035,6 +1035,36 @@ class ExportFOVsBatchTests(unittest.TestCase):
             )
         self.assertEqual(snapshot.mask_painter.mask_type_color, "#abcdef")
 
+    def test_palette_override_reads_left_panel_color_when_painter_snapshot_is_none(self):
+        """When mask_painter is None (plugin disabled), mask_type_color comes from left-panel controls."""
+        viewer_stub = _BatchExportViewerStub(self.base_path, mask_outline_thickness=1)
+        # Return a snapshot with mask_painter=None (painter disabled)
+        viewer_stub.capture_overlay_snapshot = lambda **kwargs: OverlaySnapshot(
+            include_annotations=False,
+            include_masks=True,
+            annotation=None,
+            masks=(),
+            mask_painter=None,
+        )
+        _viewer, plugin = self._make_export_plugin(viewer_stub)
+        payload = self._make_palette_payload("My Palette")
+        plugin._palette_registry = {
+            "My Palette": {"path": "/fake/path.json", "saved_at": "2026-01-01T00:00:00Z"}
+        }
+        with mock.patch(
+            "ueler.viewer.palette_store.read_palette_file",
+            return_value=payload,
+        ), mock.patch(
+            "ueler.viewer.plugin.mask_painter._resolve_mask_type_color",
+            return_value="#cc1122",
+        ):
+            snapshot = plugin._capture_overlay_snapshot(
+                include_masks=True,
+                include_annotations=False,
+                palette_name="My Palette",
+            )
+        self.assertEqual(snapshot.mask_painter.mask_type_color, "#cc1122")
+
 
 class TestSimpleViewerModeExport(unittest.TestCase):
     """BatchExportPlugin behaviour when cell_table is None (simple viewer mode)."""

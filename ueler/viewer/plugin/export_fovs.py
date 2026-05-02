@@ -486,7 +486,7 @@ class BatchExportPlugin(PluginBase):
         )
 
     def _build_layout(self) -> None:
-        header = HTML("<strong>Batch export</strong>")
+        header = HTML("<strong>Mode</strong>")
 
         output_row = HBox(
             [self.ui_component.output_path, self.ui_component.browse_button],
@@ -509,10 +509,14 @@ class BatchExportPlugin(PluginBase):
             "<hr style='border:none; border-top:1px solid #ddd; margin:4px 0;'>",
             layout=Layout(width="100%"),
         )
+        _sep3 = HTML(
+            "<hr style='border:none; border-top:1px solid #ddd; margin:4px 0;'>",
+            layout=Layout(width="100%"),
+        )
 
         controls = VBox(
             [
-                header,
+                self.ui_component.mode_tabs,
                 self.ui_component.marker_set_dropdown,
                 output_row,
                 self.ui_component.file_format_dropdown,
@@ -535,7 +539,7 @@ class BatchExportPlugin(PluginBase):
                 self.ui_component.mask_outline_thickness,
                 self.ui_component.overlay_hint,
                 self.ui_component.mask_palette_box,
-                self.ui_component.mode_tabs,
+                _sep3,
                 self.ui_component.config_accordion,
                 HBox(
                     [self.ui_component.start_button, self.ui_component.cancel_button],
@@ -1374,12 +1378,23 @@ class BatchExportPlugin(PluginBase):
             record = self._palette_registry[palette_name]
             try:
                 from ueler.viewer.palette_store import read_palette_file
+                from ueler.viewer.plugin.mask_painter import _resolve_mask_type_color
                 payload = read_palette_file(Path(record["path"]))
+                # Prefer the live painter snapshot's mask_type_color (Mask Painter active).
+                # When mask_painter is None (plugin disabled or no identifier selected),
+                # read directly from the left-panel mask color controls so border colors
+                # are never overwritten by the palette's default_color fallback.
                 live_mask_type_color = (
                     snapshot.mask_painter.mask_type_color
                     if getattr(snapshot, "mask_painter", None) is not None
+                    and snapshot.mask_painter.mask_type_color
                     else None
                 )
+                if not live_mask_type_color:
+                    live_mask_type_color = _resolve_mask_type_color(
+                        self.main_viewer,
+                        getattr(self.main_viewer, "mask_key", None),
+                    ) or None
                 overridden_painter = self._snapshot_from_palette_payload(
                     payload, self._mask_outline_thickness, live_mask_type_color
                 )
