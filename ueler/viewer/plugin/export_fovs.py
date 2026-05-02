@@ -16,6 +16,7 @@ import numpy as np
 from IPython import get_ipython
 from IPython.display import display
 from ipywidgets import (
+    Accordion,
     Button,
     Checkbox,
     Dropdown,
@@ -30,7 +31,6 @@ from ipywidgets import (
     SelectMultiple,
     Tab,
     Text,
-    ToggleButtons,
     VBox,
 )
 from matplotlib import pyplot as plt
@@ -58,6 +58,10 @@ from .plugin_base import PluginBase
 from ..layout_utils import column_block_layout, content_widget_layout, flex_fill_layout
 
 PLACEHOLDER_MESSAGE = "Batch export UI is now available."
+
+EXPORT_CONFIG_FILE_SUFFIX = ".export_config.json"
+EXPORT_CONFIG_REGISTRY_FILENAME = "export_configs_index.json"
+EXPORT_CONFIG_VERSION = "1.0.0"
 
 
 @dataclass(frozen=True)
@@ -113,6 +117,14 @@ class BatchExportPlugin(PluginBase):
         ] = {}
         self._viewer_pixel_size_nm = float(getattr(self.main_viewer, "get_pixel_size_nm", lambda: 390.0)())
 
+        self._palette_registry_folder: Optional[Path] = None
+        self._palette_registry: Dict[str, Dict[str, str]] = {}
+        self._export_config_folder: Optional[Path] = None
+        self._export_config_registry: Dict[str, Dict[str, str]] = {}
+
+        self._resolve_palette_registry_folder()
+        self._resolve_export_config_folder()
+
         self._build_widgets()
         self._build_layout()
         self._connect_events()
@@ -134,15 +146,6 @@ class BatchExportPlugin(PluginBase):
         full_width = content_widget_layout
         flex_fill = flex_fill_layout
         style_auto = {"description_width": "auto"}
-
-        self.ui_component.mode_selector = ToggleButtons(
-            options=[(label, key) for key, label in self._MODE_LABELS.items()],
-            value=self.MODE_FULL_FOV,
-            description="Mode:",
-            layout=full_width(),
-            style=style_auto,
-            button_style="",
-        )
 
         self.ui_component.marker_set_dropdown = Dropdown(
             options=[],
@@ -226,6 +229,88 @@ class BatchExportPlugin(PluginBase):
             continuous_update=False,
         )
         self.ui_component.overlay_hint = HTML(value="", layout=full_width())
+
+        # Feature 2: masks-only checkbox
+        self.ui_component.masks_only = Checkbox(
+            value=False,
+            description="Masks only (black background)",
+            indent=False,
+            layout=Layout(width="auto"),
+        )
+
+        # Feature 1: palette override controls
+        self.ui_component.mask_palette_enabled = Checkbox(
+            value=False,
+            description="Override mask palette",
+            indent=False,
+            layout=Layout(width="auto"),
+        )
+        self.ui_component.mask_palette_dropdown = Dropdown(
+            options=[("Current settings", None)],
+            value=None,
+            description="Palette:",
+            layout=full_width(),
+            style=style_auto,
+            disabled=True,
+        )
+        self.ui_component.mask_palette_box = VBox(
+            [self.ui_component.mask_palette_enabled, self.ui_component.mask_palette_dropdown],
+            layout=column_block_layout(gap="4px"),
+        )
+
+        # Feature 3: export config template accordion
+        self.ui_component.config_name_input = Text(
+            value="",
+            description="Name:",
+            placeholder="my export config",
+            layout=full_width(),
+            style=style_auto,
+        )
+        self.ui_component.config_save_button = Button(
+            description="Save config",
+            icon="save",
+            layout=Layout(width="130px"),
+        )
+        self.ui_component.config_saved_dropdown = Dropdown(
+            options=[("No saved configs", None)],
+            value=None,
+            description="Saved:",
+            layout=full_width(),
+            style=style_auto,
+        )
+        self.ui_component.config_load_button = Button(
+            description="Load config",
+            icon="folder-open",
+            layout=Layout(width="130px"),
+        )
+        self.ui_component.config_delete_button = Button(
+            description="Delete",
+            button_style="danger",
+            layout=Layout(width="90px"),
+        )
+        self.ui_component.config_status = HTML(value="", layout=full_width())
+
+        _config_save_row = HBox(
+            [self.ui_component.config_name_input, self.ui_component.config_save_button],
+            layout=Layout(gap="8px", align_items="center", flex_flow="row nowrap", width="100%"),
+        )
+        _config_load_row = HBox(
+            [
+                self.ui_component.config_saved_dropdown,
+                self.ui_component.config_load_button,
+                self.ui_component.config_delete_button,
+            ],
+            layout=Layout(gap="8px", align_items="center", flex_flow="row wrap", width="100%"),
+        )
+        _config_inner = VBox(
+            [_config_save_row, _config_load_row, self.ui_component.config_status],
+            layout=column_block_layout(gap="6px"),
+        )
+        self.ui_component.config_accordion = Accordion(
+            children=[_config_inner],
+            selected_index=None,
+        )
+        self.ui_component.config_accordion.set_title(0, "Export config templates")
 
         self.ui_component.start_button = Button(
             description="Start",
@@ -416,10 +501,18 @@ class BatchExportPlugin(PluginBase):
             ),
         )
 
+        _sep = HTML(
+            "<hr style='border:none; border-top:1px solid #ddd; margin:4px 0;'>",
+            layout=Layout(width="100%"),
+        )
+        _sep2 = HTML(
+            "<hr style='border:none; border-top:1px solid #ddd; margin:4px 0;'>",
+            layout=Layout(width="100%"),
+        )
+
         controls = VBox(
             [
                 header,
-                self.ui_component.mode_selector,
                 self.ui_component.marker_set_dropdown,
                 output_row,
                 self.ui_component.file_format_dropdown,
@@ -427,15 +520,23 @@ class BatchExportPlugin(PluginBase):
                     [self.ui_component.downsample_input, self.ui_component.dpi_input],
                     layout=Layout(gap="12px", flex_flow="row wrap"),
                 ),
+                _sep,
                 self.ui_component.include_scale_bar,
                 self.ui_component.scale_bar_ratio,
+                _sep2,
                 HBox(
-                    [self.ui_component.include_annotations, self.ui_component.include_masks],
+                    [
+                        self.ui_component.include_annotations,
+                        self.ui_component.include_masks,
+                        self.ui_component.masks_only,
+                    ],
                     layout=Layout(gap="16px", align_items="center", flex_flow="row wrap"),
                 ),
                 self.ui_component.mask_outline_thickness,
                 self.ui_component.overlay_hint,
+                self.ui_component.mask_palette_box,
                 self.ui_component.mode_tabs,
+                self.ui_component.config_accordion,
                 HBox(
                     [self.ui_component.start_button, self.ui_component.cancel_button],
                     layout=Layout(gap="10px", flex_flow="row wrap"),
@@ -452,7 +553,6 @@ class BatchExportPlugin(PluginBase):
         self.ui = controls
 
     def _connect_events(self) -> None:
-        self.ui_component.mode_selector.observe(self._on_mode_change, names="value")
         self.ui_component.full_fov_use_all.observe(
             lambda change: self._toggle_fov_selector(change.get("new", False)), names="value"
         )
@@ -470,6 +570,19 @@ class BatchExportPlugin(PluginBase):
             self._on_mask_outline_thickness_change,
             names="value",
         )
+        self.ui_component.mask_palette_enabled.observe(
+            lambda change: setattr(
+                self.ui_component.mask_palette_dropdown, "disabled", not change["new"]
+            ),
+            names="value",
+        )
+        self.ui_component.masks_only.observe(
+            lambda _: self._invalidate_overlay_cache(),
+            names="value",
+        )
+        self.ui_component.config_save_button.on_click(self._save_export_config)
+        self.ui_component.config_load_button.on_click(self._load_export_config)
+        self.ui_component.config_delete_button.on_click(self._delete_export_config)
 
     # ------------------------------------------------------------------
     # UI refresh helpers
@@ -572,6 +685,8 @@ class BatchExportPlugin(PluginBase):
         self.ui_component.roi_selection.value = selected
 
     def refresh_overlay_capabilities(self) -> None:
+        self._refresh_palette_dropdown()
+
         include_masks = self.ui_component.include_masks
         include_annotations = self.ui_component.include_annotations
         thickness_widget = self.ui_component.mask_outline_thickness
@@ -621,10 +736,15 @@ class BatchExportPlugin(PluginBase):
         masks_were_disabled: bool,
     ) -> list[str]:
         hints: list[str] = []
+        masks_only_widget = getattr(self.ui_component, "masks_only", None)
+
         if not masks_available:
             include_masks.value = False
             include_masks.disabled = True
             thickness_widget.disabled = True
+            if masks_only_widget is not None:
+                masks_only_widget.disabled = True
+                masks_only_widget.value = False
             hints.append("Masks unavailable for this dataset.")
             return hints
 
@@ -632,6 +752,9 @@ class BatchExportPlugin(PluginBase):
             include_masks.value = False
             include_masks.disabled = True
             thickness_widget.disabled = True
+            if masks_only_widget is not None:
+                masks_only_widget.disabled = True
+                masks_only_widget.value = False
             hints.append("Enable at least one mask overlay in the viewer to export masks.")
             return hints
 
@@ -644,6 +767,10 @@ class BatchExportPlugin(PluginBase):
             self._sync_mask_outline_with_viewer(viewer_thickness, thickness_widget)
 
         thickness_widget.disabled = not include_masks.value
+        if masks_only_widget is not None:
+            masks_only_widget.disabled = not include_masks.value
+            if masks_only_widget.disabled:
+                masks_only_widget.value = False
         return hints
 
     def _refresh_annotation_controls(
@@ -675,6 +802,265 @@ class BatchExportPlugin(PluginBase):
             self.ui_component.overlay_hint.value = f"<span style='color:#666;'>{message}</span>"
         else:
             self.ui_component.overlay_hint.value = ""
+
+    # ------------------------------------------------------------------
+    # Palette registry helpers (Feature 1)
+    # ------------------------------------------------------------------
+    def _resolve_palette_registry_folder(self) -> None:
+        sideplots = getattr(self.main_viewer, "SidePlots", None)
+        painter = getattr(sideplots, "mask_painter_output", None) if sideplots else None
+        folder = getattr(painter, "registry_folder", None) if painter is not None else None
+        if isinstance(folder, Path):
+            self._palette_registry_folder = folder
+            return
+        base = getattr(self.main_viewer, "base_folder", None)
+        if base:
+            self._palette_registry_folder = Path(base).expanduser() / ".UELer"
+
+    def _load_palette_registry(self) -> Dict[str, Dict[str, str]]:
+        folder = self._palette_registry_folder
+        if folder is None or not folder.is_dir():
+            return {}
+        try:
+            from ueler.viewer.palette_store import load_registry as _load_reg
+            from ueler.viewer.plugin.mask_painter import REGISTRY_FILENAME
+            return _load_reg(folder, REGISTRY_FILENAME)
+        except Exception:
+            return {}
+
+    def _refresh_palette_dropdown(self) -> None:
+        self._palette_registry = self._load_palette_registry()
+        names = sorted(self._palette_registry.keys())
+        options = [("Current settings", None)] + [(name, name) for name in names]
+        dropdown = getattr(self.ui_component, "mask_palette_dropdown", None)
+        if dropdown is None:
+            return
+        current = dropdown.value
+        dropdown.options = options
+        valid = [v for _, v in options]
+        if current not in valid:
+            dropdown.value = None
+
+    def _snapshot_from_palette_payload(
+        self,
+        payload: Dict[str, Any],
+        outline_thickness: int,
+        mask_type_color: Optional[str] = None,
+    ) -> MaskPainterSnapshot:
+        from ueler.viewer.plugin.mask_painter import FILL_OPACITY_DEFAULT_PERCENT, _normalise_opacity_percent
+        class_order = [str(c) for c in payload.get("class_order", [])]
+        colors = {str(k): str(v) for k, v in payload.get("colors", {}).items()}
+        default_color = str(payload.get("default_color", "#ffffff") or "#ffffff")
+        modes: Dict[str, str] = payload.get("modes", {})
+        visible: Dict[str, Any] = payload.get("visible", {})
+        opacities: Dict[str, Any] = payload.get("opacities", {})
+        active_classes = tuple(str(c) for c in payload.get("active_classes", class_order))
+        return MaskPainterSnapshot(
+            mask_name=str(getattr(self.main_viewer, "mask_key", "") or ""),
+            identifier=str(payload.get("identifier", "") or ""),
+            active_classes=active_classes,
+            class_colors={cls: colors.get(cls, default_color) for cls in class_order},
+            class_visible={cls: bool(visible.get(cls, True)) for cls in class_order},
+            class_fill={cls: (str(modes.get(cls, "outline")) == "fill") for cls in class_order},
+            class_opacity={
+                cls: _normalise_opacity_percent(opacities.get(cls, FILL_OPACITY_DEFAULT_PERCENT))
+                for cls in class_order
+            },
+            default_color=default_color,
+            global_fill=bool(payload.get("global_fill", False)),
+            global_fill_opacity=_normalise_opacity_percent(
+                payload.get("global_fill_opacity", FILL_OPACITY_DEFAULT_PERCENT)
+            ),
+            show_borders_on_filled=bool(payload.get("show_fill_borders", False)),
+            border_color_mode=str(payload.get("border_color_mode", "mask_type_color") or "mask_type_color"),
+            mask_type_color=mask_type_color if mask_type_color else default_color,
+            outline_thickness=outline_thickness,
+        )
+
+    # ------------------------------------------------------------------
+    # Cache invalidation helper
+    # ------------------------------------------------------------------
+    def _invalidate_overlay_cache(self) -> None:
+        self._overlay_snapshot = None
+        self._overlay_cache.clear()
+
+    # ------------------------------------------------------------------
+    # Export config template helpers (Feature 3)
+    # ------------------------------------------------------------------
+    def _resolve_export_config_folder(self) -> None:
+        base = getattr(self.main_viewer, "base_folder", None)
+        if base:
+            folder = Path(base).expanduser() / ".UELer" / "export_configs"
+            folder.mkdir(parents=True, exist_ok=True)
+            self._export_config_folder = folder
+
+    def _refresh_config_dropdown(self) -> None:
+        folder = self._export_config_folder
+        if folder and folder.is_dir():
+            try:
+                from ueler.viewer.palette_store import load_registry as _load_reg
+                self._export_config_registry = _load_reg(folder, EXPORT_CONFIG_REGISTRY_FILENAME)
+            except Exception:
+                self._export_config_registry = {}
+        names = sorted(self._export_config_registry.keys())
+        options: list[tuple[str, Any]] = (
+            [("No saved configs", None)] + [(n, n) for n in names]
+            if not names
+            else [(n, n) for n in names]
+        )
+        dropdown = getattr(self.ui_component, "config_saved_dropdown", None)
+        if dropdown is None:
+            return
+        dropdown.options = options
+        if names:
+            dropdown.value = names[0]
+        else:
+            dropdown.options = [("No saved configs", None)]
+            dropdown.value = None
+
+    def _collect_export_config(self, name: str) -> Dict[str, Any]:
+        from datetime import datetime, timezone
+        return {
+            "name": name,
+            "version": EXPORT_CONFIG_VERSION,
+            "saved_at": datetime.now(tz=timezone.utc).isoformat(),
+            "file_format": getattr(self.ui_component.file_format_dropdown, "value", "png"),
+            "downsample": int(getattr(self.ui_component.downsample_input, "value", 1) or 1),
+            "dpi": int(getattr(self.ui_component.dpi_input, "value", 300) or 300),
+            "include_scale_bar": bool(getattr(self.ui_component.include_scale_bar, "value", False)),
+            "scale_bar_ratio": float(getattr(self.ui_component.scale_bar_ratio, "value", 10.0)),
+            "include_annotations": bool(getattr(self.ui_component.include_annotations, "value", True)),
+            "include_masks": bool(getattr(self.ui_component.include_masks, "value", True)),
+            "masks_only": bool(getattr(self.ui_component.masks_only, "value", False)),
+            "mask_outline_thickness": int(getattr(self.ui_component.mask_outline_thickness, "value", 1)),
+            "mask_palette_enabled": bool(getattr(self.ui_component.mask_palette_enabled, "value", False)),
+            "mask_palette_name": getattr(self.ui_component.mask_palette_dropdown, "value", None),
+            "marker_set": getattr(self.ui_component.marker_set_dropdown, "value", None),
+            "output_path": getattr(self.ui_component.output_path, "value", ""),
+        }
+
+    def _apply_export_config(self, payload: Dict[str, Any]) -> None:
+        def _set(widget_name: str, key: str, coerce=lambda x: x) -> None:
+            widget = getattr(self.ui_component, widget_name, None)
+            if widget is not None and key in payload:
+                try:
+                    widget.value = coerce(payload[key])
+                except Exception:
+                    pass
+
+        _set("output_path", "output_path")
+        _set("file_format_dropdown", "file_format")
+        _set("downsample_input", "downsample", int)
+        _set("dpi_input", "dpi", int)
+        _set("include_scale_bar", "include_scale_bar", bool)
+        _set("scale_bar_ratio", "scale_bar_ratio", float)
+        _set("include_masks", "include_masks", bool)
+        _set("include_annotations", "include_annotations", bool)
+        _set("masks_only", "masks_only", bool)
+        _set("mask_outline_thickness", "mask_outline_thickness", int)
+        _set("mask_palette_enabled", "mask_palette_enabled", bool)
+
+        palette_name = payload.get("mask_palette_name")
+        dd = getattr(self.ui_component, "mask_palette_dropdown", None)
+        if dd is not None:
+            valid = [v for _, v in dd.options]
+            if palette_name in valid:
+                dd.value = palette_name
+
+        marker = payload.get("marker_set")
+        mdd = getattr(self.ui_component, "marker_set_dropdown", None)
+        if mdd is not None:
+            valid_m = [v for _, v in mdd.options]
+            if marker in valid_m:
+                mdd.value = marker
+
+    def _save_export_config(self, _button=None) -> None:
+        name = getattr(self.ui_component.config_name_input, "value", "").strip()
+        status_widget = getattr(self.ui_component, "config_status", None)
+
+        def _set_status(msg: str) -> None:
+            if status_widget is not None:
+                status_widget.value = msg
+
+        if not name:
+            _set_status("<span style='color:red'>Provide a name.</span>")
+            return
+        folder = self._export_config_folder
+        if folder is None:
+            _set_status("<span style='color:red'>Config folder unavailable.</span>")
+            return
+        try:
+            from ueler.viewer.palette_store import (
+                load_registry as _load_reg,
+                save_registry as _save_reg,
+                slugify_name,
+                write_palette_file,
+            )
+            payload = self._collect_export_config(name)
+            slug = slugify_name(name, default_slug="export-config")
+            path = (folder / f"{slug}{EXPORT_CONFIG_FILE_SUFFIX}").resolve()
+            write_palette_file(path, payload)
+            registry = _load_reg(folder, EXPORT_CONFIG_REGISTRY_FILENAME)
+            registry[name] = {"path": str(path), "saved_at": str(payload["saved_at"])}
+            _save_reg(folder, EXPORT_CONFIG_REGISTRY_FILENAME, registry)
+            self._export_config_registry = registry
+            self._refresh_config_dropdown()
+            _set_status(f"<span style='color:green'>Saved '{name}'.</span>")
+        except Exception as exc:
+            _set_status(f"<span style='color:red'>Save failed: {exc}</span>")
+
+    def _load_export_config(self, _button=None) -> None:
+        status_widget = getattr(self.ui_component, "config_status", None)
+
+        def _set_status(msg: str) -> None:
+            if status_widget is not None:
+                status_widget.value = msg
+
+        name = getattr(self.ui_component.config_saved_dropdown, "value", None)
+        if not name:
+            _set_status("<span style='color:orange'>Select a config.</span>")
+            return
+        record = self._export_config_registry.get(name)
+        if not record:
+            _set_status("<span style='color:red'>Config not found.</span>")
+            return
+        try:
+            from ueler.viewer.palette_store import read_palette_file
+            payload = read_palette_file(Path(record["path"]))
+            self._apply_export_config(payload)
+            _set_status(f"<span style='color:green'>Loaded '{name}'.</span>")
+        except Exception as exc:
+            _set_status(f"<span style='color:red'>Load failed: {exc}</span>")
+
+    def _delete_export_config(self, _button=None) -> None:
+        status_widget = getattr(self.ui_component, "config_status", None)
+
+        def _set_status(msg: str) -> None:
+            if status_widget is not None:
+                status_widget.value = msg
+
+        name = getattr(self.ui_component.config_saved_dropdown, "value", None)
+        if not name:
+            return
+        record = self._export_config_registry.get(name)
+        folder = self._export_config_folder
+        if record and folder:
+            try:
+                from ueler.viewer.palette_store import (
+                    load_registry as _load_reg,
+                    save_registry as _save_reg,
+                )
+                path = Path(record["path"])
+                if path.exists():
+                    path.unlink()
+                registry = _load_reg(folder, EXPORT_CONFIG_REGISTRY_FILENAME)
+                registry.pop(name, None)
+                _save_reg(folder, EXPORT_CONFIG_REGISTRY_FILENAME, registry)
+                self._export_config_registry = registry
+                self._refresh_config_dropdown()
+                _set_status(f"<span style='color:green'>Deleted '{name}'.</span>")
+            except Exception as exc:
+                _set_status(f"<span style='color:red'>Delete failed: {exc}</span>")
 
     def _refresh_mode_availability(self) -> None:
         """Show/hide the Single Cells tab based on whether a cell table is loaded."""
@@ -732,13 +1118,6 @@ class BatchExportPlugin(PluginBase):
     # ------------------------------------------------------------------
     # Trait / event handlers
     # ------------------------------------------------------------------
-    def _on_mode_change(self, change) -> None:
-        new_mode = change.get("new")
-        if new_mode not in self._MODE_LABELS:
-            return
-        index = list(self._MODE_LABELS).index(new_mode)
-        self.ui_component.mode_tabs.selected_index = index
-
     def _on_mask_outline_thickness_change(self, change) -> None:
         if self._suspend_outline_widget_callback:
             return
@@ -757,8 +1136,7 @@ class BatchExportPlugin(PluginBase):
 
         self._mask_outline_thickness = thickness
         self._mask_outline_overridden = thickness != self._viewer_outline_thickness
-        self._overlay_snapshot = None
-        self._overlay_cache.clear()
+        self._invalidate_overlay_cache()
 
     def _toggle_fov_selector(self, use_all: bool) -> None:
         self.ui_component.full_fov_selector.disabled = use_all
@@ -804,6 +1182,8 @@ class BatchExportPlugin(PluginBase):
         self.refresh_roi_options()
         self.refresh_overlay_capabilities()
         self._refresh_mode_availability()
+        self._refresh_config_dropdown()
+        self._refresh_palette_dropdown()
 
     def on_viewer_mask_outline_change(self, thickness: int) -> None:
         try:
@@ -819,8 +1199,7 @@ class BatchExportPlugin(PluginBase):
             if self._mask_outline_thickness != viewer_thickness:
                 self._mask_outline_thickness = viewer_thickness
             self._set_mask_outline_slider_value(viewer_thickness)
-            self._overlay_snapshot = None
-            self._overlay_cache.clear()
+            self._invalidate_overlay_cache()
 
     def on_viewer_pixel_size_change(self, pixel_size_nm: float) -> None:
         try:
@@ -838,7 +1217,8 @@ class BatchExportPlugin(PluginBase):
 
         try:
             marker_profile = self._resolve_marker_profile()
-            mode = self.ui_component.mode_selector.value
+            _mode_order = [self.MODE_FULL_FOV, self.MODE_SINGLE_CELLS, self.MODE_ROIS]
+            mode = _mode_order[self.ui_component.mode_tabs.selected_index or 0]
             output_dir = self._normalise_output_dir(self.ui_component.output_path.value)
             file_format = self.ui_component.file_format_dropdown.value
             downsample = max(1, int(self.ui_component.downsample_input.value or 1))
@@ -859,9 +1239,15 @@ class BatchExportPlugin(PluginBase):
                 self._mask_outline_thickness = thickness
             self._mask_outline_overridden = thickness != self._viewer_outline_thickness
 
+            palette_name: Optional[str] = (
+                self.ui_component.mask_palette_dropdown.value
+                if getattr(self.ui_component.mask_palette_enabled, "value", False)
+                else None
+            )
             overlay_snapshot = self._capture_overlay_snapshot(
                 include_masks=include_masks,
                 include_annotations=include_annotations,
+                palette_name=palette_name,
             )
 
             job = self._build_job(
@@ -943,6 +1329,7 @@ class BatchExportPlugin(PluginBase):
         *,
         include_masks: bool,
         include_annotations: bool,
+        palette_name: Optional[str] = None,
     ) -> OverlaySnapshot:
         snapshot = self.main_viewer.capture_overlay_snapshot(
             include_masks=include_masks,
@@ -972,6 +1359,34 @@ class BatchExportPlugin(PluginBase):
                     else None
                 ),
             )
+
+        # Feature 2: override skip_image_layer from the export-local masks_only widget
+        masks_only = bool(
+            include_masks
+            and getattr(self.ui_component, "masks_only", None) is not None
+            and self.ui_component.masks_only.value
+        )
+        if masks_only != getattr(snapshot, "skip_image_layer", False):
+            snapshot = replace(snapshot, skip_image_layer=masks_only)
+
+        # Feature 1: override mask_painter with a saved palette if requested
+        if include_masks and palette_name is not None and palette_name in self._palette_registry:
+            record = self._palette_registry[palette_name]
+            try:
+                from ueler.viewer.palette_store import read_palette_file
+                payload = read_palette_file(Path(record["path"]))
+                live_mask_type_color = (
+                    snapshot.mask_painter.mask_type_color
+                    if getattr(snapshot, "mask_painter", None) is not None
+                    else None
+                )
+                overridden_painter = self._snapshot_from_palette_payload(
+                    payload, self._mask_outline_thickness, live_mask_type_color
+                )
+                snapshot = replace(snapshot, mask_painter=overridden_painter)
+            except Exception as exc:
+                self._notify(f"Could not load palette '{palette_name}': {exc}", level="warning")
+
         self._overlay_snapshot = snapshot
         self._overlay_cache.clear()
         return snapshot
@@ -1991,7 +2406,6 @@ class BatchExportPlugin(PluginBase):
     def _set_running_state(self, running: bool) -> None:
         self.ui_component.start_button.disabled = running
         self.ui_component.cancel_button.disabled = not running
-        self.ui_component.mode_selector.disabled = running
         self.ui_component.marker_set_dropdown.disabled = running
         self.ui_component.output_path.disabled = running
         self.ui_component.file_format_dropdown.disabled = running

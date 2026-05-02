@@ -242,6 +242,7 @@ def _ensure_widget(name):  # pragma: no cover - helper for stubs
 
 
 for widget_name in (
+    "Accordion",
     "Button",
     "Checkbox",
     "Dropdown",
@@ -252,7 +253,6 @@ for widget_name in (
     "IntText",
     "SelectMultiple",
     "Text",
-    "ToggleButtons",
     "VBox",
 ):
     _ensure_widget(widget_name)
@@ -280,6 +280,17 @@ class _StubWidget:
 
     def observe(self, callback, names=None):
         self._observers.append(callback)
+
+    def on_click(self, callback):  # button stub
+        pass
+
+
+class _StubDropdown(_StubWidget):
+    """Stub dropdown widget with an options list."""
+
+    def __init__(self, value=None, options=()):
+        super().__init__(value)
+        self.options = list(options)
 
 
 class _StubHTML:
@@ -434,6 +445,15 @@ class ExportFOVsBatchTests(unittest.TestCase):
                 self.ui_component.include_annotations = _StubWidget(False)
                 self.ui_component.mask_outline_thickness = _StubWidget(self._mask_outline_thickness)
                 self.ui_component.overlay_hint = _StubHTML()
+                self.ui_component.masks_only = _StubWidget(False)
+                self.ui_component.mask_palette_enabled = _StubWidget(False)
+                self.ui_component.mask_palette_dropdown = _StubDropdown(None, [("Current settings", None)])
+                self.ui_component.config_name_input = _StubWidget("")
+                self.ui_component.config_saved_dropdown = _StubDropdown(None, [("No saved configs", None)])
+                self.ui_component.config_save_button = _StubWidget(None)
+                self.ui_component.config_load_button = _StubWidget(None)
+                self.ui_component.config_delete_button = _StubWidget(None)
+                self.ui_component.config_status = _StubHTML()
 
             def _build_layout(self):  # pragma: no cover - skipped in tests
                 return
@@ -441,6 +461,10 @@ class ExportFOVsBatchTests(unittest.TestCase):
             def _connect_events(self):  # pragma: no cover - manually wire slider observer
                 self.ui_component.mask_outline_thickness.observe(
                     self._on_mask_outline_thickness_change,
+                    names="value",
+                )
+                self.ui_component.masks_only.observe(
+                    lambda _: self._invalidate_overlay_cache(),
                     names="value",
                 )
 
@@ -751,6 +775,266 @@ class ExportFOVsBatchTests(unittest.TestCase):
         scale_mock.assert_called_once()
         self.assertTrue(plugin.ui_component.cell_preview_output.cleared)
 
+    # ------------------------------------------------------------------
+    # Feature 2: masks_only tests
+    # ------------------------------------------------------------------
+    def _make_plugin_with_snapshot(self, skip_image_layer=False):
+        """Helper that wires a viewer stub returning a fixed OverlaySnapshot."""
+        viewer_stub = _BatchExportViewerStub(self.base_path, mask_outline_thickness=1)
+        viewer_stub.capture_overlay_snapshot = lambda **kwargs: OverlaySnapshot(
+            include_annotations=kwargs.get("include_annotations", False),
+            include_masks=kwargs.get("include_masks", True),
+            skip_image_layer=skip_image_layer,
+            annotation=None,
+            masks=(),
+            mask_painter=MaskPainterSnapshot(
+                mask_name="MASK",
+                identifier="cell_type",
+                active_classes=("T",),
+                class_colors={"T": "#ff0000"},
+                class_visible={"T": True},
+                class_fill={"T": False},
+                class_opacity={"T": 35},
+                default_color="#ffffff",
+                global_fill_opacity=35,
+                show_borders_on_filled=False,
+                outline_thickness=1,
+            ),
+        )
+        _viewer, plugin = self._make_export_plugin(viewer_stub)
+        return plugin
+
+    def test_masks_only_sets_skip_image_layer_true(self):
+        plugin = self._make_plugin_with_snapshot(skip_image_layer=False)
+        plugin.ui_component.masks_only.value = True
+        snapshot = plugin._capture_overlay_snapshot(include_masks=True, include_annotations=False)
+        self.assertTrue(snapshot.skip_image_layer)
+
+    def test_masks_only_false_overrides_viewer_true(self):
+        """Export masks_only=False must override the viewer's skip_image_layer=True."""
+        plugin = self._make_plugin_with_snapshot(skip_image_layer=True)
+        plugin.ui_component.masks_only.value = False
+        snapshot = plugin._capture_overlay_snapshot(include_masks=True, include_annotations=False)
+        self.assertFalse(snapshot.skip_image_layer)
+
+    def test_masks_only_false_keeps_viewer_false(self):
+        plugin = self._make_plugin_with_snapshot(skip_image_layer=False)
+        plugin.ui_component.masks_only.value = False
+        snapshot = plugin._capture_overlay_snapshot(include_masks=True, include_annotations=False)
+        self.assertFalse(snapshot.skip_image_layer)
+
+    def test_masks_only_invalidates_cache(self):
+        plugin = self._make_plugin_with_snapshot()
+        plugin._overlay_snapshot = object()
+        plugin._overlay_cache = {"key": "value"}
+        plugin.ui_component.masks_only.value = True
+        self.assertIsNone(plugin._overlay_snapshot)
+        self.assertEqual(plugin._overlay_cache, {})
+
+    def test_invalidate_overlay_cache_clears_state(self):
+        plugin = self._make_plugin_with_snapshot()
+        plugin._overlay_snapshot = object()
+        plugin._overlay_cache = {"a": 1, "b": 2}
+        plugin._invalidate_overlay_cache()
+        self.assertIsNone(plugin._overlay_snapshot)
+        self.assertEqual(plugin._overlay_cache, {})
+
+    # ------------------------------------------------------------------
+    # Feature 1: palette override tests
+    # ------------------------------------------------------------------
+    def _make_palette_payload(self, name="Test Palette"):
+        return {
+            "name": name,
+            "version": "1.1.0",
+            "identifier": "cell_type",
+            "default_color": "#aabbcc",
+            "class_order": ["T", "B"],
+            "active_classes": ["T", "B"],
+            "only_specified": False,
+            "colors": {"T": "#ff0000", "B": "#0000ff"},
+            "modes": {"T": "fill", "B": "outline"},
+            "visible": {"T": True, "B": False},
+            "opacities": {"T": 60, "B": 40},
+            "global_fill": True,
+            "global_fill_opacity": 50,
+            "show_fill_borders": True,
+            "border_color_mode": "same_as_fill",
+            "saved_at": "2026-01-01T00:00:00Z",
+        }
+
+    def test_snapshot_from_palette_payload_field_mapping(self):
+        viewer_stub = _BatchExportViewerStub(self.base_path)
+        _viewer, plugin = self._make_export_plugin(viewer_stub)
+        payload = self._make_palette_payload()
+        result = plugin._snapshot_from_palette_payload(payload, outline_thickness=3)
+        self.assertEqual(result.identifier, "cell_type")
+        self.assertEqual(result.class_colors["T"], "#ff0000")
+        self.assertEqual(result.class_colors["B"], "#0000ff")
+        self.assertTrue(result.class_fill["T"])
+        self.assertFalse(result.class_fill["B"])
+        self.assertFalse(result.class_visible["B"])
+        self.assertEqual(result.global_fill_opacity, 50)
+        self.assertTrue(result.show_borders_on_filled)
+        self.assertEqual(result.border_color_mode, "same_as_fill")
+        self.assertEqual(result.outline_thickness, 3)
+        self.assertEqual(result.default_color, "#aabbcc")
+        self.assertEqual(result.mask_type_color, "#aabbcc")
+
+    def test_snapshot_from_palette_payload_empty_class_order(self):
+        viewer_stub = _BatchExportViewerStub(self.base_path)
+        _viewer, plugin = self._make_export_plugin(viewer_stub)
+        payload = {"name": "empty", "default_color": "#ffffff"}
+        result = plugin._snapshot_from_palette_payload(payload, outline_thickness=1)
+        self.assertEqual(result.active_classes, ())
+        self.assertEqual(result.class_colors, {})
+
+    def test_palette_override_uses_payload_in_snapshot(self):
+        viewer_stub = _BatchExportViewerStub(self.base_path, mask_outline_thickness=1)
+        viewer_stub.capture_overlay_snapshot = lambda **kwargs: OverlaySnapshot(
+            include_annotations=False,
+            include_masks=True,
+            annotation=None,
+            masks=(),
+            mask_painter=MaskPainterSnapshot(
+                mask_name="MASK",
+                identifier="original",
+                active_classes=(),
+                class_colors={},
+                class_visible={},
+                class_fill={},
+                class_opacity={},
+                default_color="#000000",
+                global_fill_opacity=35,
+                show_borders_on_filled=False,
+                outline_thickness=1,
+            ),
+        )
+        _viewer, plugin = self._make_export_plugin(viewer_stub)
+        payload = self._make_palette_payload("My Palette")
+        plugin._palette_registry = {
+            "My Palette": {"path": "/fake/path.json", "saved_at": "2026-01-01T00:00:00Z"}
+        }
+        with mock.patch(
+            "ueler.viewer.palette_store.read_palette_file",
+            return_value=payload,
+        ):
+            snapshot = plugin._capture_overlay_snapshot(
+                include_masks=True,
+                include_annotations=False,
+                palette_name="My Palette",
+            )
+        self.assertEqual(snapshot.mask_painter.identifier, "cell_type")
+        self.assertTrue(snapshot.mask_painter.class_fill.get("T", False))
+
+    def test_palette_override_bad_name_falls_back_to_live_state(self):
+        viewer_stub = _BatchExportViewerStub(self.base_path, mask_outline_thickness=1)
+        live_painter = MaskPainterSnapshot(
+            mask_name="MASK",
+            identifier="live",
+            active_classes=("X",),
+            class_colors={"X": "#cccccc"},
+            class_visible={"X": True},
+            class_fill={"X": False},
+            class_opacity={"X": 35},
+            default_color="#cccccc",
+            global_fill_opacity=35,
+            show_borders_on_filled=False,
+            outline_thickness=1,
+        )
+        viewer_stub.capture_overlay_snapshot = lambda **kwargs: OverlaySnapshot(
+            include_annotations=False,
+            include_masks=True,
+            annotation=None,
+            masks=(),
+            mask_painter=live_painter,
+        )
+        _viewer, plugin = self._make_export_plugin(viewer_stub)
+        plugin._palette_registry = {}
+        snapshot = plugin._capture_overlay_snapshot(
+            include_masks=True,
+            include_annotations=False,
+            palette_name="nonexistent",
+        )
+        self.assertEqual(snapshot.mask_painter.identifier, "live")
+
+    def test_refresh_palette_dropdown_populates_options(self):
+        viewer_stub = _BatchExportViewerStub(self.base_path)
+        _viewer, plugin = self._make_export_plugin(viewer_stub)
+        with mock.patch.object(
+            plugin,
+            "_load_palette_registry",
+            return_value={"Alpha": {"path": "/a"}, "Beta": {"path": "/b"}},
+        ):
+            plugin._refresh_palette_dropdown()
+        options = plugin.ui_component.mask_palette_dropdown.options
+        # options are list of (label, value) tuples
+        values = [v for _, v in options] if options and isinstance(options[0], tuple) else options
+        self.assertIn(None, values)
+        self.assertIn("Alpha", values)
+        self.assertIn("Beta", values)
+
+    def test_refresh_palette_dropdown_empty_registry(self):
+        viewer_stub = _BatchExportViewerStub(self.base_path)
+        _viewer, plugin = self._make_export_plugin(viewer_stub)
+        with mock.patch.object(plugin, "_load_palette_registry", return_value={}):
+            plugin._refresh_palette_dropdown()
+        options = plugin.ui_component.mask_palette_dropdown.options
+        values = [v for _, v in options] if options and isinstance(options[0], tuple) else options
+        self.assertIn(None, values)
+        self.assertEqual(len(values), 1)
+
+    def test_snapshot_from_palette_payload_uses_live_mask_type_color(self):
+        viewer_stub = _BatchExportViewerStub(self.base_path)
+        _viewer, plugin = self._make_export_plugin(viewer_stub)
+        payload = self._make_palette_payload()
+        result = plugin._snapshot_from_palette_payload(payload, outline_thickness=1, mask_type_color="#abcdef")
+        self.assertEqual(result.mask_type_color, "#abcdef")
+
+    def test_snapshot_from_palette_payload_falls_back_to_default_color(self):
+        viewer_stub = _BatchExportViewerStub(self.base_path)
+        _viewer, plugin = self._make_export_plugin(viewer_stub)
+        payload = self._make_palette_payload()
+        result = plugin._snapshot_from_palette_payload(payload, outline_thickness=1)
+        self.assertEqual(result.mask_type_color, result.default_color)
+
+    def test_palette_override_passes_live_mask_type_color(self):
+        viewer_stub = _BatchExportViewerStub(self.base_path, mask_outline_thickness=1)
+        viewer_stub.capture_overlay_snapshot = lambda **kwargs: OverlaySnapshot(
+            include_annotations=False,
+            include_masks=True,
+            annotation=None,
+            masks=(),
+            mask_painter=MaskPainterSnapshot(
+                mask_name="MASK",
+                identifier="live",
+                active_classes=(),
+                class_colors={},
+                class_visible={},
+                class_fill={},
+                class_opacity={},
+                default_color="#000000",
+                global_fill_opacity=35,
+                show_borders_on_filled=False,
+                outline_thickness=1,
+                mask_type_color="#abcdef",
+            ),
+        )
+        _viewer, plugin = self._make_export_plugin(viewer_stub)
+        payload = self._make_palette_payload("Palette")
+        plugin._palette_registry = {
+            "Palette": {"path": "/fake/path.json", "saved_at": "2026-01-01T00:00:00Z"}
+        }
+        with mock.patch(
+            "ueler.viewer.palette_store.read_palette_file",
+            return_value=payload,
+        ):
+            snapshot = plugin._capture_overlay_snapshot(
+                include_masks=True,
+                include_annotations=False,
+                palette_name="Palette",
+            )
+        self.assertEqual(snapshot.mask_painter.mask_type_color, "#abcdef")
+
 
 class TestSimpleViewerModeExport(unittest.TestCase):
     """BatchExportPlugin behaviour when cell_table is None (simple viewer mode)."""
@@ -783,6 +1067,15 @@ class TestSimpleViewerModeExport(unittest.TestCase):
                 self.ui_component.include_annotations = _StubWidget(False)
                 self.ui_component.mask_outline_thickness = _StubWidget(1)
                 self.ui_component.overlay_hint = _StubHTML()
+                self.ui_component.masks_only = _StubWidget(False)
+                self.ui_component.mask_palette_enabled = _StubWidget(False)
+                self.ui_component.mask_palette_dropdown = _StubDropdown(None, [("Current settings", None)])
+                self.ui_component.config_name_input = _StubWidget("")
+                self.ui_component.config_saved_dropdown = _StubDropdown(None, [("No saved configs", None)])
+                self.ui_component.config_save_button = _StubWidget(None)
+                self.ui_component.config_load_button = _StubWidget(None)
+                self.ui_component.config_delete_button = _StubWidget(None)
+                self.ui_component.config_status = _StubHTML()
 
             def _build_layout(self):
                 return
@@ -1476,7 +1769,6 @@ class BatchExportMapROIItemsTests(unittest.TestCase):
 
         # Build minimal UI widgets needed by refresh_roi_options and _connect_events
         plugin.ui_component = SimpleNamespace(
-            mode_selector=SimpleNamespace(observe=lambda *a, **kw: None),
             full_fov_use_all=SimpleNamespace(observe=lambda *a, **kw: None),
             browse_button=SimpleNamespace(on_click=lambda *a: None),
             start_button=SimpleNamespace(on_click=lambda *a: None),
@@ -1487,6 +1779,12 @@ class BatchExportMapROIItemsTests(unittest.TestCase):
             roi_selection=SimpleNamespace(options=[], value=()),
             include_masks=SimpleNamespace(observe=lambda *a, **kw: None),
             mask_outline_thickness=SimpleNamespace(observe=lambda *a, **kw: None),
+            mask_palette_enabled=SimpleNamespace(observe=lambda *a, **kw: None),
+            mask_palette_dropdown=SimpleNamespace(observe=lambda *a, **kw: None, disabled=True),
+            masks_only=SimpleNamespace(observe=lambda *a, **kw: None),
+            config_save_button=SimpleNamespace(on_click=lambda *a: None),
+            config_load_button=SimpleNamespace(on_click=lambda *a: None),
+            config_delete_button=SimpleNamespace(on_click=lambda *a: None),
         )
 
         plugin._connect_events()

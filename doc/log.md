@@ -1,9 +1,11 @@
 ### v0.3.1
 
-**Issue #91 reply 7 — Fix Global fill toggle-off for inactive classes**
-- Removed the intermediate direct-canvas update (`_apply_color_to_current_fov`) for inactive classes inside `apply_colors_to_masks`. The call used `find_boundaries(mode="inner")` on a combined multi-label integer array, which produced merged outer outlines for adjacent same-class cells and did not clear fills from the previous global-fill-ON state. Inactive classes are now rendered exclusively via the correct `update_display → _compose_fov_image → apply_registry_colors` path, which resolves fresh per-cell outlines from the current `global_fill` state.
-- Added two regression tests in `TestGlobalFillToggleOff`: one verifies `get_effective_mode_map_for_fov()` returns `"outline"` for inactive cells after toggling OFF, and one verifies `set_mask_colors_current_fov` is not called for inactive class cells during the toggle.
-- Validated: `python -m unittest tests.test_mask_painter_mode_visibility tests.test_mask_color_sets`.
+**Issue #92 reply — Batch export follow-up: mask outline color fix, output folder in config, and UI refinements**
+- Fixed `_snapshot_from_palette_payload` so the `mask_type_color` field in the export painter snapshot is taken from the live viewer's left-panel mask overlay color instead of the palette's fallback fill color; this ensures "Show borders on filled masks" with `border_color_mode="mask_type_color"` uses the correct overlay color rather than the default class color.
+- Added `output_path` to the batch export config template: the `Output folder` field is now captured on save and restored on load alongside all other export settings.
+- Replaced the `mode_selector` `ToggleButtons` widget with the existing `mode_tabs` `Tab` widget as the sole mode selector; the active tab now determines the export mode directly, removing the redundant toggle-buttons bar.
+- Added horizontal separator lines below the DPI field and the Scale bar % width slider for clearer visual grouping.
+- Validated: `python -m unittest tests.test_export_fovs_batch tests.test_export_fovs_mask_customization`.
 
 **Issue #91 reply 6 — Mask Painter inactive defaults, restored opacity linkage, and ordering/layout fixes**
 - Reworked the Mask Painter default-state model so inactive classes now derive their effective fill-vs-outline mode from `Global fill` instead of always falling back to outline mode, while active class mode controls remain untouched.
