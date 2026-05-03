@@ -523,5 +523,48 @@ class TestScatterSelectionMaskHighlights(unittest.TestCase):
         self.assertIn(3, self.image_display.last_mask_ids)
 
 
+class TestScatterToGalleryForwarding(unittest.TestCase):
+    """Scatter selection → gallery forwarding via forward_to_cell_gallery observer.
+
+    Regression tests for issue #93: multi-cell scatter selections must reach the
+    gallery; single-cell clicks must remain blocked (intentional guard).
+    """
+
+    def setUp(self):
+        table = _two_fov_table()
+        self.viewer = _make_viewer(table)
+        self.chart = _make_chart(self.viewer)
+        self.gallery: _FakeCellGallery = self.viewer.SidePlots.cell_gallery_output
+        self.chart.ui_component.cell_gallery_linked_checkbox.value = True
+
+    def test_multi_cell_scatter_selection_reaches_gallery(self):
+        """Lasso/box selection of multiple scatter points must update the gallery."""
+        self.chart._on_scatter_selection({0, 1, 2}, origin="widget")
+        self.assertIsNotNone(self.gallery.received, "gallery should have received indices")
+        self.assertEqual(set(self.gallery.received), {0, 1, 2})
+
+    def test_single_cell_scatter_click_does_not_reach_gallery(self):
+        """Single-cell click is intentionally blocked — main viewer shows that cell."""
+        self.chart._on_scatter_selection({2}, origin="widget")
+        self.assertIsNone(
+            self.gallery.received,
+            "single-cell click guard must remain; gallery must not be updated",
+        )
+
+    def test_multi_cell_gallery_update_respects_linked_checkbox(self):
+        """Gallery must not be updated when the linking checkbox is unchecked."""
+        self.chart.ui_component.cell_gallery_linked_checkbox.value = False
+        self.chart._on_scatter_selection({0, 1, 2}, origin="widget")
+        self.assertIsNone(self.gallery.received)
+
+    def test_second_multi_cell_selection_overwrites_first(self):
+        """A subsequent multi-cell selection should replace the gallery contents."""
+        self.chart._on_scatter_selection({0, 1}, origin="widget")
+        self.assertEqual(set(self.gallery.received), {0, 1})
+
+        self.chart._on_scatter_selection({2, 3}, origin="widget")
+        self.assertEqual(set(self.gallery.received), {2, 3})
+
+
 if __name__ == "__main__":
     unittest.main()

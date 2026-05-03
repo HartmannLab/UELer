@@ -1,5 +1,17 @@
 ### v0.3.1
 
+**Issue #93 reply — Fix Cell Gallery matplotlib figure not rendering in VS Code**
+- Restructured `_draw_gallery` in `ueler/viewer/plugin/cell_gallery.py` to match `chart.py`'s `_render_histogram` pattern: `clear_output(wait=True)` is now called before the `with self.plot_output:` block (VS Code-safe; prevents a blank flash), all figure setup and event handler connections happen before the context, and `plt.show(fig)` with an explicit figure argument is the only call inside the `with` block.
+- Wrapped `fig.canvas.new_timer(...)` in `try/except AttributeError` in both `_draw_gallery` and `on_mouse_move`; the gallery renders and hover events degrade gracefully on non-ipympl backends.
+- Applied the same `clear_output(wait=True)` pattern to `_show_empty_message`.
+- Added `TestDrawGalleryRendering` (4 tests) to `tests/test_cell_gallery.py`.
+- Validated: `python -m unittest tests.test_cell_gallery tests.test_chart_cell_gallery_link` — 43 tests passed.
+
+**Issue #93 — Fix Cell Gallery silent failure on scatter plot selection**
+- Removed the `except AttributeError` clause from `@update_status_bar` (`ueler/viewer/decorators.py`). The decorator was catching and discarding `AttributeError`, producing a status-bar flash with no gallery update and no visible error whenever `plot_gellery()` encountered an `AttributeError` from recently added Mask Painter / No-image code paths. Errors now propagate as visible notebook tracebacks, enabling immediate diagnosis.
+- Added `TestUpdateStatusBarDecorator` to `tests/test_cell_gallery.py` and `TestScatterToGalleryForwarding` to `tests/test_chart_cell_gallery_link.py`.
+- Validated: `python -m unittest tests.test_cell_gallery tests.test_chart_cell_gallery_link`.
+
 **Issue #92 reply — Batch export follow-up: mask outline color fix, output folder in config, and UI refinements**
 - Fixed batch export border color for palette overrides: `_capture_overlay_snapshot` now reads the left-panel mask overlay color via `_resolve_mask_type_color` as a fallback when the Mask Painter plugin is disabled or returns no snapshot (previously the export silently fell back to the palette's `default_color`). When the painter is active its snapshot's `mask_type_color` is preferred; otherwise the left-panel color control is read directly, so `Show borders on filled masks` with `border_color_mode="mask_type_color"` always reflects the correct overlay color.
 - Added `output_path` to the batch export config template: the `Output folder` field is now captured on save and restored on load alongside all other export settings.

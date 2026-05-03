@@ -173,8 +173,8 @@ class CellGalleryDisplay(PluginBase):
         )
 
     def _show_empty_message(self, message: str = "No cells selected."):
+        self.plot_output.clear_output(wait=True)
         with self.plot_output:
-            self.plot_output.clear_output()
             print(message)
 
     def _update_tile_metadata(self, canvas: np.ndarray, rows: int, columns: int):
@@ -200,68 +200,76 @@ class CellGalleryDisplay(PluginBase):
         displayed_indices: Sequence[int],
         crop_width: int,
     ):
-        with self.plot_output:
-            self.plot_output.clear_output()
+        # Clear with wait=True before entering the context so VS Code's async
+        # frontend waits for new content before removing the old figure.
+        self.plot_output.clear_output(wait=True)
 
-            min_rows = 3
-            fig_height = max(rows, min_rows)
+        min_rows = 3
+        fig_height = max(rows, min_rows)
 
-            fig, ax = plt.subplots(figsize=(self.width * 0.9, fig_height))
-            ax.imshow(canvas)
-            ax.axis("off")
+        fig, ax = plt.subplots(figsize=(self.width * 0.9, fig_height))
+        ax.imshow(canvas)
+        ax.axis("off")
 
-            fig.canvas.header_visible = False
-            fig.tight_layout()
-            plt.show()
+        fig.canvas.header_visible = False
+        fig.tight_layout()
 
-            self.data.fig = fig
-            self.data.ax = ax
-            self.mask_id_annotation = self._create_annotation()
+        self.data.fig = fig
+        self.data.ax = ax
+        self.mask_id_annotation = self._create_annotation()
 
-            def on_click(event):
-                if event.inaxes != ax or event.xdata is None or event.ydata is None:
+        def on_click(event):
+            if event.inaxes != ax or event.xdata is None or event.ydata is None:
+                return
+
+            col = int(event.xdata // (self.data.tile_width + GRID_SPACING))
+            row = int(event.ydata // (self.data.tile_height + GRID_SPACING))
+
+            if row < rows and col < GRID_COLUMNS:
+                clicked_index = row * GRID_COLUMNS + col
+                if clicked_index >= len(displayed_indices):
                     return
+                df = self.main_viewer.cell_table
+                fov_key = self.main_viewer.fov_key
+                x_key = self.main_viewer.x_key
+                y_key = self.main_viewer.y_key
+                cell_index = displayed_indices[clicked_index]
+                x = df.iloc[cell_index][x_key]
+                y = df.iloc[cell_index][y_key]
+                fov = df.iloc[cell_index][fov_key]
+                image_selector = getattr(
+                    self.main_viewer.ui_component, "image_selector", None
+                )
+                prior_fov = getattr(image_selector, "value", None) if image_selector is not None else None
+                should_skip_refresh = image_selector is not None and prior_fov != fov
+                self._skip_next_fov_refresh = should_skip_refresh
 
-                col = int(event.xdata // (self.data.tile_width + GRID_SPACING))
-                row = int(event.ydata // (self.data.tile_height + GRID_SPACING))
-
-                if row < rows and col < GRID_COLUMNS:
-                    clicked_index = row * GRID_COLUMNS + col
-                    if clicked_index >= len(displayed_indices):
-                        return
-                    df = self.main_viewer.cell_table
-                    fov_key = self.main_viewer.fov_key
-                    x_key = self.main_viewer.x_key
-                    y_key = self.main_viewer.y_key
-                    cell_index = displayed_indices[clicked_index]
-                    x = df.iloc[cell_index][x_key]
-                    y = df.iloc[cell_index][y_key]
-                    fov = df.iloc[cell_index][fov_key]
-                    image_selector = getattr(
-                        self.main_viewer.ui_component, "image_selector", None
+                try:
+                    self.main_viewer.focus_on_cell(
+                        fov,
+                        x,
+                        y,
+                        radius=crop_width / 2,
                     )
-                    prior_fov = getattr(image_selector, "value", None) if image_selector is not None else None
-                    should_skip_refresh = image_selector is not None and prior_fov != fov
-                    self._skip_next_fov_refresh = should_skip_refresh
+                finally:
+                    if not should_skip_refresh:
+                        self._skip_next_fov_refresh = False
 
-                    try:
-                        self.main_viewer.focus_on_cell(
-                            fov,
-                            x,
-                            y,
-                            radius=crop_width / 2,
-                        )
-                    finally:
-                        if not should_skip_refresh:
-                            self._skip_next_fov_refresh = False
+        fig.canvas.mpl_connect("button_press_event", on_click)
+        fig.canvas.mpl_connect("motion_notify_event", self.on_mouse_move)
 
-            fig.canvas.mpl_connect("button_press_event", on_click)
-            fig.canvas.mpl_connect("motion_notify_event", self.on_mouse_move)
+        with self.plot_output:
+            plt.show(fig)
 
+        # new_timer is ipympl-specific; degrade gracefully when the backend does
+        # not support it (e.g. VS Code with a non-widget matplotlib backend).
+        try:
             self.hover_timer = fig.canvas.new_timer(interval=HOVER_DELAY_MS)
             self.hover_timer.single_shot = True
             self.hover_timer.add_callback(self.process_hover_event)
             self.hover_timer.start()
+        except AttributeError:
+            self.hover_timer = None
 
     def _show_warning(self, message: str) -> None:
         """Display warning to user when display count exceeds recommended limit.
@@ -321,10 +329,13 @@ class CellGalleryDisplay(PluginBase):
 
         self.last_hover_event = event
 
-        self.hover_timer = self.data.fig.canvas.new_timer(interval=HOVER_DELAY_MS)
-        self.hover_timer.single_shot = True
-        self.hover_timer.add_callback(self.process_hover_event)
-        self.hover_timer.start()
+        try:
+            self.hover_timer = self.data.fig.canvas.new_timer(interval=HOVER_DELAY_MS)
+            self.hover_timer.single_shot = True
+            self.hover_timer.add_callback(self.process_hover_event)
+            self.hover_timer.start()
+        except AttributeError:
+            pass  # hover tooltip unavailable without ipympl timer support
 
     def process_hover_event(self):
         event = self.last_hover_event

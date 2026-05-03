@@ -35,8 +35,6 @@ def update_status_bar(func: F) -> F:
 		_set_status_bar(viewer, "processing", fmt="gif", width=225, height=30)
 		try:
 			return func(*args, **kwargs)
-		except AttributeError as error:
-			print(f"Error: {error}")
 		finally:
 			_set_status_bar(viewer, "ready", fmt="png", width=30, height=30)
 
