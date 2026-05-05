@@ -1,5 +1,11 @@
 ### v0.3.1
 
+**Issue #94 — Fix map mode edge tiles hidden and batch export subregion**
+- Restructured `VirtualMapLayer.render()` tile cap (`ueler/viewer/virtual_map_layer.py`): moved `channels_tuple` and `state_signature` computation before the cap to enable cache-key lookup during the partition step; replaced the flat 80-tile distance filter with a cache-aware, ds-scaled cap that always renders cached tiles and limits uncached tiles to `base_limit × ds_factor` (so ds=8 allows up to 640 uncached tiles, removing the black-edge symptom on maps with more than 80 FOVs).
+- Fixed silent tile-load failure in `_render_map_region_direct` (`ueler/viewer/plugin/export_fovs.py`): replaced the bare `continue` with `warnings.warn(...)` naming the failed tile so large-ROI exports now surface diagnostic output instead of silently producing black patches.
+- Added `TileCapTests` (3 tests) to `tests/test_virtual_map_layer.py` and 2 new tests to `BatchExportMapROIItemsTests` in `tests/test_export_fovs_batch.py`.
+- Validated: `python -m unittest tests.test_virtual_map_layer tests.test_export_fovs_batch.BatchExportMapROIItemsTests` — 21 tests passed.
+
 **Issue #93 reply — Fix Cell Gallery matplotlib figure not rendering in VS Code**
 - Restructured `_draw_gallery` in `ueler/viewer/plugin/cell_gallery.py` to match `chart.py`'s `_render_histogram` pattern: `clear_output(wait=True)` is now called before the `with self.plot_output:` block (VS Code-safe; prevents a blank flash), all figure setup and event handler connections happen before the context, and `plt.show(fig)` with an explicit figure argument is the only call inside the `with` block.
 - Wrapped `fig.canvas.new_timer(...)` in `try/except AttributeError` in both `_draw_gallery` and `on_mouse_move`; the gallery renders and hover events degrade gracefully on non-ipympl backends.

@@ -142,5 +142,93 @@ class VirtualMapLayerTests(unittest.TestCase):
         self.assertEqual((height_b, width_b), (10, 9))
 
 
+def _build_row_descriptor(n_tiles: int) -> "SlideDescriptor":
+    """Return a descriptor with *n_tiles* 100×100 µm tiles in a horizontal row."""
+    specs = tuple(
+        MapFOVSpec(
+            name=f"FOV_{i}",
+            slide_id="slide-row",
+            center_um=(50.0 + i * 100.0, 50.0),
+            frame_size_px=(100, 100),
+            fov_size_um=100.0,
+            metadata={},
+        )
+        for i in range(n_tiles)
+    )
+    return SlideDescriptor(
+        slide_id="slide-row",
+        source_path=Path("dummy_row.json"),
+        export_datetime=None,
+        fovs=specs,
+    )
+
+
+class TileCapTests(unittest.TestCase):
+    """Tests for the cache-aware, ds-scaled tile render cap."""
+
+    def test_render_all_cached_tiles_beyond_limit(self):
+        """Cached tiles always render regardless of the uncached tile cap."""
+        viewer = DummyViewer()
+        viewer._map_render_tile_limit = 2  # very low cap for testing
+
+        layer = VirtualMapLayer(viewer, _build_row_descriptor(5), allowed_downsample=[1])
+        layer.set_viewport(0.0, 500.0, 0.0, 100.0, downsample_factor=1)
+
+        # Repeated renders warm the cache: at limit=2, each pass adds ≤2 new tiles.
+        # After 3 passes all 5 tiles are cached; 10 passes ensures we are stable.
+        for _ in range(10):
+            layer.render(["DAPI"])
+
+        # All 5 tiles must appear in the last render's visible set.
+        self.assertEqual(set(layer._last_visible_fovs), {f"FOV_{i}" for i in range(5)})
+
+        # A further render must not call _render_fov_region again (all cached).
+        calls_before = len(viewer.calls)
+        layer.render(["DAPI"])
+        self.assertEqual(len(viewer.calls), calls_before)
+
+    def test_render_limits_uncached_tiles_scales_with_ds(self):
+        """At ds=1 only 2 tiles render (limit=2); at ds=4 all 5 fit within limit=8."""
+        viewer = DummyViewer()
+        viewer._map_render_tile_limit = 2  # base limit; effective = 2 * ds_factor
+
+        layer = VirtualMapLayer(viewer, _build_row_descriptor(5), allowed_downsample=[1, 4])
+
+        # ds=1: effective limit = 2 — only 2 of the 5 uncached tiles render.
+        layer.set_viewport(0.0, 500.0, 0.0, 100.0, downsample_factor=1)
+        layer.render(["DAPI"])
+        self.assertEqual(len(viewer.calls), 2)
+
+        # ds=4: effective limit = 8 — all 5 tiles are visible and none are cached at
+        # this ds level, so 5 ≤ 8 → all 5 render.
+        layer.set_viewport(0.0, 500.0, 0.0, 100.0, downsample_factor=4)
+        layer.render(["DAPI"])
+        ds4_calls = len(viewer.calls) - 2
+        self.assertEqual(ds4_calls, 5)
+
+    def test_allocate_canvas_shape_never_under_allocated(self):
+        """Canvas dimensions are always ≥ ceil((extent) / pixel_size)."""
+        import math as _math
+
+        viewer = DummyViewer()
+        layer = VirtualMapLayer(viewer, _build_row_descriptor(1), allowed_downsample=[1, 2, 4, 8])
+
+        test_cases = [
+            # (xmin, xmax, ymin, ymax, ds)
+            (0.0, 100.0, 0.0, 100.0, 1),
+            (0.0, 100.1, 0.0, 99.9, 1),   # fractional extents
+            (0.0, 800.0, 0.0, 600.0, 8),  # large downsampled view
+            (0.3, 100.7, 0.2, 50.8, 2),   # sub-pixel offsets
+        ]
+        for xmin, xmax, ymin, ymax, ds in test_cases:
+            # _allocate_canvas is a pure computation; no need to call set_viewport
+            canvas = layer._allocate_canvas(xmin, xmax, ymin, ymax, ds)
+            pixel_size = 1.0 * ds  # base_pixel_size_um == 1.0 for these fixtures
+            min_w = _math.ceil((xmax - xmin) / pixel_size)
+            min_h = _math.ceil((ymax - ymin) / pixel_size)
+            self.assertGreaterEqual(canvas.shape[1], min_w, msg=f"width too small for {(xmin,xmax,ymin,ymax,ds)}")
+            self.assertGreaterEqual(canvas.shape[0], min_h, msg=f"height too small for {(xmin,xmax,ymin,ymax,ds)}")
+
+
 if __name__ == "__main__":
     unittest.main()

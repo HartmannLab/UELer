@@ -122,21 +122,54 @@ class VirtualMapLayer:
 
         visible_tiles = self._collect_visible_tiles(xmin_um, xmax_um, ymin_um, ymax_um)
 
-        # For very large maps cap the number of tiles rendered per call to avoid
-        # loading hundreds of TIFF files from a slow network FS in one shot.
-        # Prefer tiles closest to the viewport centre so the most relevant
-        # region is always visible; the rest fade in on panning / zooming.
-        _RENDER_TILE_LIMIT: int = getattr(self._viewer, '_map_render_tile_limit', 80)
-        if len(visible_tiles) > _RENDER_TILE_LIMIT:
+        channels_tuple = tuple(selected_channels)
+        state_signature = None
+        signature_provider = getattr(self._viewer, "_map_state_signature", None)
+        if callable(signature_provider):
+            try:
+                state_signature = signature_provider(channels_tuple, ds_factor)
+            except Exception:  # pragma: no cover - viewer-provided signature is optional
+                state_signature = None
+
+        # For very large maps cap uncached tiles to avoid loading hundreds of TIFF
+        # files from a slow network FS in one shot.  Cached tiles always render
+        # regardless of count.  The uncached budget scales with the downsample factor
+        # so fully-zoomed-out views (ds=8+) show all FOVs without cutting off edges.
+        _BASE_UNCACHED_LIMIT: int = getattr(self._viewer, '_map_render_tile_limit', 80)
+        effective_uncached_limit = _BASE_UNCACHED_LIMIT * max(1, ds_factor)
+        if len(visible_tiles) > effective_uncached_limit:
             cx = (xmin_um + xmax_um) / 2.0
             cy = (ymin_um + ymax_um) / 2.0
-            visible_tiles = sorted(
-                visible_tiles,
-                key=lambda item: (
-                    ((item[0].x_min_um + item[0].x_max_um) / 2.0 - cx) ** 2
-                    + ((item[0].y_min_um + item[0].y_max_um) / 2.0 - cy) ** 2
-                ),
-            )[:_RENDER_TILE_LIMIT]
+
+            def _is_cached(tile, intersection):
+                region = self._compute_tile_region(tile, intersection, ds_factor)
+                if region is None:
+                    return False
+                region_xy, _ = region
+                key = (
+                    "tile",
+                    self._map_id,
+                    tile.name,
+                    ds_factor,
+                    channels_tuple,
+                    region_xy,
+                    state_signature,
+                )
+                return self._cache_lookup(key) is not None
+
+            cached_tiles = [item for item in visible_tiles if _is_cached(*item)]
+            uncached_tiles = [item for item in visible_tiles if not _is_cached(*item)]
+
+            if len(uncached_tiles) > effective_uncached_limit:
+                uncached_tiles = sorted(
+                    uncached_tiles,
+                    key=lambda item: (
+                        ((item[0].x_min_um + item[0].x_max_um) / 2.0 - cx) ** 2
+                        + ((item[0].y_min_um + item[0].y_max_um) / 2.0 - cy) ** 2
+                    ),
+                )[:effective_uncached_limit]
+
+            visible_tiles = cached_tiles + uncached_tiles
 
         self._last_visible_fovs = tuple(tile.name for tile, _ in visible_tiles)
         self._last_tile_viewports.clear()
@@ -152,14 +185,6 @@ class VirtualMapLayer:
             return np.zeros((empty_height, empty_width, 3), dtype=np.float32)
 
         canvas = self._allocate_canvas(xmin_um, xmax_um, ymin_um, ymax_um, ds_factor)
-        channels_tuple = tuple(selected_channels)
-        state_signature = None
-        signature_provider = getattr(self._viewer, "_map_state_signature", None)
-        if callable(signature_provider):
-            try:
-                state_signature = signature_provider(channels_tuple, ds_factor)
-            except Exception:  # pragma: no cover - viewer-provided signature is optional
-                state_signature = None
 
         for tile, intersection in visible_tiles:
             region = self._compute_tile_region(tile, intersection, ds_factor)

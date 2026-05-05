@@ -1910,6 +1910,11 @@ class BatchExportPlugin(PluginBase):
             viewer.load_fov(tile.name, channels)
             fov_arrays = viewer.image_cache.get(tile.name)
             if not fov_arrays:
+                import warnings
+                warnings.warn(
+                    f"Map export: tile '{tile.name}' could not be loaded; it will appear blank in the output.",
+                    stacklevel=2,
+                )
                 continue
 
             tile_image = render_fov_to_array(

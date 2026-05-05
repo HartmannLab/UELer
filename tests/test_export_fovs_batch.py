@@ -1771,6 +1771,116 @@ class BatchExportMapROIItemsTests(unittest.TestCase):
         self.assertIn("[MAP:slide-1]", label)
         self.assertNotIn("nan", label.lower())
 
+    def test_render_map_region_direct_warns_when_tile_load_fails(self):
+        """When image_cache.get returns None, a UserWarning is emitted naming the tile."""
+        import warnings as _warnings
+        from ueler.viewer.virtual_map_layer import MapTileGeometry
+
+        tile = MapTileGeometry(
+            name="MISSING_FOV",
+            pixel_size_um=1.0,
+            width_px=50,
+            height_px=50,
+            x_min_um=0.0,
+            x_max_um=50.0,
+            y_min_um=0.0,
+            y_max_um=50.0,
+        )
+        intersection = (5.0, 45.0, 5.0, 45.0)
+        region_xy = (5, 45, 5, 45)
+        region_ds = (5, 45, 5, 45)
+        canvas = np.zeros((50, 50, 3), dtype=np.float32)
+
+        class _StubLayer:
+            _allowed_downsample = (1,)
+            def base_pixel_size_um(self): return 1.0
+            def _collect_visible_tiles(self, *_a): return [(tile, intersection)]
+            def _allocate_canvas(self, *_a): return canvas
+            def _compute_tile_region(self, *_a): return (region_xy, region_ds)
+            def _blit_tile(self, *_a, **_kw): return None
+
+        class _FakeViewer:
+            image_cache = {}  # .get always returns None
+            def load_fov(self, fov_name, channels): pass
+
+        plugin = BatchExportPlugin.__new__(BatchExportPlugin)
+        plugin.main_viewer = _FakeViewer()
+
+        channels = ("DNA",)
+        from ueler.rendering import ChannelRenderSettings
+        channel_settings = {"DNA": ChannelRenderSettings(color=(1.0, 0.0, 0.0), contrast_min=0.0, contrast_max=1.0)}
+
+        with _warnings.catch_warnings(record=True) as caught:
+            _warnings.simplefilter("always")
+            plugin._render_map_region_direct(
+                _StubLayer(), 5.0, 45.0, 5.0, 45.0, 1, channels, channel_settings
+            )
+
+        self.assertEqual(len(caught), 1)
+        self.assertTrue(issubclass(caught[0].category, UserWarning))
+        self.assertIn("MISSING_FOV", str(caught[0].message))
+
+    def test_render_map_region_direct_canvas_size_correct_for_multi_tile_roi(self):
+        """Canvas returned by _render_map_region_direct has correct pixel dimensions."""
+        import math as _math
+        from ueler.rendering import ChannelRenderSettings
+        from ueler.viewer.virtual_map_layer import MapFOVSpec, SlideDescriptor, VirtualMapLayer
+
+        # 3×3 grid of 100×100 µm tiles with 1 µm/px
+        specs = tuple(
+            MapFOVSpec(
+                name=f"FOV_{r}_{c}",
+                slide_id="grid",
+                center_um=(50.0 + c * 100.0, 50.0 + r * 100.0),
+                frame_size_px=(100, 100),
+                fov_size_um=100.0,
+                metadata={},
+            )
+            for r in range(3)
+            for c in range(3)
+        )
+        descriptor = SlideDescriptor(
+            slide_id="grid",
+            source_path=Path("dummy_grid.json"),
+            export_datetime=None,
+            fovs=specs,
+        )
+
+        class _ViewerForLayer:
+            def _render_fov_region(self, fov_name, channels, ds, region_xy, region_ds):
+                w = max(1, region_ds[1] - region_ds[0])
+                h = max(1, region_ds[3] - region_ds[2])
+                return np.zeros((h, w, 3), dtype=np.float32)
+
+        layer = VirtualMapLayer(_ViewerForLayer(), descriptor, allowed_downsample=[1, 2])
+
+        fov_arrays = {"DNA": np.ones((100, 100), dtype=np.float32)}
+
+        class _FakeViewer:
+            def __init__(self):
+                self.image_cache = {f"FOV_{r}_{c}": fov_arrays for r in range(3) for c in range(3)}
+            def load_fov(self, *_a): pass
+
+        plugin = BatchExportPlugin.__new__(BatchExportPlugin)
+        plugin.main_viewer = _FakeViewer()
+
+        channels = ("DNA",)
+        channel_settings = {"DNA": ChannelRenderSettings(color=(1.0, 0.0, 0.0), contrast_min=0.0, contrast_max=1.0)}
+
+        # ROI covers the full 3×3 grid (0–300 µm × 0–300 µm), ds=2
+        with mock.patch("ueler.viewer.plugin.export_fovs.render_fov_to_array",
+                        lambda *a, **kw: np.zeros((50, 50, 3), dtype=np.float32)):
+            canvas = plugin._render_map_region_direct(
+                layer, 0.0, 300.0, 0.0, 300.0, 2, channels, channel_settings
+            )
+
+        ds = 2
+        pixel_size = 1.0 * ds
+        expected_w = _math.ceil(300.0 / pixel_size)
+        expected_h = _math.ceil(300.0 / pixel_size)
+        self.assertGreaterEqual(canvas.shape[1], expected_w)
+        self.assertGreaterEqual(canvas.shape[0], expected_h)
+
     def test_roi_table_observer_refreshes_batch_export_roi_list(self):
         """When ROI manager adds a new ROI, the batch export's roi_selection is refreshed."""
         from ueler.viewer.roi_manager import ROIManager
