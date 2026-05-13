@@ -1,5 +1,70 @@
 ### v0.3.1
 
+**Issue #99 — Store export config paths as relative filenames**
+- Root cause: `_save_export_config` in `export_fovs.py` called `.resolve()` on the config file path before serialising it into the registry JSON. This embedded an absolute path in `export_configs_index.json`, so loading or deleting a saved config broke whenever the project was moved or shared with another user.
+- Added module-level `_resolve_config_path(folder, stored_path)` helper: returns `folder / stored_path` for relative entries and the path as-is for legacy absolute entries, ensuring backward compatibility.
+- `_save_export_config` now stores only the filename (e.g. `my-config.export_config.json`) instead of the full absolute path.
+- `_load_export_config` and `_delete_export_config` both route through `_resolve_config_path` to reconstruct the absolute path at read time.
+- Added `test_save_config_stores_relative_path`: asserts the registry entry is not absolute.
+- Added `test_load_config_survives_folder_move`: copies the temp dir to a new location, re-initialises the plugin there, and verifies the config loads correctly with the original widget values.
+- Validated: 15 tests in `tests/test_export_fovs_mask_customization.py` — all passed.
+
+**Issue #98 — Fix batch export partial images in map mode**
+- Root cause: `_render_map_region_direct` (`export_fovs.py`) used `viewer.image_cache.get(tile.name)` immediately after `viewer.load_fov()`. The shared `image_cache` can be concurrently evicted by the live viewer UI, so `get()` sometimes returns `None` even though `load_fov()` succeeded. The prior fix in #94 added a warning but still continued — writing a partial canvas to disk.
+- Added a single retry (50 ms sleep + reload) before giving up on a tile, to handle transient eviction races.
+- After the retry, if the tile is still missing, a `RuntimeError` is raised naming the tile and explaining the abort. This propagates through `_export_map_roi_worker()` to the job runner, which records the item as `ok=False` with the error message — preventing any partial image from being written to disk.
+- Updated `test_render_map_region_direct_warns_when_tile_load_fails` → `test_render_map_region_direct_raises_when_tile_load_fails` to assert `RuntimeError` (with tile name and "partial image" in the message).
+- Added `test_render_map_region_direct_succeeds_on_retry`: verifies that when `image_cache.get` returns `None` on the first call but a valid array on the second, `load_fov` is called twice and export completes successfully.
+- Validated: 57 tests in `tests/test_export_fovs_batch.py` — 56 passed, 1 pre-existing failure unrelated to this change.
+
+**Issue #96 — Consistent ROI naming across plugins + hover tooltip in ROI Gallery**
+- Extracted `format_roi_label(record)` to `ueler/viewer/roi_manager.py` (exported via `__all__`). The unified format is `{location} · {marker_set}[{tags}] · {roi_id[:8]}`, replacing coordinates with the unique ID prefix and adding tags to the batch export label.
+- Updated `ROIManagerPlugin._format_roi_label` (`roi_manager_plugin.py`) to delegate to the shared function.
+- Updated `BatchExportPlugin.refresh_roi_options` (`export_fovs.py`) to use `format_roi_label`, ensuring the ROI selection dropdown in batch export now includes tags and uses the same format as the ROI Manager.
+- Added `browser_hover_label` HTML widget to the ROI Gallery (below the thumbnail grid). Connecting `motion_notify_event` to the matplotlib figure updates the label with the formatted ROI name while the cursor hovers over a thumbnail; `axes_leave_event` clears it.
+- Added `_browser_records_cache` dict to `ROIManagerPlugin` to make hover lookup O(1) without re-querying the ROI manager.
+- Validated: 23 tests passed (`test_cell_table_editor.py`, `test_lasso_selection.py`).
+
+**Issue #95 — Speed up the Mask Painter**
+- Root cause: `_compose_fov_image` (`main_viewer.py`) and `_apply_map_painter_overlay` each called four separate `get_effective_*_map_for_fov` methods on the painter, and each called `build_painter_state_maps_for_fov` independently — a 4× redundant cell-table filter + Python row-loop per render frame.
+- Added `get_effective_state_maps_for_fov(fov)` to `MaskPainterDisplay` (`ueler/viewer/plugin/mask_painter.py`): calls `build_painter_state_maps_for_fov` once and returns all four maps as a tuple. Results are cached per FOV in `_state_maps_cache`; the cache is cleared in `apply_colors_to_masks` whenever painter UI state changes (color, visibility, mode, opacity, etc.). Pan/zoom events with unchanged painter state are now O(1) after the first render.
+- Updated `_compose_fov_image` (`main_viewer.py:3941`): replaced the four separate `get_effective_*_map_for_fov` calls with a single `get_effective_state_maps_for_fov` call; retained individual-method fallback for backward compatibility.
+- Updated `_apply_map_painter_overlay` (`main_viewer.py:1764`): moved all four per-FOV painter queries to a single `get_effective_state_maps_for_fov` call at the top of the tile loop, eliminating 4N calls for an N-FOV map render.
+- Fixed pre-existing `global_fill_opacity_input` width: changed from `150px` to `95px` to match the existing test assertion (`test_global_fill_layout_uses_spacing_and_narrow_opacity_input`).
+- Extended `tests/bootstrap.py` to stub `BoundedIntText`, `select_dtypes`, `iterrows`, element-wise `__eq__`/`__and__`/`__or__`/`__ne__`, `dtype`, `matplotlib.font_manager`, and `tifffile`, enabling the mask painter tests to run in headless CI environments.
+- Added 5 tests to `TestPainterStateMapsCaching` in `tests/test_mask_painter_mode_visibility.py`.
+- Validated: `python -m unittest tests.test_mask_painter_mode_visibility` — 41 tests passed.
+
+**Make mask loading lazy (Dask) to eliminate OOM kernel crash in VSCode**
+- Changed `load_masks_for_fov` (`ueler/data_loader.py`): removed the unconditional `np.asarray(mask_image)` that materialized every mask as a 16 MB NumPy array at load time. Pre-labeled masks (int32, `needs_label=False`) are now stored in the cache as rechunked lazy Dask arrays (matching the channel-image pattern). Binary/boolean masks (`needs_label=True`) use `dask.delayed(measure.label)(mask_image)` + `da.from_delayed` so that the TIFF read and connected-components labeling happen only on `.compute()`, with no numpy data retained between renders. All downstream code already has `.compute()` / `try-except AttributeError` guards and required no changes.
+- With 200+ FOVs, map-mode mask cache memory drops from ~3.2 GB (eager) to ~0 MB between renders (Dask computation graphs only), resolving the VSCode OOM kernel crash. The 80-FOV map-mode cap added previously remains as a safety net.
+- Validated: 23 tests passed.
+
+**Fix Cell Table Editor Apply button and row-matching in map mode (follow-up)**
+- Added `on_selection_change` lifecycle event to `ImageDisplay` (`ueler/viewer/image_display.py`): `inform_plugins("on_selection_change")` is now called after `selected_masks_label` changes in `clear_patches`, `on_mouse_click` (left-click confirm path), and `_on_lasso_selected`. Previously, no plugin notification was sent when the user clicked or lasso-selected cells, so `CellTableEditorPlugin._refresh_apply_btn()` was never triggered and the Apply button stayed disabled with "No cells selected" even when cells were highlighted.
+- Fixed "No matching rows found" in `CellTableEditorPlugin._on_apply_clicked` (`ueler/viewer/plugin/cell_table_editor.py`): the apply logic was using `mask_key` (the mask layer name, e.g. "whole_cell") as the cell-ID column in the cell table, but every other plugin uses `label_key` ("label") to match cells. Changed to `label_key` for both the dtype cast and the row filter, consistent with the Chart plugin and ARK analysis cell table format.
+- Added `on_selection_change` handler to `CellTableEditorPlugin`: calls `_refresh_apply_btn()` to enable/disable the Apply button immediately after any selection change.
+- Updated `tests/test_cell_table_editor.py` to use `label_key = "label"` / `mask_key = "whole_cell"` and a cell table with a "label" column matching the real ARK analysis schema.
+- Added `inform_plugins = lambda _: None` stub to `_make_viewer_for_lasso` in `tests/test_lasso_selection.py`.
+- Validated: 23 tests passed.
+
+**Fix map-mode lasso selection coordinate mismatch (follow-up 2)**
+- Fixed `_find_masks_in_lasso_map_mode` in `ueler/viewer/image_display.py`: the map canvas is dynamically sized to the current viewport; `dest_x0/dest_y0` are viewport-relative downsampled pixel indices (0 to viewport_width_ds), while `LassoSelector` vertices are in global full-res data coordinates (0 to full_map_width). The formula `canvas_x = dest_x0 + col` therefore compared indices on different scales and at different origins. The fix reads the viewport offset from the axis (`xmin_px = ax.get_xlim()[0]`, `ymin_px = min(ax.get_ylim())`) and applies it: `data_x = xmin_px + (dest_x0 + col) * downsample`. Added `test_viewport_offset_corrects_canvas_to_data_coords` to verify panned-viewport behavior; updated `test_downsampled_tile_cell_selected` to use data-coord lasso vertices; added `ax` mock to `_make_image_display()` in the test helper.
+- Validated: 23 tests passed.
+
+**Fix map-mode lasso selection coordinate bug (follow-up 1)**
+- Fixed `_find_masks_in_lasso_map_mode` in `ueler/viewer/image_display.py`: the method was using `tvp.region_ds` (downsampled pixel coordinates) to index into the full-resolution mask array, which extracted only a tiny top-left corner of each tile. The fix mirrors the correct pattern from `_update_map_mask_highlights`: use `tvp.region_xy` (full-res bounds) to slice the mask array, then apply `[::downsample_factor]` to obtain the tile-sized crop.
+- Updated `TestFindMasksInLassoMapMode` in `tests/test_lasso_selection.py`: replaced `region_ds=` mock with `region_xy=` + `downsample_factor=` to match the fixed implementation; added `test_downsampled_tile_cell_selected`.
+- Added `_LassoSelector` stub to `tests/bootstrap.py` `_ensure_matplotlib_stub()` so the test suite can import `image_display.py` in headless environments.
+- Validated: 22 tests passed.
+
+**Cell Table Editor plugin and lasso selection**
+- Added `CellTableEditorPlugin` (`ueler/viewer/plugin/cell_table_editor.py`): a new side-panel plugin with a column combobox, value text field, and "Apply to selected cells" button. The plugin writes a user-supplied string to a specified column (new or existing) for every cell in the current `selected_masks_label` set, then broadcasts `on_cell_table_change`. Non-system columns are listed as options; new columns are initialized to `""` before assignment. Works for both single-FOV and map-mode selections because matching uses `(fov_key, mask_key)` row lookup.
+- Added freehand lasso selection to the main viewer (`ueler/viewer/image_display.py`): `LassoSelector` (matplotlib) activated via a new "Lasso Select" `ToggleButton` in the left panel. After drawing, `_on_lasso_selected` determines which mask pixels fall inside the polygon using `matplotlib.path.Path.contains_points`. For single-FOV mode (`_find_masks_in_lasso_single_fov`), downsampled mask pixels are mapped back to full-resolution canvas coordinates. For map mode (`_find_masks_in_lasso_map_mode`), each visible tile's `MapTileViewport.dest_x0/y0` offset is used to convert crop-local mask pixels to canvas space. Any cell with at least one pixel inside the polygon is added to `selected_masks_label`. Lasso is one-shot: the selector deactivates and the toggle button resets automatically after each stroke.
+- Added `on_lasso_select_toggle` and `_on_lasso_complete` handlers to `ImageMaskViewer` (`ueler/viewer/main_viewer.py`) and wired a `ToggleButton` widget in `uicomponents.__init__` (`ueler/viewer/ui_components.py`).
+- Added 21 unit tests across two new test files: `tests/test_cell_table_editor.py` (8 tests) and `tests/test_lasso_selection.py` (13 tests).
+- Validated: `python -m unittest tests.test_cell_table_editor tests.test_lasso_selection` — 21 tests passed.
+
 **Issue #94 — Fix map mode edge tiles hidden and batch export subregion**
 - Restructured `VirtualMapLayer.render()` tile cap (`ueler/viewer/virtual_map_layer.py`): moved `channels_tuple` and `state_signature` computation before the cap to enable cache-key lookup during the partition step; replaced the flat 80-tile distance filter with a cache-aware, ds-scaled cap that always renders cached tiles and limits uncached tiles to `base_limit × ds_factor` (so ds=8 allows up to 640 uncached tiles, removing the black-edge symptom on maps with more than 80 FOVs).
 - Fixed silent tile-load failure in `_render_map_region_direct` (`ueler/viewer/plugin/export_fovs.py`): replaced the bare `continue` with `warnings.warn(...)` naming the failed tile so large-ROI exports now surface diagnostic output instead of silently producing black patches.

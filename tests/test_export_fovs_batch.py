@@ -1771,9 +1771,8 @@ class BatchExportMapROIItemsTests(unittest.TestCase):
         self.assertIn("[MAP:slide-1]", label)
         self.assertNotIn("nan", label.lower())
 
-    def test_render_map_region_direct_warns_when_tile_load_fails(self):
-        """When image_cache.get returns None, a UserWarning is emitted naming the tile."""
-        import warnings as _warnings
+    def test_render_map_region_direct_raises_when_tile_load_fails(self):
+        """When image_cache.get returns None on both attempts, RuntimeError is raised."""
         from ueler.viewer.virtual_map_layer import MapTileGeometry
 
         tile = MapTileGeometry(
@@ -1810,15 +1809,72 @@ class BatchExportMapROIItemsTests(unittest.TestCase):
         from ueler.rendering import ChannelRenderSettings
         channel_settings = {"DNA": ChannelRenderSettings(color=(1.0, 0.0, 0.0), contrast_min=0.0, contrast_max=1.0)}
 
-        with _warnings.catch_warnings(record=True) as caught:
-            _warnings.simplefilter("always")
-            plugin._render_map_region_direct(
+        with mock.patch("time.sleep"):  # skip actual sleep in tests
+            with self.assertRaises(RuntimeError) as ctx:
+                plugin._render_map_region_direct(
+                    _StubLayer(), 5.0, 45.0, 5.0, 45.0, 1, channels, channel_settings
+                )
+        self.assertIn("MISSING_FOV", str(ctx.exception))
+        self.assertIn("partial image", str(ctx.exception))
+
+    def test_render_map_region_direct_succeeds_on_retry(self):
+        """When image_cache.get returns None on the first call but a valid array on retry,
+        the export completes without error."""
+        from ueler.viewer.virtual_map_layer import MapTileGeometry
+        from ueler.rendering import ChannelRenderSettings
+
+        tile = MapTileGeometry(
+            name="SLOW_FOV",
+            pixel_size_um=1.0,
+            width_px=50,
+            height_px=50,
+            x_min_um=0.0,
+            x_max_um=50.0,
+            y_min_um=0.0,
+            y_max_um=50.0,
+        )
+        intersection = (5.0, 45.0, 5.0, 45.0)
+        region_xy = (5, 45, 5, 45)
+        region_ds = (5, 45, 5, 45)
+        canvas = np.zeros((50, 50, 3), dtype=np.float32)
+        fov_arrays = {"DNA": np.ones((50, 50), dtype=np.float32)}
+
+        class _StubLayer:
+            _allowed_downsample = (1,)
+            def base_pixel_size_um(self): return 1.0
+            def _collect_visible_tiles(self, *_a): return [(tile, intersection)]
+            def _allocate_canvas(self, *_a): return canvas
+            def _compute_tile_region(self, *_a): return (region_xy, region_ds)
+            def _blit_tile(self, *_a, **_kw): return None
+
+        call_count = {"n": 0}
+
+        class _FakeViewer:
+            def __init__(self):
+                self._cache: dict = {}
+            @property
+            def image_cache(self):
+                return self._cache
+            def load_fov(self, fov_name, channels):
+                call_count["n"] += 1
+                if call_count["n"] >= 2:  # populated on second call
+                    self._cache[fov_name] = fov_arrays
+
+        plugin = BatchExportPlugin.__new__(BatchExportPlugin)
+        plugin.main_viewer = _FakeViewer()
+
+        channels = ("DNA",)
+        channel_settings = {"DNA": ChannelRenderSettings(color=(1.0, 0.0, 0.0), contrast_min=0.0, contrast_max=1.0)}
+
+        with mock.patch("time.sleep"), \
+             mock.patch("ueler.viewer.plugin.export_fovs.render_fov_to_array",
+                        return_value=np.zeros((40, 40, 3), dtype=np.float32)):
+            result = plugin._render_map_region_direct(
                 _StubLayer(), 5.0, 45.0, 5.0, 45.0, 1, channels, channel_settings
             )
 
-        self.assertEqual(len(caught), 1)
-        self.assertTrue(issubclass(caught[0].category, UserWarning))
-        self.assertIn("MISSING_FOV", str(caught[0].message))
+        self.assertEqual(call_count["n"], 2)
+        self.assertIsNotNone(result)
 
     def test_render_map_region_direct_canvas_size_correct_for_multi_tile_roi(self):
         """Canvas returned by _render_map_region_direct has correct pixel dimensions."""

@@ -47,6 +47,7 @@ from ueler.viewer.mask_color_overlay import derive_downsampled_region
 from .plugin_base import PluginBase
 from .roi_expression_editor import ROIExpressionEditorWidget
 from ..layout_utils import column_block_layout, content_widget_layout, flex_fill_layout
+from ..roi_manager import format_roi_label
 from ..tag_expression import TagExpressionError, compile_tag_expression
 
 
@@ -87,7 +88,9 @@ class ROIManagerPlugin(PluginBase):
         self._suspend_ui_events = False
         self._suspend_browser_events = False
         self._browser_axis_to_roi: Dict[object, str] = {}
+        self._browser_records_cache: Dict[str, dict] = {}
         self._browser_click_cid: Optional[int] = None
+        self._browser_motion_cid: Optional[int] = None
         self._browser_figure = None
         self._browser_current_page = 1
         self._browser_total_pages = 1
@@ -378,6 +381,9 @@ class ROIManagerPlugin(PluginBase):
             layout=Layout(height="400px")
         )
 
+        self.ui_component.browser_hover_label = HTML(
+            "", layout=Layout(min_height="1.4em", font_style="italic")
+        )
         self.ui_component.browser_status = HTML("<em>No ROI captured yet.</em>")
         self.ui_component.browser_page_label = HTML("<em>Page 1 of 1</em>")
         self.ui_component.browser_prev_button = Button(
@@ -448,6 +454,7 @@ class ROIManagerPlugin(PluginBase):
             [
                 controls,
                 self.ui_component.browser_output,
+                self.ui_component.browser_hover_label,
                 self.ui_component.browser_pagination,
                 self.ui_component.browser_status,
             ],
@@ -639,19 +646,7 @@ class ROIManagerPlugin(PluginBase):
 
     @staticmethod
     def _format_roi_label(record) -> str:
-        fov = str(record.get("fov") or "")
-        map_id = str(record.get("map_id") or "")
-        marker = record.get("marker_set") or "—"
-        tags = record.get("tags") or ""
-        tag_display = f" [{tags}]" if tags else ""
-        coords = (
-            int(round(record.get("x_min", 0) or 0)),
-            int(round(record.get("y_min", 0) or 0)),
-            int(round(record.get("x_max", 0) or 0)),
-            int(round(record.get("y_max", 0) or 0)),
-        )
-        location = fov if fov else (f"[MAP:{map_id}]" if map_id else "—")
-        return f"{location} · {marker}{tag_display} · {coords[0]}:{coords[1]} → {coords[2]}:{coords[3]}"
+        return format_roi_label(record)
 
     def _refresh_browser_filters(self) -> None:
         widget = getattr(self.ui_component, "browser_fov_filter", None)
@@ -804,6 +799,7 @@ class ROIManagerPlugin(PluginBase):
 
         self._disconnect_browser_events()
         self._browser_axis_to_roi.clear()
+        self._browser_records_cache.clear()
 
         with output:
             output.clear_output(wait=True)
@@ -849,7 +845,9 @@ class ROIManagerPlugin(PluginBase):
                     axis.imshow(tile)
 
                 axis.axis("off")
-                self._browser_axis_to_roi[axis] = record.get("roi_id")
+                roi_id_str = str(record.get("roi_id") or "")
+                self._browser_axis_to_roi[axis] = roi_id_str
+                self._browser_records_cache[roi_id_str] = record
                 rendered += 1
 
             # Display figure directly, matching cell gallery's simple approach
@@ -870,8 +868,11 @@ class ROIManagerPlugin(PluginBase):
         self._browser_figure = fig
         try:
             self._browser_click_cid = fig.canvas.mpl_connect("button_press_event", self._on_browser_click)
+            self._browser_motion_cid = fig.canvas.mpl_connect("motion_notify_event", self._on_browser_motion)
+            fig.canvas.mpl_connect("axes_leave_event", lambda _e: self._clear_browser_hover())
         except Exception:  # pragma: no cover - matplotlib backend quirks
             self._browser_click_cid = None
+            self._browser_motion_cid = None
 
         self._browser_last_signature = signature
         rendered_count = rendered
@@ -879,13 +880,17 @@ class ROIManagerPlugin(PluginBase):
         self._update_pagination_controls(current_page, total_pages, total)
 
     def _disconnect_browser_events(self) -> None:
-        if self._browser_figure is not None and self._browser_click_cid is not None:
-            try:
-                self._browser_figure.canvas.mpl_disconnect(self._browser_click_cid)
-            except Exception:  # pragma: no cover - defensive cleanup
-                pass
+        if self._browser_figure is not None:
+            for cid in (self._browser_click_cid, self._browser_motion_cid):
+                if cid is not None:
+                    try:
+                        self._browser_figure.canvas.mpl_disconnect(cid)
+                    except Exception:  # pragma: no cover - defensive cleanup
+                        pass
         self._browser_click_cid = None
+        self._browser_motion_cid = None
         self._browser_figure = None
+        self._clear_browser_hover()
 
     def _update_browser_summary(self, rendered: int, total: int) -> None:
         status = getattr(self.ui_component, "browser_status", None)
@@ -1676,6 +1681,26 @@ class ROIManagerPlugin(PluginBase):
         if not roi_id:
             return
         self._activate_roi_from_browser(str(roi_id))
+
+    def _on_browser_motion(self, event) -> None:  # pragma: no cover - UI callback
+        widget = getattr(self.ui_component, "browser_hover_label", None)
+        if widget is None:
+            return
+        axis = getattr(event, "inaxes", None)
+        if axis is None:
+            widget.value = ""
+            return
+        roi_id = self._browser_axis_to_roi.get(axis)
+        if not roi_id:
+            widget.value = ""
+            return
+        record = self._browser_records_cache.get(roi_id) or {}
+        widget.value = format_roi_label(record)
+
+    def _clear_browser_hover(self) -> None:  # pragma: no cover
+        widget = getattr(self.ui_component, "browser_hover_label", None)
+        if widget is not None:
+            widget.value = ""
 
     def _activate_roi_from_browser(self, roi_id: str) -> None:
         record = self.main_viewer.roi_manager.get_roi(roi_id)

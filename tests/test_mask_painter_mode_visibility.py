@@ -1117,5 +1117,159 @@ class TestGlobalFillToggleOff(unittest.TestCase):
                          "set_mask_colors_current_fov should not be called for inactive class cells")
 
 
+class TestPainterStateMapsCaching(unittest.TestCase):
+    """Tests for get_effective_state_maps_for_fov and its per-FOV result cache."""
+
+    def setUp(self):
+        clear_cell_colors()
+        self.viewer = _make_viewer()
+
+    def tearDown(self):
+        clear_cell_colors()
+
+    def _make_painter(self):
+        from ueler.viewer.plugin.mask_painter import MaskPainterDisplay
+        import ipywidgets as W
+        from ipywidgets import Checkbox, Layout
+
+        painter = MaskPainterDisplay(self.viewer, width=400, height=300)
+        painter.ui_component.identifier_dropdown.value = "cell_type"
+        painter.current_identifier = "cell_type"
+        painter.current_classes = ["TypeA", "TypeB"]
+        painter.class_color_controls = {
+            "TypeA": W.ColorPicker(description="TypeA", value="#FF0000"),
+            "TypeB": W.ColorPicker(description="TypeB", value="#0000FF"),
+        }
+        painter.class_visible_controls = {
+            "TypeA": Checkbox(value=True, indent=False, layout=Layout(width="30px")),
+            "TypeB": Checkbox(value=True, indent=False, layout=Layout(width="30px")),
+        }
+        painter.class_mode_controls = {
+            "TypeA": Checkbox(value=False, description="fill", indent=False, layout=Layout(width="60px")),
+            "TypeB": Checkbox(value=False, description="fill", indent=False, layout=Layout(width="60px")),
+        }
+        painter.ui_component.show_all_checkbox.value = True
+        painter.selected_classes = ["TypeA", "TypeB"]
+        painter._active_classes = ["TypeA", "TypeB"]
+        painter._push_to_widget()
+        return painter
+
+    def test_get_effective_state_maps_returns_all_four_maps(self):
+        """Combined method returns the same results as the four individual methods."""
+        painter = self._make_painter()
+        color_map, border_map, mode_map, opacity_map = painter.get_effective_state_maps_for_fov("FOV_001")
+        self.assertIsInstance(color_map, dict)
+        self.assertIsInstance(border_map, dict)
+        self.assertIsInstance(mode_map, dict)
+        self.assertIsInstance(opacity_map, dict)
+        self.assertEqual(color_map, painter.get_effective_color_map_for_fov("FOV_001"))
+        self.assertEqual(mode_map, painter.get_effective_mode_map_for_fov("FOV_001"))
+        self.assertEqual(opacity_map, painter.get_effective_opacity_map_for_fov("FOV_001"))
+
+    def test_state_maps_cached_after_first_call(self):
+        """Second call for the same FOV with unchanged state hits the cache."""
+        from ueler.viewer.plugin import mask_painter as mp_module
+        painter = self._make_painter()
+
+        call_count = [0]
+        original = mp_module.build_painter_state_maps_for_fov
+
+        def counting_build(**kwargs):
+            call_count[0] += 1
+            return original(**kwargs)
+
+        with patch.object(mp_module, "build_painter_state_maps_for_fov", side_effect=counting_build):
+            painter._state_maps_cache.clear()
+            painter.get_effective_state_maps_for_fov("FOV_001")
+            painter.get_effective_state_maps_for_fov("FOV_001")
+
+        self.assertEqual(call_count[0], 1, "build_painter_state_maps_for_fov called more than once for same FOV")
+
+    def test_state_maps_cache_invalidated_by_apply_colors_to_masks(self):
+        """apply_colors_to_masks clears the cache so the next render recomputes."""
+        painter = self._make_painter()
+        self.viewer.update_display = lambda _: None
+
+        painter.get_effective_state_maps_for_fov("FOV_001")
+        self.assertIn("FOV_001", painter._state_maps_cache)
+
+        painter.apply_colors_to_masks(None, notify_cell_gallery=False)
+        self.assertNotIn("FOV_001", painter._state_maps_cache)
+
+    def test_state_maps_different_fovs_cached_independently(self):
+        """Cache stores results per FOV; a miss for one FOV doesn't evict another."""
+        from ueler.viewer.plugin import mask_painter as mp_module
+        painter = self._make_painter()
+
+        call_count = [0]
+        original = mp_module.build_painter_state_maps_for_fov
+
+        def counting_build(**kwargs):
+            call_count[0] += 1
+            return original(**kwargs)
+
+        with patch.object(mp_module, "build_painter_state_maps_for_fov", side_effect=counting_build):
+            painter._state_maps_cache.clear()
+            painter.get_effective_state_maps_for_fov("FOV_001")
+            painter.get_effective_state_maps_for_fov("FOV_002")
+            painter.get_effective_state_maps_for_fov("FOV_001")  # cache hit
+            painter.get_effective_state_maps_for_fov("FOV_002")  # cache hit
+
+        self.assertEqual(call_count[0], 2, "Expected exactly one build call per unique FOV")
+
+    def test_compose_fov_image_uses_combined_state_maps_method(self):
+        """_compose_fov_image calls get_effective_state_maps_for_fov, not four separate methods."""
+        from ueler.viewer.main_viewer import ImageMaskViewer
+
+        calls = []
+
+        def fake_state_maps(fov):
+            calls.append(fov)
+            return {1: "#FF0000"}, {}, {1: "outline"}, {}
+
+        fake_painter = types.SimpleNamespace(
+            get_effective_state_maps_for_fov=fake_state_maps,
+            get_show_borders_on_filled=lambda: False,
+        )
+        viewer = types.SimpleNamespace(
+            image_cache={"FOV_001": {"ch1": np.zeros((2, 2), dtype=np.uint16)}},
+            ui_component=types.SimpleNamespace(
+                color_controls={"ch1": types.SimpleNamespace(value="Red")},
+                contrast_min_controls={"ch1": types.SimpleNamespace(value=0.0)},
+                contrast_max_controls={"ch1": types.SimpleNamespace(value=1.0)},
+                mask_display_controls={"cell": types.SimpleNamespace(value=True)},
+                mask_color_controls={},
+            ),
+            predefined_colors={"Red": "#FF0000"},
+            annotations_available=False,
+            annotation_display_enabled=False,
+            active_annotation_name=None,
+            masks_available=True,
+            mask_key="cell",
+            mask_outline_thickness=1,
+            label_masks_cache={"FOV_001": {"cell": {1: np.array([[1, 0], [0, 2]], dtype=np.int32)}}},
+            image_display=types.SimpleNamespace(selected_cells=[]),
+            is_no_image_mode_enabled=lambda: False,
+        )
+        viewer.load_fov = lambda _fov, _channels: None
+        viewer._get_label_mask_at_factor = lambda _fov, _mask, _ds: np.array([[1, 0], [0, 2]], dtype=np.int32)
+        viewer._is_mask_painter_enabled = lambda: True
+        viewer._get_mask_painter = lambda: fake_painter
+
+        with patch("ueler.viewer.main_viewer.render_fov_to_array", return_value=np.zeros((2, 2, 3), dtype=np.float32)), \
+             patch("ueler.viewer.main_viewer.collect_mask_regions", return_value={"cell": np.array([[1, 0], [0, 2]], dtype=np.int32)}), \
+             patch("ueler.viewer.main_viewer.apply_registry_colors", side_effect=lambda image, **kwargs: image):
+            ImageMaskViewer._compose_fov_image(
+                viewer,
+                "FOV_001",
+                ("ch1",),
+                1,
+                (0, 2, 0, 2),
+                (0, 2, 0, 2),
+            )
+
+        self.assertEqual(calls, ["FOV_001"], "get_effective_state_maps_for_fov should be called exactly once")
+
+
 if __name__ == "__main__":
     unittest.main()

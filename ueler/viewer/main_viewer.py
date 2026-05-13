@@ -245,8 +245,13 @@ def _dedupe_channel_sequence(channels: Sequence[str]) -> Tuple[str, ...]:
     return tuple(ordered)
 
 class ImageMaskViewer:
-    def __init__(self, base_folder, masks_folder=None, annotations_folder=None):
+    def __init__(self, base_folder, masks_folder=None, annotations_folder=None, debug=False):
         self.initialized = False
+        # Set True by display_ui() once the widget tree is sent to the browser.
+        # draw_idle() and on_draw-triggered renders are suppressed until then so
+        # that deferred ipympl comm events don't fire against a hidden canvas and
+        # crash the kernel (most visible when auto_display=False).
+        self._widget_displayed = False
         self.base_folder = base_folder
         self.masks_folder = masks_folder
         if annotations_folder is None:
@@ -306,7 +311,7 @@ class ImageMaskViewer:
         self.mask_key = "mask"
         self.fov_key = "fov"
 
-        self._debug = False
+        self._debug = debug
 
         # Frame selection for stacked imagery (OME-TIFF)
         self.current_frame_index: int = 0
@@ -1239,6 +1244,20 @@ class ImageMaskViewer:
         self.update_display(self.current_downsample_factor)
         self.inform_plugins('on_no_image_toggle')
 
+    def on_lasso_select_toggle(self, change):
+        image_display = getattr(self, "image_display", None)
+        if image_display is None:
+            return
+        if change.get("new"):
+            image_display.enable_lasso_selector(on_complete=self._on_lasso_complete)
+        else:
+            image_display.disable_lasso_selector()
+
+    def _on_lasso_complete(self):
+        toggle = getattr(getattr(self, "ui_component", None), "lasso_select_toggle", None)
+        if toggle is not None:
+            toggle.value = False
+
     def _map_state_signature(
         self,
         selected_channels: Tuple[str, ...],
@@ -1745,11 +1764,25 @@ class ImageMaskViewer:
         painter = self._get_mask_painter()
 
         for fov_name, viewport_info in tile_viewports.items():
-            color_helper = getattr(painter, "get_effective_color_map_for_fov", None) if painter is not None else None
-            if callable(color_helper):
-                cell_colors = color_helper(str(fov_name))
+            if painter is not None:
+                state_maps_helper = getattr(painter, "get_effective_state_maps_for_fov", None)
+                if callable(state_maps_helper):
+                    (cell_colors, border_color_map_for_fov,
+                     mode_map_for_fov, opacity_map_for_fov) = state_maps_helper(str(fov_name))
+                else:
+                    color_helper = getattr(painter, "get_effective_color_map_for_fov", None)
+                    cell_colors = color_helper(str(fov_name)) if callable(color_helper) else get_all_cell_colors_for_fov(str(fov_name))
+                    mode_helper = getattr(painter, "get_effective_mode_map_for_fov", None)
+                    mode_map_for_fov = mode_helper(str(fov_name)) if callable(mode_helper) else painter.get_mode_map_for_fov(str(fov_name))
+                    opacity_helper = getattr(painter, "get_effective_opacity_map_for_fov", None)
+                    opacity_map_for_fov = opacity_helper(str(fov_name)) if callable(opacity_helper) else painter.get_opacity_map_for_fov(str(fov_name))
+                    border_color_helper = getattr(painter, "get_effective_border_color_map_for_fov", None)
+                    border_color_map_for_fov = border_color_helper(str(fov_name)) if callable(border_color_helper) else {}
             else:
                 cell_colors = get_all_cell_colors_for_fov(str(fov_name))
+                mode_map_for_fov = {}
+                opacity_map_for_fov = {}
+                border_color_map_for_fov = {}
             if not cell_colors:
                 continue
 
@@ -1796,24 +1829,6 @@ class ImageMaskViewer:
             if section_view.size == 0:
                 continue
 
-            mode_helper = getattr(painter, "get_effective_mode_map_for_fov", None) if painter is not None else None
-            if callable(mode_helper):
-                mode_map_for_fov = mode_helper(str(fov_name))
-            else:
-                mode_map_for_fov = painter.get_mode_map_for_fov(str(fov_name)) if painter is not None else {}
-
-            opacity_helper = getattr(painter, "get_effective_opacity_map_for_fov", None) if painter is not None else None
-            if callable(opacity_helper):
-                opacity_map_for_fov = opacity_helper(str(fov_name))
-            else:
-                opacity_map_for_fov = painter.get_opacity_map_for_fov(str(fov_name)) if painter is not None else {}
-
-            border_color_helper = getattr(painter, "get_effective_border_color_map_for_fov", None) if painter is not None else None
-            if callable(border_color_helper):
-                border_color_map_for_fov = border_color_helper(str(fov_name))
-            else:
-                border_color_map_for_fov = {}
-
             show_borders_on_filled = painter.get_show_borders_on_filled() if painter is not None else False
 
             rows = min(section_view.shape[0], mask_region_ds.shape[0])
@@ -1852,9 +1867,6 @@ class ImageMaskViewer:
                 if self._debug:
                     print(f"Calling after_all_plugins_loaded for {attr_name}")
                 attr.after_all_plugins_loaded()
-            else:
-                if self._debug:
-                    print(f"Skipping {attr_name}")
 
 
     def dynamically_load_plugins(self, allow_plugins: Optional[Iterable[str]] = None):
@@ -3923,20 +3935,25 @@ class ImageMaskViewer:
         painter_opacity_map = None
         painter_show_borders_on_filled = False
         if painter is not None:
-            color_helper = getattr(painter, "get_effective_color_map_for_fov", None)
-            if callable(color_helper):
-                painter_color_map = color_helper(fov_name)
-            border_color_helper = getattr(painter, "get_effective_border_color_map_for_fov", None)
-            if callable(border_color_helper):
-                painter_border_color_map = border_color_helper(fov_name)
-            mode_helper = getattr(painter, "get_effective_mode_map_for_fov", None)
-            if callable(mode_helper):
-                painter_mode_map = mode_helper(fov_name)
-            elif hasattr(painter, "get_mode_map_for_fov"):
-                painter_mode_map = painter.get_mode_map_for_fov(fov_name)
-            opacity_helper = getattr(painter, "get_effective_opacity_map_for_fov", None)
-            if callable(opacity_helper):
-                painter_opacity_map = opacity_helper(fov_name)
+            state_maps_helper = getattr(painter, "get_effective_state_maps_for_fov", None)
+            if callable(state_maps_helper):
+                (painter_color_map, painter_border_color_map,
+                 painter_mode_map, painter_opacity_map) = state_maps_helper(fov_name)
+            else:
+                color_helper = getattr(painter, "get_effective_color_map_for_fov", None)
+                if callable(color_helper):
+                    painter_color_map = color_helper(fov_name)
+                border_color_helper = getattr(painter, "get_effective_border_color_map_for_fov", None)
+                if callable(border_color_helper):
+                    painter_border_color_map = border_color_helper(fov_name)
+                mode_helper = getattr(painter, "get_effective_mode_map_for_fov", None)
+                if callable(mode_helper):
+                    painter_mode_map = mode_helper(fov_name)
+                elif hasattr(painter, "get_mode_map_for_fov"):
+                    painter_mode_map = painter.get_mode_map_for_fov(fov_name)
+                opacity_helper = getattr(painter, "get_effective_opacity_map_for_fov", None)
+                if callable(opacity_helper):
+                    painter_opacity_map = opacity_helper(fov_name)
             border_helper = getattr(painter, "get_show_borders_on_filled", None)
             if callable(border_helper):
                 painter_show_borders_on_filled = bool(border_helper())
@@ -4470,7 +4487,8 @@ class ImageMaskViewer:
                 self.image_display.img_display.set_data(blank)
                 self.image_display.img_display.set_extent(xym_r)
                 self.image_display.combined = blank
-                self.image_display.fig.canvas.draw_idle()
+                if self._widget_displayed:
+                    self.image_display.fig.canvas.draw_idle()
                 return
 
         visible_fovs: Tuple[str, ...] = ()
@@ -4518,7 +4536,8 @@ class ImageMaskViewer:
         self.image_display.img_display.set_data(combined)
         self.image_display.combined = combined
         self.image_display.img_display.set_extent(xym_r)
-        self.image_display.fig.canvas.draw_idle()
+        if self._widget_displayed:
+            self.image_display.fig.canvas.draw_idle()
 
         self._visible_map_fovs = visible_fovs
 

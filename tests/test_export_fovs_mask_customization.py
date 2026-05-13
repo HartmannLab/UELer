@@ -372,6 +372,46 @@ class TestExportConfigTemplates(unittest.TestCase):
             plugin._save_export_config()
         self.assertEqual(len(plugin._export_config_registry), 3)
 
+    def test_save_config_stores_relative_path(self):
+        """Registry must store a filename, not an absolute path (issue #99)."""
+        plugin = self._make_plugin()
+        plugin.ui_component.config_name_input.value = "relative test"
+        plugin._save_export_config()
+        record = list(plugin._export_config_registry.values())[0]
+        stored = record["path"]
+        from pathlib import Path as _Path
+        self.assertFalse(
+            _Path(stored).is_absolute(),
+            f"Registry should store a relative filename, got: {stored!r}",
+        )
+
+    def test_load_config_survives_folder_move(self):
+        """Config must remain loadable after the base folder is renamed (issue #99)."""
+        import shutil
+        plugin = self._make_plugin()
+        plugin.ui_component.config_name_input.value = "move test"
+        plugin.ui_component.dpi_input.value = 72
+        plugin._save_export_config()
+
+        # Simulate moving the project to a new location
+        new_base = self.base_path.parent / (self.base_path.name + "_moved")
+        shutil.copytree(str(self.base_path), str(new_base))
+        self.addCleanup(shutil.rmtree, str(new_base), True)
+
+        viewer2 = _ViewerStub(new_base)
+        plugin2 = _TestPlugin(viewer2, width=320, height=480)
+        self.addCleanup(plugin2._executor.shutdown, False)
+        plugin2._refresh_config_dropdown()  # mirrors after_all_plugins_loaded()
+
+        # Registry should load from the moved folder
+        self.assertIn("move test", plugin2._export_config_registry)
+        saved_name = "move test"
+        plugin2.ui_component.config_saved_dropdown.options = [(saved_name, saved_name)]
+        plugin2.ui_component.config_saved_dropdown.value = saved_name
+        plugin2._load_export_config()
+        self.assertEqual(plugin2.ui_component.dpi_input.value, 72)
+        self.assertIn("color:green", plugin2.ui_component.config_status.value)
+
     def test_delete_nonexistent_does_not_crash(self):
         plugin = self._make_plugin()
         plugin.ui_component.config_saved_dropdown.options = []

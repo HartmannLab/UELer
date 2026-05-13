@@ -19,7 +19,8 @@ from ueler.image_utils import (
 )
 from ueler.rendering.engine import scale_outline_thickness, thicken_outline
 from matplotlib.patches import Polygon
-from matplotlib.widgets import RectangleSelector
+from matplotlib.widgets import LassoSelector, RectangleSelector
+from matplotlib.path import Path as MplPath
 # from skimage.measure import find_contours
 from skimage.segmentation import find_boundaries
 import cv2
@@ -61,6 +62,9 @@ class ImageDisplay:
         self.selected_mask_label = set()  # For storing mask IDs to display
         self._roi_selector = None
         self._roi_callback = None
+        self._lasso_selector = None
+        self._lasso_active = False
+        self._lasso_on_complete = None
         # Viewport size trackers used by on_draw to detect zoom changes even
         # when the center is unchanged (e.g., scroll-wheel zoom).
         self.prev_viewport_width: float = 0.0
@@ -265,7 +269,7 @@ class ImageDisplay:
         if new_downsample_factor != self.main_viewer.current_downsample_factor:
             self.main_viewer.on_downsample_factor_changed(new_downsample_factor)
         
-        if self.main_viewer.initialized:
+        if self.main_viewer.initialized and getattr(self.main_viewer, '_widget_displayed', False):
             self.main_viewer.update_display(self.main_viewer.current_downsample_factor)
 
     def on_mouse_move(self, event):
@@ -347,6 +351,9 @@ class ImageDisplay:
             print("Mouse click outside axes")
             return
 
+        if self._lasso_active:
+            return
+
         # Check if any navigation tool is active
         if self.fig.canvas.toolbar is not None and self.fig.canvas.toolbar.mode != '':
             # A navigation tool (e.g., zoom or pan) is active; ignore the click
@@ -376,12 +383,14 @@ class ImageDisplay:
             else:
                 self.selected_masks_label.add(selection)
             self.update_patches(do_not_reset=multi_select)
+            self.main_viewer.inform_plugins("on_selection_change")
         elif event.button in {MouseButton.RIGHT, 3}:  # Right click fallback to legacy value
             self.clear_patches()
 
     def clear_patches(self):
         self.selected_masks_label.clear()
         self.update_patches()
+        self.main_viewer.inform_plugins("on_selection_change")
 
     def update_patches(self, do_not_reset=False):
         """Update the display of selected mask patches (contour lines)."""
@@ -676,4 +685,214 @@ class ImageDisplay:
         callback = self._roi_callback
         self.disable_roi_selector()
         callback(bounds)
-        
+
+    # ------------------------------------------------------------------
+    # Lasso selection helpers
+    # ------------------------------------------------------------------
+
+    def enable_lasso_selector(self, on_complete=None):
+        """Activate freehand lasso selection mode (one-shot)."""
+        self.disable_lasso_selector()
+        # Release any active navigation tool so the LassoSelector can acquire
+        # the canvas widget lock.  Without this, zoom/pan mode silently blocks
+        # all LassoSelector events via canvas.widgetlock.
+        try:
+            toolbar = self.fig.canvas.toolbar
+            if toolbar is not None and getattr(toolbar, 'mode', '') != '':
+                mode = str(toolbar.mode).lower()
+                if 'zoom' in mode and hasattr(toolbar, 'zoom'):
+                    toolbar.zoom()
+                elif 'pan' in mode and hasattr(toolbar, 'pan'):
+                    toolbar.pan()
+        except Exception:
+            pass
+        self._lasso_active = True
+        self._lasso_on_complete = on_complete
+        self._lasso_selector = LassoSelector(
+            self.ax,
+            self._on_lasso_selected,
+            button=[1],
+            useblit=False,  # useblit=True restores the pre-lasso background AFTER our
+                            # callback, wiping the selection highlights drawn by update_patches()
+        )
+
+    def disable_lasso_selector(self):
+        """Deactivate lasso selection mode."""
+        selector = self._lasso_selector
+        self._lasso_selector = None
+        self._lasso_active = False
+        self._lasso_on_complete = None
+        if selector is not None:
+            try:
+                selector.set_active(False)
+            except Exception:
+                pass
+            try:
+                selector.disconnect_events()
+            except Exception:
+                pass
+
+    def _on_lasso_selected(self, verts):
+        """Callback fired when the user completes a lasso gesture."""
+        on_complete = self._lasso_on_complete
+        # Mark inactive so click-select works again immediately, but do NOT
+        # call disable_lasso_selector() here — we are still inside the
+        # LassoSelector event handler.  Calling disconnect_events() from
+        # within the handler that triggered the callback is unsafe.
+        # The LassoSelector will call set_active(False) + update() itself
+        # after this callback returns; with useblit=False, update() just
+        # schedules a draw_idle(), which re-renders our updated image data.
+        self._lasso_active = False
+        self._lasso_on_complete = None
+
+        if not verts or len(verts) < 3:
+            if on_complete is not None:
+                on_complete()
+            return
+
+        try:
+            if getattr(self.main_viewer, "_map_mode_active", False) and getattr(self.main_viewer, "_active_map_id", None):
+                new_selections = self._find_masks_in_lasso_map_mode(verts)
+            else:
+                new_selections = self._find_masks_in_lasso_single_fov(verts)
+        except Exception:
+            new_selections = set()
+
+        self.selected_masks_label.update(new_selections)
+        self.update_patches()
+        self.main_viewer.inform_plugins("on_selection_change")
+
+        if on_complete is not None:
+            on_complete()
+
+        # Schedule deferred cleanup of the selector reference (safe to
+        # disconnect outside the event handler context).
+        try:
+            timer = self.fig.canvas.new_timer(interval=50)
+            timer.single_shot = True
+            timer.add_callback(self._deferred_lasso_cleanup)
+            timer.start()
+        except Exception:
+            self._lasso_selector = None
+
+    def _deferred_lasso_cleanup(self):
+        """Clean up the lasso selector reference after the event handler has returned."""
+        selector = self._lasso_selector
+        self._lasso_selector = None
+        if selector is not None:
+            try:
+                selector.disconnect_events()
+            except Exception:
+                pass
+
+    def _find_masks_in_lasso_single_fov(self, verts) -> set:
+        """Return MaskSelections whose pixels fall inside the lasso polygon (single-FOV)."""
+        from ueler.image_utils import get_axis_limits_with_padding
+
+        path = MplPath(verts)
+        result = set()
+
+        selector = getattr(self.main_viewer.ui_component, "image_selector", None)
+        fov_name = selector.value if selector is not None else None
+        if not fov_name:
+            return result
+
+        ds = self.main_viewer.current_downsample_factor
+        xmin, xmax, ymin, ymax, _xds, _xds2, _yds, _yds2 = get_axis_limits_with_padding(
+            self.main_viewer, ds
+        )
+
+        for mask_name, label_mask_full in self.main_viewer.full_resolution_label_masks.items():
+            try:
+                try:
+                    mask_ds = label_mask_full[ymin:ymax:ds, xmin:xmax:ds].compute()
+                except AttributeError:
+                    mask_ds = np.asarray(label_mask_full[ymin:ymax:ds, xmin:xmax:ds])
+            except Exception:
+                continue
+
+            rows, cols = np.nonzero(mask_ds)
+            if rows.size == 0:
+                continue
+
+            # Map downsampled-crop indices back to full-resolution canvas coordinates
+            x_px = cols * ds + xmin
+            y_px = rows * ds + ymin
+            points = np.column_stack([x_px.astype(float), y_px.astype(float)])
+
+            inside = path.contains_points(points)
+            if not np.any(inside):
+                continue
+
+            touched_ids = set(mask_ds[rows[inside], cols[inside]].tolist())
+            touched_ids.discard(0)
+            for mid in touched_ids:
+                result.add(MaskSelection(fov=str(fov_name), mask=str(mask_name), mask_id=int(mid)))
+
+        return result
+
+    def _find_masks_in_lasso_map_mode(self, verts) -> set:
+        """Return MaskSelections whose pixels fall inside the lasso polygon (map mode)."""
+        path = MplPath(verts)
+        result = set()
+
+        try:
+            layer = self.main_viewer._get_map_layer(self.main_viewer._active_map_id)
+        except Exception:
+            return result
+
+        tile_viewports = layer.last_tile_viewports()
+        if not tile_viewports:
+            return result
+
+        mask_names = self.main_viewer._selected_mask_names()
+        if not mask_names:
+            return result
+
+        # Lasso vertices are in global full-res data coords (same space as event.xdata/ydata).
+        # dest_x0/dest_y0 are viewport-relative downsampled canvas indices.
+        # Convert: data_x = xmin_px + (dest_x0 + col) * downsample
+        xmin_px = float(self.ax.get_xlim()[0])
+        ymin_px = float(min(self.ax.get_ylim()))   # min because y-axis is inverted
+
+        for fov_name, tvp in tile_viewports.items():
+            for mask_name in mask_names:
+                mask_array = self.main_viewer._get_mask_array(str(fov_name), str(mask_name))
+                if mask_array is None or mask_array.size == 0:
+                    continue
+
+                # Use full-res pixel bounds (region_xy), then downsample — mirrors
+                # _update_map_mask_highlights in main_viewer.py.
+                try:
+                    x_min_px, x_max_px, y_min_px, y_max_px = (
+                        int(tvp.region_xy[0]), int(tvp.region_xy[1]),
+                        int(tvp.region_xy[2]), int(tvp.region_xy[3]),
+                    )
+                    mask_crop = mask_array[y_min_px:y_max_px, x_min_px:x_max_px]
+                    downsample = max(1, int(getattr(tvp, "downsample_factor", 1)))
+                    mask_crop = mask_crop[::downsample, ::downsample]
+                except Exception:
+                    continue
+
+                if hasattr(mask_crop, "compute"):
+                    mask_crop = mask_crop.compute()
+
+                rows, cols = np.nonzero(mask_crop)
+                if rows.size == 0:
+                    continue
+
+                # Map downsampled canvas indices to global full-res data coordinates
+                canvas_x = (xmin_px + (tvp.dest_x0 + cols) * downsample).astype(float)
+                canvas_y = (ymin_px + (tvp.dest_y0 + rows) * downsample).astype(float)
+                points = np.column_stack([canvas_x, canvas_y])
+
+                inside = path.contains_points(points)
+                if not np.any(inside):
+                    continue
+
+                touched_ids = set(mask_crop[rows[inside], cols[inside]].tolist())
+                touched_ids.discard(0)
+                for mid in touched_ids:
+                    result.add(MaskSelection(fov=str(fov_name), mask=str(mask_name), mask_id=int(mid)))
+
+        return result

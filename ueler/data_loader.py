@@ -267,9 +267,15 @@ def load_masks_for_fov(fov_name, masks_folder, mask_names_set):
                 and np.iinfo(mask_dtype).max == 1
             )
         )
-        mask_image = np.asarray(mask_image)  # materialize once
         if needs_label:
-            mask_image = measure.label(mask_image)
+            # measure.label requires a full numpy array (global connected-components).
+            # Wrap as a dask.delayed so the TIFF read + labeling only happens on
+            # .compute(), keeping the cache footprint near zero between renders.
+            _dask, _da = _ensure_dask()
+            shape = mask_image.shape
+            delayed_labeled = _dask.delayed(measure.label)(mask_image)
+            mask_image = _da.from_delayed(delayed_labeled, shape=shape, dtype=np.int64)
+        mask_image = mask_image.rechunk(_CHUNK_SIZE)
 
         mask_dict[mask_name] = mask_image
         mask_names_set.add(mask_name)

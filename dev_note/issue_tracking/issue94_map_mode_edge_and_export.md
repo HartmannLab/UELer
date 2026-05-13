@@ -54,7 +54,7 @@ if not fov_arrays:
 
 When a tile cannot be loaded (network FS issue, cache eviction race), the tile is skipped silently. For a large ROI spanning many FOVs the result is an image with correct overall dimensions but black tiles — described as "only a subregion".
 
-### Fix
+### Fix (partial — see issue #98 for follow-up)
 
 **File:** `ueler/viewer/plugin/export_fovs.py`
 
@@ -69,6 +69,8 @@ if not fov_arrays:
     )
     continue
 ```
+
+> **Note:** This fix was insufficient — the partial canvas was still written to disk, producing partial images. Issue #98 addresses this with a retry + `RuntimeError` to abort the export instead of silently accepting an incomplete result. See [issue98_partial_map_export.md](issue98_partial_map_export.md).
 
 ---
 

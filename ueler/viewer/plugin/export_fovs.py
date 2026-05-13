@@ -55,6 +55,7 @@ from ..scale_bar import (
     effective_pixel_size_nm,
 )
 from .plugin_base import PluginBase
+from ..roi_manager import format_roi_label
 from ..layout_utils import column_block_layout, content_widget_layout, flex_fill_layout
 
 PLACEHOLDER_MESSAGE = "Batch export UI is now available."
@@ -62,6 +63,20 @@ PLACEHOLDER_MESSAGE = "Batch export UI is now available."
 EXPORT_CONFIG_FILE_SUFFIX = ".export_config.json"
 EXPORT_CONFIG_REGISTRY_FILENAME = "export_configs_index.json"
 EXPORT_CONFIG_VERSION = "1.0.0"
+
+
+def _resolve_config_path(folder: Optional[Path], stored_path: str) -> Path:
+    """Return the absolute path for a registry entry.
+
+    New entries store only a filename; legacy entries may contain an absolute
+    path.  Absolute stored paths are returned as-is for backward compatibility.
+    """
+    p = Path(stored_path)
+    if p.is_absolute():
+        return p
+    if folder is not None:
+        return folder / p
+    return p
 
 
 @dataclass(frozen=True)
@@ -677,10 +692,7 @@ class BatchExportPlugin(PluginBase):
         for _, row in df.iterrows():
             record = row.to_dict()
             roi_id = str(record.get("roi_id"))
-            fov = str(record.get("fov") or "")
-            map_id = str(record.get("map_id") or "")
-            location = fov if fov else (f"[MAP:{map_id}]" if map_id else "—")
-            label = f"{location} · {record.get('marker_set', '—')} · {roi_id[:8]}"
+            label = format_roi_label(record)
             options.append((label, roi_id))
             self._roi_records[roi_id] = record
 
@@ -1002,10 +1014,11 @@ class BatchExportPlugin(PluginBase):
             )
             payload = self._collect_export_config(name)
             slug = slugify_name(name, default_slug="export-config")
-            path = (folder / f"{slug}{EXPORT_CONFIG_FILE_SUFFIX}").resolve()
+            filename = f"{slug}{EXPORT_CONFIG_FILE_SUFFIX}"
+            path = folder / filename
             write_palette_file(path, payload)
             registry = _load_reg(folder, EXPORT_CONFIG_REGISTRY_FILENAME)
-            registry[name] = {"path": str(path), "saved_at": str(payload["saved_at"])}
+            registry[name] = {"path": filename, "saved_at": str(payload["saved_at"])}
             _save_reg(folder, EXPORT_CONFIG_REGISTRY_FILENAME, registry)
             self._export_config_registry = registry
             self._refresh_config_dropdown()
@@ -1030,7 +1043,7 @@ class BatchExportPlugin(PluginBase):
             return
         try:
             from ueler.viewer.palette_store import read_palette_file
-            payload = read_palette_file(Path(record["path"]))
+            payload = read_palette_file(_resolve_config_path(self._export_config_folder, record["path"]))
             self._apply_export_config(payload)
             _set_status(f"<span style='color:green'>Loaded '{name}'.</span>")
         except Exception as exc:
@@ -1054,7 +1067,7 @@ class BatchExportPlugin(PluginBase):
                     load_registry as _load_reg,
                     save_registry as _save_reg,
                 )
-                path = Path(record["path"])
+                path = _resolve_config_path(folder, record["path"])
                 if path.exists():
                     path.unlink()
                 registry = _load_reg(folder, EXPORT_CONFIG_REGISTRY_FILENAME)
@@ -1910,12 +1923,15 @@ class BatchExportPlugin(PluginBase):
             viewer.load_fov(tile.name, channels)
             fov_arrays = viewer.image_cache.get(tile.name)
             if not fov_arrays:
-                import warnings
-                warnings.warn(
-                    f"Map export: tile '{tile.name}' could not be loaded; it will appear blank in the output.",
-                    stacklevel=2,
+                import time
+                time.sleep(0.05)
+                viewer.load_fov(tile.name, channels)
+                fov_arrays = viewer.image_cache.get(tile.name)
+            if not fov_arrays:
+                raise RuntimeError(
+                    f"Map export: tile '{tile.name}' could not be loaded after retry. "
+                    "Export aborted to prevent writing a partial image."
                 )
-                continue
 
             tile_image = render_fov_to_array(
                 tile.name,

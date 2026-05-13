@@ -10,7 +10,19 @@ import pandas as pd
 
 from .observable import Observable
 
-__all__ = ["ROI_COLUMNS", "ROIManager"]
+__all__ = ["ROI_COLUMNS", "ROIManager", "format_roi_label"]
+
+
+def format_roi_label(record: dict) -> str:
+    """Return a consistent display label for an ROI record."""
+    fov = str(record.get("fov") or "")
+    map_id = str(record.get("map_id") or "")
+    marker = record.get("marker_set") or "—"
+    tags = record.get("tags") or ""
+    tag_display = f" [{tags}]" if tags else ""
+    roi_id = str(record.get("roi_id") or "")
+    location = fov if fov else (f"[MAP:{map_id}]" if map_id else "—")
+    return f"{location} · {marker}{tag_display} · {roi_id[:8]}"
 
 ROI_COLUMNS = [
     "roi_id",

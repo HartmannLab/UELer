@@ -308,6 +308,7 @@ class MaskPainterDisplay(PluginBase):
         self._last_applied_identifier: Optional[str] = None
         self._last_applied_classes: Optional[set] = None
         self._last_applied_class_colors: dict[str, str] = {}
+        self._state_maps_cache: Dict[str, tuple] = {}  # fov -> (color_map, border_map, mode_map, opacity_map)
 
         storage_folder = self._determine_storage_folder()
         if storage_folder is None:
@@ -678,6 +679,42 @@ class MaskPainterDisplay(PluginBase):
             mask_type_color=self.get_mask_type_color(),
         )
         return opacity_map
+
+    def _invalidate_state_maps_cache(self) -> None:
+        """Clear the per-FOV state-maps cache. Call whenever painter UI state changes."""
+        self._state_maps_cache.clear()
+
+    def get_effective_state_maps_for_fov(
+        self, fov: Optional[str] = None
+    ) -> Tuple[Dict[int, str], Dict[int, str], Dict[int, str], Dict[int, float]]:
+        """Return (color_map, border_map, mode_map, opacity_map) from a single cell-table pass.
+
+        Results are cached per FOV and invalidated by _invalidate_state_maps_cache() whenever
+        painter UI state changes, so repeated renders of the same FOV (pan/zoom) are O(1).
+        """
+        current_fov = fov or self.main_viewer.get_active_fov()
+        cached = self._state_maps_cache.get(str(current_fov) if current_fov else "")
+        if cached is not None:
+            return cached
+        result = build_painter_state_maps_for_fov(
+            cell_table=self.main_viewer.cell_table,
+            fov_key=self.main_viewer.fov_key,
+            label_key=self.main_viewer.label_key,
+            fov=current_fov,
+            identifier=self.ui_component.identifier_dropdown.value,
+            active_classes=self._get_active_classes(),
+            class_colors={cls: getattr(widget, "value", self.default_color) for cls, widget in self.class_color_controls.items()},
+            class_visible={cls: bool(getattr(widget, "value", True)) for cls, widget in self.class_visible_controls.items()},
+            class_fill={cls: bool(getattr(widget, "value", False)) for cls, widget in self.class_mode_controls.items()},
+            class_opacity={cls: _normalise_opacity_percent(getattr(widget, "value", FILL_OPACITY_DEFAULT_PERCENT)) for cls, widget in self.class_opacity_controls.items()},
+            default_color=self.default_color,
+            global_fill=bool(self.ui_component.global_fill_checkbox.value),
+            global_fill_opacity=_normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
+            border_color_mode=self.get_border_color_mode(),
+            mask_type_color=self.get_mask_type_color(),
+        )
+        self._state_maps_cache[str(current_fov) if current_fov else ""] = result
+        return result
 
     def get_opacity_map_for_fov(self, fov: str) -> Dict[int, float]:
         return dict(self._cell_opacity_cache.get(str(fov), {}))
@@ -1123,6 +1160,7 @@ class MaskPainterDisplay(PluginBase):
             Whether to register colors globally for all FOVs (slow for large datasets).
             Set to False when called automatically on display updates.
         """
+        self._invalidate_state_maps_cache()
         identifier = self.ui_component.identifier_dropdown.value
         if not identifier:
             self._log("No identifier selected.", error=True, clear=True)
@@ -1422,6 +1460,7 @@ class MaskPainterDisplay(PluginBase):
         self._last_applied_class_opacities = {}
         self._cell_mode_cache = {}
         self._cell_opacity_cache = {}
+        self._state_maps_cache = {}
 
     def on_mv_update_display(self):
         """Handle main viewer display updates.
@@ -1818,8 +1857,8 @@ class UiComponent:
             max=100,
             step=1,
         )
-        self.global_fill_opacity_input.layout.width = "150px"
-        self.global_fill_opacity_input.layout.min_width = "150px"
+        self.global_fill_opacity_input.layout.width = "95px"
+        self.global_fill_opacity_input.layout.min_width = "95px"
         self.global_fill_checkbox = Checkbox(
             value=False,
             description="Global fill",

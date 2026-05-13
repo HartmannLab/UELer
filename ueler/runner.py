@@ -161,15 +161,26 @@ def run_viewer(
 
 def _refresh_viewer_state(viewer: "ImageMaskViewer") -> None:
 	"""Refresh viewer controls after mutating underlying data."""
+	_dbg = getattr(viewer, "_debug", False)
 
+	if _dbg:
+		print("[runner] _refresh_viewer_state: update_marker_set_dropdown", flush=True)
 	viewer.update_marker_set_dropdown()
+
+	if _dbg:
+		print("[runner] _refresh_viewer_state: update_controls", flush=True)
 	viewer.update_controls(None)
 
+	if _dbg:
+		print("[runner] _refresh_viewer_state: on_image_change", flush=True)
 	try:
 		viewer.on_image_change(None)
 	except AttributeError:
-		if getattr(viewer, "_debug", False):  # pragma: no cover - debug aid only
+		if _dbg:
 			print("[runner] Skipping on_image_change refresh; side plots not fully initialised.")
+
+	if _dbg:
+		print("[runner] _refresh_viewer_state: on_image_change done", flush=True)
 
 	# In map mode, run the same activation path used by map-selector changes.
 	# load_cell_table -> on_image_change mutates FOV-derived state even when the
@@ -184,18 +195,32 @@ def _refresh_viewer_state(viewer: "ImageMaskViewer") -> None:
 			active_map_id = getattr(selector, "value", None)
 		activate = getattr(viewer, "_activate_map_mode", None)
 		if active_map_id is not None and callable(activate):
+			if _dbg:
+				print(f"[runner] _refresh_viewer_state: _activate_map_mode({active_map_id!r})", flush=True)
 			try:
 				activate(str(active_map_id))
 			except Exception:
-				if getattr(viewer, "_debug", False):  # pragma: no cover - debug aid only
+				if _dbg:
 					print("[runner] Failed to re-activate map mode during refresh.")
 		refresh_map_controls = getattr(viewer, "_refresh_map_controls", None)
 		if callable(refresh_map_controls):
+			if _dbg:
+				print("[runner] _refresh_viewer_state: _refresh_map_controls", flush=True)
 			refresh_map_controls()
+	if _dbg:
+		print("[runner] _refresh_viewer_state: update_display", flush=True)
 	viewer.update_display(viewer.current_downsample_factor)
+	if _dbg:
+		print("[runner] _refresh_viewer_state: update_keys", flush=True)
 	viewer.update_keys(None)
+	if _dbg:
+		print("[runner] _refresh_viewer_state: refresh_bottom_panel", flush=True)
 	viewer.refresh_bottom_panel()
+	if _dbg:
+		print("[runner] _refresh_viewer_state: inform_plugins", flush=True)
 	viewer.inform_plugins('refresh_roi_table')
+	if _dbg:
+		print("[runner] _refresh_viewer_state: DONE", flush=True)
 
 
 def load_cell_table(

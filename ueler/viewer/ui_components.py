@@ -87,6 +87,7 @@ Accordion = _ensure_widget_class("Accordion")
 Tab = _ensure_widget_class("Tab")
 HTML = _ensure_widget_class("HTML")
 ToggleButtons = _ensure_widget_class("ToggleButtons")
+ToggleButton = _ensure_widget_class("ToggleButton")
 IntSlider = _ensure_widget_class("IntSlider")
 TagsInput = _ensure_widget_class("TagsInput")
 Image = _ensure_widget_class("Image")
@@ -357,6 +358,7 @@ def display_ui(viewer):
     top_part_widgets = VBox(
         [
             viewer.ui_component.image_selector,
+            viewer.ui_component.lasso_select_toggle,
             viewer.ui_component.map_controls_box,
             control_panel_stack,
             VBox([viewer.ui_component.advanced_settings_accordion]),
@@ -390,6 +392,13 @@ def display_ui(viewer):
     if hasattr(viewer, 'refresh_bottom_panel'):
         viewer.refresh_bottom_panel()
 
+    # Mark the widget as visible before displaying so that draw_idle() and
+    # on_draw-triggered renders are unblocked from this point on.  All renders
+    # before this line were silently skipped to prevent deferred ipympl comm
+    # events from firing against a hidden canvas and crashing the kernel.
+    if hasattr(viewer, '_widget_displayed'):
+        viewer._widget_displayed = True
+
     display(root)
 
 class SidePlots:
@@ -421,6 +430,16 @@ class uicomponents:
             disabled=False
         )
         self.image_selector.observe(viewer.on_image_change, names='value')
+
+        self.lasso_select_toggle = ToggleButton(
+            value=False,
+            description='Lasso Select',
+            button_style='',
+            tooltip='Draw a freehand lasso to select cells (one-shot)',
+            icon='object-group',
+            layout=Layout(width='auto', height='28px'),
+        )
+        self.lasso_select_toggle.observe(viewer.on_lasso_select_toggle, names='value')
 
         map_controls_disabled = not (getattr(viewer, "_map_mode_enabled", False) and getattr(viewer, "_map_descriptors", {}))
         self.map_mode_toggle = Checkbox(

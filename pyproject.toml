@@ -33,6 +33,8 @@ dependencies = [
     "ipywidgets>=8.1",
     "anywidget>=0.9",
     "numpy",
+    "ipykernel",
+    "ipympl"
 ]
 
 [project.optional-dependencies]
