@@ -41,3 +41,26 @@ A small helper `_resolve_config_path(folder, stored_path)` handles both:
    - `test_save_config_stores_relative_path` — asserts the registry entry is not absolute.
    - `test_load_config_survives_folder_move` — moves the temp dir, re-initialises the
      plugin, and verifies the config can still be loaded.
+
+---
+
+## Reply follow-up — `output_path` inside the template payload was still absolute
+
+After the initial fix, the `output_path` field stored inside each config JSON still held
+the absolute widget value, so moving the project still produced a stale path in the output
+directory widget.
+
+### Fix
+
+- `_relativize_output_path(path)` — converts `output_path` to relative form when it is
+  under `base_folder`; leaves absolute paths outside `base_folder` unchanged.
+- `_expand_output_path(stored)` — expands relative stored path to absolute using the
+  current `base_folder`; absolute paths pass through unchanged.
+- `_collect_export_config` now calls `_relativize_output_path` before serialising.
+- `_apply_export_config` now calls `_expand_output_path` before setting the widget.
+
+### New tests (4)
+- `test_save_config_relativizes_output_path_under_base_folder`
+- `test_save_config_output_path_outside_base_folder_unchanged`
+- `test_load_config_expands_relative_output_path_to_absolute`
+- `test_output_path_survives_folder_move`

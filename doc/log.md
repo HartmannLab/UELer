@@ -1,5 +1,17 @@
 ### v0.3.1
 
+**Reply to Issue #99 — Relativize output_path inside export config templates**
+- Root cause: the `output_path` field stored inside each export config JSON was the raw widget value — typically an absolute path. When the project was moved, the loaded config restored the old absolute path, pointing into the original location.
+- Added `_relativize_output_path`: converts `output_path` to relative form when it is under `base_folder`; paths outside `base_folder` are left absolute so they remain usable on fixed mounts.
+- Added `_expand_output_path`: called in `_apply_export_config` before restoring widget values; converts a stored relative path back to absolute using the current `base_folder`, ensuring the widget always displays a usable absolute path.
+- Updated `_collect_export_config` to call `_relativize_output_path` on the widget value before serialising.
+- Added 4 tests:
+  - `test_save_config_relativizes_output_path_under_base_folder`: stored path is not absolute.
+  - `test_save_config_output_path_outside_base_folder_unchanged`: absolute path outside base_folder is preserved.
+  - `test_load_config_expands_relative_output_path_to_absolute`: widget is set to the full absolute path after loading.
+  - `test_output_path_survives_folder_move`: after copying the project to a new location, loading the config points the widget into the *new* base_folder.
+- Validated: 19 tests in `tests/test_export_fovs_mask_customization.py` — all passed.
+
 **Issue #99 — Store export config paths as relative filenames**
 - Root cause: `_save_export_config` in `export_fovs.py` called `.resolve()` on the config file path before serialising it into the registry JSON. This embedded an absolute path in `export_configs_index.json`, so loading or deleting a saved config broke whenever the project was moved or shared with another user.
 - Added module-level `_resolve_config_path(folder, stored_path)` helper: returns `folder / stored_path` for relative entries and the path as-is for legacy absolute entries, ensuring backward compatibility.

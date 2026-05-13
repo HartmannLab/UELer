@@ -102,7 +102,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### **UELer v0.3.1 Summary**
-- Fixed export config paths stored as absolute (#99): the batch export plugin now stores only the filename in `export_configs_index.json` instead of the full resolved path, so saved configs survive project moves and sharing across machines.
+- Fixed export config paths stored as absolute (#99): the registry now stores only the filename and the `output_path` field inside each template is stored relative to `base_folder`; both are expanded back to absolute at load time, so saved configs survive project moves and sharing across machines.
 - Fixed batch export partial images in map mode (#98): tile load failures in `_render_map_region_direct` now trigger a retry (50 ms) and then raise `RuntimeError` rather than continuing with a black patch. The job runner records the export as failed and surfaces the error message — no partial image is written to disk.
 - Unified ROI display name across all plugins (#96): ROI Manager dropdown, Batch Export dropdown, and ROI Gallery hover tooltip now all use the format `{location} · {marker_set}[{tags}] · {id[:8]}`. Added a hover-tooltip label below the ROI Gallery thumbnail grid that updates as the cursor moves over thumbnails.
 - Optimized Mask Painter rendering performance (#95): pan, zoom, and FOV-change renders now call `build_painter_state_maps_for_fov` once per FOV instead of four times, and results are cached per FOV until painter UI state changes. Map-mode tile rendering similarly consolidates four per-tile painter queries into one. Combined with a per-FOV result cache, repeated renders of the same FOV with unchanged settings are now O(1).

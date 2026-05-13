@@ -419,6 +419,7 @@ class TestExportConfigTemplates(unittest.TestCase):
         plugin._delete_export_config()
 
     def test_load_config_restores_output_path(self):
+        # Path outside base_folder must be restored as-is (still absolute).
         plugin = self._make_plugin()
         plugin.ui_component.output_path.value = "/tmp/my_exports"
         plugin.ui_component.config_name_input.value = "output path test"
@@ -431,6 +432,84 @@ class TestExportConfigTemplates(unittest.TestCase):
         plugin._load_export_config()
 
         self.assertEqual(plugin.ui_component.output_path.value, "/tmp/my_exports")
+
+    def test_save_config_relativizes_output_path_under_base_folder(self):
+        """output_path under base_folder must be stored as a relative path (reply to #99)."""
+        plugin = self._make_plugin()
+        output_abs = str(self.base_path / "exports")
+        plugin.ui_component.output_path.value = output_abs
+        plugin.ui_component.config_name_input.value = "rel test"
+        plugin._save_export_config()
+
+        record = list(plugin._export_config_registry.values())[0]
+        import json
+        config_data = json.loads(
+            (self.base_path / ".UELer" / "export_configs" /
+             record["path"]).read_text()
+        )
+        stored_path = config_data["output_path"]
+        self.assertFalse(
+            stored_path.startswith("/") or (len(stored_path) > 1 and stored_path[1] == ":"),
+            f"output_path under base_folder should be relative, got: {stored_path!r}",
+        )
+
+    def test_save_config_output_path_outside_base_folder_unchanged(self):
+        """output_path outside base_folder must stay absolute (reply to #99)."""
+        plugin = self._make_plugin()
+        plugin.ui_component.output_path.value = "/tmp/unrelated_exports"
+        plugin.ui_component.config_name_input.value = "abs test"
+        plugin._save_export_config()
+
+        record = list(plugin._export_config_registry.values())[0]
+        import json
+        config_data = json.loads(
+            (self.base_path / ".UELer" / "export_configs" /
+             record["path"]).read_text()
+        )
+        self.assertEqual(config_data["output_path"], "/tmp/unrelated_exports")
+
+    def test_load_config_expands_relative_output_path_to_absolute(self):
+        """A relative output_path stored in the config must be expanded on load (reply to #99)."""
+        plugin = self._make_plugin()
+        output_abs = str(self.base_path / "exports")
+        plugin.ui_component.output_path.value = output_abs
+        plugin.ui_component.config_name_input.value = "expand test"
+        plugin._save_export_config()
+
+        plugin.ui_component.output_path.value = "/tmp/other"
+        saved_name = sorted(plugin._export_config_registry.keys())[0]
+        plugin.ui_component.config_saved_dropdown.options = [(saved_name, saved_name)]
+        plugin.ui_component.config_saved_dropdown.value = saved_name
+        plugin._load_export_config()
+
+        self.assertEqual(plugin.ui_component.output_path.value, output_abs)
+
+    def test_output_path_survives_folder_move(self):
+        """After moving the project, loading a config must yield an absolute path
+        pointing into the *new* base_folder, not the original one (reply to #99)."""
+        import shutil
+        plugin = self._make_plugin()
+        plugin.ui_component.output_path.value = str(self.base_path / "exports")
+        plugin.ui_component.config_name_input.value = "move path test"
+        plugin._save_export_config()
+
+        new_base = self.base_path.parent / (self.base_path.name + "_mp")
+        shutil.copytree(str(self.base_path), str(new_base))
+        self.addCleanup(shutil.rmtree, str(new_base), True)
+
+        viewer2 = _ViewerStub(new_base)
+        plugin2 = _TestPlugin(viewer2, width=320, height=480)
+        self.addCleanup(plugin2._executor.shutdown, False)
+        plugin2._refresh_config_dropdown()
+
+        saved_name = "move path test"
+        plugin2.ui_component.config_saved_dropdown.options = [(saved_name, saved_name)]
+        plugin2.ui_component.config_saved_dropdown.value = saved_name
+        plugin2._load_export_config()
+
+        expected = str(new_base / "exports")
+        self.assertEqual(plugin2.ui_component.output_path.value, expected,
+                         "output_path should point into the new base_folder after a move")
 
 
 if __name__ == "__main__":

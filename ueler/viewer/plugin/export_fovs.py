@@ -952,10 +952,16 @@ class BatchExportPlugin(PluginBase):
             "mask_palette_enabled": bool(getattr(self.ui_component.mask_palette_enabled, "value", False)),
             "mask_palette_name": getattr(self.ui_component.mask_palette_dropdown, "value", None),
             "marker_set": getattr(self.ui_component.marker_set_dropdown, "value", None),
-            "output_path": getattr(self.ui_component.output_path, "value", ""),
+            "output_path": self._relativize_output_path(
+                getattr(self.ui_component.output_path, "value", "")
+            ),
         }
 
     def _apply_export_config(self, payload: Dict[str, Any]) -> None:
+        if "output_path" in payload:
+            payload = dict(payload)
+            payload["output_path"] = self._expand_output_path(payload["output_path"])
+
         def _set(widget_name: str, key: str, coerce=lambda x: x) -> None:
             widget = getattr(self.ui_component, widget_name, None)
             if widget is not None and key in payload:
@@ -2207,6 +2213,32 @@ class BatchExportPlugin(PluginBase):
             path = os.path.join(self.main_viewer.base_folder, path)
         os.makedirs(path, exist_ok=True)
         return path
+
+    def _relativize_output_path(self, path: str) -> str:
+        """Convert output_path to relative form if it is under base_folder.
+
+        Paths outside base_folder are left unchanged so they remain usable
+        after a project move even if they happen to be on a fixed mount.
+        """
+        base = getattr(self.main_viewer, "base_folder", None)
+        if not base or not path:
+            return path
+        try:
+            return str(Path(path).relative_to(base))
+        except ValueError:
+            return path
+
+    def _expand_output_path(self, stored: str) -> str:
+        """Expand a stored output_path back to absolute using base_folder.
+
+        Absolute paths (legacy or outside base_folder) are returned unchanged.
+        """
+        if not stored or os.path.isabs(stored):
+            return stored
+        base = getattr(self.main_viewer, "base_folder", None)
+        if base:
+            return os.path.join(base, stored)
+        return stored
 
     def _finalise_array(
         self,
