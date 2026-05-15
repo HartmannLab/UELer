@@ -1,5 +1,30 @@
 ### v0.3.1
 
+**Follow-up to Issue #101 — Mask opacity control in batch export**
+- Added `mask_alpha_slider` (FloatSlider, 0.0–1.0, default 1.0) to the batch export mask controls. The slider is grouped with the mask layer dropdown and color picker inside `mask_layer_box`, disabled when `Include Mask` is off or masks are unavailable.
+- `_capture_overlay_snapshot()` now reads `mask_alpha_slider.value` instead of the previous hardcoded `alpha=1.0` when building the export `MaskOverlaySnapshot`.
+- Config serialization extended: `_collect_export_config()` saves `mask_alpha`; `_apply_export_config()` restores it via `_set("mask_alpha_slider", "mask_alpha", float)`.
+- Updated test stubs and expanded `test_config_roundtrip_includes_mask_layer_and_color` to cover alpha; added `test_capture_snapshot_uses_alpha_slider_value`.
+- Validated: 68 tests in `tests/test_export_fovs_batch.py` — 67 passed, 1 pre-existing unrelated failure.
+
+**Reply to Issue #101 — Explicit mask layer selector in batch export**
+- Root cause of persistence: even after the Bug 1 + Bug 2 fix, `_refresh_mask_controls()` reset `include_masks` to `False` whenever no viewer panel mask checkboxes were ticked, silently overriding the user's intent before the export ran.
+- Added `mask_layer_dropdown` (Dropdown) and `mask_color_picker` (ColorPicker) to the batch export UI, making mask inclusion fully independent of the viewer's live overlay state.
+- Added `_refresh_mask_layer_dropdown()`: populates the dropdown from `main_viewer.mask_names` on each `refresh_overlay_capabilities()` call; falls back to `mask_key` for single-mask sessions; preserves the current selection when valid.
+- Removed the `visible_masks` gate in `_refresh_mask_controls()` that disabled the `include_masks` checkbox when no viewer panel checkboxes were ticked.
+- Replaced the separate Bug 1 strip + Bug 2 fallback blocks in `_capture_overlay_snapshot()` with a single unified path: when `include_masks=True` and `palette_name is None`, always build a `MaskOverlaySnapshot` from the export-local dropdown value and color picker value.
+- Config serialization updated: `_collect_export_config()` saves `mask_layer` and `mask_color`; `_apply_export_config()` restores them.
+- Updated tests: all stubs extended with `mask_layer_dropdown` + `mask_color_picker`; renamed `test_fallback_mask_added_when_no_masks_and_painter_disabled` → `test_export_local_layer_and_color_used_when_no_palette_override`; added 5 new tests.
+- Validated: 66 tests in `tests/test_export_fovs_batch.py` — 65 passed, 1 pre-existing unrelated failure.
+
+**Issue #101 — Fix batch export mask handling**
+- Root cause Bug 1: `capture_overlay_snapshot` always captures the live `MaskPainterSnapshot` when the Mask Painter is enabled. `_capture_overlay_snapshot` carried this snapshot unchanged when `palette_name is None`, so `apply_overlay_snapshot_to_array` applied per-cell annotation colours to every export even when `Override Mask Palette` was not checked.
+- Root cause Bug 2: `capture_overlay_snapshot` only adds `MaskOverlaySnapshot` entries for mask layers whose panel checkbox is ticked. When the Mask Painter is disabled and all checkboxes are off, `snapshot.masks` is empty and `snapshot.mask_painter` is `None`; neither rendering stage produces any output, so the export contains no mask even with `Include Mask` checked.
+- Fix 1: In `_capture_overlay_snapshot`, after the thickness-adjustment block, strip `mask_painter` to `None` whenever `palette_name is None`. This prevents live painter colours from leaking into exports that did not request a saved palette override.
+- Fix 2: After Fix 1, detect the "nothing captured" case (`include_masks=True`, no masks, no painter, no palette) and inject a fallback `MaskOverlaySnapshot` outline for the primary `mask_key` using the viewer's configured colour, so `Include Mask` always produces visible content.
+- Updated `test_batch_export_snapshot_preserves_mask_painter_outline_thickness` → `test_batch_export_snapshot_strips_painter_when_no_palette_override` to reflect corrected behaviour; added `test_palette_override_preserves_outline_thickness` plus 3 new regression tests for both bugs and the no-double-overlay edge case.
+- Validated: 61 tests in `tests/test_export_fovs_batch.py` — 60 passed, 1 pre-existing unrelated failure.
+
 **Reply to Issue #99 — Relativize output_path inside export config templates**
 - Root cause: the `output_path` field stored inside each export config JSON was the raw widget value — typically an absolute path. When the project was moved, the loaded config restored the old absolute path, pointing into the original location.
 - Added `_relativize_output_path`: converts `output_path` to relative form when it is under `base_folder`; paths outside `base_folder` are left absolute so they remain usable on fixed mounts.

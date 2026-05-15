@@ -19,6 +19,7 @@ from ipywidgets import (
     Accordion,
     Button,
     Checkbox,
+    ColorPicker,
     Dropdown,
     FloatSlider,
     HBox,
@@ -251,6 +252,40 @@ class BatchExportPlugin(PluginBase):
             description="Masks only (black background)",
             indent=False,
             layout=Layout(width="auto"),
+        )
+
+        # Mask layer selector: explicit per-export layer + colour, independent of viewer state
+        self.ui_component.mask_layer_dropdown = Dropdown(
+            options=[],
+            value=None,
+            description="Mask layer:",
+            layout=full_width(),
+            style=style_auto,
+        )
+        self.ui_component.mask_color_picker = ColorPicker(
+            value="#ffffff",
+            description="Mask color:",
+            concise=False,
+            layout=full_width(),
+        )
+        self.ui_component.mask_alpha_slider = FloatSlider(
+            value=1.0,
+            min=0.0,
+            max=1.0,
+            step=0.05,
+            description="Mask opacity:",
+            layout=full_width(),
+            style=style_auto,
+            continuous_update=False,
+            readout_format=".2f",
+        )
+        self.ui_component.mask_layer_box = VBox(
+            [
+                self.ui_component.mask_layer_dropdown,
+                self.ui_component.mask_color_picker,
+                self.ui_component.mask_alpha_slider,
+            ],
+            layout=column_block_layout(gap="4px"),
         )
 
         # Feature 1: palette override controls
@@ -552,6 +587,7 @@ class BatchExportPlugin(PluginBase):
                     layout=Layout(gap="16px", align_items="center", flex_flow="row wrap"),
                 ),
                 self.ui_component.mask_outline_thickness,
+                self.ui_component.mask_layer_box,
                 self.ui_component.overlay_hint,
                 self.ui_component.mask_palette_box,
                 _sep3,
@@ -596,6 +632,18 @@ class BatchExportPlugin(PluginBase):
             names="value",
         )
         self.ui_component.masks_only.observe(
+            lambda _: self._invalidate_overlay_cache(),
+            names="value",
+        )
+        self.ui_component.mask_layer_dropdown.observe(
+            lambda _: self._invalidate_overlay_cache(),
+            names="value",
+        )
+        self.ui_component.mask_color_picker.observe(
+            lambda _: self._invalidate_overlay_cache(),
+            names="value",
+        )
+        self.ui_component.mask_alpha_slider.observe(
             lambda _: self._invalidate_overlay_cache(),
             names="value",
         )
@@ -710,9 +758,6 @@ class BatchExportPlugin(PluginBase):
         masks_available = bool(getattr(self.main_viewer, "masks_available", False))
         annotations_available = bool(getattr(self.main_viewer, "annotations_available", False))
 
-        mask_controls = getattr(self.main_viewer.ui_component, "mask_display_controls", {})
-        visible_masks = any(getattr(cb, "value", False) for cb in mask_controls.values()) if masks_available else False
-
         annotation_active = bool(
             annotations_available
             and getattr(self.main_viewer, "annotation_display_enabled", False)
@@ -728,7 +773,6 @@ class BatchExportPlugin(PluginBase):
                 include_masks=include_masks,
                 thickness_widget=thickness_widget,
                 masks_available=masks_available,
-                visible_masks=visible_masks,
                 masks_were_disabled=masks_were_disabled,
             )
         )
@@ -748,11 +792,13 @@ class BatchExportPlugin(PluginBase):
         include_masks,
         thickness_widget,
         masks_available: bool,
-        visible_masks: bool,
         masks_were_disabled: bool,
     ) -> list[str]:
         hints: list[str] = []
         masks_only_widget = getattr(self.ui_component, "masks_only", None)
+        layer_dropdown = getattr(self.ui_component, "mask_layer_dropdown", None)
+        color_picker = getattr(self.ui_component, "mask_color_picker", None)
+        alpha_slider = getattr(self.ui_component, "mask_alpha_slider", None)
 
         if not masks_available:
             include_masks.value = False
@@ -761,17 +807,13 @@ class BatchExportPlugin(PluginBase):
             if masks_only_widget is not None:
                 masks_only_widget.disabled = True
                 masks_only_widget.value = False
+            if layer_dropdown is not None:
+                layer_dropdown.disabled = True
+            if color_picker is not None:
+                color_picker.disabled = True
+            if alpha_slider is not None:
+                alpha_slider.disabled = True
             hints.append("Masks unavailable for this dataset.")
-            return hints
-
-        if not visible_masks:
-            include_masks.value = False
-            include_masks.disabled = True
-            thickness_widget.disabled = True
-            if masks_only_widget is not None:
-                masks_only_widget.disabled = True
-                masks_only_widget.value = False
-            hints.append("Enable at least one mask overlay in the viewer to export masks.")
             return hints
 
         include_masks.disabled = False
@@ -782,12 +824,41 @@ class BatchExportPlugin(PluginBase):
             viewer_thickness = max(1, int(getattr(self.main_viewer, "mask_outline_thickness", 1)))
             self._sync_mask_outline_with_viewer(viewer_thickness, thickness_widget)
 
-        thickness_widget.disabled = not include_masks.value
+        masks_on = bool(include_masks.value)
+        thickness_widget.disabled = not masks_on
         if masks_only_widget is not None:
-            masks_only_widget.disabled = not include_masks.value
+            masks_only_widget.disabled = not masks_on
             if masks_only_widget.disabled:
                 masks_only_widget.value = False
+        if layer_dropdown is not None:
+            layer_dropdown.disabled = not masks_on
+        if color_picker is not None:
+            color_picker.disabled = not masks_on
+        if alpha_slider is not None:
+            alpha_slider.disabled = not masks_on
+
+        self._refresh_mask_layer_dropdown()
+
+        if masks_on and layer_dropdown is not None and not layer_dropdown.options:
+            hints.append("Load a FOV to populate the mask layer list.")
         return hints
+
+    def _refresh_mask_layer_dropdown(self) -> None:
+        dropdown = getattr(self.ui_component, "mask_layer_dropdown", None)
+        if dropdown is None:
+            return
+        mask_names = list(getattr(self.main_viewer, "mask_names", []))
+        if not mask_names:
+            mask_key = str(getattr(self.main_viewer, "mask_key", "") or "")
+            if mask_key:
+                mask_names = [mask_key]
+        options = [(name, name) for name in mask_names]
+        current = dropdown.value
+        dropdown.options = options
+        valid = [v for _, v in options]
+        if current not in valid:
+            mask_key = str(getattr(self.main_viewer, "mask_key", "") or "")
+            dropdown.value = mask_key if mask_key in valid else (valid[0] if valid else None)
 
     def _refresh_annotation_controls(
         self,
@@ -951,6 +1022,9 @@ class BatchExportPlugin(PluginBase):
             "mask_outline_thickness": int(getattr(self.ui_component.mask_outline_thickness, "value", 1)),
             "mask_palette_enabled": bool(getattr(self.ui_component.mask_palette_enabled, "value", False)),
             "mask_palette_name": getattr(self.ui_component.mask_palette_dropdown, "value", None),
+            "mask_layer": getattr(self.ui_component.mask_layer_dropdown, "value", None),
+            "mask_color": getattr(self.ui_component.mask_color_picker, "value", "#ffffff"),
+            "mask_alpha": float(getattr(self.ui_component.mask_alpha_slider, "value", 1.0)),
             "marker_set": getattr(self.ui_component.marker_set_dropdown, "value", None),
             "output_path": self._relativize_output_path(
                 getattr(self.ui_component.output_path, "value", "")
@@ -988,6 +1062,15 @@ class BatchExportPlugin(PluginBase):
             valid = [v for _, v in dd.options]
             if palette_name in valid:
                 dd.value = palette_name
+
+        layer_name = payload.get("mask_layer")
+        layer_dd = getattr(self.ui_component, "mask_layer_dropdown", None)
+        if layer_dd is not None and layer_name is not None:
+            valid_layers = [v for _, v in layer_dd.options]
+            if layer_name in valid_layers:
+                layer_dd.value = layer_name
+        _set("mask_color_picker", "mask_color")
+        _set("mask_alpha_slider", "mask_alpha", float)
 
         marker = payload.get("marker_set")
         mdd = getattr(self.ui_component, "marker_set_dropdown", None)
@@ -1382,6 +1465,29 @@ class BatchExportPlugin(PluginBase):
                     else None
                 ),
             )
+
+        # When no palette override is requested, use the export-local layer/colour
+        # selection — fully independent of the viewer's live overlay controls.
+        if include_masks and palette_name is None:
+            layer_dd = getattr(self.ui_component, "mask_layer_dropdown", None)
+            mask_layer = str(layer_dd.value or "") if (layer_dd is not None and layer_dd.value) else ""
+            if not mask_layer:
+                mask_layer = str(getattr(self.main_viewer, "mask_key", "") or "")
+            if mask_layer:
+                cp = getattr(self.ui_component, "mask_color_picker", None)
+                color_hex = str(cp.value or "#ffffff") if cp is not None else "#ffffff"
+                alpha_w = getattr(self.ui_component, "mask_alpha_slider", None)
+                mask_alpha = float(alpha_w.value) if alpha_w is not None else 1.0
+                export_mask = MaskOverlaySnapshot(
+                    name=mask_layer,
+                    color=to_rgb(color_hex),
+                    alpha=mask_alpha,
+                    mode="outline",
+                    outline_thickness=self._mask_outline_thickness,
+                )
+                snapshot = replace(snapshot, masks=(export_mask,), mask_painter=None)
+            else:
+                snapshot = replace(snapshot, masks=(), mask_painter=None)
 
         # Feature 2: override skip_image_layer from the export-local masks_only widget
         masks_only = bool(
@@ -1905,6 +2011,7 @@ class BatchExportPlugin(PluginBase):
         channel_settings: Mapping[str, Any],
         *,
         skip_image_layer: bool = False,
+        snapshot: Optional[OverlaySnapshot] = None,
     ) -> np.ndarray:
         """Render a rectangular region of the stitched map using explicit channel settings.
 
@@ -1912,6 +2019,9 @@ class BatchExportPlugin(PluginBase):
         UI widgets, this method calls ``render_fov_to_array`` directly with the supplied
         ``channel_settings``.  This is required for batch export so that the marker profile's
         settings are used instead of whatever the user currently has on screen.
+
+        When ``snapshot`` contains simple mask outlines (``snapshot.masks``), they are rendered
+        per-tile via ``render_fov_to_array`` — the same approach as single-FOV exports.
         """
         visible_tiles = layer._collect_visible_tiles(xmin_um, xmax_um, ymin_um, ymax_um)
         canvas = layer._allocate_canvas(xmin_um, xmax_um, ymin_um, ymax_um, downsample_factor)
@@ -1939,6 +2049,30 @@ class BatchExportPlugin(PluginBase):
                     "Export aborted to prevent writing a partial image."
                 )
 
+            # Build per-tile mask settings from the export-local snapshot so that simple
+            # mask outlines are rendered at the same time as the channel composite.
+            tile_masks: tuple = ()
+            if snapshot is not None and snapshot.include_masks and snapshot.masks:
+                tile_mask_list = []
+                for m in snapshot.masks:
+                    raw_mask = viewer._get_mask_array(tile.name, m.name)
+                    if raw_mask is None:
+                        continue
+                    mask_ds = raw_mask[::downsample_factor, ::downsample_factor]
+                    try:
+                        mask_ds = mask_ds.compute()
+                    except AttributeError:
+                        mask_ds = np.asarray(mask_ds)
+                    tile_mask_list.append(MaskRenderSettings(
+                        array=mask_ds,
+                        color=m.color,
+                        alpha=m.alpha,
+                        mode=m.mode,
+                        outline_thickness=m.outline_thickness,
+                        downsample_factor=downsample_factor,
+                    ))
+                tile_masks = tuple(tile_mask_list)
+
             tile_image = render_fov_to_array(
                 tile.name,
                 fov_arrays,
@@ -1947,6 +2081,7 @@ class BatchExportPlugin(PluginBase):
                 downsample_factor=downsample_factor,
                 region_xy=region_xy,
                 skip_image_layer=skip_image_layer,
+                masks=tile_masks if tile_masks else None,
                 # Do NOT pass region_ds here: it is in absolute downsampled coordinates
                 # (non-zero origin), but render_fov_to_array uses it to set the canvas
                 # shape.  Let render_fov_to_array derive region_ds from region_xy so
@@ -2035,6 +2170,7 @@ class BatchExportPlugin(PluginBase):
             channels,
             marker_profile.channel_settings,
             skip_image_layer=bool(getattr(overlay_snapshot, "skip_image_layer", False)),
+            snapshot=overlay_snapshot,
         )
 
         if image is None or not image.size:

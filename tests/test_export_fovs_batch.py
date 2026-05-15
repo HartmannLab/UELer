@@ -446,6 +446,9 @@ class ExportFOVsBatchTests(unittest.TestCase):
                 self.ui_component.mask_outline_thickness = _StubWidget(self._mask_outline_thickness)
                 self.ui_component.overlay_hint = _StubHTML()
                 self.ui_component.masks_only = _StubWidget(False)
+                self.ui_component.mask_layer_dropdown = _StubDropdown("MASK", [("MASK", "MASK")])
+                self.ui_component.mask_color_picker = _StubWidget("#ffffff")
+                self.ui_component.mask_alpha_slider = _StubWidget(1.0)
                 self.ui_component.mask_palette_enabled = _StubWidget(False)
                 self.ui_component.mask_palette_dropdown = _StubDropdown(None, [("Current settings", None)])
                 self.ui_component.config_name_input = _StubWidget("")
@@ -556,7 +559,8 @@ class ExportFOVsBatchTests(unittest.TestCase):
         self.assertFalse(snapshot_disabled.include_masks)
         self.assertTrue(snapshot_disabled.skip_image_layer)
 
-    def test_batch_export_snapshot_preserves_mask_painter_outline_thickness(self) -> None:
+    def test_batch_export_snapshot_strips_painter_when_no_palette_override(self) -> None:
+        """Bug 1 regression: live painter must be stripped when no palette override is used."""
         viewer_stub = _BatchExportViewerStub(self.base_path, mask_outline_thickness=4)
         viewer_stub.capture_overlay_snapshot = lambda **_kwargs: OverlaySnapshot(
             include_annotations=False,
@@ -584,6 +588,36 @@ class ExportFOVsBatchTests(unittest.TestCase):
         snapshot = plugin._capture_overlay_snapshot(include_masks=True, include_annotations=False)
 
         self.assertIsNotNone(snapshot)
+        self.assertIsNone(snapshot.mask_painter)
+
+    def test_palette_override_preserves_outline_thickness(self) -> None:
+        """Outline thickness must be applied to the painter snapshot built from a saved palette."""
+        viewer_stub = _BatchExportViewerStub(self.base_path, mask_outline_thickness=1)
+        viewer_stub.capture_overlay_snapshot = lambda **_kwargs: OverlaySnapshot(
+            include_annotations=False,
+            include_masks=True,
+            annotation=None,
+            masks=(),
+            mask_painter=None,
+        )
+        _viewer, plugin = self._make_export_plugin(viewer_stub)
+        plugin._mask_outline_thickness = 7
+        payload = self._make_palette_payload("Thick Palette")
+        plugin._palette_registry = {
+            "Thick Palette": {"path": "/fake/path.json", "saved_at": "2026-01-01T00:00:00Z"}
+        }
+        with mock.patch(
+            "ueler.viewer.palette_store.read_palette_file",
+            return_value=payload,
+        ), mock.patch(
+            "ueler.viewer.plugin.mask_painter._resolve_mask_type_color",
+            return_value=None,
+        ):
+            snapshot = plugin._capture_overlay_snapshot(
+                include_masks=True,
+                include_annotations=False,
+                palette_name="Thick Palette",
+            )
         self.assertIsNotNone(snapshot.mask_painter)
         self.assertEqual(snapshot.mask_painter.outline_thickness, 7)
 
@@ -1065,6 +1099,230 @@ class ExportFOVsBatchTests(unittest.TestCase):
             )
         self.assertEqual(snapshot.mask_painter.mask_type_color, "#cc1122")
 
+    # ------------------------------------------------------------------
+    # Issue #101 regression tests
+    # ------------------------------------------------------------------
+
+    def test_live_painter_stripped_when_no_palette_override(self):
+        """Bug 1: live Mask Painter colours must NOT appear when Override is unchecked."""
+        viewer_stub = _BatchExportViewerStub(self.base_path, mask_outline_thickness=1)
+        viewer_stub.capture_overlay_snapshot = lambda **kwargs: OverlaySnapshot(
+            include_annotations=False,
+            include_masks=True,
+            annotation=None,
+            masks=(),
+            mask_painter=MaskPainterSnapshot(
+                mask_name="MASK",
+                identifier="live_class",
+                active_classes=("T",),
+                class_colors={"T": "#ff0000"},
+                class_visible={"T": True},
+                class_fill={"T": False},
+                class_opacity={"T": 35},
+                default_color="#ffffff",
+                global_fill_opacity=35,
+                show_borders_on_filled=False,
+                outline_thickness=1,
+            ),
+        )
+        _viewer, plugin = self._make_export_plugin(viewer_stub)
+        snapshot = plugin._capture_overlay_snapshot(
+            include_masks=True,
+            include_annotations=False,
+            palette_name=None,
+        )
+        self.assertIsNone(snapshot.mask_painter)
+
+    def test_export_local_layer_and_color_used_when_no_palette_override(self):
+        """Mask layer and colour come from the export-local widgets, not the viewer controls."""
+        viewer_stub = _BatchExportViewerStub(self.base_path, mask_outline_thickness=2)
+        viewer_stub.mask_key = "MASK"
+        viewer_stub.capture_overlay_snapshot = lambda **kwargs: OverlaySnapshot(
+            include_annotations=False,
+            include_masks=True,
+            annotation=None,
+            masks=(),
+            mask_painter=None,
+        )
+        _viewer, plugin = self._make_export_plugin(viewer_stub)
+        plugin.ui_component.mask_color_picker.value = "#ff0000"
+        snapshot = plugin._capture_overlay_snapshot(
+            include_masks=True,
+            include_annotations=False,
+            palette_name=None,
+        )
+        self.assertEqual(len(snapshot.masks), 1)
+        self.assertEqual(snapshot.masks[0].name, "MASK")
+        self.assertAlmostEqual(snapshot.masks[0].color[0], 1.0)  # red channel
+        self.assertAlmostEqual(snapshot.masks[0].color[1], 0.0)  # green channel
+        self.assertEqual(snapshot.masks[0].outline_thickness, 2)
+        self.assertIsNone(snapshot.mask_painter)
+
+    def test_no_fallback_mask_when_palette_override_is_set(self):
+        """When a palette override IS requested, Feature 1 sets mask_painter from
+        the palette; no fallback MaskOverlaySnapshot should be injected on top."""
+        viewer_stub = _BatchExportViewerStub(self.base_path, mask_outline_thickness=1)
+        viewer_stub.mask_key = "MASK"
+        viewer_stub.capture_overlay_snapshot = lambda **kwargs: OverlaySnapshot(
+            include_annotations=False,
+            include_masks=True,
+            annotation=None,
+            masks=(),
+            mask_painter=None,
+        )
+        _viewer, plugin = self._make_export_plugin(viewer_stub)
+        payload = self._make_palette_payload("My Palette")
+        plugin._palette_registry = {
+            "My Palette": {"path": "/fake/path.json", "saved_at": "2026-01-01T00:00:00Z"}
+        }
+        with mock.patch(
+            "ueler.viewer.palette_store.read_palette_file",
+            return_value=payload,
+        ), mock.patch(
+            "ueler.viewer.plugin.mask_painter._resolve_mask_type_color",
+            return_value=None,
+        ):
+            snapshot = plugin._capture_overlay_snapshot(
+                include_masks=True,
+                include_annotations=False,
+                palette_name="My Palette",
+            )
+        self.assertEqual(snapshot.masks, ())
+        self.assertIsNotNone(snapshot.mask_painter)
+
+    # ------------------------------------------------------------------
+    # Issue #101 reply: explicit mask layer selector
+    # ------------------------------------------------------------------
+
+    def test_refresh_mask_layer_dropdown_populates_from_mask_names(self):
+        """Dropdown options are built from viewer.mask_names after refresh."""
+        viewer_stub = _BatchExportViewerStub(self.base_path)
+        viewer_stub.mask_names = ["MASK", "CELL"]
+        viewer_stub.mask_key = "MASK"
+        viewer_stub.masks_available = True
+        _viewer, plugin = self._make_export_plugin(viewer_stub)
+        plugin._refresh_mask_layer_dropdown()
+        opts = plugin.ui_component.mask_layer_dropdown.options
+        values = [v for _, v in opts]
+        self.assertIn("MASK", values)
+        self.assertIn("CELL", values)
+
+    def test_refresh_mask_layer_dropdown_defaults_to_mask_key(self):
+        """When current dropdown value is not in the new options, it defaults to mask_key."""
+        viewer_stub = _BatchExportViewerStub(self.base_path)
+        viewer_stub.mask_names = ["CELL"]
+        viewer_stub.mask_key = "CELL"
+        viewer_stub.masks_available = True
+        _viewer, plugin = self._make_export_plugin(viewer_stub)
+        plugin.ui_component.mask_layer_dropdown.value = "OLD"
+        plugin._refresh_mask_layer_dropdown()
+        self.assertEqual(plugin.ui_component.mask_layer_dropdown.value, "CELL")
+
+    def test_capture_snapshot_uses_export_local_layer_dropdown(self):
+        """Layer name in snapshot comes from mask_layer_dropdown, not mask_key fallback."""
+        viewer_stub = _BatchExportViewerStub(self.base_path, mask_outline_thickness=1)
+        viewer_stub.capture_overlay_snapshot = lambda **kwargs: OverlaySnapshot(
+            include_annotations=False,
+            include_masks=True,
+            annotation=None,
+            masks=(),
+            mask_painter=None,
+        )
+        _viewer, plugin = self._make_export_plugin(viewer_stub)
+        plugin.ui_component.mask_layer_dropdown = _StubDropdown("CELL", [("CELL", "CELL")])
+        plugin.ui_component.mask_color_picker.value = "#00ff00"
+        snapshot = plugin._capture_overlay_snapshot(
+            include_masks=True,
+            include_annotations=False,
+            palette_name=None,
+        )
+        self.assertEqual(len(snapshot.masks), 1)
+        self.assertEqual(snapshot.masks[0].name, "CELL")
+        self.assertAlmostEqual(snapshot.masks[0].color[1], 1.0)  # green channel
+        self.assertAlmostEqual(snapshot.masks[0].alpha, 1.0)  # default alpha
+
+    def test_capture_snapshot_uses_alpha_slider_value(self):
+        """alpha in snapshot comes from mask_alpha_slider widget."""
+        viewer_stub = _BatchExportViewerStub(self.base_path, mask_outline_thickness=1)
+        viewer_stub.capture_overlay_snapshot = lambda **kwargs: OverlaySnapshot(
+            include_annotations=False,
+            include_masks=True,
+            annotation=None,
+            masks=(),
+            mask_painter=None,
+        )
+        _viewer, plugin = self._make_export_plugin(viewer_stub)
+        plugin.ui_component.mask_layer_dropdown = _StubDropdown("CELL", [("CELL", "CELL")])
+        plugin.ui_component.mask_alpha_slider.value = 0.4
+        snapshot = plugin._capture_overlay_snapshot(
+            include_masks=True,
+            include_annotations=False,
+            palette_name=None,
+        )
+        self.assertEqual(len(snapshot.masks), 1)
+        self.assertAlmostEqual(snapshot.masks[0].alpha, 0.4)
+
+    def test_capture_snapshot_painter_is_none_without_palette_override(self):
+        """mask_painter is always None when no palette override is requested."""
+        viewer_stub = _BatchExportViewerStub(self.base_path, mask_outline_thickness=1)
+        viewer_stub.capture_overlay_snapshot = lambda **kwargs: OverlaySnapshot(
+            include_annotations=False,
+            include_masks=True,
+            annotation=None,
+            masks=(),
+            mask_painter=MaskPainterSnapshot(
+                mask_name="MASK",
+                identifier="live",
+                active_classes=(),
+                class_colors={},
+                class_visible={},
+                class_fill={},
+                class_opacity={},
+                default_color="#ffffff",
+                global_fill_opacity=35,
+                show_borders_on_filled=False,
+                outline_thickness=1,
+            ),
+        )
+        _viewer, plugin = self._make_export_plugin(viewer_stub)
+        snapshot = plugin._capture_overlay_snapshot(
+            include_masks=True,
+            include_annotations=False,
+            palette_name=None,
+        )
+        self.assertIsNone(snapshot.mask_painter)
+
+    def test_config_roundtrip_includes_mask_layer_and_color(self):
+        """mask_layer, mask_color, and mask_alpha survive a config save→load roundtrip."""
+        viewer_stub = _BatchExportViewerStub(self.base_path)
+        viewer_stub.mask_names = ["CELL"]
+        viewer_stub.mask_key = "CELL"
+        _viewer, plugin = self._make_export_plugin(viewer_stub)
+        # Add extra widgets required by _collect_export_config
+        plugin.ui_component.file_format_dropdown = _StubWidget("png")
+        plugin.ui_component.downsample_input = _StubWidget(1)
+        plugin.ui_component.dpi_input = _StubWidget(300)
+        plugin.ui_component.include_scale_bar = _StubWidget(False)
+        plugin.ui_component.scale_bar_ratio = _StubWidget(10.0)
+        plugin.ui_component.include_annotations = _StubWidget(False)
+        plugin.ui_component.marker_set_dropdown = _StubDropdown(None, [])
+        plugin.ui_component.output_path = _StubWidget("")
+        # Set the fields under test
+        plugin.ui_component.mask_layer_dropdown = _StubDropdown("CELL", [("CELL", "CELL")])
+        plugin.ui_component.mask_color_picker.value = "#aabbcc"
+        plugin.ui_component.mask_alpha_slider.value = 0.6
+
+        config = plugin._collect_export_config("test")
+        self.assertEqual(config["mask_layer"], "CELL")
+        self.assertEqual(config["mask_color"], "#aabbcc")
+        self.assertAlmostEqual(config["mask_alpha"], 0.6)
+
+        plugin.ui_component.mask_color_picker.value = "#000000"
+        plugin.ui_component.mask_alpha_slider.value = 1.0
+        plugin._apply_export_config(config)
+        self.assertEqual(plugin.ui_component.mask_color_picker.value, "#aabbcc")
+        self.assertAlmostEqual(plugin.ui_component.mask_alpha_slider.value, 0.6)
+
 
 class TestSimpleViewerModeExport(unittest.TestCase):
     """BatchExportPlugin behaviour when cell_table is None (simple viewer mode)."""
@@ -1098,6 +1356,9 @@ class TestSimpleViewerModeExport(unittest.TestCase):
                 self.ui_component.mask_outline_thickness = _StubWidget(1)
                 self.ui_component.overlay_hint = _StubHTML()
                 self.ui_component.masks_only = _StubWidget(False)
+                self.ui_component.mask_layer_dropdown = _StubDropdown("MASK", [("MASK", "MASK")])
+                self.ui_component.mask_color_picker = _StubWidget("#ffffff")
+                self.ui_component.mask_alpha_slider = _StubWidget(1.0)
                 self.ui_component.mask_palette_enabled = _StubWidget(False)
                 self.ui_component.mask_palette_dropdown = _StubDropdown(None, [("Current settings", None)])
                 self.ui_component.config_name_input = _StubWidget("")
@@ -1489,7 +1750,7 @@ class BatchExportMapROIItemsTests(unittest.TestCase):
 
         # Patch _render_map_region_direct to record the call and return a known canvas.
         def _fake_render_map_region_direct(
-            _self, layer, xmin_um, xmax_um, ymin_um, ymax_um, ds, channels, channel_settings, *, skip_image_layer=False
+            _self, layer, xmin_um, xmax_um, ymin_um, ymax_um, ds, channels, channel_settings, *, skip_image_layer=False, snapshot=None
         ):
             region_direct_calls.append({
                 "xmin_um": xmin_um,
@@ -1622,7 +1883,7 @@ class BatchExportMapROIItemsTests(unittest.TestCase):
 
         render_calls = []
 
-        def _fake_render_fov_to_array(fov_name, arrays, chans, ch_settings, *, downsample_factor, region_xy, region_ds=None, skip_image_layer=False):
+        def _fake_render_fov_to_array(fov_name, arrays, chans, ch_settings, *, downsample_factor, region_xy, region_ds=None, skip_image_layer=False, masks=None):
             render_calls.append({"fov": fov_name, "channel_settings": ch_settings, "skip_image_layer": skip_image_layer})
             return rendered_tile_array
 
@@ -1651,7 +1912,7 @@ class BatchExportMapROIItemsTests(unittest.TestCase):
         region_direct_calls = []
         rendered_tile = np.ones((10, 10, 3), dtype=np.float32) * 0.5
 
-        def _fake_render(self_, layer, xmin_um, xmax_um, ymin_um, ymax_um, ds, channels, ch_settings, *, skip_image_layer=False):
+        def _fake_render(self_, layer, xmin_um, xmax_um, ymin_um, ymax_um, ds, channels, ch_settings, *, skip_image_layer=False, snapshot=None):
             region_direct_calls.append((xmin_um, xmax_um, ymin_um, ymax_um))
             return rendered_tile
 
@@ -1712,6 +1973,92 @@ class BatchExportMapROIItemsTests(unittest.TestCase):
                     overlay_snapshot=self._make_overlay_snapshot(),
                 )
 
+
+    def test_render_map_region_direct_passes_masks_to_render_fov(self):
+        """When the snapshot contains mask outlines, _render_map_region_direct passes
+        per-tile MaskRenderSettings to render_fov_to_array so mask outlines are
+        drawn at render time — not silently dropped."""
+        from ueler.rendering import ChannelRenderSettings
+        from ueler.rendering.engine import MaskOverlaySnapshot
+
+        channel_settings = {
+            "DNA": ChannelRenderSettings(color=(1.0, 0.0, 0.0), contrast_min=0.0, contrast_max=1.0),
+        }
+        channels = ("DNA",)
+        mask_color = (1.0, 0.0, 0.0)
+
+        from ueler.viewer.virtual_map_layer import MapTileGeometry
+        tile = MapTileGeometry(
+            name="FOV_A",
+            pixel_size_um=0.5,
+            width_px=100,
+            height_px=100,
+            x_min_um=0.0,
+            x_max_um=50.0,
+            y_min_um=0.0,
+            y_max_um=50.0,
+        )
+        intersection = (5.0, 25.0, 5.0, 25.0)
+        region_xy = (10, 50, 10, 50)
+        region_ds = (10, 50, 10, 50)
+        canvas = np.zeros((50, 50, 3), dtype=np.float32)
+        rendered_tile = np.ones((40, 40, 3), dtype=np.float32) * 0.4
+        fake_mask = np.ones((100, 100), dtype=np.int32)
+
+        class _StubLayer:
+            _allowed_downsample = (1,)
+            def base_pixel_size_um(self): return 0.5
+            def _collect_visible_tiles(self, *_a): return [(tile, intersection)]
+            def _allocate_canvas(self, *_a): return canvas
+            def _compute_tile_region(self, *_a): return (region_xy, region_ds)
+            def _blit_tile(self, *_a, **_kw): return None
+
+        class _FakeViewer:
+            image_cache = {"FOV_A": {"DNA": np.ones((100, 100), dtype=np.float32) * 0.3}}
+            def load_fov(self, fov_name, channels): pass
+            def _get_mask_array(self, fov_name, mask_name):
+                return fake_mask if mask_name == "whole_cell" else None
+
+        plugin = BatchExportPlugin.__new__(BatchExportPlugin)
+        plugin.main_viewer = _FakeViewer()
+
+        snapshot = OverlaySnapshot(
+            include_annotations=False,
+            include_masks=True,
+            skip_image_layer=False,
+            annotation=None,
+            masks=(MaskOverlaySnapshot(
+                name="whole_cell",
+                color=mask_color,
+                alpha=1.0,
+                mode="outline",
+                outline_thickness=2,
+            ),),
+        )
+
+        render_calls = []
+
+        def _fake_render_fov(fov_name, arrays, chans, ch_settings, *, downsample_factor, region_xy, region_ds=None, skip_image_layer=False, masks=None):
+            render_calls.append({"fov": fov_name, "masks": masks})
+            return rendered_tile
+
+        with mock.patch("ueler.viewer.plugin.export_fovs.render_fov_to_array", _fake_render_fov):
+            plugin._render_map_region_direct(
+                _StubLayer(),
+                5.0, 25.0, 5.0, 25.0,
+                1,
+                channels,
+                channel_settings,
+                snapshot=snapshot,
+            )
+
+        self.assertEqual(len(render_calls), 1, "render_fov_to_array must be called once per tile")
+        tile_masks = render_calls[0]["masks"]
+        self.assertIsNotNone(tile_masks, "masks must not be None when snapshot.masks is non-empty")
+        self.assertEqual(len(tile_masks), 1, "exactly one MaskRenderSettings expected")
+        self.assertEqual(tile_masks[0].color, mask_color)
+        self.assertEqual(tile_masks[0].mode, "outline")
+        self.assertEqual(tile_masks[0].outline_thickness, 2)
 
     def test_build_roi_items_routes_nan_fov_map_roi_to_map_worker(self):
         """After CSV reload, fov may be NaN (float). With fov sanitized to '',
@@ -1978,6 +2325,9 @@ class BatchExportMapROIItemsTests(unittest.TestCase):
             mask_palette_enabled=SimpleNamespace(observe=lambda *a, **kw: None),
             mask_palette_dropdown=SimpleNamespace(observe=lambda *a, **kw: None, disabled=True),
             masks_only=SimpleNamespace(observe=lambda *a, **kw: None),
+            mask_layer_dropdown=SimpleNamespace(observe=lambda *a, **kw: None),
+            mask_color_picker=SimpleNamespace(observe=lambda *a, **kw: None),
+            mask_alpha_slider=SimpleNamespace(observe=lambda *a, **kw: None),
             config_save_button=SimpleNamespace(on_click=lambda *a: None),
             config_load_button=SimpleNamespace(on_click=lambda *a: None),
             config_delete_button=SimpleNamespace(on_click=lambda *a: None),
