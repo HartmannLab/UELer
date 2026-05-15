@@ -449,6 +449,7 @@ class ExportFOVsBatchTests(unittest.TestCase):
                 self.ui_component.mask_layer_dropdown = _StubDropdown("MASK", [("MASK", "MASK")])
                 self.ui_component.mask_color_picker = _StubWidget("#ffffff")
                 self.ui_component.mask_alpha_slider = _StubWidget(1.0)
+                self.ui_component.separate_channels = _StubWidget(False)
                 self.ui_component.mask_palette_enabled = _StubWidget(False)
                 self.ui_component.mask_palette_dropdown = _StubDropdown(None, [("Current settings", None)])
                 self.ui_component.config_name_input = _StubWidget("")
@@ -1359,6 +1360,7 @@ class TestSimpleViewerModeExport(unittest.TestCase):
                 self.ui_component.mask_layer_dropdown = _StubDropdown("MASK", [("MASK", "MASK")])
                 self.ui_component.mask_color_picker = _StubWidget("#ffffff")
                 self.ui_component.mask_alpha_slider = _StubWidget(1.0)
+                self.ui_component.separate_channels = _StubWidget(False)
                 self.ui_component.mask_palette_enabled = _StubWidget(False)
                 self.ui_component.mask_palette_dropdown = _StubDropdown(None, [("Current settings", None)])
                 self.ui_component.config_name_input = _StubWidget("")
@@ -2433,6 +2435,182 @@ class EnsureDataframeFovSanitizationTests(unittest.TestCase):
         fov_val = df.iloc[0]["fov"]
         self.assertEqual(fov_val, "", f"Expected empty fov after CSV roundtrip, got {fov_val!r}")
         self.assertEqual(df.iloc[0]["map_id"], "slide-1")
+
+
+class TestSeparateChannelsBuilders(unittest.TestCase):
+    """Tests for separate_channels=True in the three builder methods."""
+
+    def setUp(self) -> None:
+        self._tmp_dir = TemporaryDirectory()
+        self.addCleanup(self._tmp_dir.cleanup)
+        self.base_path = Path(self._tmp_dir.name)
+
+    def _make_3ch_profile(self):
+        from ueler.viewer.plugin.export_fovs import _MarkerProfile
+        from ueler.rendering import ChannelRenderSettings
+        return _MarkerProfile(
+            name="panel1",
+            selected_channels=("DNA", "CD8", "CD45"),
+            channel_settings={
+                "DNA": ChannelRenderSettings(color=(1.0, 0.0, 0.0), contrast_min=0.0, contrast_max=1.0),
+                "CD8": ChannelRenderSettings(color=(0.0, 1.0, 0.0), contrast_min=0.0, contrast_max=1.0),
+                "CD45": ChannelRenderSettings(color=(0.0, 0.0, 1.0), contrast_min=0.0, contrast_max=1.0),
+            },
+        )
+
+    def _make_2ch_profile(self):
+        from ueler.viewer.plugin.export_fovs import _MarkerProfile
+        from ueler.rendering import ChannelRenderSettings
+        return _MarkerProfile(
+            name="panel1",
+            selected_channels=("DNA", "CD8"),
+            channel_settings={
+                "DNA": ChannelRenderSettings(color=(1.0, 0.0, 0.0), contrast_min=0.0, contrast_max=1.0),
+                "CD8": ChannelRenderSettings(color=(0.0, 1.0, 0.0), contrast_min=0.0, contrast_max=1.0),
+            },
+        )
+
+    def _make_overlay(self):
+        return OverlaySnapshot(
+            include_annotations=False,
+            include_masks=False,
+            skip_image_layer=False,
+            annotation=None,
+            masks=(),
+        )
+
+    def test_separate_channels_full_fov_creates_per_channel_items(self):
+        """2 FOVs × 3 channels = 6 items; paths end with _{channel}.png."""
+        from ueler.viewer.plugin.export_fovs import BatchExportPlugin
+
+        plugin = BatchExportPlugin.__new__(BatchExportPlugin)
+        plugin.ui_component = SimpleNamespace(
+            full_fov_use_all=SimpleNamespace(value=False),
+            full_fov_selector=SimpleNamespace(value=["FOV1", "FOV2"]),
+        )
+        plugin.main_viewer = SimpleNamespace()
+        marker_profile = self._make_3ch_profile()
+
+        items = plugin._build_full_fov_items(
+            marker_profile=marker_profile,
+            output_dir=str(self.base_path),
+            file_format="png",
+            downsample=1,
+            dpi=300,
+            include_scale_bar=False,
+            scale_ratio=10.0,
+            pixel_size_nm=390.0,
+            overlay_snapshot=self._make_overlay(),
+            separate_channels=True,
+        )
+
+        self.assertEqual(len(items), 6)
+        channels_in_paths = {Path(i.output_path).stem.split("_")[-1] for i in items}
+        self.assertEqual(channels_in_paths, {"DNA", "CD8", "CD45"})
+        for item in items:
+            self.assertTrue(item.output_path.endswith(".png"))
+            self.assertIn("channel", item.metadata)
+
+    def test_separate_channels_cell_creates_per_channel_items(self):
+        """2 cells × 2 channels = 4 items; paths contain _{channel}.png."""
+        from ueler.viewer.plugin.export_fovs import BatchExportPlugin
+
+        plugin = BatchExportPlugin.__new__(BatchExportPlugin)
+        plugin._cell_records = {
+            0: {"fov": "FOV1", "label": 1, "_index": 0},
+            1: {"fov": "FOV1", "label": 2, "_index": 1},
+        }
+        plugin.ui_component = SimpleNamespace(
+            cell_selection=SimpleNamespace(value=()),
+            cell_crop_size=SimpleNamespace(value=64),
+        )
+        plugin.main_viewer = SimpleNamespace(fov_key="fov", label_key="label")
+        marker_profile = self._make_2ch_profile()
+
+        items = plugin._build_single_cell_items(
+            marker_profile=marker_profile,
+            output_dir=str(self.base_path),
+            file_format="tiff",
+            downsample=1,
+            dpi=300,
+            include_scale_bar=False,
+            scale_ratio=10.0,
+            pixel_size_nm=390.0,
+            overlay_snapshot=self._make_overlay(),
+            separate_channels=True,
+        )
+
+        self.assertEqual(len(items), 4)
+        for item in items:
+            self.assertTrue(item.output_path.endswith(".tiff"))
+            self.assertIn("channel", item.metadata)
+        channels_seen = {item.metadata["channel"] for item in items}
+        self.assertEqual(channels_seen, {"DNA", "CD8"})
+
+    def test_separate_channels_roi_creates_per_channel_items(self):
+        """1 FOV-mode ROI × 2 channels = 2 items with _{channel} suffix."""
+        from ueler.viewer.plugin.export_fovs import BatchExportPlugin
+
+        roi_id = "fov-roi-abc123456789"
+        plugin = BatchExportPlugin.__new__(BatchExportPlugin)
+        plugin._roi_records = {
+            roi_id: {"fov": "FOV1", "map_id": "", "x_min": 0, "x_max": 100, "y_min": 0, "y_max": 100}
+        }
+        plugin.ui_component = SimpleNamespace(
+            roi_selection=SimpleNamespace(value=(roi_id,)),
+        )
+        plugin.main_viewer = SimpleNamespace()
+        marker_profile = self._make_2ch_profile()
+
+        items = plugin._build_roi_items(
+            marker_profile=marker_profile,
+            output_dir=str(self.base_path),
+            file_format="png",
+            downsample=1,
+            dpi=300,
+            include_scale_bar=False,
+            scale_ratio=10.0,
+            pixel_size_nm=390.0,
+            overlay_snapshot=self._make_overlay(),
+            separate_channels=True,
+        )
+
+        self.assertEqual(len(items), 2)
+        channels_seen = {item.metadata["channel"] for item in items}
+        self.assertEqual(channels_seen, {"DNA", "CD8"})
+        for item in items:
+            self.assertTrue(item.output_path.endswith(".png"))
+            fname = Path(item.output_path).name
+            self.assertTrue(fname.startswith("FOV1_"), f"Unexpected filename: {fname}")
+
+    def test_separate_channels_false_is_unchanged(self):
+        """separate_channels=False produces one item per FOV (no regression)."""
+        from ueler.viewer.plugin.export_fovs import BatchExportPlugin
+
+        plugin = BatchExportPlugin.__new__(BatchExportPlugin)
+        plugin.ui_component = SimpleNamespace(
+            full_fov_use_all=SimpleNamespace(value=False),
+            full_fov_selector=SimpleNamespace(value=["FOV1", "FOV2"]),
+        )
+        plugin.main_viewer = SimpleNamespace()
+        marker_profile = self._make_3ch_profile()
+
+        items = plugin._build_full_fov_items(
+            marker_profile=marker_profile,
+            output_dir=str(self.base_path),
+            file_format="png",
+            downsample=1,
+            dpi=300,
+            include_scale_bar=False,
+            scale_ratio=10.0,
+            pixel_size_nm=390.0,
+            overlay_snapshot=self._make_overlay(),
+            separate_channels=False,
+        )
+
+        self.assertEqual(len(items), 2)
+        for item in items:
+            self.assertNotIn("channel", item.metadata)
 
 
 if __name__ == "__main__":

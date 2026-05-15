@@ -1,5 +1,13 @@
 ### v0.3.1
 
+**Issue #102 — Separate channels export option in batch export plugin**
+- Added `separate_channels` checkbox to the shared controls of the batch export plugin. When checked, each selected channel is exported as an individual image file (e.g. `FOV1_DNA.png`, `FOV1_CD8.png`) instead of a merged composite. Applies to all three export modes: Full FOV, Single Cells, and ROIs (including map-mode ROIs).
+- Added `_build_channel_items()` private helper: iterates over `marker_profile.selected_channels`, creates a per-channel `_MarkerProfile`, and returns a `JobItem` list. Used by all three builder methods to avoid code duplication.
+- `_build_full_fov_items`, `_build_single_cell_items`, and `_build_roi_items` each accept `separate_channels: bool = False`; the merged-image path is unchanged when `False`.
+- Config serialization updated: `_collect_export_config()` saves `separate_channels`; `_apply_export_config()` restores it via `_set("separate_channels", "separate_channels", bool)`.
+- Added 4 new tests in `TestSeparateChannelsBuilders`; all pass.
+- Validated: 72 tests in `tests/test_export_fovs_batch.py` — 71 passed, 1 pre-existing unrelated failure.
+
 **Follow-up to Issue #101 — Mask opacity control in batch export**
 - Added `mask_alpha_slider` (FloatSlider, 0.0–1.0, default 1.0) to the batch export mask controls. The slider is grouped with the mask layer dropdown and color picker inside `mask_layer_box`, disabled when `Include Mask` is off or masks are unavailable.
 - `_capture_overlay_snapshot()` now reads `mask_alpha_slider.value` instead of the previous hardcoded `alpha=1.0` when building the export `MaskOverlaySnapshot`.

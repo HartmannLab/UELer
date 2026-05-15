@@ -102,6 +102,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### **UELer v0.3.1 Summary**
+- Added separate channels export option to batch export plugin (#102): a new "Export channels separately" checkbox exports each selected channel as an individual image file (e.g. `FOV1_DNA.png`) instead of a merged composite. Works across all three export modes: Full FOV, Single Cells, and ROIs (including map-mode ROIs).
 - Added mask opacity control to batch export plugin (#101 follow-up): a new opacity slider (0–100%) lets users control how transparent the mask overlay is in exported images.
 - Added explicit mask layer selector and color picker to batch export plugin (#101 reply): a new dropdown lists all available mask layers; a color picker sets the outline color. Mask export is now fully independent of the live viewer's overlay state — `Include Mask` always works regardless of which viewer panel checkboxes are ticked or whether the Mask Painter is active.
 - Fixed batch export mask handling (#101): `Include Mask` in the batch export plugin now works independently of the live viewer state. When `Override Mask Palette` is not checked, live Mask Painter per-cell colours are no longer applied to the export (only simple mask outlines appear). When the Mask Painter is disabled and no mask-layer panel checkboxes are ticked, a fallback mask outline is automatically included so exported images always contain mask content when `Include Mask` is checked.

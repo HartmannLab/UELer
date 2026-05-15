@@ -389,6 +389,13 @@ class BatchExportPlugin(PluginBase):
         self.ui_component.status_message = HTML(value="")
         self.ui_component.log_output = Output(layout=column_block_layout(border="1px solid #ddd"))
 
+        self.ui_component.separate_channels = Checkbox(
+            value=False,
+            description="Export channels separately",
+            indent=False,
+            layout=Layout(width="auto"),
+        )
+
         # Mode specific containers -------------------------------------------------
         self._build_full_fov_widgets(full_width, style_auto)
         self._build_single_cell_widgets(full_width, flex_fill, style_auto)
@@ -591,6 +598,7 @@ class BatchExportPlugin(PluginBase):
                 self.ui_component.overlay_hint,
                 self.ui_component.mask_palette_box,
                 _sep3,
+                self.ui_component.separate_channels,
                 self.ui_component.config_accordion,
                 HBox(
                     [self.ui_component.start_button, self.ui_component.cancel_button],
@@ -1025,6 +1033,7 @@ class BatchExportPlugin(PluginBase):
             "mask_layer": getattr(self.ui_component.mask_layer_dropdown, "value", None),
             "mask_color": getattr(self.ui_component.mask_color_picker, "value", "#ffffff"),
             "mask_alpha": float(getattr(self.ui_component.mask_alpha_slider, "value", 1.0)),
+            "separate_channels": bool(getattr(self.ui_component.separate_channels, "value", False)),
             "marker_set": getattr(self.ui_component.marker_set_dropdown, "value", None),
             "output_path": self._relativize_output_path(
                 getattr(self.ui_component.output_path, "value", "")
@@ -1071,6 +1080,7 @@ class BatchExportPlugin(PluginBase):
                 layer_dd.value = layer_name
         _set("mask_color_picker", "mask_color")
         _set("mask_alpha_slider", "mask_alpha", float)
+        _set("separate_channels", "separate_channels", bool)
 
         marker = payload.get("marker_set")
         mdd = getattr(self.ui_component, "marker_set_dropdown", None)
@@ -1355,6 +1365,7 @@ class BatchExportPlugin(PluginBase):
                 include_annotations=include_annotations,
                 palette_name=palette_name,
             )
+            separate_channels = bool(getattr(self.ui_component.separate_channels, "value", False))
 
             job = self._build_job(
                 mode=mode,
@@ -1369,6 +1380,7 @@ class BatchExportPlugin(PluginBase):
                 include_annotations=include_annotations,
                 include_masks=include_masks,
                 overlay_snapshot=overlay_snapshot,
+                separate_channels=separate_channels,
             )
         except Exception as exc:
             self._notify(f"Unable to start export: {exc}", level="error")
@@ -1588,6 +1600,7 @@ class BatchExportPlugin(PluginBase):
         include_annotations: bool,
         include_masks: bool,
         overlay_snapshot: OverlaySnapshot,
+        separate_channels: bool = False,
     ):
         overrides = {
             "downsample_factor": downsample,
@@ -1619,6 +1632,7 @@ class BatchExportPlugin(PluginBase):
             scale_ratio=scale_ratio,
             pixel_size_nm=pixel_size_nm,
             overlay_snapshot=overlay_snapshot,
+            separate_channels=separate_channels,
         )
 
         from ueler.export.job import Job  # Local import to avoid circular dependency at module import time
@@ -1640,6 +1654,38 @@ class BatchExportPlugin(PluginBase):
     # ------------------------------------------------------------------
     # Job item builders per mode
     # ------------------------------------------------------------------
+    def _build_channel_items(
+        self,
+        *,
+        base_item_id: str,
+        base_output_path: str,
+        file_format: str,
+        marker_profile: "_MarkerProfile",
+        make_worker_fn,
+        base_metadata: dict,
+    ) -> list:
+        from ueler.export.job import JobItem
+
+        items = []
+        for channel in marker_profile.selected_channels:
+            stem, _ = os.path.splitext(base_output_path)
+            ch_path = f"{stem}_{self._safe_filename(channel)}.{file_format}"
+            ch_settings = {channel: marker_profile.channel_settings[channel]}
+            ch_profile = _MarkerProfile(
+                name=f"{marker_profile.name}_{channel}",
+                selected_channels=(channel,),
+                channel_settings=ch_settings,
+            )
+            items.append(
+                JobItem(
+                    item_id=f"{base_item_id}__{channel}",
+                    execute=make_worker_fn(ch_profile, ch_path),
+                    output_path=ch_path,
+                    metadata={**base_metadata, "channel": channel},
+                )
+            )
+        return items
+
     def _build_full_fov_items(
         self,
         *,
@@ -1652,6 +1698,7 @@ class BatchExportPlugin(PluginBase):
         scale_ratio: float,
         pixel_size_nm: float,
         overlay_snapshot: OverlaySnapshot,
+        separate_channels: bool = False,
     ):
         from ueler.export.job import JobItem
 
@@ -1667,34 +1714,59 @@ class BatchExportPlugin(PluginBase):
 
             output_path = os.path.join(output_dir, f"{self._safe_filename(fov)}.{file_format}")
 
-            worker = partial(
-                self._export_fov_worker,
-                fov_name=fov,
-                marker_profile=marker_profile,
-                downsample=downsample,
-                file_format=file_format,
-                output_path=output_path,
-                dpi=dpi,
-                include_scale_bar=include_scale_bar,
-                scale_ratio=scale_ratio,
-                pixel_size_nm=pixel_size_nm,
-                overlay_snapshot=overlay_snapshot,
-            )
-
             metadata = {
                 "fov": fov,
                 "mode": self.MODE_FULL_FOV,
                 "marker_set": marker_profile.name,
             }
 
-            items.append(
-                JobItem(
-                    item_id=fov,
-                    execute=worker,
-                    output_path=output_path,
-                    metadata=metadata,
+            if separate_channels:
+                def _make_fov_worker(ch_profile, ch_path, _fov=fov):
+                    return partial(
+                        self._export_fov_worker,
+                        fov_name=_fov,
+                        marker_profile=ch_profile,
+                        downsample=downsample,
+                        file_format=file_format,
+                        output_path=ch_path,
+                        dpi=dpi,
+                        include_scale_bar=include_scale_bar,
+                        scale_ratio=scale_ratio,
+                        pixel_size_nm=pixel_size_nm,
+                        overlay_snapshot=overlay_snapshot,
+                    )
+                items.extend(
+                    self._build_channel_items(
+                        base_item_id=fov,
+                        base_output_path=output_path,
+                        file_format=file_format,
+                        marker_profile=marker_profile,
+                        make_worker_fn=_make_fov_worker,
+                        base_metadata=metadata,
+                    )
                 )
-            )
+            else:
+                worker = partial(
+                    self._export_fov_worker,
+                    fov_name=fov,
+                    marker_profile=marker_profile,
+                    downsample=downsample,
+                    file_format=file_format,
+                    output_path=output_path,
+                    dpi=dpi,
+                    include_scale_bar=include_scale_bar,
+                    scale_ratio=scale_ratio,
+                    pixel_size_nm=pixel_size_nm,
+                    overlay_snapshot=overlay_snapshot,
+                )
+                items.append(
+                    JobItem(
+                        item_id=fov,
+                        execute=worker,
+                        output_path=output_path,
+                        metadata=metadata,
+                    )
+                )
 
         return items
 
@@ -1710,6 +1782,7 @@ class BatchExportPlugin(PluginBase):
         scale_ratio: float,
         pixel_size_nm: float,
         overlay_snapshot: OverlaySnapshot,
+        separate_channels: bool = False,
     ):
         from ueler.export.job import JobItem
 
@@ -1741,21 +1814,6 @@ class BatchExportPlugin(PluginBase):
                 f"{self._safe_filename(str(fov))}_cell_{label_str}.{file_format}",
             )
 
-            worker = partial(
-                self._export_cell_worker,
-                record=record,
-                marker_profile=marker_profile,
-                crop_size=crop_size,
-                downsample=downsample,
-                file_format=file_format,
-                output_path=output_path,
-                dpi=dpi,
-                include_scale_bar=include_scale_bar,
-                scale_ratio=scale_ratio,
-                pixel_size_nm=pixel_size_nm,
-                overlay_snapshot=overlay_snapshot,
-            )
-
             metadata = {
                 "fov": fov,
                 "cell_label": label,
@@ -1764,14 +1822,56 @@ class BatchExportPlugin(PluginBase):
             }
 
             item_id = f"{fov}::cell::{label_str}"
-            items.append(
-                JobItem(
-                    item_id=item_id,
-                    execute=worker,
-                    output_path=output_path,
-                    metadata=metadata,
+
+            if separate_channels:
+                def _make_cell_worker(ch_profile, ch_path, _rec=record):
+                    return partial(
+                        self._export_cell_worker,
+                        record=_rec,
+                        marker_profile=ch_profile,
+                        crop_size=crop_size,
+                        downsample=downsample,
+                        file_format=file_format,
+                        output_path=ch_path,
+                        dpi=dpi,
+                        include_scale_bar=include_scale_bar,
+                        scale_ratio=scale_ratio,
+                        pixel_size_nm=pixel_size_nm,
+                        overlay_snapshot=overlay_snapshot,
+                    )
+                items.extend(
+                    self._build_channel_items(
+                        base_item_id=item_id,
+                        base_output_path=output_path,
+                        file_format=file_format,
+                        marker_profile=marker_profile,
+                        make_worker_fn=_make_cell_worker,
+                        base_metadata=metadata,
+                    )
                 )
-            )
+            else:
+                worker = partial(
+                    self._export_cell_worker,
+                    record=record,
+                    marker_profile=marker_profile,
+                    crop_size=crop_size,
+                    downsample=downsample,
+                    file_format=file_format,
+                    output_path=output_path,
+                    dpi=dpi,
+                    include_scale_bar=include_scale_bar,
+                    scale_ratio=scale_ratio,
+                    pixel_size_nm=pixel_size_nm,
+                    overlay_snapshot=overlay_snapshot,
+                )
+                items.append(
+                    JobItem(
+                        item_id=item_id,
+                        execute=worker,
+                        output_path=output_path,
+                        metadata=metadata,
+                    )
+                )
 
         return items
 
@@ -1787,6 +1887,7 @@ class BatchExportPlugin(PluginBase):
         scale_ratio: float,
         pixel_size_nm: float,
         overlay_snapshot: OverlaySnapshot,
+        separate_channels: bool = False,
     ):
         from ueler.export.job import JobItem
 
@@ -1812,52 +1913,63 @@ class BatchExportPlugin(PluginBase):
                     output_dir,
                     f"map_{self._safe_filename(map_id)}_roi_{self._safe_filename(roi_id[:12])}.{file_format}",
                 )
-                worker = partial(
-                    self._export_map_roi_worker,
-                    roi=record,
-                    marker_profile=marker_profile,
-                    downsample=downsample,
-                    file_format=file_format,
-                    output_path=output_path,
-                    dpi=dpi,
-                    include_scale_bar=include_scale_bar,
-                    scale_ratio=scale_ratio,
-                    overlay_snapshot=overlay_snapshot,
-                )
                 metadata = {
                     "map_id": map_id,
                     "roi_id": roi_id,
                     "mode": self.MODE_ROIS,
                     "marker_set": marker_profile.name,
                 }
-                items.append(
-                    JobItem(
-                        item_id=f"roi::{roi_id}",
-                        execute=worker,
-                        output_path=output_path,
-                        metadata=metadata,
+                if separate_channels:
+                    def _make_map_worker(ch_profile, ch_path, _rec=record):
+                        return partial(
+                            self._export_map_roi_worker,
+                            roi=_rec,
+                            marker_profile=ch_profile,
+                            downsample=downsample,
+                            file_format=file_format,
+                            output_path=ch_path,
+                            dpi=dpi,
+                            include_scale_bar=include_scale_bar,
+                            scale_ratio=scale_ratio,
+                            overlay_snapshot=overlay_snapshot,
+                        )
+                    items.extend(
+                        self._build_channel_items(
+                            base_item_id=f"roi::{roi_id}",
+                            base_output_path=output_path,
+                            file_format=file_format,
+                            marker_profile=marker_profile,
+                            make_worker_fn=_make_map_worker,
+                            base_metadata=metadata,
+                        )
                     )
-                )
+                else:
+                    worker = partial(
+                        self._export_map_roi_worker,
+                        roi=record,
+                        marker_profile=marker_profile,
+                        downsample=downsample,
+                        file_format=file_format,
+                        output_path=output_path,
+                        dpi=dpi,
+                        include_scale_bar=include_scale_bar,
+                        scale_ratio=scale_ratio,
+                        overlay_snapshot=overlay_snapshot,
+                    )
+                    items.append(
+                        JobItem(
+                            item_id=f"roi::{roi_id}",
+                            execute=worker,
+                            output_path=output_path,
+                            metadata=metadata,
+                        )
+                    )
                 continue
 
             # Single-FOV ROI — original path.
             output_path = os.path.join(
                 output_dir,
                 f"{self._safe_filename(str(fov))}_roi_{self._safe_filename(roi_id[:12])}.{file_format}",
-            )
-
-            worker = partial(
-                self._export_roi_worker,
-                roi=record,
-                marker_profile=marker_profile,
-                downsample=downsample,
-                file_format=file_format,
-                output_path=output_path,
-                dpi=dpi,
-                include_scale_bar=include_scale_bar,
-                scale_ratio=scale_ratio,
-                pixel_size_nm=pixel_size_nm,
-                overlay_snapshot=overlay_snapshot,
             )
 
             metadata = {
@@ -1867,14 +1979,53 @@ class BatchExportPlugin(PluginBase):
                 "marker_set": marker_profile.name,
             }
 
-            items.append(
-                JobItem(
-                    item_id=f"roi::{roi_id}",
-                    execute=worker,
-                    output_path=output_path,
-                    metadata=metadata,
+            if separate_channels:
+                def _make_roi_worker(ch_profile, ch_path, _rec=record):
+                    return partial(
+                        self._export_roi_worker,
+                        roi=_rec,
+                        marker_profile=ch_profile,
+                        downsample=downsample,
+                        file_format=file_format,
+                        output_path=ch_path,
+                        dpi=dpi,
+                        include_scale_bar=include_scale_bar,
+                        scale_ratio=scale_ratio,
+                        pixel_size_nm=pixel_size_nm,
+                        overlay_snapshot=overlay_snapshot,
+                    )
+                items.extend(
+                    self._build_channel_items(
+                        base_item_id=f"roi::{roi_id}",
+                        base_output_path=output_path,
+                        file_format=file_format,
+                        marker_profile=marker_profile,
+                        make_worker_fn=_make_roi_worker,
+                        base_metadata=metadata,
+                    )
                 )
-            )
+            else:
+                worker = partial(
+                    self._export_roi_worker,
+                    roi=record,
+                    marker_profile=marker_profile,
+                    downsample=downsample,
+                    file_format=file_format,
+                    output_path=output_path,
+                    dpi=dpi,
+                    include_scale_bar=include_scale_bar,
+                    scale_ratio=scale_ratio,
+                    pixel_size_nm=pixel_size_nm,
+                    overlay_snapshot=overlay_snapshot,
+                )
+                items.append(
+                    JobItem(
+                        item_id=f"roi::{roi_id}",
+                        execute=worker,
+                        output_path=output_path,
+                        metadata=metadata,
+                    )
+                )
 
         return items
 
