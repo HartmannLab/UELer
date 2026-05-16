@@ -223,6 +223,14 @@ class ROIManagerPlugin(PluginBase):
             except Exception:  # pragma: no cover - defensive for older widgets
                 pass
 
+        self.ui_component.name_input = Text(
+            value="",
+            placeholder="Custom name (optional)",
+            description="Name:",
+            layout=full_width(),
+            style=style_auto,
+        )
+
         self.ui_component.comment = Textarea(
             value="",
             placeholder="Add a comment",
@@ -275,6 +283,7 @@ class ROIManagerPlugin(PluginBase):
 
         metadata_box = VBox(
             [
+                self.ui_component.name_input,
                 self.ui_component.marker_dropdown,
                 self.ui_component.tag_entry,
                 self.ui_component.tags,
@@ -1947,6 +1956,7 @@ class ROIManagerPlugin(PluginBase):
             ),
             **viewport,
             "marker_set": self._resolve_marker_set_choice(),
+            "name": self.ui_component.name_input.value.strip(),
             "tags": list(self.ui_component.tags.value),
             "comment": self.ui_component.comment.value.strip(),
             "annotation_palette": self._get_active_annotation_palette(),
@@ -1980,6 +1990,7 @@ class ROIManagerPlugin(PluginBase):
                 else ""
             ),
             "marker_set": self._resolve_marker_set_choice(),
+            "name": self.ui_component.name_input.value.strip(),
             "tags": list(self.ui_component.tags.value),
             "comment": self.ui_component.comment.value.strip(),
             "annotation_palette": self._get_active_annotation_palette(),
@@ -2206,6 +2217,11 @@ class ROIManagerPlugin(PluginBase):
             else:
                 self.ui_component.marker_dropdown.value = ""
 
+            name_value = record.get("name", "")
+            if pd.isna(name_value):
+                name_value = ""
+            self.ui_component.name_input.value = str(name_value).strip()
+
             tags = record.get("tags") or ""
             tag_values = tuple(tag.strip() for tag in str(tags).split(",") if tag.strip())
             self.ui_component.tags.value = tag_values
@@ -2227,6 +2243,7 @@ class ROIManagerPlugin(PluginBase):
         self._suspend_ui_events = True
         try:
             self.ui_component.marker_dropdown.value = self.CURRENT_MARKER_VALUE
+            self.ui_component.name_input.value = ""
             self.ui_component.tags.value = ()
             self.ui_component.comment.value = ""
             self._update_metadata_summaries("", "", "")

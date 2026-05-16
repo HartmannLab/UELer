@@ -102,6 +102,8 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### **UELer v0.3.1 Summary**
+- Added "Merge same color" option to batch export plugin (#103 reply): when "Export channels separately" is active, channels sharing the same RGB color in the viewer's render settings are grouped into a single composite image (e.g. `FOV1_merged_DNA_CD8.png`) instead of separate files. The checkbox is disabled unless "Export channels separately" is checked.
+- Added custom ROI name support (#103): users can now assign a meaningful name to any ROI via the ROI Manager editor. The name is shown in the ROI dropdown label in place of the UUID suffix and used as the filename stem in batch exports (e.g. `FOV1_roi_tumor_core.png`).
 - Added separate channels export option to batch export plugin (#102): a new "Export channels separately" checkbox exports each selected channel as an individual image file (e.g. `FOV1_DNA.png`) instead of a merged composite. Works across all three export modes: Full FOV, Single Cells, and ROIs (including map-mode ROIs).
 - Added mask opacity control to batch export plugin (#101 follow-up): a new opacity slider (0–100%) lets users control how transparent the mask overlay is in exported images.
 - Added explicit mask layer selector and color picker to batch export plugin (#101 reply): a new dropdown lists all available mask layers; a color picker sets the outline color. Mask export is now fully independent of the live viewer's overlay state — `Include Mask` always works regardless of which viewer panel checkboxes are ticked or whether the Mask Painter is active.

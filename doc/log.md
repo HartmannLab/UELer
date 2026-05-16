@@ -1,5 +1,21 @@
 ### v0.3.1
 
+**Reply to Issue #103 — Merge same color in batch export**
+- Added `merge_same_color` checkbox to the shared controls of the batch export plugin (disabled unless `separate_channels` is checked, wired via `.observe()`).
+- Added `_build_grouped_channel_items()` private helper: groups `marker_profile.selected_channels` by their `ChannelRenderSettings.color` tuple; exports solo channels as `{base}_{ch}.{fmt}` and multi-channel groups as `{base}_merged_{ch1}_{ch2}.{fmt}`.
+- All three builder methods (`_build_full_fov_items`, `_build_single_cell_items`, `_build_roi_items` — both FOV-mode and map-mode branches) dispatch to `_build_grouped_channel_items` when both `separate_channels=True` and `merge_same_color=True`; otherwise unchanged.
+- Config serialization updated: `_collect_export_config()` saves `merge_same_color`; `_apply_export_config()` restores it.
+- Added 3 new tests in `TestMergeSameColorBuilders`; all pass.
+- Validated: 118 tests across `tests/test_export_fovs_batch.py` and `tests/test_roi_manager_tags.py` — all pass except 2 pre-existing unrelated failures.
+
+**Issue #103 — Custom ROI names**
+- Added a `name` field to `ROI_COLUMNS` (default `""`). Existing CSVs load without change via `_ensure_dataframe()`.
+- `format_roi_label()` now uses the custom name as the label suffix when non-empty, falling back to `roi_id[:8]`.
+- Added `name_input` (`Text` widget) to the ROI Manager plugin editor. Populated from the selected ROI record; included in both capture (add) and update operations.
+- Added `_roi_file_stem()` to the batch export plugin: returns the sanitized custom name when set, else `roi_id[:12]`. Used in `_build_roi_items()` for both FOV-mode and map-mode ROIs.
+- Added 6 new tests (`TestCustomROINameFilenames` + `FormatROILabelTests`); all pass.
+- Validated: 121 tests across `tests/test_export_fovs_batch.py` and `tests/test_roi_manager_tags.py` — all pass except 2 pre-existing unrelated failures.
+
 **Issue #102 — Separate channels export option in batch export plugin**
 - Added `separate_channels` checkbox to the shared controls of the batch export plugin. When checked, each selected channel is exported as an individual image file (e.g. `FOV1_DNA.png`, `FOV1_CD8.png`) instead of a merged composite. Applies to all three export modes: Full FOV, Single Cells, and ROIs (including map-mode ROIs).
 - Added `_build_channel_items()` private helper: iterates over `marker_profile.selected_channels`, creates a per-channel `_MarkerProfile`, and returns a `JobItem` list. Used by all three builder methods to avoid code duplication.

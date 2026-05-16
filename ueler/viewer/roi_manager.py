@@ -22,10 +22,13 @@ def format_roi_label(record: dict) -> str:
     tag_display = f" [{tags}]" if tags else ""
     roi_id = str(record.get("roi_id") or "")
     location = fov if fov else (f"[MAP:{map_id}]" if map_id else "—")
-    return f"{location} · {marker}{tag_display} · {roi_id[:8]}"
+    name = str(record.get("name") or "").strip()
+    suffix = name if name else roi_id[:8]
+    return f"{location} · {marker}{tag_display} · {suffix}"
 
 ROI_COLUMNS = [
     "roi_id",
+    "name",
     "fov",
     "map_id",
     "x",
@@ -56,6 +59,7 @@ def _ensure_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             ""
             if col
             in {
+                "name",
                 "fov",
                 "marker_set",
                 "tags",
@@ -69,7 +73,7 @@ def _ensure_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             else 0.0
         )
     df = df[ROI_COLUMNS]
-    for col in ["fov", "marker_set", "tags", "annotation_palette", "mask_color_set", "mask_visibility", "mask_painter_state", "comment", "map_id"]:
+    for col in ["name", "fov", "marker_set", "tags", "annotation_palette", "mask_color_set", "mask_visibility", "mask_painter_state", "comment", "map_id"]:
         if col in df.columns:
             df[col] = (
                 df[col]

@@ -396,6 +396,14 @@ class BatchExportPlugin(PluginBase):
             layout=Layout(width="auto"),
         )
 
+        self.ui_component.merge_same_color = Checkbox(
+            value=False,
+            description="Merge same color",
+            indent=False,
+            disabled=True,
+            layout=Layout(width="auto"),
+        )
+
         # Mode specific containers -------------------------------------------------
         self._build_full_fov_widgets(full_width, style_auto)
         self._build_single_cell_widgets(full_width, flex_fill, style_auto)
@@ -598,7 +606,10 @@ class BatchExportPlugin(PluginBase):
                 self.ui_component.overlay_hint,
                 self.ui_component.mask_palette_box,
                 _sep3,
-                self.ui_component.separate_channels,
+                HBox(
+                    [self.ui_component.separate_channels, self.ui_component.merge_same_color],
+                    layout=Layout(gap="16px", align_items="center", flex_flow="row wrap"),
+                ),
                 self.ui_component.config_accordion,
                 HBox(
                     [self.ui_component.start_button, self.ui_component.cancel_button],
@@ -636,6 +647,12 @@ class BatchExportPlugin(PluginBase):
         self.ui_component.mask_palette_enabled.observe(
             lambda change: setattr(
                 self.ui_component.mask_palette_dropdown, "disabled", not change["new"]
+            ),
+            names="value",
+        )
+        self.ui_component.separate_channels.observe(
+            lambda change: setattr(
+                self.ui_component.merge_same_color, "disabled", not change["new"]
             ),
             names="value",
         )
@@ -1034,6 +1051,7 @@ class BatchExportPlugin(PluginBase):
             "mask_color": getattr(self.ui_component.mask_color_picker, "value", "#ffffff"),
             "mask_alpha": float(getattr(self.ui_component.mask_alpha_slider, "value", 1.0)),
             "separate_channels": bool(getattr(self.ui_component.separate_channels, "value", False)),
+            "merge_same_color": bool(getattr(self.ui_component.merge_same_color, "value", False)),
             "marker_set": getattr(self.ui_component.marker_set_dropdown, "value", None),
             "output_path": self._relativize_output_path(
                 getattr(self.ui_component.output_path, "value", "")
@@ -1081,6 +1099,7 @@ class BatchExportPlugin(PluginBase):
         _set("mask_color_picker", "mask_color")
         _set("mask_alpha_slider", "mask_alpha", float)
         _set("separate_channels", "separate_channels", bool)
+        _set("merge_same_color", "merge_same_color", bool)
 
         marker = payload.get("marker_set")
         mdd = getattr(self.ui_component, "marker_set_dropdown", None)
@@ -1366,6 +1385,9 @@ class BatchExportPlugin(PluginBase):
                 palette_name=palette_name,
             )
             separate_channels = bool(getattr(self.ui_component.separate_channels, "value", False))
+            merge_same_color = separate_channels and bool(
+                getattr(self.ui_component.merge_same_color, "value", False)
+            )
 
             job = self._build_job(
                 mode=mode,
@@ -1381,6 +1403,7 @@ class BatchExportPlugin(PluginBase):
                 include_masks=include_masks,
                 overlay_snapshot=overlay_snapshot,
                 separate_channels=separate_channels,
+                merge_same_color=merge_same_color,
             )
         except Exception as exc:
             self._notify(f"Unable to start export: {exc}", level="error")
@@ -1601,6 +1624,7 @@ class BatchExportPlugin(PluginBase):
         include_masks: bool,
         overlay_snapshot: OverlaySnapshot,
         separate_channels: bool = False,
+        merge_same_color: bool = False,
     ):
         overrides = {
             "downsample_factor": downsample,
@@ -1633,6 +1657,7 @@ class BatchExportPlugin(PluginBase):
             pixel_size_nm=pixel_size_nm,
             overlay_snapshot=overlay_snapshot,
             separate_channels=separate_channels,
+            merge_same_color=merge_same_color,
         )
 
         from ueler.export.job import Job  # Local import to avoid circular dependency at module import time
@@ -1686,6 +1711,52 @@ class BatchExportPlugin(PluginBase):
             )
         return items
 
+    def _build_grouped_channel_items(
+        self,
+        *,
+        base_item_id: str,
+        base_output_path: str,
+        file_format: str,
+        marker_profile: "_MarkerProfile",
+        make_worker_fn,
+        base_metadata: dict,
+    ) -> list:
+        from ueler.export.job import JobItem
+
+        color_groups: dict = {}
+        for ch in marker_profile.selected_channels:
+            key = marker_profile.channel_settings[ch].color
+            color_groups.setdefault(key, []).append(ch)
+
+        stem, _ = os.path.splitext(base_output_path)
+        items = []
+        for channels in color_groups.values():
+            if len(channels) == 1:
+                ch = channels[0]
+                ch_path = f"{stem}_{self._safe_filename(ch)}.{file_format}"
+                item_id_suffix = ch
+                metadata_extra: dict = {"channel": ch}
+            else:
+                safe_names = [self._safe_filename(c) for c in channels]
+                ch_path = f"{stem}_merged_{'_'.join(safe_names)}.{file_format}"
+                item_id_suffix = "merged_" + "_".join(channels)
+                metadata_extra = {"channels": list(channels)}
+            ch_settings = {c: marker_profile.channel_settings[c] for c in channels}
+            ch_profile = _MarkerProfile(
+                name=f"{marker_profile.name}_{'_'.join(channels)}",
+                selected_channels=tuple(channels),
+                channel_settings=ch_settings,
+            )
+            items.append(
+                JobItem(
+                    item_id=f"{base_item_id}__{item_id_suffix}",
+                    execute=make_worker_fn(ch_profile, ch_path),
+                    output_path=ch_path,
+                    metadata={**base_metadata, **metadata_extra},
+                )
+            )
+        return items
+
     def _build_full_fov_items(
         self,
         *,
@@ -1699,6 +1770,7 @@ class BatchExportPlugin(PluginBase):
         pixel_size_nm: float,
         overlay_snapshot: OverlaySnapshot,
         separate_channels: bool = False,
+        merge_same_color: bool = False,
     ):
         from ueler.export.job import JobItem
 
@@ -1735,8 +1807,9 @@ class BatchExportPlugin(PluginBase):
                         pixel_size_nm=pixel_size_nm,
                         overlay_snapshot=overlay_snapshot,
                     )
+                builder_fn = self._build_grouped_channel_items if merge_same_color else self._build_channel_items
                 items.extend(
-                    self._build_channel_items(
+                    builder_fn(
                         base_item_id=fov,
                         base_output_path=output_path,
                         file_format=file_format,
@@ -1783,6 +1856,7 @@ class BatchExportPlugin(PluginBase):
         pixel_size_nm: float,
         overlay_snapshot: OverlaySnapshot,
         separate_channels: bool = False,
+        merge_same_color: bool = False,
     ):
         from ueler.export.job import JobItem
 
@@ -1839,8 +1913,9 @@ class BatchExportPlugin(PluginBase):
                         pixel_size_nm=pixel_size_nm,
                         overlay_snapshot=overlay_snapshot,
                     )
+                builder_fn = self._build_grouped_channel_items if merge_same_color else self._build_channel_items
                 items.extend(
-                    self._build_channel_items(
+                    builder_fn(
                         base_item_id=item_id,
                         base_output_path=output_path,
                         file_format=file_format,
@@ -1875,6 +1950,10 @@ class BatchExportPlugin(PluginBase):
 
         return items
 
+    def _roi_file_stem(self, record: dict, roi_id: str) -> str:
+        name = str(record.get("name") or "").strip()
+        return self._safe_filename(name) if name else self._safe_filename(roi_id[:12])
+
     def _build_roi_items(
         self,
         *,
@@ -1888,6 +1967,7 @@ class BatchExportPlugin(PluginBase):
         pixel_size_nm: float,
         overlay_snapshot: OverlaySnapshot,
         separate_channels: bool = False,
+        merge_same_color: bool = False,
     ):
         from ueler.export.job import JobItem
 
@@ -1911,7 +1991,7 @@ class BatchExportPlugin(PluginBase):
                 # Map-mode ROI — render via the stitched VirtualMapLayer.
                 output_path = os.path.join(
                     output_dir,
-                    f"map_{self._safe_filename(map_id)}_roi_{self._safe_filename(roi_id[:12])}.{file_format}",
+                    f"map_{self._safe_filename(map_id)}_roi_{self._roi_file_stem(record, roi_id)}.{file_format}",
                 )
                 metadata = {
                     "map_id": map_id,
@@ -1933,8 +2013,9 @@ class BatchExportPlugin(PluginBase):
                             scale_ratio=scale_ratio,
                             overlay_snapshot=overlay_snapshot,
                         )
+                    builder_fn = self._build_grouped_channel_items if merge_same_color else self._build_channel_items
                     items.extend(
-                        self._build_channel_items(
+                        builder_fn(
                             base_item_id=f"roi::{roi_id}",
                             base_output_path=output_path,
                             file_format=file_format,
@@ -1969,7 +2050,7 @@ class BatchExportPlugin(PluginBase):
             # Single-FOV ROI — original path.
             output_path = os.path.join(
                 output_dir,
-                f"{self._safe_filename(str(fov))}_roi_{self._safe_filename(roi_id[:12])}.{file_format}",
+                f"{self._safe_filename(str(fov))}_roi_{self._roi_file_stem(record, roi_id)}.{file_format}",
             )
 
             metadata = {
@@ -1994,8 +2075,9 @@ class BatchExportPlugin(PluginBase):
                         pixel_size_nm=pixel_size_nm,
                         overlay_snapshot=overlay_snapshot,
                     )
+                builder_fn = self._build_grouped_channel_items if merge_same_color else self._build_channel_items
                 items.extend(
-                    self._build_channel_items(
+                    builder_fn(
                         base_item_id=f"roi::{roi_id}",
                         base_output_path=output_path,
                         file_format=file_format,

@@ -450,6 +450,7 @@ class ExportFOVsBatchTests(unittest.TestCase):
                 self.ui_component.mask_color_picker = _StubWidget("#ffffff")
                 self.ui_component.mask_alpha_slider = _StubWidget(1.0)
                 self.ui_component.separate_channels = _StubWidget(False)
+                self.ui_component.merge_same_color = _StubWidget(False)
                 self.ui_component.mask_palette_enabled = _StubWidget(False)
                 self.ui_component.mask_palette_dropdown = _StubDropdown(None, [("Current settings", None)])
                 self.ui_component.config_name_input = _StubWidget("")
@@ -1361,6 +1362,7 @@ class TestSimpleViewerModeExport(unittest.TestCase):
                 self.ui_component.mask_color_picker = _StubWidget("#ffffff")
                 self.ui_component.mask_alpha_slider = _StubWidget(1.0)
                 self.ui_component.separate_channels = _StubWidget(False)
+                self.ui_component.merge_same_color = _StubWidget(False)
                 self.ui_component.mask_palette_enabled = _StubWidget(False)
                 self.ui_component.mask_palette_dropdown = _StubDropdown(None, [("Current settings", None)])
                 self.ui_component.config_name_input = _StubWidget("")
@@ -2330,6 +2332,8 @@ class BatchExportMapROIItemsTests(unittest.TestCase):
             mask_layer_dropdown=SimpleNamespace(observe=lambda *a, **kw: None),
             mask_color_picker=SimpleNamespace(observe=lambda *a, **kw: None),
             mask_alpha_slider=SimpleNamespace(observe=lambda *a, **kw: None),
+            separate_channels=SimpleNamespace(observe=lambda *a, **kw: None),
+            merge_same_color=SimpleNamespace(observe=lambda *a, **kw: None, disabled=True),
             config_save_button=SimpleNamespace(on_click=lambda *a: None),
             config_load_button=SimpleNamespace(on_click=lambda *a: None),
             config_delete_button=SimpleNamespace(on_click=lambda *a: None),
@@ -2611,6 +2615,267 @@ class TestSeparateChannelsBuilders(unittest.TestCase):
         self.assertEqual(len(items), 2)
         for item in items:
             self.assertNotIn("channel", item.metadata)
+
+
+class TestCustomROINameFilenames(unittest.TestCase):
+    """Tests for _roi_file_stem and custom name usage in _build_roi_items."""
+
+    def setUp(self) -> None:
+        self._tmp_dir = TemporaryDirectory()
+        self.addCleanup(self._tmp_dir.cleanup)
+        self.base_path = Path(self._tmp_dir.name)
+
+    def _make_1ch_profile(self):
+        from ueler.viewer.plugin.export_fovs import _MarkerProfile
+        from ueler.rendering import ChannelRenderSettings
+        return _MarkerProfile(
+            name="panel1",
+            selected_channels=("DNA",),
+            channel_settings={
+                "DNA": ChannelRenderSettings(color=(1.0, 0.0, 0.0), contrast_min=0.0, contrast_max=1.0),
+            },
+        )
+
+    def _make_overlay(self):
+        return OverlaySnapshot(
+            include_annotations=False,
+            include_masks=False,
+            skip_image_layer=False,
+            annotation=None,
+            masks=(),
+        )
+
+    def _make_plugin(self, roi_records, selected_ids):
+        from ueler.viewer.plugin.export_fovs import BatchExportPlugin
+        plugin = BatchExportPlugin.__new__(BatchExportPlugin)
+        plugin.main_viewer = SimpleNamespace()
+        plugin._roi_records = roi_records
+        plugin.ui_component = SimpleNamespace(
+            roi_selection=SimpleNamespace(value=tuple(selected_ids)),
+        )
+        return plugin
+
+    def test_build_roi_items_uses_custom_name_in_filename(self):
+        """FOV-mode ROI with name='my_region' → filename contains roi_my_region."""
+        roi_id = "fov-roi-aabbccddeeff1122"
+        plugin = self._make_plugin(
+            roi_records={roi_id: {"fov": "FOV1", "map_id": "", "name": "my_region",
+                                  "x_min": 0, "x_max": 100, "y_min": 0, "y_max": 100}},
+            selected_ids=[roi_id],
+        )
+        items = plugin._build_roi_items(
+            marker_profile=self._make_1ch_profile(),
+            output_dir=str(self.base_path),
+            file_format="png",
+            downsample=1,
+            dpi=300,
+            include_scale_bar=False,
+            scale_ratio=10.0,
+            pixel_size_nm=390.0,
+            overlay_snapshot=self._make_overlay(),
+        )
+        self.assertEqual(len(items), 1)
+        fname = Path(items[0].output_path).name
+        self.assertIn("roi_my_region", fname, f"Expected 'roi_my_region' in filename, got: {fname}")
+        self.assertNotIn(roi_id[:12], fname)
+
+    def test_build_roi_items_map_mode_uses_custom_name(self):
+        """Map-mode ROI with name='tumor_core' → filename contains roi_tumor_core."""
+        roi_id = "map-roi-aabbccddeeff1122"
+        plugin = self._make_plugin(
+            roi_records={roi_id: {"fov": "", "map_id": "slide-1", "name": "tumor_core",
+                                  "x_min": 0, "x_max": 100, "y_min": 0, "y_max": 100}},
+            selected_ids=[roi_id],
+        )
+        items = plugin._build_roi_items(
+            marker_profile=self._make_1ch_profile(),
+            output_dir=str(self.base_path),
+            file_format="tiff",
+            downsample=1,
+            dpi=300,
+            include_scale_bar=False,
+            scale_ratio=10.0,
+            pixel_size_nm=390.0,
+            overlay_snapshot=self._make_overlay(),
+        )
+        self.assertEqual(len(items), 1)
+        fname = Path(items[0].output_path).name
+        self.assertIn("roi_tumor_core", fname, f"Expected 'roi_tumor_core' in filename, got: {fname}")
+
+    def test_build_roi_items_empty_name_falls_back_to_roi_id(self):
+        """ROI with name='' → filename uses roi_{id[:12]} (no regression)."""
+        roi_id = "fov-roi-aabbccddeeff1122"
+        plugin = self._make_plugin(
+            roi_records={roi_id: {"fov": "FOV1", "map_id": "", "name": "",
+                                  "x_min": 0, "x_max": 100, "y_min": 0, "y_max": 100}},
+            selected_ids=[roi_id],
+        )
+        items = plugin._build_roi_items(
+            marker_profile=self._make_1ch_profile(),
+            output_dir=str(self.base_path),
+            file_format="png",
+            downsample=1,
+            dpi=300,
+            include_scale_bar=False,
+            scale_ratio=10.0,
+            pixel_size_nm=390.0,
+            overlay_snapshot=self._make_overlay(),
+        )
+        self.assertEqual(len(items), 1)
+        fname = Path(items[0].output_path).name
+        expected_stem = roi_id[:12]
+        self.assertIn(expected_stem, fname, f"Expected roi_id[:12] '{expected_stem}' in filename, got: {fname}")
+
+
+class TestMergeSameColorBuilders(unittest.TestCase):
+    """Tests for merge_same_color=True in _build_grouped_channel_items dispatch."""
+
+    def setUp(self) -> None:
+        self._tmp_dir = TemporaryDirectory()
+        self.addCleanup(self._tmp_dir.cleanup)
+        self.base_path = Path(self._tmp_dir.name)
+
+    def _make_overlay(self):
+        return OverlaySnapshot(
+            include_annotations=False,
+            include_masks=False,
+            skip_image_layer=False,
+            annotation=None,
+            masks=(),
+        )
+
+    def test_merge_same_color_groups_channels(self):
+        """3 channels where 2 share same color → 2 items (1 merged, 1 solo)."""
+        from ueler.viewer.plugin.export_fovs import BatchExportPlugin, _MarkerProfile
+        from ueler.rendering import ChannelRenderSettings
+
+        shared_color = (1.0, 0.0, 0.0)
+        marker_profile = _MarkerProfile(
+            name="panel1",
+            selected_channels=("DNA", "CD8", "CD45"),
+            channel_settings={
+                "DNA":  ChannelRenderSettings(color=shared_color, contrast_min=0.0, contrast_max=1.0),
+                "CD8":  ChannelRenderSettings(color=shared_color, contrast_min=0.0, contrast_max=1.0),
+                "CD45": ChannelRenderSettings(color=(0.0, 0.0, 1.0), contrast_min=0.0, contrast_max=1.0),
+            },
+        )
+
+        plugin = BatchExportPlugin.__new__(BatchExportPlugin)
+        plugin.ui_component = SimpleNamespace(
+            full_fov_use_all=SimpleNamespace(value=False),
+            full_fov_selector=SimpleNamespace(value=["FOV1"]),
+        )
+        plugin.main_viewer = SimpleNamespace()
+
+        items = plugin._build_full_fov_items(
+            marker_profile=marker_profile,
+            output_dir=str(self.base_path),
+            file_format="png",
+            downsample=1,
+            dpi=300,
+            include_scale_bar=False,
+            scale_ratio=10.0,
+            pixel_size_nm=390.0,
+            overlay_snapshot=self._make_overlay(),
+            separate_channels=True,
+            merge_same_color=True,
+        )
+
+        self.assertEqual(len(items), 2)
+        path_names = {Path(i.output_path).name for i in items}
+        self.assertTrue(any("merged" in n for n in path_names), f"No merged item in: {path_names}")
+        merged_item = next(i for i in items if "merged" in Path(i.output_path).name)
+        self.assertIn("channels", merged_item.metadata)
+        self.assertEqual(set(merged_item.metadata["channels"]), {"DNA", "CD8"})
+        solo_item = next(i for i in items if "merged" not in Path(i.output_path).name)
+        self.assertIn("channel", solo_item.metadata)
+        self.assertEqual(solo_item.metadata["channel"], "CD45")
+
+    def test_merge_same_color_all_unique_same_as_separate(self):
+        """3 channels with all different colors → 3 solo items, same naming as separate_channels."""
+        from ueler.viewer.plugin.export_fovs import BatchExportPlugin, _MarkerProfile
+        from ueler.rendering import ChannelRenderSettings
+
+        marker_profile = _MarkerProfile(
+            name="panel1",
+            selected_channels=("DNA", "CD8", "CD45"),
+            channel_settings={
+                "DNA":  ChannelRenderSettings(color=(1.0, 0.0, 0.0), contrast_min=0.0, contrast_max=1.0),
+                "CD8":  ChannelRenderSettings(color=(0.0, 1.0, 0.0), contrast_min=0.0, contrast_max=1.0),
+                "CD45": ChannelRenderSettings(color=(0.0, 0.0, 1.0), contrast_min=0.0, contrast_max=1.0),
+            },
+        )
+
+        plugin = BatchExportPlugin.__new__(BatchExportPlugin)
+        plugin.ui_component = SimpleNamespace(
+            full_fov_use_all=SimpleNamespace(value=False),
+            full_fov_selector=SimpleNamespace(value=["FOV1"]),
+        )
+        plugin.main_viewer = SimpleNamespace()
+
+        items = plugin._build_full_fov_items(
+            marker_profile=marker_profile,
+            output_dir=str(self.base_path),
+            file_format="png",
+            downsample=1,
+            dpi=300,
+            include_scale_bar=False,
+            scale_ratio=10.0,
+            pixel_size_nm=390.0,
+            overlay_snapshot=self._make_overlay(),
+            separate_channels=True,
+            merge_same_color=True,
+        )
+
+        self.assertEqual(len(items), 3)
+        for item in items:
+            self.assertNotIn("merged", Path(item.output_path).name)
+            self.assertIn("channel", item.metadata)
+        channels_seen = {item.metadata["channel"] for item in items}
+        self.assertEqual(channels_seen, {"DNA", "CD8", "CD45"})
+
+    def test_merge_same_color_false_uses_channel_items(self):
+        """merge_same_color=False with separate_channels=True still gives per-channel items (no grouping)."""
+        from ueler.viewer.plugin.export_fovs import BatchExportPlugin, _MarkerProfile
+        from ueler.rendering import ChannelRenderSettings
+
+        shared_color = (1.0, 0.0, 0.0)
+        marker_profile = _MarkerProfile(
+            name="panel1",
+            selected_channels=("DNA", "CD8"),
+            channel_settings={
+                "DNA": ChannelRenderSettings(color=shared_color, contrast_min=0.0, contrast_max=1.0),
+                "CD8": ChannelRenderSettings(color=shared_color, contrast_min=0.0, contrast_max=1.0),
+            },
+        )
+
+        plugin = BatchExportPlugin.__new__(BatchExportPlugin)
+        plugin.ui_component = SimpleNamespace(
+            full_fov_use_all=SimpleNamespace(value=False),
+            full_fov_selector=SimpleNamespace(value=["FOV1"]),
+        )
+        plugin.main_viewer = SimpleNamespace()
+
+        items = plugin._build_full_fov_items(
+            marker_profile=marker_profile,
+            output_dir=str(self.base_path),
+            file_format="png",
+            downsample=1,
+            dpi=300,
+            include_scale_bar=False,
+            scale_ratio=10.0,
+            pixel_size_nm=390.0,
+            overlay_snapshot=self._make_overlay(),
+            separate_channels=True,
+            merge_same_color=False,
+        )
+
+        self.assertEqual(len(items), 2)
+        for item in items:
+            self.assertNotIn("merged", Path(item.output_path).name)
+            self.assertIn("channel", item.metadata)
+        channels_seen = {item.metadata["channel"] for item in items}
+        self.assertEqual(channels_seen, {"DNA", "CD8"})
 
 
 if __name__ == "__main__":

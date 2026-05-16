@@ -952,5 +952,51 @@ class ROIManagerMapModeTests(unittest.TestCase):
         self.assertTrue(snapshot.skip_image_layer)
 
 
+class FormatROILabelTests(unittest.TestCase):
+    """Tests for format_roi_label with and without a custom name."""
+
+    def test_format_roi_label_uses_name_when_set(self):
+        """When name is non-empty, the label suffix is the custom name."""
+        from ueler.viewer.roi_manager import format_roi_label
+        record = {
+            "roi_id": "abcdef1234567890",
+            "fov": "FOV1",
+            "map_id": "",
+            "marker_set": "panel1",
+            "tags": "",
+            "name": "my_roi",
+        }
+        label = format_roi_label(record)
+        self.assertTrue(label.endswith("my_roi"), f"Expected label to end with 'my_roi', got: {label!r}")
+        self.assertNotIn("abcdef12", label)
+
+    def test_format_roi_label_falls_back_to_id_when_name_empty(self):
+        """When name is empty, the label suffix is roi_id[:8]."""
+        from ueler.viewer.roi_manager import format_roi_label
+        record = {
+            "roi_id": "abcdef1234567890",
+            "fov": "FOV1",
+            "map_id": "",
+            "marker_set": "panel1",
+            "tags": "",
+            "name": "",
+        }
+        label = format_roi_label(record)
+        self.assertTrue(label.endswith("abcdef12"), f"Expected label to end with 'abcdef12', got: {label!r}")
+
+    def test_format_roi_label_name_none_falls_back_to_id(self):
+        """When name is None (missing from record), falls back to roi_id[:8]."""
+        from ueler.viewer.roi_manager import format_roi_label
+        record = {
+            "roi_id": "abcdef1234567890",
+            "fov": "FOV1",
+            "map_id": "",
+            "marker_set": "panel1",
+            "tags": "",
+        }
+        label = format_roi_label(record)
+        self.assertTrue(label.endswith("abcdef12"), f"Expected label to end with 'abcdef12', got: {label!r}")
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
