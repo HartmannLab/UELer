@@ -1214,6 +1214,18 @@ def _ensure_dask_stub() -> None:
         _protect_module(_DASK, dask_module)
         return
 
+    # Prefer the real dask when it is importable.  The stub's __spec__ is None
+    # which causes importlib.util.find_spec("dask") to raise ValueError, breaking
+    # any library (e.g. anndata) that probes for dask via find_spec.
+    try:
+        import importlib as _importlib
+        _real = _importlib.import_module(_DASK)
+        if getattr(_real, "__file__", None):
+            _protect_module(_DASK, _real)
+            return
+    except Exception:
+        pass
+
     class _DelayedComputation:
         def __init__(self, func, args, kwargs):
             self._func = func

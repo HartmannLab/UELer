@@ -34,7 +34,8 @@ dependencies = [
     "anywidget>=0.9",
     "numpy",
     "ipykernel",
-    "ipympl"
+    "ipympl",
+    "anndata>=0.10",
 ]
 
 [project.optional-dependencies]

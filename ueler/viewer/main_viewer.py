@@ -1866,7 +1866,10 @@ class ImageMaskViewer:
             if isinstance(attr, PluginBase):
                 if self._debug:
                     print(f"Calling after_all_plugins_loaded for {attr_name}")
-                attr.after_all_plugins_loaded()
+                try:
+                    attr.after_all_plugins_loaded()
+                except Exception as exc:
+                    print(f"[viewer] after_all_plugins_loaded failed for {attr_name}: {exc}")
 
 
     def dynamically_load_plugins(self, allow_plugins: Optional[Iterable[str]] = None):
@@ -1889,10 +1892,13 @@ class ImageMaskViewer:
                         and issubclass(plugin_candidate, PluginBase)
                         and plugin_candidate is not PluginBase
                     ):
-                        instance = plugin_candidate(self, 6, 3)
-                        self.SidePlots.__dict__[f"{module_name}_output"] = instance
-                        if module_name == 'roi_manager_plugin':
-                            self.roi_plugin = instance
+                        try:
+                            instance = plugin_candidate(self, 6, 3)
+                            self.SidePlots.__dict__[f"{module_name}_output"] = instance
+                            if module_name == 'roi_manager_plugin':
+                                self.roi_plugin = instance
+                        except Exception as exc:
+                            print(f"[viewer] Failed to load plugin {module_name}: {exc}")
                         
 
     def setup_event_connections(self):

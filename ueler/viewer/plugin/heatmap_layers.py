@@ -7,7 +7,7 @@ import os
 import pickle
 import inspect
 import sys
-from typing import Iterable, List, Sequence, Set
+from typing import Any, Iterable, List, Sequence, Set
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -595,6 +595,175 @@ class DataLayer:
         old_subset = self.ui_component.subset_on_dropdown.value
         self.ui_component.subset_on_dropdown.options = cluster_columns
         self.ui_component.subset_on_dropdown.value = old_subset
+
+    # ------------------------------------------------------------------
+    # Checkpoint export / import
+    # ------------------------------------------------------------------
+
+    def export_heatmap_state(self, *, include_raw_medians: bool = True) -> "Any":
+        """Capture current heatmap state as an AnnData object.
+
+        The returned object is ready to be passed to ``CheckpointStore.write_checkpoint``.
+        ``uns["checkpoint"]`` is intentionally left empty here — the store fills it in.
+        """
+        import anndata
+
+        data = getattr(self, "heatmap_data", None)
+        if data is None or not hasattr(data, "columns"):
+            raise RuntimeError("No heatmap data available to export. Run the heatmap first.")
+
+        _meta_cols = {"meta_cluster", "meta_cluster_revised"}
+        marker_cols = [c for c in data.columns if c not in _meta_cols]
+        if not marker_cols:
+            raise RuntimeError("No marker columns found in heatmap data.")
+
+        X = data[marker_cols].values.astype("float32")
+        obs = {}
+        if "meta_cluster" in data.columns:
+            obs["meta_cluster"] = [
+                int(v) if not (isinstance(v, float) and v != v) else -1
+                for v in data["meta_cluster"]
+            ]
+        if "meta_cluster_revised" in data.columns:
+            obs["meta_cluster_revised"] = [
+                int(v) if not (isinstance(v, float) and v != v) else -1
+                for v in data["meta_cluster_revised"]
+            ]
+
+        adata = anndata.AnnData(
+            X=X,
+            obs=pd.DataFrame(obs, index=[str(idx) for idx in data.index]),
+            var=pd.DataFrame(index=marker_cols),
+        )
+
+        # Palette — convert int keys to str for JSON-safe serialisation
+        mc_colors = getattr(self.data, "meta_cluster_colors", {}) or {}
+        mc_names = getattr(self.data, "meta_cluster_names", {}) or {}
+        adata.uns["palette"] = {
+            "colors": {str(k): v for k, v in mc_colors.items()},
+            "names": {str(k): v for k, v in mc_names.items()},
+            "next_id": int(getattr(self.data, "next_meta_cluster_id", 0) or 0),
+        }
+
+        # UI widget values
+        ui = self.ui_component
+        adata.uns["ui"] = {
+            "selected_channels": list(getattr(ui.channel_selector, "value", [])),
+            "cluster_method": getattr(ui.cluster_method_dropdown, "value", "ward"),
+            "distance_metric": getattr(ui.distance_metric_dropdown, "value", "euclidean"),
+            "zscore_across_markers": bool(getattr(ui.zscore_across_markers_checkbox, "value", False)),
+            "horizontal_layout": bool(getattr(ui.horizontal_layout_checkbox, "value", False)),
+            "high_level_cluster_column": getattr(ui.high_level_cluster_dropdown, "value", ""),
+            "subset_on": getattr(ui.subset_on_dropdown, "value", ""),
+            "subset_values": list(getattr(ui.subset_selector, "value", []) or []),
+        }
+
+        # Dendrogram
+        raw_dend = getattr(self, "dendrogram", None)
+        if raw_dend is not None:
+            adata.uns["row_linkage"] = raw_dend.tolist()
+
+        # Dendrogram cutoff
+        cut = getattr(self.data, "dendrogram_cut", None)
+        if cut is not None:
+            adata.uns["dendrogram_cut"] = float(cut)
+
+        return adata
+
+    def import_heatmap_state(self, adata: "Any") -> None:
+        """Restore heatmap state from a previously exported AnnData checkpoint.
+
+        Reconstructs ``heatmap_data``, ``dendrogram``, meta-cluster registry, and
+        UI widget values, then re-renders the heatmap from the saved state.
+        """
+        # 1. Reconstruct heatmap_data DataFrame
+        marker_cols = list(adata.var_names)
+        obs_index = list(adata.obs_names)
+        df = pd.DataFrame(adata.X, index=obs_index, columns=marker_cols)
+        for col in ("meta_cluster", "meta_cluster_revised"):
+            if col in adata.obs.columns:
+                df[col] = adata.obs[col].values
+        self.heatmap_data = df
+
+        # 2. Restore dendrogram
+        raw_link = adata.uns.get("row_linkage")
+        if raw_link is not None:
+            self.dendrogram = np.array(raw_link)
+        else:
+            self.dendrogram = None
+
+        # 3. Restore cutoff
+        cut = adata.uns.get("dendrogram_cut")
+        if cut is not None:
+            self.data.dendrogram_cut = float(cut)
+
+        # 4. Cache revised assignments so _restore_cluster_assignments can reapply
+        if "meta_cluster_revised" in df.columns:
+            self._cluster_assignment_cache = {
+                idx: int(v) for idx, v in df["meta_cluster_revised"].dropna().items()
+            }
+        else:
+            self._cluster_assignment_cache = {}
+
+        # 5. Restore UI widget values (guarded — widgets may be stubs in test env)
+        ui_state = adata.uns.get("ui", {})
+        _widget_map = [
+            ("cluster_method_dropdown",        "cluster_method"),
+            ("distance_metric_dropdown",       "distance_metric"),
+            ("zscore_across_markers_checkbox", "zscore_across_markers"),
+            ("horizontal_layout_checkbox",     "horizontal_layout"),
+        ]
+        for attr, key in _widget_map:
+            widget = getattr(self.ui_component, attr, None)
+            val = ui_state.get(key)
+            if widget is not None and val is not None:
+                try:
+                    widget.value = val
+                except Exception:
+                    pass
+        # channel_selector — restore marker list
+        ch_widget = getattr(self.ui_component, "channel_selector", None)
+        saved_channels = ui_state.get("selected_channels")
+        if ch_widget is not None and saved_channels is not None:
+            try:
+                ch_widget.value = tuple(saved_channels)
+            except Exception:
+                pass
+
+        # 6. Update orientation state from the loaded data
+        self._update_orientation_state()
+
+        # 7. Re-render the heatmap from the saved state
+        if self.dendrogram is not None and getattr(self.data, "dendrogram_cut", None) is not None:
+            self.restore_vertical_canvas()
+            plot_output = getattr(self, "plot_output", None)
+            if plot_output is not None:
+                with plot_output:
+                    plot_output.clear_output(wait=True)
+                    self.generate_heatmap()
+            else:
+                self.generate_heatmap()
+
+        # 8. Re-apply saved palette on top of whatever generate_heatmap set
+        pal = adata.uns.get("palette", {})
+        saved_colors = {int(k): v for k, v in pal.get("colors", {}).items()}
+        saved_names = {int(k): v for k, v in pal.get("names", {}).items()}
+        next_id = int(pal.get("next_id", 0))
+        if saved_colors:
+            self.data.meta_cluster_colors.update(saved_colors)
+        if saved_names:
+            self.data.meta_cluster_names.update(saved_names)
+        if next_id:
+            self.data.next_meta_cluster_id = max(
+                int(getattr(self.data, "next_meta_cluster_id", 0) or 0), next_id
+            )
+        self._refresh_meta_cluster_controls()
+
+        # Re-render color patches with the correct saved palette
+        try:
+            self.display_row_colors_as_patches()
+        except Exception:
+            pass
 
     def _map_indices_to_cluster_positions(self, selection_indices: Sequence[int] | Set[int]):
         cluster_index = self._cluster_index_labels()

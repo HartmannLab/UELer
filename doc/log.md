@@ -1,5 +1,21 @@
 ### v0.3.1
 
+**Reply to Issue #105 — Fix heatmap not displayed after Cell Annotation plugin load**
+- Fixed `CellAnnotationPlugin.after_all_plugins_loaded()` to not call `super()`: `PluginBase.load_widget_states()` does `vars(self.ui_component)` but `CellAnnotationPlugin` has no `ui_component`, causing `AttributeError` whenever a state file existed on disk.
+- Wrapped each plugin call in `main_viewer.after_all_plugins_loaded()` with `try/except` so a crash in one plugin (e.g. `cell_annotation_output`, which sorts alphabetically before `heatmap_output`) no longer prevents later plugins from initializing.
+- Wrapped plugin instantiation in `dynamically_load_plugins()` with `try/except` for the same defensive isolation.
+- Added regression test `TestAfterAllPluginsLoaded.test_no_crash_when_no_state_file` to `tests/test_cell_annotation.py` (now 29 tests total).
+
+**Issue #105 — Heatmap checkpoint save/load (Cell Annotation plugin)**
+- Added `anndata>=0.10` as a required dependency for `.h5ad` checkpoint serialization.
+- Added `ueler/viewer/interfaces.py`: `HeatmapStateProvider` and `FlowsomParamsProvider` Protocol stubs for cross-plugin communication.
+- Added `ueler/viewer/checkpoint_store.py`: `CheckpointStore` class — atomic `.h5ad` read/write (`.partial` → fsync → `os.replace()`) and `manifest.json` management under `<root>/.UELer/dataset_<sha1>/checkpoints/`.
+- Added `export_heatmap_state()` and `import_heatmap_state()` to the `DataLayer` mixin in `heatmap_layers.py`: serialize z-scored median matrix, meta-cluster palette (colors + names), dendrogram linkage, UI settings, and `meta_cluster_revised` obs column into AnnData; restore in the correct order (re-render first, then re-apply saved palette) to avoid `_sync_meta_cluster_registry()` overwrite.
+- Added `export_flowsom_params()` and `import_flowsom_params()` to `RunFlowsom` in `run_flowsom.py`.
+- Added `ueler/viewer/plugin/cell_annotation.py`: `CellAnnotationPlugin` with a save form (step ID, description, parent dropdown, op selector) and a `CheckpointTreeWidget` (anywidget + HasTraits fallback) that renders saved checkpoints as a parent-child tree. Plugin is auto-discovered by `dynamically_load_plugins`.
+- Fixed `tests/bootstrap.py` `_ensure_dask_stub()` to prefer real dask when importable (prevents anndata `find_spec("dask")` crash).
+- Added 28 unit tests across `tests/test_checkpoint_store.py` and `tests/test_cell_annotation.py`; all pass with zero regressions.
+
 **Reply to Issue #103 — Merge same color in batch export**
 - Added `merge_same_color` checkbox to the shared controls of the batch export plugin (disabled unless `separate_channels` is checked, wired via `.observe()`).
 - Added `_build_grouped_channel_items()` private helper: groups `marker_profile.selected_channels` by their `ChannelRenderSettings.color` tuple; exports solo channels as `{base}_{ch}.{fmt}` and multi-channel groups as `{base}_merged_{ch1}_{ch2}.{fmt}`.
