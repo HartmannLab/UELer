@@ -1,7 +1,10 @@
 """Status bar helper decorators for the packaged viewer namespace."""
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable, Optional, TypeVar
+
+_logger = logging.getLogger(__name__)
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -23,8 +26,7 @@ def _set_status_bar(viewer: Optional[Any], state: str, *, fmt: str, width: int, 
 		viewer.ui_component.status_bar.width = width
 		viewer.ui_component.status_bar.height = height
 	except Exception as error:  # pragma: no cover - debugging aid only
-		if getattr(viewer, "_debug", False):
-			print(f"Error updating status bar: {error}")
+		_logger.debug("Error updating status bar: %s", error)
 
 
 def update_status_bar(func: F) -> F:

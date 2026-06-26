@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import html
+import logging
 import os
 import pickle
 import inspect
 import sys
 from typing import Any, Iterable, List, Sequence, Set
+
+_logger = logging.getLogger(__name__)
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -179,7 +182,7 @@ class DataLayer:
         if not self.ui_component.lock_cutoff_button.value:
             self.ui_component.lock_cutoff_button.value = True
         else:
-            print(f"{reason}. Use 'Unlock once' before editing the dendrogram.")
+            _logger.warning("%s. Use 'Unlock once' before editing the dendrogram.", reason)
 
     def _reset_selection_cache(self):
         self._last_scatter_selection = None
@@ -457,7 +460,7 @@ class DataLayer:
         data_file = os.path.join(base_folder, "heatmap_data.pkl")
         with open(data_file, "wb") as handle:
             pickle.dump(self.data, handle)
-        print(f"Data autosaved to {data_file}")
+        _logger.info("Data autosaved to %s", data_file)
 
     def prepare_heatmap_data(self):
         df = self.main_viewer.cell_table
@@ -467,8 +470,8 @@ class DataLayer:
         marker_columns = list(self.ui_component.channel_selector.value)
         channel = marker_columns + [cluster_column]
 
-        print(f"Preparing heatmap data for channels: {channel}")
-        print(f"Using cluster: {[cluster_column]}")
+        _logger.debug("Preparing heatmap data for channels: %s", channel)
+        _logger.debug("Using cluster: %s", [cluster_column])
 
         subset = list(self.ui_component.subset_selector.value)
         if subset:
@@ -480,7 +483,7 @@ class DataLayer:
         except Exception:
             cluster_count = len(pd.unique(cluster_values))
         if cluster_count > 300:
-            print("The number of classes is too large to display. Please select a smaller number of classes.")
+            _logger.warning("The number of classes is too large to display. Please select a smaller number of classes.")
             return
 
         df_grouped = df.groupby(cluster_column)[marker_columns].median()
@@ -526,9 +529,9 @@ class DataLayer:
 
         if column_name in self.main_viewer.cell_table.columns:
             if not overwrite:
-                print("If you intend to overwrite the existing column, please check the 'Overwrite' checkbox.")
+                _logger.warning("If you intend to overwrite the existing column, please check the 'Overwrite' checkbox.")
                 return
-            print("Overwriting the existing column.")
+            _logger.info("Overwriting the existing column.")
             self.main_viewer.cell_table.drop(column_name, axis=1, inplace=True)
             if f"{column_name}_revised" in self.main_viewer.cell_table.columns:
                 self.main_viewer.cell_table.drop(f"{column_name}_revised", axis=1, inplace=True)
@@ -579,11 +582,11 @@ class DataLayer:
             ].map(self._meta_cluster_display_name)
 
         cluster_columns = self.main_viewer.cell_table.select_dtypes(include=['int', 'int64', 'object']).columns.tolist()
-        print(cluster_columns)
+        _logger.debug("Cluster-capable columns: %s", cluster_columns)
 
         self.main_viewer.inform_plugins('on_cell_table_change')
 
-        print(f"Cluster labels saved to column '{column_name}' in the cell table.")
+        _logger.info("Cluster labels saved to column '%s' in the cell table.", column_name)
         self.display_row_colors_as_patches()
 
     def on_cell_table_change(self):
@@ -921,21 +924,21 @@ class InteractionLayer:
 
                 self.highlight_a_heatmap_grid(row_ind, col_ind)
                 self.heatmap_current_selection = (row_ind, col_ind)
-                print(f"Clicked cluster: {cluster_label}")
+                _logger.debug("Clicked cluster: %s", cluster_label)
                 cell_count = self.main_viewer.cell_table[
                     self.main_viewer.cell_table[self.ui_component.high_level_cluster_dropdown.value] == cluster_label
                 ].shape[0]
-                print(f"cell number: {cell_count}")
+                _logger.debug("cell number: %s", cell_count)
                 self.update_linked()
 
             elif dend_axis is not None and event.inaxes == dend_axis:
                 if self.ui_component.lock_cutoff_button.value:
-                    print("Cutoff is locked. Please unlock to apply new cutoff.")
+                    _logger.warning("Cutoff is locked. Please unlock to apply new cutoff.")
                     return
                 value = self._dendrogram_coord_from_event(event)
                 if value is not None:
                     self.data.dendrogram_cut = value
-                    print(f"New dendrogram cutoff: {value}")
+                    _logger.debug("New dendrogram cutoff: %s", value)
                     self._draw_cutoff_line(dend_axis)
                     self.apply_new_cutoff()
                     self._engage_cutoff_lock("Cutoff locked after dendrogram update")
@@ -945,13 +948,13 @@ class InteractionLayer:
                 selected_idx = self._cluster_index_from_coord(coord)
                 cluster_count, _ = self._cluster_and_marker_counts()
                 if selected_idx is None or selected_idx < 0 or selected_idx >= cluster_count:
-                    print("Clicked outside the color bar.")
+                    _logger.debug("Clicked outside the color bar.")
                     return
 
                 if event.button == MouseButton.RIGHT:
                     self.current_selection = []
                     self.data.current_clusters["index"].value = []
-                    print("Cleared selection.")
+                    _logger.debug("Cleared selection.")
                 else:
                     if event.key == 'shift' and self.data.current_clusters["index"].value:
                         start = min(self.data.current_clusters["index"].value[-1], selected_idx)
@@ -973,7 +976,7 @@ class InteractionLayer:
                     if cluster_labels:
                         meta_cluster_id = self.heatmap_data.loc[cluster_labels, 'meta_cluster']
                         values = meta_cluster_id.values if hasattr(meta_cluster_id, 'values') else meta_cluster_id
-                        print(f"Meta cluster IDs: {list(values)}")
+                        _logger.debug("Meta cluster IDs: %s", list(values))
                     self.highlight_row_colors(self.current_selection)
 
         return on_click
@@ -1028,7 +1031,7 @@ class InteractionLayer:
 
         if self.ui_component.chart_checkbox.value:
             if self.main_viewer.SidePlots.chart_output.ui_component.y_axis_selector.value == "None":
-                print("The response of a histogram is not implemented yet.")
+                _logger.debug("The response of a histogram is not implemented yet.")
             else:
                 self.color_points_by_meta_cluster()
                 self.highlight_scatter_plot()
@@ -1060,7 +1063,7 @@ class InteractionLayer:
 
         chart_display = getattr(self.main_viewer.SidePlots, "chart_output", None)
         if chart_display is None:
-            print("Chart plugin not available for coloring.")
+            _logger.warning("Chart plugin not available for coloring.")
             return
         meta_colors = getattr(self.data, "meta_cluster_colors", {}) or {}
         cluster_colors = getattr(self.data, "cluster_colors", {}) or {}
@@ -1074,7 +1077,7 @@ class InteractionLayer:
             color_map_source = {}
             color_series = merged_table[used_cluster]
         if not color_map_source:
-            print("Cluster color palette not available.")
+            _logger.warning("Cluster color palette not available.")
             return
         normalized_map = {}
         for key, value in color_map_source.items():
@@ -1089,7 +1092,7 @@ class InteractionLayer:
     def highlight_scatter_plot(self):
         cluster_label = self._current_cluster_label()
         if cluster_label is None:
-            print(NO_CLUSTER_SELECTED_MSG)
+            _logger.warning(NO_CLUSTER_SELECTED_MSG)
             return
 
         high_level_cluster = self.ui_component.high_level_cluster_dropdown.value
@@ -1105,13 +1108,13 @@ class InteractionLayer:
                 cell_table[high_level_cluster] == cluster_label
             ].index.tolist()
 
-        print(f"Selected indices: {row_indices}")
+        _logger.debug("Selected indices: %s", row_indices)
         self.main_viewer.SidePlots.chart_output.color_points(row_indices)
 
     def display_cells(self):
         cluster_label = self._current_cluster_label()
         if cluster_label is None:
-            print(NO_CLUSTER_SELECTED_MSG)
+            _logger.warning(NO_CLUSTER_SELECTED_MSG)
             return
 
         high_level_cluster = self.ui_component.high_level_cluster_dropdown.value
@@ -1132,7 +1135,7 @@ class InteractionLayer:
     def highlight_cells(self):
         cluster_label = self._current_cluster_label()
         if cluster_label is None:
-            print(NO_CLUSTER_SELECTED_MSG)
+            _logger.warning(NO_CLUSTER_SELECTED_MSG)
             return
 
         high_level_cluster = self.ui_component.high_level_cluster_dropdown.value
@@ -1143,18 +1146,18 @@ class InteractionLayer:
         mask_label = sub_table.loc[sub_table[high_level_cluster] == cluster_label, label_key].tolist()
 
         self.main_viewer.image_display.set_mask_ids(mask_name=self.main_viewer.mask_key, mask_ids=mask_label)
-        print(f"{mask_label} in the main viewer.")
-        print(f"Highlighted cells from cluster {cluster_label} of {high_level_cluster} in the main viewer.")
+        _logger.debug("%s in the main viewer.", mask_label)
+        _logger.info("Highlighted cells from cluster %s of %s in the main viewer.", cluster_label, high_level_cluster)
 
     def trace_cluster(self, *args):
         selections = self.main_viewer.image_display.selected_masks_label
         if not selections:
-            print("Please select a cell in the main viewer.")
+            _logger.warning("Please select a cell in the main viewer.")
             return
         selection = next(iter(selections))
         cell_id = getattr(selection, "mask_id", None)
         if cell_id is None:
-            print("Could not determine selected cell identifier.")
+            _logger.warning("Could not determine selected cell identifier.")
             return
         fov = getattr(selection, "fov", None) or self.main_viewer.ui_component.image_selector.value
         cluster_column = self.ui_component.high_level_cluster_dropdown.value
@@ -1164,28 +1167,28 @@ class InteractionLayer:
             (self.main_viewer.cell_table[label_key] == cell_id) & (self.main_viewer.cell_table[fov_key] == fov),
             cluster_column
         ].values[0]
-        print(f"Cluster of the selected cell: {cluster}")
+        _logger.debug("Cluster of the selected cell: %s", cluster)
 
         if cluster_column != self.heatmap_data.index.name:
-            print("Cluster column not found in the heatmap data.")
+            _logger.warning("Cluster column not found in the heatmap data.")
             return
 
         cluster_index = self._cluster_index_labels()
         order_positions = list(self._cluster_order_positions())
         if cluster_index is None or not order_positions:
-            print("Heatmap ordering not available.")
+            _logger.warning("Heatmap ordering not available.")
             return
 
         try:
             base_position = cluster_index.get_loc(cluster)
         except KeyError:
-            print("Cluster not found in the heatmap data.")
+            _logger.warning("Cluster not found in the heatmap data.")
             return
 
         try:
             selection_index = order_positions.index(base_position)
         except ValueError:
-            print("Cluster position not found in current ordering.")
+            _logger.warning("Cluster position not found in current ordering.")
             return
 
         if self.adapter.is_wide():
@@ -1197,7 +1200,7 @@ class InteractionLayer:
 
         self.heatmap_current_selection = (row_ind, col_ind)
         self.highlight_a_heatmap_grid(row_ind, col_ind)
-        print(f"Found cluster at heatmap index: {selection_index}")
+        _logger.debug("Found cluster at heatmap index: %s", selection_index)
 
         self.highlight_cells()
 
@@ -1225,7 +1228,7 @@ class InteractionLayer:
         self._last_highlighted_clusters = normalized_tuple
 
     def on_selected_indices_change(self, selected_indices):
-        print("Selected indices have changed.")
+        _logger.debug("Selected indices have changed.")
 
         if selected_indices is None:
             selected_items = []
@@ -1250,8 +1253,8 @@ class InteractionLayer:
             if selection_set:
                 try:
                     self.plot_heatmap()
-                except Exception as exc:
-                    print(f"Error while plotting heatmap: {exc}")
+                except Exception:
+                    _logger.error("Error while plotting heatmap", exc_info=True)
             return
 
         if not selection_set:
@@ -1264,8 +1267,8 @@ class InteractionLayer:
             self._last_scatter_selection = normalized_selection
             try:
                 self.plot_heatmap()
-            except Exception as exc:
-                print(f"Error while plotting heatmap: {exc}")
+            except Exception:
+                _logger.error("Error while plotting heatmap", exc_info=True)
             return
 
         self._apply_cluster_highlights(positions)
@@ -1296,15 +1299,15 @@ class InteractionLayer:
         new_cluster_id = self.ui_component.cluster_id_dropdown.value
         selected_indices = list(self.data.current_clusters["index"].value or [])
         if new_cluster_id is None:
-            print("Please select a meta-cluster.")
+            _logger.warning("Please select a meta-cluster.")
             return
         if not selected_indices:
-            print("No clusters selected to update.")
+            _logger.warning("No clusters selected to update.")
             return
 
         sorted_positions = self._cluster_order_positions()
         if not sorted_positions:
-            print("No cluster ordering available.")
+            _logger.warning("No cluster ordering available.")
             return
 
         self._ensure_meta_cluster_revised_column()
@@ -1313,7 +1316,7 @@ class InteractionLayer:
 
         cluster_index = self._cluster_index_labels()
         if cluster_index is None:
-            print("Cluster index not available.")
+            _logger.warning("Cluster index not available.")
             return
 
         selection_positions = np.array(sorted_positions)[np.array(selected_indices)]
@@ -1327,23 +1330,23 @@ class InteractionLayer:
             self.update_text_labels()
 
         self._engage_cutoff_lock("Cutoff locked after meta-cluster reassignment")
-        print(f"Assigned selected clusters to {self._meta_cluster_display_name(new_cluster_id)} ({new_cluster_id}).")
+        _logger.info("Assigned selected clusters to %s (%s).", self._meta_cluster_display_name(new_cluster_id), new_cluster_id)
 
     def rename_meta_cluster(self, *args):
         selected_id = self.ui_component.rename_cluster_dropdown.value
         new_name = (self.ui_component.rename_cluster_name.value or "").strip()
         if selected_id is None:
-            print("Please select a meta-cluster to rename.")
+            _logger.warning("Please select a meta-cluster to rename.")
             return
         if not new_name:
-            print("Please enter a non-empty name.")
+            _logger.warning("Please enter a non-empty name.")
             return
 
         self.data.meta_cluster_names[selected_id] = new_name
         self._refresh_meta_cluster_controls()
         self.ui_component.rename_cluster_dropdown.value = selected_id
         self.ui_component.cluster_id_dropdown.value = selected_id
-        print(f"Renamed meta-cluster {selected_id} to '{new_name}'.")
+        _logger.info("Renamed meta-cluster %s to '%s'.", selected_id, new_name)
 
     def add_meta_cluster(self, *args):
         new_id = self._next_available_meta_cluster_id()
@@ -1357,15 +1360,15 @@ class InteractionLayer:
         self._refresh_meta_cluster_controls()
         self.ui_component.rename_cluster_dropdown.value = new_id
         self.ui_component.cluster_id_dropdown.value = new_id
-        print(f"Added meta-cluster {new_id} ({new_name}).")
+        _logger.info("Added meta-cluster %s (%s).", new_id, new_name)
 
     def remove_meta_cluster(self, *args):
         selected_id = self.ui_component.rename_cluster_dropdown.value
         if selected_id is None:
-            print("Please select a meta-cluster to remove.")
+            _logger.warning("Please select a meta-cluster to remove.")
             return
         if selected_id == UNASSIGNED_META_CLUSTER_ID:
-            print("The unassigned meta-cluster cannot be removed.")
+            _logger.warning("The unassigned meta-cluster cannot be removed.")
             return
 
         if hasattr(self, 'heatmap_data') and self.heatmap_data is not None:
@@ -1395,9 +1398,9 @@ class InteractionLayer:
             self.update_text_labels()
 
         self._engage_cutoff_lock("Cutoff locked after meta-cluster removal")
-        print(
-            f"Removed meta-cluster {selected_id}. Existing assignments were moved to "
-            f"{UNASSIGNED_META_CLUSTER_NAME} ({UNASSIGNED_META_CLUSTER_ID})."
+        _logger.info(
+            "Removed meta-cluster %s. Existing assignments were moved to %s (%s).",
+            selected_id, UNASSIGNED_META_CLUSTER_NAME, UNASSIGNED_META_CLUSTER_ID,
         )
 
 
@@ -1544,49 +1547,41 @@ class DisplayLayer:
         return None
 
     def request_cached_wide_panel_refresh(self):
-        viewer = getattr(self, 'main_viewer', None)
-        debug_enabled = getattr(viewer, '_debug', False)
         if not getattr(self, 'initialized', False):
-            if debug_enabled:
-                print('[heatmap] skip cached refresh: plugin not initialised')
+            _logger.debug('[heatmap] skip cached refresh: plugin not initialised')
             return
         if not self.adapter.is_wide():
-            if debug_enabled:
-                print('[heatmap] skip cached refresh: not in wide layout')
+            _logger.debug('[heatmap] skip cached refresh: not in wide layout')
             return
         if getattr(self, '_plot_refresh_inflight', False):
-            if debug_enabled:
-                print('[heatmap] skip cached refresh: refresh already running')
+            _logger.debug('[heatmap] skip cached refresh: refresh already running')
             return
-        if debug_enabled:
-            print('[heatmap] refreshing cached wide pane')
+        _logger.debug('[heatmap] refreshing cached wide pane')
         self._plot_refresh_inflight = True
         try:
             self._ensure_plot_canvas_attached()
             self.plot_heatmap()
-            if debug_enabled:
-                print('[heatmap] wide pane refresh complete')
+            _logger.debug('[heatmap] wide pane refresh complete')
         finally:
             self._plot_refresh_inflight = False
 
     def plot_heatmap(self, *args):
-        viewer = getattr(self, 'main_viewer', None)
-        debug_enabled = getattr(viewer, '_debug', False)
         self._cache_cluster_assignments()
         self._reset_selection_cache()
+        _logger.debug("[heatmap] plot_heatmap: starting data preparation")
         self.prepare_heatmap_data()
+        _logger.debug("[heatmap] plot_heatmap: generating dendrogram")
         self.dendrogram = self.generate_dendrogram()
+        _logger.debug("[heatmap] plot_heatmap: dendrogram=%s", "ok" if self.dendrogram is not None else "None")
         self.restore_vertical_canvas()
-
         with self.plot_output:
             self.plot_output.clear_output(wait=True)
             self.generate_heatmap()
 
         if self.adapter.is_wide() and not self._plot_output_has_widget_view():
             self.restore_footer_canvas()
-        if debug_enabled:
-            mode = 'wide' if self.adapter.is_wide() else 'vertical'
-            print(f'[heatmap] plot refreshed in {mode} mode')
+        mode = 'wide' if self.adapter.is_wide() else 'vertical'
+        _logger.debug('[heatmap] plot refreshed in %s mode', mode)
 
     def load_heatmap(self, heatmap_df, cutoff, *args):
         self._reset_selection_cache()
@@ -1608,7 +1603,7 @@ class DisplayLayer:
 
         self.data.dendrogram_cut = cutoff
 
-        print(f"New dendrogram cutoff: {cutoff}")
+        _logger.info("New dendrogram cutoff: %s", cutoff)
         if getattr(self, 'current_vline', None):
             self.current_vline.remove()
         self.current_vline = self.data.g.ax_row_dendrogram.axvline(
@@ -1721,20 +1716,22 @@ class DisplayLayer:
 
     @update_status_bar
     def generate_heatmap(self):
+        _logger.debug("[heatmap] generate_heatmap: entry")
         markers = list(self.ui_component.channel_selector.value)
         if not markers:
-            print("No markers selected for display.")
+            _logger.debug("[heatmap] generate_heatmap: early return — no markers selected")
             return
 
         self._update_orientation_state()
         heatmap_view = self.orientation_state.get("view")
         if heatmap_view is None or heatmap_view.empty:
-            print("Heatmap view is empty.")
+            _logger.debug("[heatmap] generate_heatmap: early return — heatmap view is None or empty")
             return
 
         cutoff = self.data.dendrogram_cut
+        _logger.debug("[heatmap] generate_heatmap: dendrogram=%s, cutoff=%s", self.dendrogram is not None, cutoff)
         if self.dendrogram is None:
-            print("Dendrogram not available for plotting.")
+            _logger.debug("[heatmap] generate_heatmap: early return — dendrogram not available")
             return
         meta_cluster_labels = cut_tree(self.dendrogram, height=cutoff).flatten()
 
@@ -1743,7 +1740,7 @@ class DisplayLayer:
 
         base_index = self.orientation_state.get("cluster_index")
         if base_index is None:
-            print("Cluster index not available.")
+            _logger.debug("[heatmap] generate_heatmap: early return — cluster_index is None")
             return
         self.heatmap_data = self.heatmap_data.reindex(base_index)
         self.heatmap_data['meta_cluster'] = meta_cluster_labels
@@ -1766,10 +1763,10 @@ class DisplayLayer:
         requested_markers = [m for m in markers if m in marker_axis_labels]
         missing_markers = [m for m in markers if m not in marker_axis_labels]
         if missing_markers:
-            print(f"Warning: markers not found in heatmap data and will be skipped: {missing_markers}")
+            _logger.debug("[heatmap] generate_heatmap: markers not in data (skipped): %s", missing_markers)
 
         if not requested_markers:
-            print("No requested markers are available in the heatmap data.")
+            _logger.debug("[heatmap] generate_heatmap: early return — no requested markers available in heatmap data")
             return
 
         plot_data = self.adapter.slice_for_markers(heatmap_view, requested_markers)
@@ -1790,15 +1787,27 @@ class DisplayLayer:
             **self._heatmap_colormap_settings(),
         )
 
-        g = sns.clustermap(**clustermap_kwargs)
+        _logger.debug("[heatmap] generate_heatmap: calling sns.clustermap (shape=%s)", plot_data.shape)
+        try:
+            g = sns.clustermap(**clustermap_kwargs)
+        except Exception:
+            _logger.debug("[heatmap] generate_heatmap: sns.clustermap FAILED", exc_info=True)
+            return
 
         self.data.g = g
+        _logger.debug("[heatmap] generate_heatmap: clustermap ok, setting up layout")
 
         if hasattr(g, 'cax') and g.cax is not None:
             g.cax.set_visible(False)
             g.cax.remove()
 
-        self._setup_layout(g, cluster, subset_on)
+        try:
+            self._setup_layout(g, cluster, subset_on)
+        except Exception:
+            _logger.debug("[heatmap] generate_heatmap: _setup_layout FAILED", exc_info=True)
+            return
+
+        _logger.debug("[heatmap] generate_heatmap: render complete")
 
     def _setup_layout(self, g, cluster, subset_on):
         cluster_index = self.orientation_state.get("cluster_index")

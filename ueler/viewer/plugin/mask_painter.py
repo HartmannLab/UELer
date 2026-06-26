@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib
+import logging
 import shutil
 from collections import OrderedDict
 from datetime import datetime
@@ -47,6 +48,8 @@ from ueler.viewer.palette_store import (
     write_palette_file,
 )
 from ueler.rendering import MaskPainterSnapshot, set_cell_color, get_cell_color, clear_cell_colors, set_cell_colors_bulk
+
+_logger = logging.getLogger(__name__)
 COLOR_SET_FILE_SUFFIX = ".maskcolors.json"
 REGISTRY_FILENAME = "mask_color_sets_index.json"
 COLOR_SET_VERSION = "1.1.0"
@@ -1511,8 +1514,7 @@ class MaskPainterDisplay(PluginBase):
             try:
                 cell_gallery_plugin.on_mask_painter_change()
             except Exception as exc:
-                if getattr(self.main_viewer, "_debug", False):
-                    print(f"[mask_painter] Failed to notify cell gallery: {exc}")
+                _logger.debug("[mask_painter] Failed to notify cell gallery: %s", exc)
 
     def get_cell_color(self, fov: str, mask_id: int) -> Optional[str]:
         """Get the painted color for a specific cell ID in a specific FOV.
@@ -1726,8 +1728,10 @@ class MaskPainterDisplay(PluginBase):
     def _log(self, message: str, error: bool = False, clear: bool = False) -> None:
         if error:
             self.ui_component.feedback_label.value = f'<span style="color:orange">⚠️ {message}</span>'
+            _logger.warning(message)
         else:
             self.ui_component.feedback_label.value = f'<span style="color:green">✓ {message}</span>'
+            _logger.info(message)
 
     def _determine_storage_folder(self) -> Optional[Path]:
         base_folder = getattr(self.main_viewer, "base_folder", None)

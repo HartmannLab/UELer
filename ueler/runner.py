@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Callable, Optional, Protocol, TYPE_CHECKING, Union
 
 from ._compat import ensure_aliases_loaded
+
+_logger = logging.getLogger(__name__)
 
 __all__ = ["run_viewer", "load_cell_table"]
 
@@ -161,26 +164,19 @@ def run_viewer(
 
 def _refresh_viewer_state(viewer: "ImageMaskViewer") -> None:
 	"""Refresh viewer controls after mutating underlying data."""
-	_dbg = getattr(viewer, "_debug", False)
-
-	if _dbg:
-		print("[runner] _refresh_viewer_state: update_marker_set_dropdown", flush=True)
+	_logger.debug("[runner] _refresh_viewer_state: update_marker_set_dropdown")
 	viewer.update_marker_set_dropdown()
 
-	if _dbg:
-		print("[runner] _refresh_viewer_state: update_controls", flush=True)
+	_logger.debug("[runner] _refresh_viewer_state: update_controls")
 	viewer.update_controls(None)
 
-	if _dbg:
-		print("[runner] _refresh_viewer_state: on_image_change", flush=True)
+	_logger.debug("[runner] _refresh_viewer_state: on_image_change")
 	try:
 		viewer.on_image_change(None)
 	except AttributeError:
-		if _dbg:
-			print("[runner] Skipping on_image_change refresh; side plots not fully initialised.")
+		_logger.debug("[runner] Skipping on_image_change refresh; side plots not fully initialised.")
 
-	if _dbg:
-		print("[runner] _refresh_viewer_state: on_image_change done", flush=True)
+	_logger.debug("[runner] _refresh_viewer_state: on_image_change done")
 
 	# In map mode, run the same activation path used by map-selector changes.
 	# load_cell_table -> on_image_change mutates FOV-derived state even when the
@@ -195,32 +191,24 @@ def _refresh_viewer_state(viewer: "ImageMaskViewer") -> None:
 			active_map_id = getattr(selector, "value", None)
 		activate = getattr(viewer, "_activate_map_mode", None)
 		if active_map_id is not None and callable(activate):
-			if _dbg:
-				print(f"[runner] _refresh_viewer_state: _activate_map_mode({active_map_id!r})", flush=True)
+			_logger.debug("[runner] _refresh_viewer_state: _activate_map_mode(%r)", active_map_id)
 			try:
 				activate(str(active_map_id))
 			except Exception:
-				if _dbg:
-					print("[runner] Failed to re-activate map mode during refresh.")
+				_logger.debug("[runner] Failed to re-activate map mode during refresh.")
 		refresh_map_controls = getattr(viewer, "_refresh_map_controls", None)
 		if callable(refresh_map_controls):
-			if _dbg:
-				print("[runner] _refresh_viewer_state: _refresh_map_controls", flush=True)
+			_logger.debug("[runner] _refresh_viewer_state: _refresh_map_controls")
 			refresh_map_controls()
-	if _dbg:
-		print("[runner] _refresh_viewer_state: update_display", flush=True)
+	_logger.debug("[runner] _refresh_viewer_state: update_display")
 	viewer.update_display(viewer.current_downsample_factor)
-	if _dbg:
-		print("[runner] _refresh_viewer_state: update_keys", flush=True)
+	_logger.debug("[runner] _refresh_viewer_state: update_keys")
 	viewer.update_keys(None)
-	if _dbg:
-		print("[runner] _refresh_viewer_state: refresh_bottom_panel", flush=True)
+	_logger.debug("[runner] _refresh_viewer_state: refresh_bottom_panel")
 	viewer.refresh_bottom_panel()
-	if _dbg:
-		print("[runner] _refresh_viewer_state: inform_plugins", flush=True)
+	_logger.debug("[runner] _refresh_viewer_state: inform_plugins")
 	viewer.inform_plugins('refresh_roi_table')
-	if _dbg:
-		print("[runner] _refresh_viewer_state: DONE", flush=True)
+	_logger.debug("[runner] _refresh_viewer_state: DONE")
 
 
 def load_cell_table(

@@ -1,10 +1,13 @@
 # ui_components.py
 import ipywidgets as widgets
 import importlib
+import logging
 from pathlib import Path
 
 from IPython.display import display
 from types import SimpleNamespace
+
+_logger = logging.getLogger(__name__)
 
 _FileChooserModule = None
 try:  # pragma: no cover - optional dependency for richer load dialogs
@@ -256,15 +259,12 @@ def _trigger_cached_plugin_refresh(plugin):
 
 
 def update_wide_plugin_panel(viewer, ordering=None):
-    debug_enabled = getattr(viewer, '_debug', False)
     if not hasattr(viewer, 'wide_plugin_tab') or not hasattr(viewer, 'wide_plugin_panel'):
-        if debug_enabled:
-            print("[wide-plugin] viewer missing wide_plugin_tab or wide_plugin_panel; skipping update")
+        _logger.debug("[wide-plugin] viewer missing wide_plugin_tab or wide_plugin_panel; skipping update")
         return
 
     entries = collect_wide_plugin_entries(viewer)
-    if debug_enabled:
-        print(f"[wide-plugin] update requested with {len(entries)} entries")
+    _logger.debug("[wide-plugin] update requested with %d entries", len(entries))
     bottom_ns = _ensure_bottom_namespace(viewer)
     pane_cache = _ensure_pane_cache(viewer)
 
@@ -272,8 +272,7 @@ def update_wide_plugin_panel(viewer, ordering=None):
     _cleanup_bottom_state(bottom_ns, pane_cache, active_attrs)
 
     if not entries:
-        if debug_enabled:
-            print('[wide-plugin] no entries found; hiding footer panel')
+        _logger.debug('[wide-plugin] no entries found; hiding footer panel')
         _clear_wide_panel(viewer)
         return
 
@@ -288,18 +287,17 @@ def update_wide_plugin_panel(viewer, ordering=None):
         setattr(bottom_ns, entry['attr'], entry['plugin'])
         if reused:
             refresh_queue.append(entry['plugin'])
-            if debug_enabled:
-                print(f"[wide-plugin] reused pane for {entry['attr']}")
-        elif debug_enabled:
-            print(f"[wide-plugin] rebuilt pane for {entry['attr']}")
+            _logger.debug("[wide-plugin] reused pane for %s", entry['attr'])
+        else:
+            _logger.debug("[wide-plugin] rebuilt pane for %s", entry['attr'])
 
     _apply_wide_panel(viewer, entries, tab_children)
     _restore_heatmap(viewer)
     for plugin in refresh_queue:
         _trigger_cached_plugin_refresh(plugin)
-    if debug_enabled and refresh_queue:
+    if refresh_queue:
         refreshed = ', '.join(getattr(plugin, 'displayed_name', repr(plugin)) for plugin in refresh_queue)
-        print(f'[wide-plugin] triggered cached refresh for: {refreshed}')
+        _logger.debug('[wide-plugin] triggered cached refresh for: %s', refreshed)
 
 
 def create_widgets(viewer):
@@ -387,7 +385,16 @@ def display_ui(viewer):
         viewer.side_plot  # Add the chart output widget to the right
     ])
 
-    root = VBox([ui, viewer.wide_plugin_panel], layout=Layout(width='100%', max_width='100%', min_width='0', box_sizing='border-box', gap='12px'))
+    root_children = [ui, viewer.wide_plugin_panel]
+    if getattr(viewer, "_debug", False):
+        from ueler.viewer.log_console import enable_log_console, build_log_console_panel
+        viewer.log_console_handler = enable_log_console()
+        root_children.append(build_log_console_panel(viewer.log_console_handler))
+    else:
+        from ueler.viewer.log_console import disable_log_console
+        disable_log_console()
+
+    root = VBox(root_children, layout=Layout(width='100%', max_width='100%', min_width='0', box_sizing='border-box', gap='12px'))
 
     if hasattr(viewer, 'refresh_bottom_panel'):
         viewer.refresh_bottom_panel()

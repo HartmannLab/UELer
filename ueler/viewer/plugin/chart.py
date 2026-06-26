@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import itertools
+import logging
 import os
 from collections import OrderedDict
+
+_logger = logging.getLogger(__name__)
 from typing import Iterable, Mapping, Optional, Sequence, Set, Tuple, Union
 
 import matplotlib.pyplot as plt
@@ -243,7 +246,7 @@ class ChartDisplay(PluginBase):
         c_col = self.ui_component.color_selector.value
 
         if x_col == "None" and y_col == "None":
-            print("Please select columns for at least the x axis.")
+            _logger.warning("Please select columns for at least the x axis.")
             return
 
         if y_col == "None":
@@ -321,6 +324,7 @@ class ChartDisplay(PluginBase):
                 )
                 fig.canvas.draw_idle()
                 print(f"Cutoff set at: {self.cutoff:.3f}")
+                _logger.info("Cutoff set at: %.3f", self.cutoff)
                 self.highlight_cells(push_to_gallery=True)
 
             fig.canvas.mpl_connect("button_press_event", onclick)
@@ -462,12 +466,12 @@ class ChartDisplay(PluginBase):
     def trace_cells(self, _button) -> None:
         selections = list(self.main_viewer.image_display.selected_masks_label)
         if not selections:
-            print("No cells selected.")
+            _logger.warning("No cells selected.")
             return
         x_col = self.ui_component.x_axis_selector.value
         y_col = self.ui_component.y_axis_selector.value
         if x_col == "None" or y_col == "None":
-            print("Please select both x and y axes to trace cells.")
+            _logger.warning("Please select both x and y axes to trace cells.")
             return
         current_fov = self.main_viewer.ui_component.image_selector.value
         mask_ids = [
@@ -476,7 +480,7 @@ class ChartDisplay(PluginBase):
             if getattr(selection, "fov", current_fov) == current_fov
         ]
         if not mask_ids:
-            print("No cells selected for tracing.")
+            _logger.warning("No cells selected for tracing.")
             return
         cell_table = self.main_viewer.cell_table
         in_fov = cell_table[self.main_viewer.fov_key] == current_fov
@@ -484,14 +488,14 @@ class ChartDisplay(PluginBase):
             in_fov & cell_table[self.main_viewer.label_key].isin(mask_ids)
         ]
         if traced.empty:
-            print("No matching cells found in the current FOV.")
+            _logger.warning("No matching cells found in the current FOV.")
             return
         self._apply_external_selection(traced.index)
 
     def highlight_cells(self, *, push_to_gallery: bool = False) -> None:
         x_col = self.ui_component.x_axis_selector.value
         if x_col == "None" or self.cutoff is None:
-            print("X-axis not selected or cutoff unset.")
+            _logger.warning("X-axis not selected or cutoff unset.")
             return
         cell_table = self.main_viewer.cell_table
         select_above = self.ui_component.above_below_buttons.value == "above"
@@ -678,9 +682,7 @@ class ChartDisplay(PluginBase):
         self._section_location = "horizontal"
 
     def _sync_panel_location(self) -> bool:
-        debug_enabled = getattr(self.main_viewer, '_debug', False)
-        if debug_enabled:
-            print(f"[chart] sync panel location: {self._section_location}")
+        _logger.debug("[chart] sync panel location: %s", self._section_location)
         previous_location = self._section_location
         if self._has_multiple_scatter():
             self._place_sections_horizontal()
@@ -691,8 +693,7 @@ class ChartDisplay(PluginBase):
             layout_changed
             and hasattr(self.main_viewer, "refresh_bottom_panel")
         ):
-            if debug_enabled:
-                print("[chart] refreshing bottom panel due to layout change")
+            _logger.debug("[chart] refreshing bottom panel due to layout change")
             self.main_viewer.refresh_bottom_panel()
         return layout_changed
 

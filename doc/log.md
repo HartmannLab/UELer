@@ -1,5 +1,17 @@
 ### v0.3.1
 
+**Package-wide logging sweep — all UELer messages feed the log console**
+- Converted ~140 scattered `print()` calls across the viewer core and plugins to module loggers (`logging.getLogger(__name__)`), so every diagnostic now flows through the `ueler` logger into the bottom log console (debug mode). Touched: `main_viewer.py` (~95), `image_display.py`, `plugin_base.py`, `ui_components.py`, `decorators.py`, `runner.py`, `data_loader.py`, and the `run_flowsom`, `chart`, `chart_heatmap`, `cell_gallery`, `go_to`, `mask_painter` plugins. Level by intent: debug for traces (dropping `if self._debug:` guards where they only gated a print), info for confirmations, warning for user-actionable problems, error (`exc_info=True`) for failures.
+- Mirrored plugin UI text into the log console: the status-label/log helpers `mask_painter._log()`, `roi_manager_plugin.set_status()`, `cell_annotation._set_status()`, `export_fovs._log()`, and `main_viewer._log_annotation_palette()` now emit a `ueler` log record in addition to updating their inline widget; widget-rendered prints (cell_gallery, chart cutoff) keep their `Output` rendering and add a log mirror.
+- Added `tests/test_logging_sweep.py` (4 tests) asserting the helpers emit `ueler.*` records.
+
+**Reply 2 to Issue #105 — UELer log console + heatmap diagnostics via `logging`**
+- Added a dedicated **log console** docked at the bottom of the viewer UI, shown only when `debug=True`. New `ueler/viewer/log_console.py` defines `OutputWidgetHandler` (a `logging.Handler` that renders records into an `ipywidgets.Output`), plus `enable_log_console()` / `disable_log_console()` / `build_log_console_panel()`. The console is scrollable, its text is selectable/copyable, and a **Clear** button empties it; retained records are capped at 1000.
+- `display_ui()` docks the console as the last root child when `viewer._debug` is set, and attaches the handler to `logging.getLogger("ueler")` with `propagate=False` so all `ueler.*` module loggers feed the console (and nothing leaks to the notebook cell). `ImageMaskViewer(debug=True)` raises the `ueler` logger to `DEBUG`.
+- Converted the heatmap plugins fully to `logging`: all ~50 `print()` calls in `heatmap_layers.py` and `heatmap.py` now use `_logger.<level>` by intent — `debug` for traces (`Preparing heatmap data…`, click traces), `info` for confirmations, `warning` for user-actionable problems, `error(exc_info=True)` for render failures. `generate_heatmap()` logs at each early-return and wraps `sns.clustermap()` / `_setup_layout()` to surface failures.
+- Note: an earlier attempt to route logs to the kernel's stderr via a custom fd handler in `ueler/__init__.py` was **reverted** — ipykernel captures stdout/stderr/fds, and the dedicated widget console is the correct home for these messages.
+- Added `tests/test_log_console.py` (8 tests).
+
 **Reply to Issue #105 — Fix heatmap not displayed after Cell Annotation plugin load**
 - Fixed `CellAnnotationPlugin.after_all_plugins_loaded()` to not call `super()`: `PluginBase.load_widget_states()` does `vars(self.ui_component)` but `CellAnnotationPlugin` has no `ui_component`, causing `AttributeError` whenever a state file existed on disk.
 - Wrapped each plugin call in `main_viewer.after_all_plugins_loaded()` with `try/except` so a crash in one plugin (e.g. `cell_annotation_output`, which sorts alphabetically before `heatmap_output`) no longer prevents later plugins from initializing.

@@ -1,11 +1,20 @@
 import html
 import json
+import logging
 import math
 import os
 import uuid
 from dataclasses import asdict, dataclass
 from types import SimpleNamespace
 from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+
+_logger = logging.getLogger(__name__)
+_STATUS_LOG_LEVELS = {
+    "info": logging.INFO,
+    "success": logging.INFO,
+    "warning": logging.WARNING,
+    "error": logging.ERROR,
+}
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -2270,6 +2279,7 @@ class ROIManagerPlugin(PluginBase):
     def set_status(self, message: str, level: str = "info") -> None:
         color = self.STATUS_COLORS.get(level, self.STATUS_COLORS["info"])
         self.ui_component.status.value = f"<span style='color:{color}'>{message}</span>"
+        _logger.log(_STATUS_LOG_LEVELS.get(level, logging.INFO), message)
 
     # ------------------------------------------------------------------
     # Lifecycle hooks

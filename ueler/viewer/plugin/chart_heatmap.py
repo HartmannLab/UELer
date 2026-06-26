@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import logging
 from collections import OrderedDict
 from typing import Iterable, Optional, Sequence, Set, Union
 
@@ -29,6 +30,8 @@ from ueler.viewer.decorators import update_status_bar
 from ueler.viewer.observable import Observable
 from ueler.viewer.plugin.plugin_base import PluginBase
 from ueler.viewer.plugin.scatter_widget import ScatterPlotWidget
+
+_logger = logging.getLogger(__name__)
 
 
 _SELECTION_NOTICE = (
@@ -199,12 +202,12 @@ class ChartDisplay(PluginBase):
     def plot_chart(self, _button):
         heatmap_plugin = getattr(self.main_viewer.SidePlots, "heatmap_output", None)
         if heatmap_plugin is None or not hasattr(heatmap_plugin, "heatmap_data"):
-            print("Heatmap data not available. Plot the heatmap first.")
+            _logger.warning("Heatmap data not available. Plot the heatmap first.")
             return
 
         heatmap_df = getattr(heatmap_plugin, "heatmap_data", None)
         if heatmap_df is None or not isinstance(heatmap_df, pd.DataFrame):
-            print("Heatmap data is not a pandas DataFrame.")
+            _logger.warning("Heatmap data is not a pandas DataFrame.")
             return
 
         x_col = self.ui_component.x_axis_selector.value
@@ -212,7 +215,7 @@ class ChartDisplay(PluginBase):
         c_col = self.ui_component.color_selector.value
 
         if x_col == "None" and y_col == "None":
-            print("Please select columns for at least the x axis.")
+            _logger.warning("Please select columns for at least the x axis.")
             return
 
         if y_col == "None":
@@ -224,7 +227,7 @@ class ChartDisplay(PluginBase):
         ]
         missing = [col for col in required_columns if col not in heatmap_df.columns]
         if missing:
-            print(f"Missing columns in heatmap data: {missing}")
+            _logger.warning("Missing columns in heatmap data: %s", missing)
             return
 
         data = heatmap_df.dropna(subset=required_columns)
@@ -255,7 +258,7 @@ class ChartDisplay(PluginBase):
 
     def _render_histogram(self, data: pd.DataFrame, x_col: str) -> None:
         if x_col not in data.columns:
-            print(f"Column '{x_col}' not found in heatmap data.")
+            _logger.warning("Column '%s' not found in heatmap data.", x_col)
             return
         filtered = data.dropna(subset=[x_col])
         if filtered.empty:
@@ -289,6 +292,7 @@ class ChartDisplay(PluginBase):
                 )
                 fig.canvas.draw_idle()
                 print(f"Cutoff set at: {self.cutoff:.3f}")
+                _logger.info("Cutoff set at: %.3f", self.cutoff)
                 self.highlight_cells()
 
             fig.canvas.mpl_connect("button_press_event", onclick)
@@ -335,7 +339,7 @@ class ChartDisplay(PluginBase):
     def highlight_cells(self) -> None:
         x_col = self.ui_component.x_axis_selector.value
         if x_col == "None" or self.cutoff is None:
-            print("X-axis not selected or cutoff unset.")
+            _logger.warning("X-axis not selected or cutoff unset.")
             return
         cell_table = self.main_viewer.cell_table
         select_above = self.ui_component.above_below_buttons.value == "above"

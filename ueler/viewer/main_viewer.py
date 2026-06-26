@@ -312,6 +312,10 @@ class ImageMaskViewer:
         self.fov_key = "fov"
 
         self._debug = debug
+        if debug:
+            # Raise the ueler package logger to DEBUG so plugin traces
+            # (e.g. [heatmap], [cell_annotation]) reach the kernel console.
+            logging.getLogger("ueler").setLevel(logging.DEBUG)
 
         # Frame selection for stacked imagery (OME-TIFF)
         self.current_frame_index: int = 0
@@ -357,7 +361,7 @@ class ImageMaskViewer:
         if self._map_mode_enabled:
             self._initialize_map_descriptors()
         if self._debug:
-            print("[INIT DEBUG] _initialize_map_descriptors done", flush=True)
+            logger.debug("[INIT DEBUG] _initialize_map_descriptors done")
 
         # Initialize caches and other variables
         self.max_cache_size = 100
@@ -413,12 +417,12 @@ class ImageMaskViewer:
         # Load the status images
         self.load_status_images()
         if self._debug:
-            print("[INIT DEBUG] load_status_images done", flush=True)
+            logger.debug("[INIT DEBUG] load_status_images done")
 
         # Load the first FOV and set image dimensions
         initial_fov = self.available_fovs[0]
         if self._debug:
-            print(f"[INIT DEBUG] loading initial FOV: {initial_fov}", flush=True)
+            logger.debug(f"[INIT DEBUG] loading initial FOV: {initial_fov}")
         self.load_fov(initial_fov)
         fov_images = self.image_cache[initial_fov]
         if isinstance(fov_images, OMEFovWrapper):
@@ -443,7 +447,7 @@ class ImageMaskViewer:
                 )
             self.height, self.width = first_channel_image.shape
         if self._debug:
-            print(f"[INIT DEBUG] initial FOV loaded, size={self.width}x{self.height}", flush=True)
+            logger.debug(f"[INIT DEBUG] initial FOV loaded, size={self.width}x{self.height}")
 
         # Calculate the downsample factor based on image size
         initial_factor = select_downsample_factor(
@@ -454,18 +458,18 @@ class ImageMaskViewer:
         )
         self.on_downsample_factor_changed(initial_factor)
         if self._debug:
-            print(f"[INIT DEBUG] downsample factor set to {self.current_downsample_factor}", flush=True)
+            logger.debug(f"[INIT DEBUG] downsample factor set to {self.current_downsample_factor}")
 
         # Initialize image output and image display
         self.image_output = Output()
         if self._debug:
-            print("[INIT DEBUG] creating ImageDisplay + plt.show()", flush=True)
+            logger.debug("[INIT DEBUG] creating ImageDisplay + plt.show()")
         with self.image_output:
             self.image_display = ImageDisplay(self.width, self.height)
             self.image_display.main_viewer = self
             plt.show()
         if self._debug:
-            print("[INIT DEBUG] ImageDisplay created", flush=True)
+            logger.debug("[INIT DEBUG] ImageDisplay created")
 
         # Grid-view output (hidden until the user activates channel grid mode)
         self.grid_output = Output()
@@ -474,13 +478,13 @@ class ImageMaskViewer:
 
         # Initialize widgets
         if self._debug:
-            print("[INIT DEBUG] calling create_widgets", flush=True)
+            logger.debug("[INIT DEBUG] calling create_widgets")
         create_widgets(self)
         if self._debug:
-            print("[INIT DEBUG] create_widgets done; calling _refresh_map_controls", flush=True)
+            logger.debug("[INIT DEBUG] create_widgets done; calling _refresh_map_controls")
         self._refresh_map_controls()
         if self._debug:
-            print("[INIT DEBUG] _refresh_map_controls done", flush=True)
+            logger.debug("[INIT DEBUG] _refresh_map_controls done")
         pixel_widget = getattr(self.ui_component, "pixel_size_inttext", None)
         if pixel_widget is not None:
             try:
@@ -505,47 +509,47 @@ class ImageMaskViewer:
         self._initialize_annotation_palette_manager()
         self._refresh_annotation_control_states()
         if self._debug:
-            print("[INIT DEBUG] annotation palette manager ready", flush=True)
+            logger.debug("[INIT DEBUG] annotation palette manager ready")
 
         # Setup widget observers
         if self._debug:
-            print("[INIT DEBUG] calling setup_widget_observers", flush=True)
+            logger.debug("[INIT DEBUG] calling setup_widget_observers")
         self.setup_widget_observers()
         if self._debug:
-            print("[INIT DEBUG] setup_widget_observers done", flush=True)
+            logger.debug("[INIT DEBUG] setup_widget_observers done")
 
         # Setup event connections
         if self._debug:
-            print("[INIT DEBUG] calling setup_event_connections", flush=True)
+            logger.debug("[INIT DEBUG] calling setup_event_connections")
         self.setup_event_connections()
         if self._debug:
-            print("[INIT DEBUG] setup_event_connections done", flush=True)
+            logger.debug("[INIT DEBUG] setup_event_connections done")
 
         # Initial setup
         if self._debug:
-            print("[INIT DEBUG] calling update_marker_set_dropdown", flush=True)
+            logger.debug("[INIT DEBUG] calling update_marker_set_dropdown")
         self.update_marker_set_dropdown()
         if self._debug:
-            print("[INIT DEBUG] calling update_controls", flush=True)
+            logger.debug("[INIT DEBUG] calling update_controls")
         self.update_controls(None)
         if self._debug:
-            print("[INIT DEBUG] update_controls done; calling on_image_change", flush=True)
+            logger.debug("[INIT DEBUG] update_controls done; calling on_image_change")
         self.on_image_change(None)
         if self._debug:
-            print("[INIT DEBUG] on_image_change done; calling update_display", flush=True)
+            logger.debug("[INIT DEBUG] on_image_change done; calling update_display")
         self.update_display(self.current_downsample_factor)
         if self._debug:
-            print("[INIT DEBUG] update_display done", flush=True)
+            logger.debug("[INIT DEBUG] update_display done")
 
         self.SidePlots = SimpleNamespace()
         self.BottomPlots = SimpleNamespace()
         if self._debug:
-            print("[INIT DEBUG] SidePlots/BottomPlots set", flush=True)
+            logger.debug("[INIT DEBUG] SidePlots/BottomPlots set")
 
         # Suppress the per-widget update_display observers that fire while
         # restoring saved states, then do exactly one render at the end.
         if self._debug:
-            print("[INIT DEBUG] entering load_widget_states", flush=True)
+            logger.debug("[INIT DEBUG] entering load_widget_states")
         self._suspend_display_updates = True
         try:
             self.load_widget_states(os.path.join(self.base_folder, ".UELer", 'widget_states.json'))
@@ -555,16 +559,16 @@ class ImageMaskViewer:
         # the restored channel/contrast/FOV selections (fixes #84).
         self.update_display(self.current_downsample_factor)
         if self._debug:
-            print("[INIT DEBUG] load_widget_states done", flush=True)
+            logger.debug("[INIT DEBUG] load_widget_states done")
 
         # Setup attribute observers
         if self._debug:
-            print("[INIT DEBUG] calling setup_attr_observers", flush=True)
+            logger.debug("[INIT DEBUG] calling setup_attr_observers")
         self.setup_attr_observers()
 
         self.initialized = True
         if self._debug:
-            print("[INIT DEBUG] __init__ COMPLETE", flush=True)
+            logger.debug("[INIT DEBUG] __init__ COMPLETE")
     
     def _has_tiff_files(self, fov_name):
         """Check if a directory contains .tif or .tiff files, including in 'rescaled' subdirectory."""
@@ -624,7 +628,7 @@ class ImageMaskViewer:
         self._map_mode_messages.append(text)
         logger.warning(text)
         try:
-            print(f"Map mode warning: {message}")
+            logger.warning(f"Map mode warning: {message}")
         except Exception:  # pragma: no cover - console output best effort
             pass
 
@@ -831,7 +835,7 @@ class ImageMaskViewer:
     def on_map_mode_toggle(self, change):
         new_value = bool(change.get("new"))
         if self._debug:
-            print(f"[INIT DEBUG] on_map_mode_toggle fired: new_value={new_value}, _map_mode_active={self._map_mode_active}", flush=True)
+            logger.debug(f"[INIT DEBUG] on_map_mode_toggle fired: new_value={new_value}, _map_mode_active={self._map_mode_active}")
         if new_value == self._map_mode_active:
             return
         # Grid view is incompatible with map mode — deactivate it cleanly
@@ -900,7 +904,7 @@ class ImageMaskViewer:
             self.label_masks_cache[fov_name] = {}
             for mask_name, mask in masks_dict.items():
                 if mask is None or mask.size == 0:
-                    print(f"Warning: Mask '{mask_name}' in FOV '{fov_name}' is empty or invalid.")
+                    logger.warning(f"Warning: Mask '{mask_name}' in FOV '{fov_name}' is empty or invalid.")
                     continue
 
                 self.edge_masks_cache[fov_name][mask_name] = {}
@@ -917,7 +921,7 @@ class ImageMaskViewer:
             removed_fov, _ = self.mask_cache.popitem(last=False)
             self.edge_masks_cache.pop(removed_fov, None)
             self.label_masks_cache.pop(removed_fov, None)
-            print(f"Removed FOV '{removed_fov}' from mask cache.")
+            logger.info(f"Removed FOV '{removed_fov}' from mask cache.")
 
     def _get_label_mask_at_factor(self, fov_name: str, mask_name: str, factor: int):
         """Return the downsampled label mask for *fov_name*/*mask_name* at *factor*.
@@ -936,17 +940,17 @@ class ImageMaskViewer:
 
     def _activate_map_mode(self, map_id: str) -> None:
         if self._debug:
-            print(f"[INIT DEBUG] _activate_map_mode: map_id={map_id!r}", flush=True)
+            logger.debug(f"[INIT DEBUG] _activate_map_mode: map_id={map_id!r}")
         if map_id not in self._map_descriptors:
             raise KeyError(map_id)
         if self._debug:
-            print("[INIT DEBUG] _activate_map_mode: calling _get_map_layer", flush=True)
+            logger.debug("[INIT DEBUG] _activate_map_mode: calling _get_map_layer")
         layer = self._get_map_layer(map_id)
         if self._debug:
-            print("[INIT DEBUG] _activate_map_mode: computing canvas dimensions", flush=True)
+            logger.debug("[INIT DEBUG] _activate_map_mode: computing canvas dimensions")
         width_px, height_px, base_pixel = self._compute_map_canvas_dimensions(layer)
         if self._debug:
-            print(f"[INIT DEBUG] _activate_map_mode: canvas={width_px}x{height_px}px, pixel={base_pixel}um", flush=True)
+            logger.debug(f"[INIT DEBUG] _activate_map_mode: canvas={width_px}x{height_px}px, pixel={base_pixel}um")
         self._map_mode_active = True
         self._active_map_id = map_id
         self._map_pixel_size_nm = base_pixel * 1000.0
@@ -960,17 +964,17 @@ class ImageMaskViewer:
         if selector is not None:
             selector.disabled = False
         if self._debug:
-            print(f"[INIT DEBUG] _activate_map_mode: calling _set_map_canvas_dimensions({width_px}, {height_px})", flush=True)
+            logger.debug(f"[INIT DEBUG] _activate_map_mode: calling _set_map_canvas_dimensions({width_px}, {height_px})")
         self._set_map_canvas_dimensions(width_px, height_px)
         descriptor = self._map_descriptors[map_id]
         tile_names = [spec.name for spec in getattr(descriptor, 'fovs', ())]
         if self._debug:
-            print(f"[INIT DEBUG] _activate_map_mode: {len(tile_names)} tiles, _batch_compute_channel_stats follows (enabled={self._map_batch_stats_enabled})", flush=True)
+            logger.debug(f"[INIT DEBUG] _activate_map_mode: {len(tile_names)} tiles, _batch_compute_channel_stats follows (enabled={self._map_batch_stats_enabled})")
         channel_selector = getattr(getattr(self, 'ui_component', None), 'channel_selector', None)
         selected_channels = list(getattr(channel_selector, 'value', ())) if channel_selector is not None else []
         self._batch_compute_channel_stats(tile_names, selected_channels)
         if self._debug:
-            print("[INIT DEBUG] _activate_map_mode: _batch_compute_channel_stats done", flush=True)
+            logger.debug("[INIT DEBUG] _activate_map_mode: _batch_compute_channel_stats done")
         # Reset lazy-stats tracking so the new map starts fresh.
         self._stats_computed_fovs = set()
         try:
@@ -984,7 +988,7 @@ class ImageMaskViewer:
         except Exception:
             pass
         if self._debug:
-            print("[INIT DEBUG] _activate_map_mode: DONE", flush=True)
+            logger.debug("[INIT DEBUG] _activate_map_mode: DONE")
 
     def _deactivate_map_mode(self) -> None:
         self._map_mode_active = False
@@ -1223,7 +1227,7 @@ class ImageMaskViewer:
                 layer.invalidate_for_fov(fov_name)
             except Exception:
                 if self._debug:
-                    print(f"[viewer] Failed to invalidate map cache for {fov_name}")
+                    logger.debug(f"[viewer] Failed to invalidate map cache for {fov_name}")
 
     def _invalidate_all_map_tiles(self) -> None:
         self._map_tile_cache.clear()
@@ -1494,7 +1498,7 @@ class ImageMaskViewer:
             self.load_fov(fov_name)
         except Exception:
             if self._debug:
-                print(f"[viewer] Failed to prime mask cache for {fov_name}")
+                logger.debug(f"[viewer] Failed to prime mask cache for {fov_name}")
 
     def _get_mask_array(self, fov_name: str, mask_name: str):
         self._ensure_mask_cache(fov_name)
@@ -1865,11 +1869,11 @@ class ImageMaskViewer:
             attr = getattr(self.SidePlots, attr_name)
             if isinstance(attr, PluginBase):
                 if self._debug:
-                    print(f"Calling after_all_plugins_loaded for {attr_name}")
+                    logger.debug(f"Calling after_all_plugins_loaded for {attr_name}")
                 try:
                     attr.after_all_plugins_loaded()
                 except Exception as exc:
-                    print(f"[viewer] after_all_plugins_loaded failed for {attr_name}: {exc}")
+                    logger.warning(f"[viewer] after_all_plugins_loaded failed for {attr_name}: {exc}")
 
 
     def dynamically_load_plugins(self, allow_plugins: Optional[Iterable[str]] = None):
@@ -1878,7 +1882,7 @@ class ImageMaskViewer:
         for filename in os.listdir(plugin_dir):
             if filename.endswith('.py') and not filename.startswith('_'):
                 if self._debug:
-                    print(f"Loading plugin: {filename}")
+                    logger.debug(f"Loading plugin: {filename}")
                 module_name = filename[:-3]
                 if allowed is not None and module_name not in allowed:
                     continue
@@ -1898,7 +1902,7 @@ class ImageMaskViewer:
                             if module_name == 'roi_manager_plugin':
                                 self.roi_plugin = instance
                         except Exception as exc:
-                            print(f"[viewer] Failed to load plugin {module_name}: {exc}")
+                            logger.warning(f"[viewer] Failed to load plugin {module_name}: {exc}")
                         
 
     def setup_event_connections(self):
@@ -1930,29 +1934,29 @@ class ImageMaskViewer:
                 close_fn()
             except Exception:
                 if self._debug:
-                    print(f"[viewer] Failed to close image resource: {resource}")
+                    logger.debug(f"[viewer] Failed to close image resource: {resource}")
 
     def on_cache_size_change(self, change):
         """Handle changes to the cache size input."""
         self.max_cache_size = self.ui_component.cache_size_input.value
-        print(f"Cache size set to {self.max_cache_size}.")
+        logger.info(f"Cache size set to {self.max_cache_size}.")
 
         # Trim caches if necessary
         while len(self.image_cache) > self.max_cache_size:
             removed_fov, resource = self.image_cache.popitem(last=False)
             self._close_image_resource(resource)
-            print(f"Removed FOV '{removed_fov}' from image cache due to cache size limit.")
+            logger.info(f"Removed FOV '{removed_fov}' from image cache due to cache size limit.")
 
         while len(self.mask_cache) > self.max_cache_size:
             removed_fov, _ = self.mask_cache.popitem(last=False)
             self.edge_masks_cache.pop(removed_fov, None)
             self.label_masks_cache.pop(removed_fov, None)
-            print(f"Removed FOV '{removed_fov}' from mask cache due to cache size limit.")
+            logger.info(f"Removed FOV '{removed_fov}' from mask cache due to cache size limit.")
 
         while len(self.annotation_cache) > self.max_cache_size:
             removed_fov, _ = self.annotation_cache.popitem(last=False)
             self.annotation_label_cache.pop(removed_fov, None)
-            print(f"Removed FOV '{removed_fov}' from annotation cache due to cache size limit.")
+            logger.info(f"Removed FOV '{removed_fov}' from annotation cache due to cache size limit.")
 
     def _ensure_channel_max_computed(self, fov_name, channel_name):
         if channel_name in self.channel_max_values:
@@ -2053,7 +2057,7 @@ class ImageMaskViewer:
         while len(self.image_cache) > self.max_cache_size:
             removed_fov, resource = self.image_cache.popitem(last=False)
             self._close_image_resource(resource)
-            print(f"Removed FOV '{removed_fov}' from image cache.")
+            logger.info(f"Removed FOV '{removed_fov}' from image cache.")
             self._invalidate_map_tiles_for_fov(removed_fov)
 
         else:
@@ -2342,7 +2346,7 @@ class ImageMaskViewer:
 
         new_key = change['new']
         setattr(self, key_name, new_key)
-        print(f"{key_name} set to '{new_key}'.")
+        logger.info(f"{key_name} set to '{new_key}'.")
 
     def _restore_pixel_size_widget(self) -> None:
         widget = getattr(self.ui_component, "pixel_size_inttext", None)
@@ -2363,7 +2367,7 @@ class ImageMaskViewer:
             plugin.on_viewer_pixel_size_change(pixel_nm)
         except Exception:
             if self._debug:
-                print("[viewer] Plugin notification for pixel size change failed")
+                logger.debug("[viewer] Plugin notification for pixel size change failed")
 
     def get_pixel_size_nm(self) -> float:
         if self._map_mode_active and self._map_pixel_size_nm is not None:
@@ -2620,7 +2624,7 @@ class ImageMaskViewer:
                 self.image_display.update_channel_legend(entries, enabled=enabled)
             except Exception:
                 if self._debug:
-                    print("[viewer] Failed to update channel legend overlay")
+                    logger.debug("[viewer] Failed to update channel legend overlay")
 
     def on_channel_legend_toggle(self, change) -> None:
         self._refresh_channel_legend()
@@ -3158,6 +3162,7 @@ class ImageMaskViewer:
         dropdown.value = ""
 
     def _log_annotation_palette(self, message: str, *, error: bool = False, clear: bool = False) -> None:
+        logger.warning(message) if error else logger.info(message)
         output = getattr(self.ui_component, "annotation_palette_feedback", None)
         if output is None:
             return
@@ -3726,7 +3731,7 @@ class ImageMaskViewer:
                     self.update_display(self.current_downsample_factor)
                 except Exception:
                     if self._debug:
-                        print(f"[viewer] center_on_roi: failed to activate map {map_id!r}")
+                        logger.debug(f"[viewer] center_on_roi: failed to activate map {map_id!r}")
 
         if self._map_mode_active:
             if target_fov:
@@ -3784,7 +3789,7 @@ class ImageMaskViewer:
                 self.update_display(self.current_downsample_factor)
             except Exception:
                 if self._debug:
-                    print("[viewer] Failed to refresh display after map switch")
+                    logger.debug("[viewer] Failed to refresh display after map switch")
 
         ax = getattr(display, "ax", None)
         if ax is None:
@@ -4554,12 +4559,12 @@ class ImageMaskViewer:
                 self._apply_map_painter_overlay()
             except Exception:
                 if self._debug:
-                    print("[viewer] Failed to apply map painter overlay")
+                    logger.debug("[viewer] Failed to apply map painter overlay")
             try:
                 self._update_map_mask_highlights()
             except Exception:
                 if self._debug:
-                    print("[viewer] Failed to refresh map mask highlights")
+                    logger.debug("[viewer] Failed to refresh map mask highlights")
 
     # ------------------------------------------------------------------
     # Mask outline controls
@@ -4595,7 +4600,7 @@ class ImageMaskViewer:
                 self.update_display(self.current_downsample_factor)
             except Exception:
                 if self._debug:
-                    print("[viewer] Failed to refresh display after mask outline update")
+                    logger.debug("[viewer] Failed to refresh display after mask outline update")
         self._notify_plugins_mask_outline_changed(thickness)
 
     def _notify_plugins_mask_outline_changed(self, thickness: int) -> None:
@@ -4610,7 +4615,7 @@ class ImageMaskViewer:
                 plugin.on_viewer_mask_outline_change(thickness)
             except Exception:
                 if self._debug:
-                    print("[viewer] Plugin notification for mask outline change failed")
+                    logger.debug("[viewer] Plugin notification for mask outline change failed")
         
         # Notify cell gallery plugin
         cell_gallery_plugin = getattr(sideplots, "cell_gallery_output", None)
@@ -4619,7 +4624,7 @@ class ImageMaskViewer:
                 cell_gallery_plugin.on_viewer_mask_outline_change(thickness)
             except Exception:
                 if self._debug:
-                    print("[viewer] Cell gallery notification for mask outline change failed")
+                    logger.debug("[viewer] Cell gallery notification for mask outline change failed")
 
     def on_plugin_mask_outline_change(self, thickness: int) -> None:
         try:
@@ -4635,7 +4640,7 @@ class ImageMaskViewer:
                 self.update_display(self.current_downsample_factor)
             except Exception:
                 if self._debug:
-                    print("[viewer] Failed to refresh display after plugin mask outline change")
+                    logger.debug("[viewer] Failed to refresh display after plugin mask outline change")
         self._notify_plugins_mask_outline_changed(thickness)
         
     
@@ -4668,22 +4673,22 @@ class ImageMaskViewer:
                     getattr(attr, method_name)()
                 except AttributeError:
                     if self._debug:
-                        print(f"Skipping {attr_name}")
+                        logger.debug(f"Skipping {attr_name}")
 
 
     def save_marker_set(self, button):
         set_name = self.ui_component.marker_set_name_input.value.strip()
         if not set_name:
-            print("Please enter a valid marker set name.")
+            logger.warning("Please enter a valid marker set name.")
             return
         if set_name in self.marker_sets:
-            print(f"A marker set named '{set_name}' already exists.")
+            logger.warning(f"A marker set named '{set_name}' already exists.")
             return
 
         # Capture current settings
         selected_channels = list(_dedupe_channel_sequence(self.ui_component.channel_selector.value))
         if not selected_channels:
-            print("No channels selected to save.")
+            logger.warning("No channels selected to save.")
             return
 
         channel_settings = {}
@@ -4701,20 +4706,20 @@ class ImageMaskViewer:
         }
         # Update the marker set dropdown
         self.update_marker_set_dropdown()
-        print(f"Marker set '{set_name}' saved.")
+        logger.info(f"Marker set '{set_name}' saved.")
         # clear the marker_set_name_input value
         self.ui_component.marker_set_name_input.value = ""
 
     def update_marker_set(self, button):
         set_name = self.ui_component.marker_set_dropdown.value
         if not set_name:
-            print("No marker set selected to update.")
+            logger.warning("No marker set selected to update.")
             return
 
         # Capture current settings
         selected_channels = list(_dedupe_channel_sequence(self.ui_component.channel_selector.value))
         if not selected_channels:
-            print("No channels selected to save.")
+            logger.warning("No channels selected to save.")
             return
 
         channel_settings = {}
@@ -4730,42 +4735,42 @@ class ImageMaskViewer:
             'selected_channels': selected_channels,
             'channel_settings': channel_settings
         }
-        print(f"Marker set '{set_name}' updated.")
+        logger.info(f"Marker set '{set_name}' updated.")
         self.update_marker_set_dropdown()
 
     def delete_marker_set(self, button):
         set_name = self.ui_component.marker_set_dropdown.value
         if not set_name:
-            print("No marker set selected to delete.")
+            logger.warning("No marker set selected to delete.")
             return
 
         # Check if deletion is confirmed
         if not self.ui_component.delete_confirmation_checkbox.value:
-            print("Please check 'Confirm Deletion' to delete the marker set.")
+            logger.warning("Please check 'Confirm Deletion' to delete the marker set.")
             return
 
         del self.marker_sets[set_name]
         # Update the marker set dropdown
         self.update_marker_set_dropdown()
         self.ui_component.delete_confirmation_checkbox.value = False  # Reset the checkbox
-        print(f"Marker set '{set_name}' deleted.")
+        logger.info(f"Marker set '{set_name}' deleted.")
 
     def _apply_marker_set(self, set_name: str, *, silent: bool = False) -> bool:
         if not set_name:
             if not silent:
-                print("Please provide a valid marker set name.")
+                logger.warning("Please provide a valid marker set name.")
             return False
 
         marker_set = self.marker_sets.get(set_name)
         if marker_set is None:
             if not silent:
-                print(f"Marker set '{set_name}' not found.")
+                logger.warning(f"Marker set '{set_name}' not found.")
             return False
 
         selected_channels = _dedupe_channel_sequence(marker_set.get('selected_channels', ()))
         if not selected_channels:
             if not silent:
-                print(f"Marker set '{set_name}' has no channels saved.")
+                logger.info(f"Marker set '{set_name}' has no channels saved.")
             return False
 
         channel_settings = marker_set.get('channel_settings', {}) or {}
@@ -4779,7 +4784,7 @@ class ImageMaskViewer:
         selector = getattr(self.ui_component, 'channel_selector', None)
         if selector is None:
             if not silent:
-                print("Channel selector widget unavailable; cannot load marker set.")
+                logger.warning("Channel selector widget unavailable; cannot load marker set.")
             return False
 
         existing_channels = _dedupe_channel_sequence(getattr(selector, 'value', ()))
@@ -4815,17 +4820,17 @@ class ImageMaskViewer:
             self.update_display(self.current_downsample_factor)
         except Exception:  # pragma: no cover - rendering safeguards
             if not silent:
-                print("Marker set applied, but display refresh failed.")
+                logger.warning("Marker set applied, but display refresh failed.")
 
         self.active_marker_set_name = set_name
         if not silent:
-            print(f"Marker set '{set_name}' loaded.")
+            logger.info(f"Marker set '{set_name}' loaded.")
         return True
 
     def load_marker_set(self, button):
         set_name = self.ui_component.marker_set_dropdown.value
         if not set_name:
-            print("No marker set selected to load.")
+            logger.warning("No marker set selected to load.")
             return
         self._apply_marker_set(set_name, silent=False)
 
@@ -4892,7 +4897,7 @@ class ImageMaskViewer:
     def refresh_bottom_panel(self, ordering=None):
         debug_enabled = getattr(self, '_debug', False)
         if debug_enabled:
-            print("Refreshing bottom panel...")
+            logger.debug("Refreshing bottom panel...")
         update_wide_plugin_panel(self, ordering)
 
     def save_widget_states(self, file_path):
@@ -4949,22 +4954,22 @@ class ImageMaskViewer:
             json.dump(state, f, indent=4)
         
         if self._debug:
-            print(f"Widget states saved to {file_path}")
+            logger.debug(f"Widget states saved to {file_path}")
 
     def load_widget_states(self, file_path):
         """Load the state of all widgets from a JSON file."""
         # When the json file does not exist, do nothing
         if not os.path.exists(file_path):
             if self._debug:
-                print("[INIT DEBUG] load_widget_states: no saved state file, skipping", flush=True)
+                logger.debug("[INIT DEBUG] load_widget_states: no saved state file, skipping")
             return
 
         if self._debug:
-            print(f"[INIT DEBUG] load_widget_states: reading {file_path}", flush=True)
+            logger.debug(f"[INIT DEBUG] load_widget_states: reading {file_path}")
         with open(file_path, 'r') as f:
             state = json.load(f)
         if self._debug:
-            print(f"[INIT DEBUG] load_widget_states: {len(state)} keys to restore", flush=True)
+            logger.debug(f"[INIT DEBUG] load_widget_states: {len(state)} keys to restore")
 
         selected_section_index = state.get('control_sections_selected_index')
 
@@ -4984,10 +4989,10 @@ class ImageMaskViewer:
                     # If the widget has a 'value' attribute, set it to the saved value
                     if hasattr(attr, 'value'):
                         if self._debug:
-                            print(f"[INIT DEBUG] restoring widget '{attr_name}' = {value!r}", flush=True)
+                            logger.debug(f"[INIT DEBUG] restoring widget '{attr_name}' = {value!r}")
                         attr.value = value
                         if self._debug:
-                            print(f"[INIT DEBUG] widget '{attr_name}' restored ok", flush=True)
+                            logger.debug(f"[INIT DEBUG] widget '{attr_name}' restored ok")
                     else:
                         # Skip widgets without a 'value' attribute
                         pass
@@ -5014,19 +5019,19 @@ class ImageMaskViewer:
 
         # Update the marker set dropdown and controls
         if self._debug:
-            print("[INIT DEBUG] load_widget_states: calling update_marker_set_dropdown", flush=True)
+            logger.debug("[INIT DEBUG] load_widget_states: calling update_marker_set_dropdown")
         self.update_marker_set_dropdown()
         if self._debug:
-            print("[INIT DEBUG] load_widget_states: calling update_controls", flush=True)
+            logger.debug("[INIT DEBUG] load_widget_states: calling update_controls")
         self.update_controls(None)
         if self._debug:
-            print("[INIT DEBUG] load_widget_states: calling update_display (suppressed if _suspend_display_updates)", flush=True)
+            logger.debug("[INIT DEBUG] load_widget_states: calling update_display (suppressed if _suspend_display_updates)")
         self.update_display(self.current_downsample_factor)
         if self._debug:
-            print("[INIT DEBUG] load_widget_states: calling update_keys", flush=True)
+            logger.debug("[INIT DEBUG] load_widget_states: calling update_keys")
         self.update_keys(None)
         if self._debug:
-            print("[INIT DEBUG] load_widget_states: update_keys done", flush=True)
+            logger.debug("[INIT DEBUG] load_widget_states: update_keys done")
 
         accordion = getattr(self.ui_component, 'control_sections', None)
         if accordion is not None:
@@ -5039,13 +5044,13 @@ class ImageMaskViewer:
                 accordion.selected_index = selected_section_index
 
         if self._debug:
-            print(f"Widget states loaded from {file_path}")
+            logger.debug(f"Widget states loaded from {file_path}")
         if self._debug:
-            print("[INIT DEBUG] load_widget_states: calling inform_plugins", flush=True)
+            logger.debug("[INIT DEBUG] load_widget_states: calling inform_plugins")
         self.inform_plugins('on_marker_sets_changed')
         self.inform_plugins('refresh_roi_table')
         if self._debug:
-            print("[INIT DEBUG] load_widget_states: DONE", flush=True)
+            logger.debug("[INIT DEBUG] load_widget_states: DONE")
     
     def load_status_images(self):
         self._status_image["processing"] = load_asset_bytes("loading.gif")
@@ -5084,7 +5089,7 @@ class ImageMaskViewer:
                 color_rgb = to_rgb(color_value)
                 marker_to_color[marker] = color_rgb
             except ValueError as e:
-                print(f"Invalid color value for marker '{marker}': {color_value}")
+                logger.warning(f"Invalid color value for marker '{marker}': {color_value}")
                 # Handle the error as needed (e.g., default to black or raise an exception)
                 marker_to_color[marker] = (0, 0, 0)  # Default to black
         return marker_to_color

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
@@ -22,6 +23,8 @@ from ueler.viewer.decorators import update_status_bar
 from ueler.viewer.observable import Observable
 
 from .plugin_base import PluginBase
+
+_logger = logging.getLogger(__name__)
 
 
 GRID_COLUMNS = 5
@@ -176,6 +179,7 @@ class CellGalleryDisplay(PluginBase):
         self.plot_output.clear_output(wait=True)
         with self.plot_output:
             print(message)
+        _logger.info(message)
 
     def _update_tile_metadata(self, canvas: np.ndarray, rows: int, columns: int):
         self.data.n = rows
@@ -279,6 +283,7 @@ class CellGalleryDisplay(PluginBase):
         """
         with self.plot_output:
             print(f"⚠️  Warning: {message}")
+        _logger.warning(message)
 
     @update_status_bar
     def plot_gellery(self):  # noqa: N802 - preserve legacy method name
@@ -388,7 +393,7 @@ class CellGalleryDisplay(PluginBase):
             try:
                 return capture()
             except Exception as exc:  # pragma: no cover - non-critical
-                print(f"Failed to capture overlay snapshot: {exc}")
+                _logger.warning("Failed to capture overlay snapshot: %s", exc)
         return None
 
     def refresh_gallery(self, _button=None):
@@ -564,14 +569,14 @@ def _limit_selection(indices, max_displayed: float) -> List[int]:
     if max_displayed is None or np.isinf(max_displayed) or len(indices) <= max_displayed:
         return list(indices)
 
-    print(f"{len(indices)} cells selected, which exceeds the maximum number of cells to display.")
+    _logger.warning("%d cells selected, which exceeds the maximum number of cells to display.", len(indices))
     safe_indices = np.asarray(indices, dtype=int)
     seed = int(abs(int(safe_indices.sum()))) % (2**32)
     rng = np.random.default_rng(seed=seed)
     
     sample_size = max(1, int(max_displayed))
     sampled = rng.choice(safe_indices, size=sample_size, replace=False)
-    print(f"Randomly sampled {sample_size} cells for display.")
+    _logger.info("Randomly sampled %d cells for display.", sample_size)
     return sorted(int(i) for i in sampled.tolist())
 
 
@@ -913,7 +918,7 @@ def _render_tile_for_index(df, index: int, context: _RenderContext):
     
     except Exception as e:
         # If any error occurs during tile rendering, return error placeholder
-        print(f"[ERROR] Failed to render tile for index={index}: {e}")
+        _logger.error("Failed to render tile for index=%s: %s", index, e, exc_info=True)
         return _create_error_placeholder(context.crop_width, str(e))
 
 

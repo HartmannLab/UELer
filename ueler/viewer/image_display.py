@@ -1,5 +1,6 @@
 # viewer/image_display.py
 
+import logging
 import numpy as np
 import matplotlib.pyplot as plt
 from dataclasses import dataclass, replace
@@ -28,6 +29,8 @@ import math
 from matplotlib.backend_bases import MouseButton
 from ueler.viewer.decorators import update_status_bar
 from .tooltip_utils import format_tooltip_value, resolve_cell_record
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -348,7 +351,7 @@ class ImageDisplay:
     def on_mouse_click(self, event):
         """Handle mouse click events to select/unselect masks."""
         if event.inaxes != self.ax:
-            print("Mouse click outside axes")
+            _logger.debug("Mouse click outside axes")
             return
 
         if self._lasso_active:
@@ -357,18 +360,18 @@ class ImageDisplay:
         # Check if any navigation tool is active
         if self.fig.canvas.toolbar is not None and self.fig.canvas.toolbar.mode != '':
             # A navigation tool (e.g., zoom or pan) is active; ignore the click
-            print("Navigation tool active")
+            _logger.debug("Navigation tool active")
             return
 
         # Get mouse event coordinates
         x, y = event.xdata, event.ydata
         if x is None or y is None:
-            print("Mouse click outside data area")
+            _logger.debug("Mouse click outside data area")
             return
 
         hit = self.main_viewer.resolve_mask_hit_at_viewport(x, y)
         if hit is None:
-            print("No mask at click location")
+            _logger.debug("No mask at click location")
             self.clear_patches()
             return
 
@@ -402,8 +405,7 @@ class ImageDisplay:
             try:
                 self.main_viewer._update_map_mask_highlights()
             except Exception:
-                if self.main_viewer._debug:
-                    print("[viewer] Failed to update map mask highlights")
+                _logger.debug("[viewer] Failed to update map mask highlights")
             return
 
         # Adjust for downsample factor
@@ -489,8 +491,7 @@ class ImageDisplay:
                 combined[mapped_rows, mapped_cols] = [1, 1, 1]
                 self.img_display.set_data(combined)
 
-                if self.main_viewer._debug:
-                    print("Redrawing canvas")
+                _logger.debug("Redrawing canvas")
                 self.fig.canvas.draw_idle()
             else:
                 # No cells selected - just refresh to show painted colors if painter is enabled
@@ -537,13 +538,13 @@ class ImageDisplay:
         selector = getattr(self.main_viewer.ui_component, "image_selector", None)
         current_fov = selector.value if selector is not None else None
         if not current_fov:
-            print("No active FOV to apply mask selection.")
+            _logger.warning("No active FOV to apply mask selection.")
             return
 
         # Get the full-resolution label mask
         label_mask_full = self.main_viewer.full_resolution_label_masks.get(mask_name)
         if label_mask_full is None:
-            print(f"Mask '{mask_name}' not found.")
+            _logger.warning("Mask '%s' not found.", mask_name)
             return
 
         try:
@@ -574,8 +575,7 @@ class ImageDisplay:
         color_rgb = np.array(to_rgb(color), dtype=np.float32)
         # Overlay masks
         selected_masks = [mask_name for mask_name, cb in self.main_viewer.ui_component.mask_display_controls.items() if cb.value]
-        if self.main_viewer._debug:
-            print(f"color_rgb: {color_rgb}")
+        _logger.debug("color_rgb: %s", color_rgb)
         if selected_masks:
             if self.main_viewer.ui_component.image_selector.value in self.main_viewer.mask_cache:
                 if mask_name in selected_masks:
@@ -587,7 +587,7 @@ class ImageDisplay:
                         # In the `selected_mask_label_ds`, Keep only labels in mask_ids
                         mask_label_ds = self._materialize_array(mask_label_ds)
                         mask_label_ds = np.where(np.isin(mask_label_ds, mask_ids), mask_label_ds, 0)
-                        print(f"sum(mask_label_ds): {np.sum(mask_label_ds)}")
+                        _logger.debug("sum(mask_label_ds): %s", np.sum(mask_label_ds))
 
                         # Find contours in the downsampled mask
                         edge_mask = generate_edges(
@@ -603,18 +603,16 @@ class ImageDisplay:
                             if combined is None:
                                 return
 
-                        # print the type of edge_mask
-                        print(f"edge_mask: {type(edge_mask)}")
+                        _logger.debug("edge_mask: %s", type(edge_mask))
                         combined[edge_mask] = color_rgb
                         self.img_display.set_data(combined)
 
                         self.fig.canvas.draw_idle()
-                        if self.main_viewer._debug:
-                            print("Redrawing canvas")
+                        _logger.debug("Redrawing canvas")
                     else:
-                        print(f"Mask '{mask_name}' not found in FOV '{self.main_viewer.ui_component.image_selector.value}'.")
+                        _logger.warning("Mask '%s' not found in FOV '%s'.", mask_name, self.main_viewer.ui_component.image_selector.value)
             else:
-                print(f"Masks not loaded for FOV '{self.main_viewer.ui_component.image_selector.value}'.")
+                _logger.warning("Masks not loaded for FOV '%s'.", self.main_viewer.ui_component.image_selector.value)
             # self.update_patches(do_not_reset=True)
 
     def update_image(self, combined, extent):

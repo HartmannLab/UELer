@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 import os
 import pickle
 from collections import OrderedDict
+
+_logger = logging.getLogger(__name__)
 
 import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
@@ -129,7 +132,7 @@ class RunFlowsom(PluginBase):
         self.main_viewer.cell_table = df
         self.main_viewer.inform_plugins("on_cell_table_change")
 
-        print(f"FlowSOM clustering completed. The labels are saved in the column {column_name_text}")
+        _logger.info("FlowSOM clustering completed. The labels are saved in the column %s", column_name_text)
     
     def export_flowsom_params(self) -> dict:
         """Return a dict of the current FlowSOM UI parameter values."""

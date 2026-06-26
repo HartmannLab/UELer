@@ -12,7 +12,10 @@ Provides a side-panel plugin that lets users:
 
 from __future__ import annotations
 
+import logging
 import os
+
+_logger = logging.getLogger(__name__)
 from ipywidgets import (
     Button,
     Dropdown,
@@ -365,6 +368,7 @@ class CellAnnotationPlugin(PluginBase):
 
         Returns the new checkpoint ID, or ``None`` on failure.
         """
+        _logger.debug("[cell_annotation] save_checkpoint: entry (step_id=%r)", step_id)
         if self._store is None:
             self._set_status("Cannot save: no dataset folder configured.", error=True)
             return None
@@ -372,16 +376,19 @@ class CellAnnotationPlugin(PluginBase):
             self._set_status("Cannot save: Heatmap plugin not loaded.", error=True)
             return None
 
+        _logger.debug("[cell_annotation] save_checkpoint: exporting heatmap state")
         try:
             adata = self._heatmap_plugin.export_heatmap_state()
         except Exception as exc:
             self._set_status(f"Export failed: {exc}", error=True)
             return None
+        _logger.debug("[cell_annotation] save_checkpoint: export ok (shape=%s)", adata.shape)
 
         # Attach FlowSOM params if available
         if self._flowsom_plugin is not None:
             try:
                 adata.uns["flowsom"] = self._flowsom_plugin.export_flowsom_params()
+                _logger.debug("[cell_annotation] save_checkpoint: FlowSOM params attached")
             except Exception:
                 pass  # FlowSOM params are optional
 
@@ -397,6 +404,7 @@ class CellAnnotationPlugin(PluginBase):
             self._set_status(f"Write failed: {exc}", error=True)
             return None
 
+        _logger.debug("[cell_annotation] save_checkpoint: written as %s", ckpt_id)
         self._set_status(
             f'<span style="color:green">Saved checkpoint [{step_id}] {description}</span>'
         )
@@ -419,6 +427,7 @@ class CellAnnotationPlugin(PluginBase):
 
     def load_checkpoint(self, checkpoint_id: str) -> bool:
         """Load a saved checkpoint and restore the heatmap state from it."""
+        _logger.debug("[cell_annotation] load_checkpoint: entry (id=%r)", checkpoint_id)
         if self._store is None:
             self._set_status("Cannot load: no dataset folder configured.", error=True)
             return False
@@ -431,15 +440,19 @@ class CellAnnotationPlugin(PluginBase):
         except FileNotFoundError as exc:
             self._set_status(f"Load failed: {exc}", error=True)
             return False
+        _logger.debug("[cell_annotation] load_checkpoint: read ok (shape=%s)", adata.shape)
 
+        _logger.debug("[cell_annotation] load_checkpoint: calling import_heatmap_state")
         try:
             self._heatmap_plugin.import_heatmap_state(adata)
         except Exception as exc:
             self._set_status(f"Import failed: {exc}", error=True)
             return False
+        _logger.debug("[cell_annotation] load_checkpoint: import_heatmap_state done")
 
         # Optionally restore FlowSOM params
         if self._flowsom_plugin is not None and "flowsom" in adata.uns:
+            _logger.debug("[cell_annotation] load_checkpoint: restoring FlowSOM params")
             try:
                 self._flowsom_plugin.import_flowsom_params(adata.uns["flowsom"])
             except Exception:
@@ -448,6 +461,7 @@ class CellAnnotationPlugin(PluginBase):
         ckpt_meta = adata.uns.get("checkpoint", {})
         step = ckpt_meta.get("step_id", "")
         desc = ckpt_meta.get("description", "")
+        _logger.debug("[cell_annotation] load_checkpoint: complete (step=%r)", step)
         self._set_status(
             f'<span style="color:green">Loaded checkpoint [{step}] {desc}</span>'
         )
@@ -521,6 +535,7 @@ class CellAnnotationPlugin(PluginBase):
     # ------------------------------------------------------------------
 
     def _set_status(self, message: str, *, error: bool = False) -> None:
+        _logger.warning(message) if error else _logger.info(message)
         label = getattr(self, "status_label", None)
         if label is None:
             return

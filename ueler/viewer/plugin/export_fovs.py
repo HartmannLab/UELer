@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -58,6 +59,8 @@ from ..scale_bar import (
 from .plugin_base import PluginBase
 from ..roi_manager import format_roi_label
 from ..layout_utils import column_block_layout, content_widget_layout, flex_fill_layout
+
+_logger = logging.getLogger(__name__)
 
 PLACEHOLDER_MESSAGE = "Batch export UI is now available."
 
@@ -2839,6 +2842,7 @@ class BatchExportPlugin(PluginBase):
     def _log(self, message: str) -> None:
         with self.ui_component.log_output:
             print(message)
+        _logger.info(message)
 
     def _set_running_state(self, running: bool) -> None:
         self.ui_component.start_button.disabled = running

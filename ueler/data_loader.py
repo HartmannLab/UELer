@@ -85,7 +85,7 @@ def load_channel_struct_fov(fov_name: str, base_folder: str) -> Dict[str, None] 
 
     tiff_files = _list_tiff_files(channel_folder)
     if not tiff_files:
-        print(f"No TIFF files found in {channel_folder}. Skipping {fov_name}.")
+        logger.warning("No TIFF files found in %s. Skipping %s.", channel_folder, fov_name)
         return None
 
     channels: Dict[str, None] = {}
@@ -180,7 +180,7 @@ def load_one_channel_fov(fov_name, base_folder, channel_max_values, requested_ch
     channel_folder = _ensure_channel_folder(base_folder, fov_name)
     tiff_files = _list_tiff_files(channel_folder)
     if not tiff_files:
-        print(f"No TIFF files found in {channel_folder}. Skipping {fov_name}.")
+        logger.warning("No TIFF files found in %s. Skipping %s.", channel_folder, fov_name)
         return None
 
     imread = _ensure_imread()
@@ -206,7 +206,7 @@ def load_images_for_fov(fov_name, base_folder, channel_max_values, requested_cha
     channel_folder = _ensure_channel_folder(base_folder, fov_name)
     tiff_files = _list_tiff_files(channel_folder)
     if not tiff_files:
-        print(f"No TIFF files found in {channel_folder}. Skipping {fov_name}.")
+        logger.warning("No TIFF files found in %s. Skipping %s.", channel_folder, fov_name)
         return None
 
     imread = _ensure_imread()
@@ -255,8 +255,8 @@ def load_masks_for_fov(fov_name, masks_folder, mask_names_set):
         elif getattr(mask_image, "ndim", 0) == 3 and mask_image.shape[2] == 1:
             mask_image = mask_image[-1, :, -1]
         elif getattr(mask_image, "ndim", 0) != 2:
-            print(
-                f"Warning: Mask '{mask_name}' in FOV '{fov_name}' has unexpected dimensions {mask_image.shape}."
+            logger.warning(
+                "Mask '%s' in FOV '%s' has unexpected dimensions %s.", mask_name, fov_name, mask_image.shape
             )
 
         mask_dtype = getattr(mask_image, "dtype", None)
@@ -310,8 +310,8 @@ def load_annotations_for_fov(fov_name, annotations_folder, annotation_names_set)
         elif getattr(array, "ndim", 0) == 3 and array.shape[-1] == 1:
             array = array[..., 0]
         elif getattr(array, "ndim", 0) != 2:
-            print(
-                f"Warning: Annotation '{annotation_name}' in FOV '{fov_name}' has unexpected dimensions {array.shape}."
+            logger.warning(
+                "Annotation '%s' in FOV '%s' has unexpected dimensions %s.", annotation_name, fov_name, array.shape
             )
 
         if not np.issubdtype(getattr(array, "dtype", np.int32), np.integer):
