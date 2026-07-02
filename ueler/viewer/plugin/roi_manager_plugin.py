@@ -1075,6 +1075,11 @@ class ROIManagerPlugin(PluginBase):
 
         annotation_settings, mask_settings = self._resolve_roi_overlays(record, fov_name, factor)
 
+        # Resolve the overlay snapshot before rendering: it decides whether the base
+        # image layer is skipped ("No image (masks only)" mode) and is reused for the
+        # overlay pass below.
+        snapshot = self._build_overlay_snapshot(record, fov_name)
+
         try:
             array = render_roi_to_array(
                 fov_name,
@@ -1085,12 +1090,14 @@ class ROIManagerPlugin(PluginBase):
                 downsample_factor=factor,
                 annotation=annotation_settings,
                 masks=mask_settings,
-                skip_image_layer=bool(getattr(snapshot, "skip_image_layer", False)) if snapshot is not None else False,
+                skip_image_layer=bool(getattr(snapshot, "skip_image_layer", False)),
             )
-        except Exception:  # pragma: no cover - rendering failures
+        except Exception as exc:  # pragma: no cover - rendering failures
+            _logger.warning(
+                "Failed to render ROI thumbnail for %s: %s", fov_name, exc, exc_info=True
+            )
             return None
 
-        snapshot = self._build_overlay_snapshot(record, fov_name)
         if snapshot is not None:
             region_xy = (
                 int(float(record.get("x_min") or 0.0)),

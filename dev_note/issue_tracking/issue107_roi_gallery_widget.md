@@ -86,6 +86,19 @@ event layer** was coupled to Matplotlib.
   → 69 passed. Full suite: **no new failures** vs. baseline (2 pre-existing failures
   incidentally fixed).
 
+## Follow-up fix — "Preview unavailable" for all FOV-based ROIs
+After the migration, all FOV-based ROI thumbnails showed "Preview unavailable". Root cause was
+a **pre-existing** variable-ordering bug in `_render_roi_tile` (introduced in `f9c9996`, issue
+#91's "No image (masks only)" mode), not the gallery migration: `snapshot` was referenced in the
+`render_roi_to_array(...)` call (`skip_image_layer=bool(getattr(snapshot, ...))`) before it was
+assigned a few lines below, raising `UnboundLocalError` that the surrounding
+`except Exception: return None` swallowed — so the renderer returned `None` for every FOV-based
+ROI. Map-mode ROIs were unaffected (different code path). Fix: move
+`snapshot = self._build_overlay_snapshot(record, fov_name)` above the render call, simplify to
+`skip_image_layer=bool(getattr(snapshot, "skip_image_layer", False))`, and log
+`_logger.warning(..., exc_info=True)` in the `except` so future render failures are visible.
+Regression coverage: `tests/test_roi_manager_tags.py::ROIManagerThumbnailRenderTests`.
+
 ## Manual verification (recommended before release)
 Open `script/run_ueler_CRC_cohort.ipynb` in both JupyterLab/browser and VSCode:
 - ROI Manager: clickable thumbnail grid; click centers/activates ROI + applies preset;

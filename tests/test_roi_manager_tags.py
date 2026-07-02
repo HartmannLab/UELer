@@ -944,6 +944,79 @@ class ROIManagerMapModeTests(unittest.TestCase):
         self.assertTrue(snapshot.skip_image_layer)
 
 
+class ROIManagerThumbnailRenderTests(unittest.TestCase):
+    """Regression tests for FOV-based ROI thumbnail rendering (Reply to issue #107).
+
+    Guards against the snapshot-ordering bug where ``snapshot`` was referenced in the
+    ``render_roi_to_array`` call before assignment, raising UnboundLocalError that the
+    surrounding ``except`` swallowed — so every FOV-based ROI showed "Preview unavailable".
+    """
+
+    def _prepare(self, plugin, snapshot):
+        import numpy as np
+
+        plugin.main_viewer.load_fov = lambda *a, **k: None
+        plugin.main_viewer.image_cache = {"FOV1": {"CHANNEL": np.zeros((4, 4), dtype=np.float32)}}
+        plugin._resolve_thumbnail_downsample = lambda *a, **k: 1
+        plugin._resolve_roi_overlays = lambda *a, **k: (None, ())
+        plugin._build_overlay_snapshot = lambda *a, **k: snapshot
+
+    def test_fov_tile_renders_when_snapshot_is_none(self):
+        import numpy as np
+        from unittest.mock import patch
+
+        plugin = make_plugin()
+        self._prepare(plugin, snapshot=None)
+
+        profile = _MarkerProfile(
+            name="current", selected_channels=("CHANNEL",), channel_settings={}
+        )
+        record = {"fov": "FOV1", "roi_id": "r1"}
+        expected = np.ones((4, 4, 3), dtype=np.float32) * 0.5
+        captured = {}
+
+        def _fake_render(*_args, **kwargs):
+            captured.update(kwargs)
+            return expected
+
+        with patch(
+            "ueler.viewer.plugin.roi_manager_plugin.render_roi_to_array",
+            side_effect=_fake_render,
+        ):
+            result = plugin._render_roi_tile(record, profile)
+
+        self.assertIsNotNone(result, "FOV-based ROI tile must not fall back to None")
+        np.testing.assert_allclose(result, expected)
+        self.assertFalse(captured.get("skip_image_layer"))
+
+    def test_fov_tile_honours_skip_image_layer_from_snapshot(self):
+        import numpy as np
+        from unittest.mock import patch
+
+        plugin = make_plugin()
+        # x_max <= x_min so the overlay-apply branch is skipped without a viewer stub.
+        self._prepare(plugin, snapshot=SimpleNamespace(skip_image_layer=True))
+
+        profile = _MarkerProfile(
+            name="current", selected_channels=("CHANNEL",), channel_settings={}
+        )
+        record = {"fov": "FOV1", "roi_id": "r2"}
+        captured = {}
+
+        def _fake_render(*_args, **kwargs):
+            captured.update(kwargs)
+            return np.zeros((4, 4, 3), dtype=np.float32)
+
+        with patch(
+            "ueler.viewer.plugin.roi_manager_plugin.render_roi_to_array",
+            side_effect=_fake_render,
+        ):
+            result = plugin._render_roi_tile(record, profile)
+
+        self.assertIsNotNone(result)
+        self.assertTrue(captured.get("skip_image_layer"))
+
+
 class FormatROILabelTests(unittest.TestCase):
     """Tests for format_roi_label with and without a custom name."""
 
