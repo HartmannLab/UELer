@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass
 
 import numpy as np
-from ipywidgets import Button, Checkbox, ColorPicker, HBox, IntSlider, IntText, Layout, VBox
+from ipywidgets import Button, Checkbox, ColorPicker, HBox, IntSlider, IntText, VBox
 from matplotlib.colors import to_rgb
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
@@ -114,7 +114,8 @@ class CellGalleryDisplay(PluginBase):
         )
 
         # Clickable thumbnail grid (anywidget) — replaces the Matplotlib figure.
-        self.gallery = TileGalleryWidget(columns=GRID_COLUMNS)
+        # The widget owns its own internal vertical scroll via max_height.
+        self.gallery = TileGalleryWidget(columns=GRID_COLUMNS, max_height="400px")
         self.gallery.observe(self._on_gallery_clicked, names="clicked")
 
         self.ui_component.refresh_button = Button(
@@ -150,9 +151,7 @@ class CellGalleryDisplay(PluginBase):
                 HBox([self.ui_component.use_uniform_color_checkbox]),
             ]
         )
-        self.ui = VBox(
-            [controls, VBox([self.gallery], layout=Layout(max_height="400px", overflow_y="auto"))]
-        )
+        self.ui = VBox([controls, VBox([self.gallery])])
 
     def _collect_ui_values(self) -> _UiValues:
         crop_width = int(self.ui_component.cutout_size_slider.value)

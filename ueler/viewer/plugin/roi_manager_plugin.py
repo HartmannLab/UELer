@@ -389,12 +389,12 @@ class ROIManagerPlugin(PluginBase):
 
         # Clickable thumbnail grid rendered from pre-encoded PNG tiles (anywidget).
         # Hover labels ride inside each tile as a CSS tooltip, so no separate hover
-        # widget or interactive Matplotlib backend is required.
-        self.ui_component.browser_gallery = TileGalleryWidget(columns=int(self.BROWSER_COLUMNS))
-        self.ui_component.browser_output = VBox(
-            [self.ui_component.browser_gallery],
-            layout=Layout(max_height="400px", overflow_y="auto"),
+        # widget or interactive Matplotlib backend is required. The widget owns its own
+        # internal vertical scroll (via max_height), so the wrapper needs no overflow.
+        self.ui_component.browser_gallery = TileGalleryWidget(
+            columns=int(self.BROWSER_COLUMNS), max_height=self.BROWSER_SCROLL_HEIGHT
         )
+        self.ui_component.browser_output = VBox([self.ui_component.browser_gallery])
         self.ui_component.browser_status = HTML("<em>No ROI captured yet.</em>")
         self.ui_component.browser_page_label = HTML("<em>Page 1 of 1</em>")
         self.ui_component.browser_prev_button = Button(

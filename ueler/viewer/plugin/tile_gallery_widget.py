@@ -110,8 +110,13 @@ try:
         tiles: list = traitlets.List().tag(sync=True)
         columns: int = traitlets.Int(2).tag(sync=True)
         clicked: str = traitlets.Unicode("").tag(sync=True)
+        max_height: str = traitlets.Unicode("400px").tag(sync=True)
 
         _css = """
+.tg-root {
+    overflow-y: auto;
+    box-sizing: border-box;
+}
 .tg-grid {
     display: grid;
     gap: 4px;
@@ -173,8 +178,15 @@ try:
 export function render({ model, el }) {
   let _nonce = 0;
 
+  const root = document.createElement('div');
+  root.className = 'tg-root';
+
   const grid = document.createElement('div');
   grid.className = 'tg-grid';
+
+  function applyHeight() {
+    root.style.maxHeight = model.get('max_height') || '400px';
+  }
 
   function rebuild() {
     const tiles = model.get('tiles') || [];
@@ -222,9 +234,12 @@ export function render({ model, el }) {
 
   model.on('change:tiles', rebuild);
   model.on('change:columns', rebuild);
+  model.on('change:max_height', applyHeight);
 
+  applyHeight();
   rebuild();
-  el.appendChild(grid);
+  root.appendChild(grid);
+  el.appendChild(root);
 }
 """
 
@@ -239,6 +254,7 @@ except (ImportError, AttributeError):
         tiles: list = traitlets.List()
         columns: int = traitlets.Int(2)
         clicked: str = traitlets.Unicode("")
+        max_height: str = traitlets.Unicode("400px")
 
 
 def parse_clicked_id(value) -> str:

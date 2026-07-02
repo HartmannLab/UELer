@@ -76,6 +76,10 @@ class TileGalleryWidgetTestCase(unittest.TestCase):
         self.assertEqual(fired, ["a|0", "a|1"])
         self.assertEqual(parse_clicked_id(fired[-1]), "a")
 
+    def test_max_height_trait_default_and_override(self):
+        self.assertEqual(TileGalleryWidget().max_height, "400px")
+        self.assertEqual(TileGalleryWidget(max_height="250px").max_height, "250px")
+
 
 if __name__ == "__main__":
     unittest.main()

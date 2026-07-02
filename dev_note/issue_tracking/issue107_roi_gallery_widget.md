@@ -99,6 +99,16 @@ ROI. Map-mode ROIs were unaffected (different code path). Fix: move
 `_logger.warning(..., exc_info=True)` in the `except` so future render failures are visible.
 Regression coverage: `tests/test_roi_manager_tags.py::ROIManagerThumbnailRenderTests`.
 
+## Follow-up fix — gallery could not scroll (Reply 2)
+When a page held more tiles than fit the visible area, the gallery could not be scrolled. An
+`anywidget` embedded in an ipywidgets `VBox` does not reliably inherit a scroll viewport from
+the parent's `max_height`/`overflow_y`. Fixed by having `TileGalleryWidget` own its own scroll
+(matching `mask_class_list_widget.py`'s `.mask-cl-scroll`): a synced `max_height` traitlet
+(default `"400px"`) plus a `.tg-root` wrapper with `overflow-y: auto` and `max-height` bound to
+the trait. The host `VBox` wrappers in both plugins were simplified to plain `VBox([gallery])`
+to avoid a nested double scrollbar. Coverage: `max_height` trait asserted in
+`tests/test_roi_manager_tags.py` and `tests/test_tile_gallery_widget.py`.
+
 ## Manual verification (recommended before release)
 Open `script/run_ueler_CRC_cohort.ipynb` in both JupyterLab/browser and VSCode:
 - ROI Manager: clickable thumbnail grid; click centers/activates ROI + applies preset;

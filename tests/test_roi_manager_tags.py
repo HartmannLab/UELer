@@ -436,14 +436,13 @@ class ROIManagerTagsTests(unittest.TestCase):
 
     def test_browser_output_widget_scrolls_within_fixed_height(self):
         plugin = make_plugin()
-        # browser_output is a VBox wrapper that scrolls; it holds the tile-grid widget.
+        # browser_output wraps the tile-grid widget, which owns its own internal
+        # vertical scroll via the max_height trait (no VBox overflow needed).
         wrapper = plugin.ui_component.browser_output
         self.assertIsInstance(wrapper, VBox)
         self.assertEqual(len(wrapper.children), 1)
         self.assertIs(wrapper.children[0], plugin.ui_component.browser_gallery)
-        wrapper_layout = wrapper.layout
-        self.assertEqual(getattr(wrapper_layout, "max_height", None), "400px")
-        self.assertEqual(getattr(wrapper_layout, "overflow_y", None), "auto")
+        self.assertEqual(plugin.ui_component.browser_gallery.max_height, "400px")
 
     def test_browser_root_layout_can_shrink(self):
         plugin = make_plugin()
