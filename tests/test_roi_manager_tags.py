@@ -436,18 +436,14 @@ class ROIManagerTagsTests(unittest.TestCase):
 
     def test_browser_output_widget_scrolls_within_fixed_height(self):
         plugin = make_plugin()
-        # browser_output is now a VBox wrapper with fixed height (matching cell gallery)
+        # browser_output is a VBox wrapper that scrolls; it holds the tile-grid widget.
         wrapper = plugin.ui_component.browser_output
         self.assertIsInstance(wrapper, VBox)
         self.assertEqual(len(wrapper.children), 1)
-        self.assertEqual(getattr(wrapper.layout, "height", None), "400px")
-        
-        # Inner Output widget has max_height and scrolling
-        inner_output = plugin.ui_component.browser_output_inner
-        self.assertIsInstance(inner_output, Output)
-        inner_layout = inner_output.layout
-        self.assertEqual(getattr(inner_layout, "max_height", None), "400px")
-        self.assertEqual(getattr(inner_layout, "overflow_y", None), "auto")
+        self.assertIs(wrapper.children[0], plugin.ui_component.browser_gallery)
+        wrapper_layout = wrapper.layout
+        self.assertEqual(getattr(wrapper_layout, "max_height", None), "400px")
+        self.assertEqual(getattr(wrapper_layout, "overflow_y", None), "auto")
 
     def test_browser_root_layout_can_shrink(self):
         plugin = make_plugin()
@@ -455,14 +451,10 @@ class ROIManagerTagsTests(unittest.TestCase):
         self.assertEqual(getattr(layout, "min_width", None), "0")
         self.assertEqual(plugin.ui_component.browser_root.children[2], plugin.ui_component.browser_pagination)
 
-    def test_gallery_layout_respects_width_ratio_and_columns(self):
+    def test_browser_gallery_uses_configured_columns(self):
         plugin = make_plugin()
-        columns, rows, fig_width, fig_height = plugin._determine_gallery_layout(2)
-        self.assertEqual(columns, plugin.BROWSER_COLUMNS)
-        self.assertEqual(rows, 1)
-        # Static narrow width approach to prevent clipping
-        self.assertAlmostEqual(fig_width, 4.8)
-        self.assertAlmostEqual(fig_height, fig_width / columns)
+        gallery = plugin.ui_component.browser_gallery
+        self.assertEqual(int(gallery.columns), int(plugin.BROWSER_COLUMNS))
 
     def test_new_tags_extend_allowed_pool(self):
         plugin = make_plugin()

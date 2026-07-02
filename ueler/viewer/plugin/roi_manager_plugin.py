@@ -16,7 +16,6 @@ _STATUS_LOG_LEVELS = {
     "error": logging.ERROR,
 }
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from ipywidgets import (
@@ -28,7 +27,6 @@ from ipywidgets import (
     HBox,
     HTML,
     Layout,
-    Output,
     SelectMultiple,
     Tab,
     TagsInput,
@@ -39,7 +37,7 @@ from ipywidgets import (
     Widget,
 )
 from matplotlib.colors import to_rgb
-from IPython.display import HTML as IPythonHTML, display
+from IPython.display import display
 
 from ueler.rendering import (
     AnnotationOverlaySnapshot,
@@ -55,6 +53,12 @@ from ueler.viewer.mask_color_overlay import derive_downsampled_region
 
 from .plugin_base import PluginBase
 from .roi_expression_editor import ROIExpressionEditorWidget
+from .tile_gallery_widget import (
+    TileGalleryWidget,
+    array_to_data_uri,
+    parse_clicked_id,
+    text_placeholder_uri,
+)
 from ..layout_utils import column_block_layout, content_widget_layout, flex_fill_layout
 from ..roi_manager import format_roi_label
 from ..tag_expression import TagExpressionError, compile_tag_expression
@@ -85,7 +89,6 @@ class ROIManagerPlugin(PluginBase):
     THUMBNAIL_MAX_EDGE = 256
     GALLERY_WIDTH_RATIO = 0.98
     BROWSER_SCROLL_HEIGHT = "400px"
-    _browser_css_injected = False
 
     def __init__(self, main_viewer, width: int = 6, height: int = 3) -> None:
         super().__init__(main_viewer, width, height)
@@ -96,11 +99,7 @@ class ROIManagerPlugin(PluginBase):
         self._selected_roi_id: Optional[str] = None
         self._suspend_ui_events = False
         self._suspend_browser_events = False
-        self._browser_axis_to_roi: Dict[object, str] = {}
         self._browser_records_cache: Dict[str, dict] = {}
-        self._browser_click_cid: Optional[int] = None
-        self._browser_motion_cid: Optional[int] = None
-        self._browser_figure = None
         self._browser_current_page = 1
         self._browser_total_pages = 1
         self._browser_last_signature = None
@@ -388,19 +387,13 @@ class ROIManagerPlugin(PluginBase):
             "<em>Combine tags with () &amp; | !. Leave blank to use the simple tag filter.</em>"
         )
 
-        # Simple Output widget with scrolling, matching cell gallery's approach
-        # The Output must be wrapped in a VBox with fixed height to properly constrain
-        # the Matplotlib figure and prevent overlap with pagination controls below
-        self.ui_component.browser_output_inner = Output(
-            layout=Layout(max_height="400px", overflow_y="auto")
-        )
+        # Clickable thumbnail grid rendered from pre-encoded PNG tiles (anywidget).
+        # Hover labels ride inside each tile as a CSS tooltip, so no separate hover
+        # widget or interactive Matplotlib backend is required.
+        self.ui_component.browser_gallery = TileGalleryWidget(columns=int(self.BROWSER_COLUMNS))
         self.ui_component.browser_output = VBox(
-            [self.ui_component.browser_output_inner],
-            layout=Layout(height="400px")
-        )
-
-        self.ui_component.browser_hover_label = HTML(
-            "", layout=Layout(min_height="1.4em", font_style="italic")
+            [self.ui_component.browser_gallery],
+            layout=Layout(max_height="400px", overflow_y="auto"),
         )
         self.ui_component.browser_status = HTML("<em>No ROI captured yet.</em>")
         self.ui_component.browser_page_label = HTML("<em>Page 1 of 1</em>")
@@ -472,7 +465,6 @@ class ROIManagerPlugin(PluginBase):
             [
                 controls,
                 self.ui_component.browser_output,
-                self.ui_component.browser_hover_label,
                 self.ui_component.browser_pagination,
                 self.ui_component.browser_status,
             ],
@@ -531,6 +523,7 @@ class ROIManagerPlugin(PluginBase):
         self.ui_component.browser_expression_editor.observe(
             self._on_apply_requested_change, names="apply_requested"
         )
+        self.ui_component.browser_gallery.observe(self._on_gallery_clicked, names="clicked")
         self.ui_component.browser_refresh_button.on_click(self._on_browser_refresh_clicked)
         self.ui_component.browser_prev_button.on_click(self._on_browser_prev_clicked)
         self.ui_component.browser_next_button.on_click(self._on_browser_next_clicked)
@@ -739,24 +732,10 @@ class ROIManagerPlugin(PluginBase):
 
         return df.reset_index(drop=True)
 
-    def _determine_gallery_layout(self, record_count: int) -> Tuple[int, int, float, float]:
-        columns = max(1, int(self.BROWSER_COLUMNS))
-        active_count = max(1, int(record_count))
-        rows = max(1, math.ceil(active_count / columns))
-
-        # Use a conservative static width that fits narrow accordions without clipping.
-        # At 72 DPI, 4.8 inches ≈ 346 px which fits comfortably in typical narrow panels.
-        # The canvas will stretch via width:100% when more space is available.
-        safe_cols = max(columns, 1)
-        fig_width = 4.8  # inches - static narrow size to avoid clipping
-        tile_inch = fig_width / safe_cols
-        fig_height = max(tile_inch * rows, tile_inch)
-        return columns, rows, fig_width, fig_height
-
     def _refresh_browser_gallery(self) -> None:
-        output = getattr(self.ui_component, "browser_output_inner", None)
+        gallery = getattr(self.ui_component, "browser_gallery", None)
         status = getattr(self.ui_component, "browser_status", None)
-        if output is None or status is None:
+        if gallery is None or status is None:
             return
 
         if self._suspend_browser_events:
@@ -767,12 +746,10 @@ class ROIManagerPlugin(PluginBase):
         total = len(records)
 
         if total == 0:
-            self._disconnect_browser_events()
-            self._browser_axis_to_roi.clear()
+            self._browser_records_cache.clear()
             self._browser_last_signature = ("empty",)
             self._browser_total_pages = 0
-            with output:
-                output.clear_output(wait=True)
+            gallery.tiles = []
             self._update_browser_summary(0, 0)
             self._update_pagination_controls(0, 0, 0)
             return
@@ -815,100 +792,39 @@ class ROIManagerPlugin(PluginBase):
             self._update_pagination_controls(current_page, total_pages, total)
             return
 
-        self._disconnect_browser_events()
-        self._browser_axis_to_roi.clear()
         self._browser_records_cache.clear()
 
-        with output:
-            output.clear_output(wait=True)
-            columns, rows, fig_width, fig_height = self._determine_gallery_layout(len(limited_records))
-            fig, axes = plt.subplots(rows, columns, figsize=(fig_width, fig_height))
-            dpi_value = self._resolve_browser_dpi()
-            try:
-                fig.set_dpi(dpi_value)
-            except Exception:  # pragma: no cover - matplotlib backends without set_dpi
-                pass
-            fig.subplots_adjust(left=0.01, right=0.99, top=0.99, bottom=0.01, wspace=0.02, hspace=0.02)
-            axes_array = np.atleast_1d(np.array(axes)).ravel()
-            aspect_ratio = 1.0
-            if fig_width > 0:
-                try:
-                    aspect_ratio = max(fig_height / fig_width, 1e-3)
-                except Exception:
-                    aspect_ratio = 1.0
+        tiles: List[dict] = []
+        rendered = 0
+        for record in limited_records:
+            roi_id_str = str(record.get("roi_id") or "")
+            label = format_roi_label(record)
+            marker_profile = self._build_marker_profile(record)
+            message_text = None
+            if marker_profile is None or not marker_profile.selected_channels:
+                message_text = "No channels"
 
-            rendered = 0
-            for slot_index, axis in enumerate(axes_array):
-                axis.axis("off")
-                if slot_index >= len(limited_records):
-                    try:
-                        axis.set_facecolor("#f8f8f8")
-                    except Exception:  # pragma: no cover - matplotlib backend differences
-                        pass
-                    continue
+            tile = None if message_text else self._render_roi_tile(record, marker_profile)
+            if tile is None or getattr(tile, "size", 0) == 0:
+                message_text = message_text or "Preview unavailable"
 
-                record = limited_records[slot_index]
-                marker_profile = self._build_marker_profile(record)
-                message_text = None
-                if marker_profile is None or not marker_profile.selected_channels:
-                    message_text = "No channels"
+            if message_text:
+                src = text_placeholder_uri(message_text)
+                tile_label = f"{label} — {message_text}" if label else message_text
+            else:
+                src = array_to_data_uri(tile)
+                tile_label = label
 
-                tile = None if message_text else self._render_roi_tile(record, marker_profile)
-                if tile is None or tile.size == 0:
-                    message_text = message_text or "Preview unavailable"
+            tiles.append({"id": roi_id_str, "src": src, "label": tile_label})
+            self._browser_records_cache[roi_id_str] = record
+            rendered += 1
 
-                if message_text:
-                    axis.text(0.5, 0.5, message_text, ha="center", va="center", fontsize=9)
-                else:
-                    axis.imshow(tile)
-
-                axis.axis("off")
-                roi_id_str = str(record.get("roi_id") or "")
-                self._browser_axis_to_roi[axis] = roi_id_str
-                self._browser_records_cache[roi_id_str] = record
-                rendered += 1
-
-            # Display figure directly, matching cell gallery's simple approach
-            plt.show(fig)
-
-            try:
-                canvas = getattr(fig, "canvas", None)
-                if canvas is not None:
-                    if hasattr(canvas, "toolbar_visible"):
-                        canvas.toolbar_visible = False
-                    if hasattr(canvas, "header_visible"):
-                        canvas.header_visible = False
-                    if hasattr(canvas, "footer_visible"):
-                        canvas.footer_visible = False
-            except Exception:  # pragma: no cover - backend differences
-                pass
-
-        self._browser_figure = fig
-        try:
-            self._browser_click_cid = fig.canvas.mpl_connect("button_press_event", self._on_browser_click)
-            self._browser_motion_cid = fig.canvas.mpl_connect("motion_notify_event", self._on_browser_motion)
-            fig.canvas.mpl_connect("axes_leave_event", lambda _e: self._clear_browser_hover())
-        except Exception:  # pragma: no cover - matplotlib backend quirks
-            self._browser_click_cid = None
-            self._browser_motion_cid = None
+        gallery.columns = int(self.BROWSER_COLUMNS)
+        gallery.tiles = tiles
 
         self._browser_last_signature = signature
-        rendered_count = rendered
-        self._update_browser_summary(rendered_count, total)
+        self._update_browser_summary(rendered, total)
         self._update_pagination_controls(current_page, total_pages, total)
-
-    def _disconnect_browser_events(self) -> None:
-        if self._browser_figure is not None:
-            for cid in (self._browser_click_cid, self._browser_motion_cid):
-                if cid is not None:
-                    try:
-                        self._browser_figure.canvas.mpl_disconnect(cid)
-                    except Exception:  # pragma: no cover - defensive cleanup
-                        pass
-        self._browser_click_cid = None
-        self._browser_motion_cid = None
-        self._browser_figure = None
-        self._clear_browser_hover()
 
     def _update_browser_summary(self, rendered: int, total: int) -> None:
         status = getattr(self.ui_component, "browser_status", None)
@@ -1062,32 +978,6 @@ class ROIManagerPlugin(PluginBase):
         insert = f"{leading}{snippet}{trailing}"
         cursor_offset = len(leading) + len(snippet)
         return insert, cursor_offset
-
-    @classmethod
-    def _ensure_browser_css(cls) -> None:
-        if getattr(cls, "_browser_css_injected", False):
-            return
-        try:
-            display(
-                IPythonHTML(
-                    """
-<style>
-.roi-browser-output img {
-    max-width: 100% !important;
-    height: auto !important;
-}
-</style>
-"""
-                )
-            )
-        except Exception:  # pragma: no cover - fallback for headless environments
-            pass
-        cls._browser_css_injected = True
-
-    @staticmethod
-    def _resolve_browser_dpi() -> float:
-        base_dpi = 72.0
-        return max(36.0, min(120.0, base_dpi))
 
     def _refresh_expression_tag_buttons(self, tags: Sequence[str]) -> None:
         editor = getattr(self.ui_component, "browser_expression_editor", None)
@@ -1691,34 +1581,11 @@ class ROIManagerPlugin(PluginBase):
         self._browser_last_signature = None
         self._refresh_browser_gallery()
 
-    def _on_browser_click(self, event) -> None:  # pragma: no cover - UI callback
-        axis = getattr(event, "inaxes", None)
-        if axis is None:
-            return
-        roi_id = self._browser_axis_to_roi.get(axis)
+    def _on_gallery_clicked(self, change) -> None:
+        roi_id = parse_clicked_id(change.get("new") if isinstance(change, dict) else getattr(change, "new", ""))
         if not roi_id:
             return
-        self._activate_roi_from_browser(str(roi_id))
-
-    def _on_browser_motion(self, event) -> None:  # pragma: no cover - UI callback
-        widget = getattr(self.ui_component, "browser_hover_label", None)
-        if widget is None:
-            return
-        axis = getattr(event, "inaxes", None)
-        if axis is None:
-            widget.value = ""
-            return
-        roi_id = self._browser_axis_to_roi.get(axis)
-        if not roi_id:
-            widget.value = ""
-            return
-        record = self._browser_records_cache.get(roi_id) or {}
-        widget.value = format_roi_label(record)
-
-    def _clear_browser_hover(self) -> None:  # pragma: no cover
-        widget = getattr(self.ui_component, "browser_hover_label", None)
-        if widget is not None:
-            widget.value = ""
+        self._activate_roi_from_browser(roi_id)
 
     def _activate_roi_from_browser(self, roi_id: str) -> None:
         record = self.main_viewer.roi_manager.get_roi(roi_id)

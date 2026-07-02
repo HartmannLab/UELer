@@ -665,41 +665,19 @@ class TestErrorHandling(unittest.TestCase):
             self.assertTrue(np.all(placeholder <= 1.0))
     
     def test_warning_above_100_cells(self):
-        """Verify warning is displayed when max_cells exceeds 100."""
+        """Verify a performance warning is logged when max_cells exceeds 100."""
         from ueler.viewer.plugin.cell_gallery import CellGalleryDisplay
-        from unittest.mock import Mock, patch, MagicMock
-        from io import StringIO
-        
-        # Create a properly mocked gallery instance
-        # We don't need to actually create a full CellGalleryDisplay, 
-        # just test the _show_warning method
-        mock_plot_output = MagicMock()
-        
-        # Create a minimal mock instance with just the plot_output
+
         gallery = SimpleNamespace()
-        gallery.plot_output = mock_plot_output
-        
-        # Bind the _show_warning method to our namespace
-        def show_warning(message: str) -> None:
-            with gallery.plot_output:
-                print(f"⚠️  Warning: {message}")
-        
-        gallery._show_warning = show_warning
-        
-        # Capture the print output
-        with patch('sys.stdout', new=StringIO()) as fake_out:
-            # Call _show_warning with performance message
-            gallery._show_warning(
+        with self.assertLogs("ueler.viewer.plugin.cell_gallery", level="WARNING") as captured:
+            CellGalleryDisplay._show_warning(
+                gallery,
                 "Performance may degrade above 100 cells. "
-                "Consider reducing display count for better responsiveness."
+                "Consider reducing display count for better responsiveness.",
             )
-            output = fake_out.getvalue()
-        
-        # Assert: Warning message was printed
-        self.assertIn("⚠️", output)
-        self.assertIn("Warning", output)
-        self.assertIn("Performance may degrade", output)
-        self.assertIn("100 cells", output)
+
+        self.assertTrue(any("Performance may degrade" in line for line in captured.output))
+        self.assertTrue(any("100 cells" in line for line in captured.output))
 
 
 class TestUpdateStatusBarDecorator(unittest.TestCase):
@@ -779,256 +757,89 @@ class TestUpdateStatusBarDecorator(unittest.TestCase):
         self.assertEqual(calls_log, ["processing", "ready"])
 
 
-class TestDrawGalleryRendering(unittest.TestCase):
-    """Regression tests for issue #93 reply: reliable figure rendering in VS Code.
+class TestTileGalleryRendering(unittest.TestCase):
+    """Tests for the anywidget tile-grid rendering path (issue #107).
 
-    Verifies that _draw_gallery uses clear_output(wait=True) before the Output
-    context (not inside it), passes the figure explicitly to plt.show(), and
-    degrades gracefully when the backend does not provide new_timer().
+    The cell gallery no longer draws a Matplotlib figure; it encodes each rendered
+    tile to a PNG data-URI and pushes ``{id, src, label}`` entries to a
+    TileGalleryWidget. Clicks arrive as a ``clicked`` traitlet change.
     """
 
-    def _make_output_stub(self):
-        """Return a simple Output-like stub that tracks clear_output calls."""
-        calls = []
-
-        class _OutputStub:
-            def __init__(self):
-                self.clear_calls = calls
-
-            def clear_output(self, wait=False):
-                self.clear_calls.append({"wait": wait})
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *_):
-                return False
-
-        return _OutputStub()
-
-    def _make_gallery_stub(self, output_stub, canvas_supports_timer=True):
-        """Minimal CellGalleryDisplay-like namespace for testing _draw_gallery."""
-        from ueler.viewer.plugin.cell_gallery import CellGalleryDisplay, Data, UiComponent
-
-        class _FakeCanvas:
-            def __init__(self, supports_timer):
-                self._supports_timer = supports_timer
-                self.header_visible = True
-                self.connected = []
-                self.show_calls = []
-
-            def mpl_connect(self, event, cb):
-                self.connected.append(event)
-
-            def new_timer(self, interval):
-                if not self._supports_timer:
-                    raise AttributeError("backend has no new_timer")
-                t = SimpleNamespace(
-                    single_shot=False,
-                    callbacks=[],
-                    started=False,
-                )
-                t.add_callback = lambda cb: t.callbacks.append(cb)
-                t.start = lambda: setattr(t, "started", True)
-                t.stop = lambda: None
-                return t
-
-        class _FakeFig:
-            def __init__(self, supports_timer):
-                self.canvas = _FakeCanvas(supports_timer)
-                self._tight = False
-                self.tight_layout = lambda: setattr(self, "_tight", True)
-
-        show_calls = []
+    def _make_gallery(self, df):
+        from ueler.viewer.plugin.cell_gallery import CellGalleryDisplay
+        from ueler.viewer.plugin.tile_gallery_widget import TileGalleryWidget
 
         gallery = SimpleNamespace()
-        gallery.plot_output = output_stub
-        gallery.width = 5
-        gallery.data = Data()
-        gallery.hover_timer = None
-        gallery.last_hover_event = None
+        gallery.gallery = TileGalleryWidget(columns=1)
+        gallery.data = SimpleNamespace(displayed_cells=[1, 2, 3])
         gallery._skip_next_fov_refresh = False
+        gallery._last_crop_width = 50
         gallery.main_viewer = SimpleNamespace(
-            cell_table=None,
+            cell_table=df,
             fov_key="fov",
             x_key="x",
             y_key="y",
+            label_key="label",
             ui_component=SimpleNamespace(image_selector=None),
         )
+        return gallery, CellGalleryDisplay
 
-        return gallery, _FakeFig(canvas_supports_timer), show_calls
+    def test_draw_gallery_populates_tiles(self):
+        from ueler.viewer.plugin.cell_gallery import GRID_COLUMNS
 
-    def test_draw_gallery_calls_clear_output_with_wait(self):
-        """clear_output(wait=True) must be called before the with-block, not inside it."""
-        import numpy as np
+        df = pd.DataFrame(
+            {"fov": ["F1", "F2"], "label": [10, 20], "x": [1.0, 2.0], "y": [3.0, 4.0]}
+        )
+        gallery, CGD = self._make_gallery(df)
+        img = np.zeros((4, 4, 3), dtype=np.float32)
 
-        # Single sequence list records call order for both clear_output and __enter__
-        sequence = []
+        CGD._draw_gallery(gallery, [img, img], [0, 1])
 
-        class _TrackingOutput:
-            def __init__(self):
-                self.clear_wait_values = []
+        tiles = gallery.gallery.tiles
+        self.assertEqual([t["id"] for t in tiles], ["0", "1"])
+        self.assertEqual([t["label"] for t in tiles], ["F1: 10", "F2: 20"])
+        self.assertTrue(all(t["src"].startswith("data:image/png;base64,") for t in tiles))
+        self.assertEqual(int(gallery.gallery.columns), GRID_COLUMNS)
 
-            def clear_output(self, wait=False):
-                self.clear_wait_values.append(wait)
-                sequence.append("clear")
+    def test_show_empty_message_clears_tiles(self):
+        df = pd.DataFrame({"fov": ["F1"], "label": [10], "x": [1.0], "y": [3.0]})
+        gallery, CGD = self._make_gallery(df)
+        gallery.gallery.tiles = [{"id": "0", "src": "x", "label": "y"}]
 
-            def __enter__(self):
-                sequence.append("enter")
-                return self
+        CGD._show_empty_message(gallery, "No cells selected.")
 
-            def __exit__(self, *_):
-                return False
+        self.assertEqual(list(gallery.gallery.tiles), [])
+        self.assertEqual(list(gallery.data.displayed_cells), [])
 
-        tracking_output = _TrackingOutput()
-        canvas = np.zeros((10, 10, 3), dtype=np.float32)
-
-        with patch("ueler.viewer.plugin.cell_gallery.plt") as mock_plt:
-            mock_ax = MagicMock()
-            mock_canvas = MagicMock()
-            mock_canvas.new_timer.side_effect = AttributeError("no timer")
-            mock_fig = MagicMock()
-            mock_fig.canvas = mock_canvas
-            mock_fig.tight_layout = MagicMock()
-            mock_plt.subplots.return_value = (mock_fig, mock_ax)
-            mock_plt.show = MagicMock()
-
-            from ueler.viewer.plugin.cell_gallery import CellGalleryDisplay, Data
-            gallery = SimpleNamespace()
-            gallery.plot_output = tracking_output
-            gallery.width = 5
-            gallery.data = Data()
-            gallery.hover_timer = None
-            gallery.last_hover_event = None
-            gallery._skip_next_fov_refresh = False
-            gallery.main_viewer = SimpleNamespace(
-                cell_table=None,
-                fov_key="fov", x_key="x", y_key="y",
-                ui_component=SimpleNamespace(image_selector=None),
-            )
-            gallery._create_annotation = lambda: CellGalleryDisplay._create_annotation(gallery)
-            gallery.on_mouse_move = lambda event: None
-
-            CellGalleryDisplay._draw_gallery(gallery, canvas, rows=1, displayed_indices=[0], crop_width=50)
-
-        # clear_output must have been called before __enter__
-        self.assertIn("clear", sequence, "clear_output was never called")
-        self.assertIn("enter", sequence, "with-block was never entered")
-        self.assertLess(sequence.index("clear"), sequence.index("enter"),
-                        "clear_output must precede the with-block")
-
-        # clear_output must have been called with wait=True
-        self.assertTrue(
-            any(tracking_output.clear_wait_values),
-            "clear_output must be called with wait=True",
+    def test_gallery_click_focuses_cell(self):
+        df = pd.DataFrame(
+            {"fov": ["F1", "F2"], "label": [10, 20], "x": [1.0, 2.0], "y": [3.0, 4.0]}
+        )
+        gallery, CGD = self._make_gallery(df)
+        focus_calls = []
+        gallery.main_viewer.focus_on_cell = (
+            lambda fov, x, y, radius: focus_calls.append((fov, x, y, radius))
         )
 
-    def test_draw_gallery_calls_plt_show_with_figure(self):
-        """plt.show must receive the figure as its argument, not be called bare."""
-        import numpy as np
+        # Nonce-suffixed payload for tile id "1" (the second row).
+        CGD._on_gallery_clicked(gallery, {"new": "1|0"})
 
-        canvas = np.zeros((10, 10, 3), dtype=np.float32)
-        show_args = []
+        self.assertEqual(len(focus_calls), 1)
+        fov, x, y, radius = focus_calls[0]
+        self.assertEqual(fov, "F2")
+        self.assertEqual(x, 2.0)
+        self.assertEqual(y, 4.0)
+        self.assertEqual(radius, 25.0)  # _last_crop_width (50) / 2
 
-        with patch("ueler.viewer.plugin.cell_gallery.plt") as mock_plt:
-            mock_ax = MagicMock()
-            mock_canvas = MagicMock()
-            mock_canvas.new_timer.side_effect = AttributeError("no timer")
-            mock_fig = MagicMock()
-            mock_fig.canvas = mock_canvas
-            mock_plt.subplots.return_value = (mock_fig, mock_ax)
-            mock_plt.show.side_effect = lambda fig=None: show_args.append(fig)
+    def test_gallery_click_ignores_empty_payload(self):
+        df = pd.DataFrame({"fov": ["F1"], "label": [10], "x": [1.0], "y": [3.0]})
+        gallery, CGD = self._make_gallery(df)
+        focus_calls = []
+        gallery.main_viewer.focus_on_cell = lambda *a, **k: focus_calls.append((a, k))
 
-            output_stub = self._make_output_stub()
+        CGD._on_gallery_clicked(gallery, {"new": ""})
 
-            from ueler.viewer.plugin.cell_gallery import CellGalleryDisplay, Data
-            gallery = SimpleNamespace()
-            gallery.plot_output = output_stub
-            gallery.width = 5
-            gallery.data = Data()
-            gallery.hover_timer = None
-            gallery.last_hover_event = None
-            gallery._skip_next_fov_refresh = False
-            gallery.main_viewer = SimpleNamespace(
-                cell_table=None, fov_key="fov", x_key="x", y_key="y",
-                ui_component=SimpleNamespace(image_selector=None),
-            )
-            gallery._create_annotation = lambda: CellGalleryDisplay._create_annotation(gallery)
-            gallery.on_mouse_move = lambda event: None
-
-            CellGalleryDisplay._draw_gallery(gallery, canvas, rows=1, displayed_indices=[0], crop_width=50)
-
-        self.assertEqual(len(show_args), 1, "plt.show must be called exactly once")
-        self.assertIs(show_args[0], mock_fig, "plt.show must receive the figure object")
-
-    def test_draw_gallery_handles_missing_new_timer(self):
-        """Gallery must render successfully even when canvas.new_timer raises AttributeError."""
-        import numpy as np
-
-        canvas = np.zeros((10, 10, 3), dtype=np.float32)
-
-        with patch("ueler.viewer.plugin.cell_gallery.plt") as mock_plt:
-            mock_ax = MagicMock()
-            mock_canvas = MagicMock()
-            mock_canvas.new_timer.side_effect = AttributeError("backend has no timer")
-            mock_fig = MagicMock()
-            mock_fig.canvas = mock_canvas
-            mock_plt.subplots.return_value = (mock_fig, mock_ax)
-            mock_plt.show = MagicMock()
-
-            output_stub = self._make_output_stub()
-
-            from ueler.viewer.plugin.cell_gallery import CellGalleryDisplay, Data
-            gallery = SimpleNamespace()
-            gallery.plot_output = output_stub
-            gallery.width = 5
-            gallery.data = Data()
-            gallery.hover_timer = None
-            gallery.last_hover_event = None
-            gallery._skip_next_fov_refresh = False
-            gallery.main_viewer = SimpleNamespace(
-                cell_table=None, fov_key="fov", x_key="x", y_key="y",
-                ui_component=SimpleNamespace(image_selector=None),
-            )
-            gallery._create_annotation = lambda: CellGalleryDisplay._create_annotation(gallery)
-            gallery.on_mouse_move = lambda event: None
-
-            # Must not raise
-            CellGalleryDisplay._draw_gallery(gallery, canvas, rows=1, displayed_indices=[0], crop_width=50)
-
-        # hover_timer should be None when new_timer is unavailable
-        self.assertIsNone(gallery.hover_timer)
-        # plt.show must still have been called (figure was rendered)
-        mock_plt.show.assert_called_once()
-
-    def test_show_empty_message_clears_with_wait(self):
-        """_show_empty_message must call clear_output(wait=True) before the context."""
-        from ueler.viewer.plugin.cell_gallery import CellGalleryDisplay
-
-        clear_calls = []
-        enter_calls = []
-
-        class _TrackingOutput:
-            def clear_output(self, wait=False):
-                clear_calls.append({"wait": wait})
-
-            def __enter__(self):
-                enter_calls.append("enter")
-                return self
-
-            def __exit__(self, *_):
-                return False
-
-        gallery = SimpleNamespace()
-        gallery.plot_output = _TrackingOutput()
-
-        CellGalleryDisplay._show_empty_message(gallery, "No cells selected.")
-
-        self.assertTrue(len(clear_calls) > 0, "clear_output must be called")
-        self.assertTrue(clear_calls[0]["wait"], "clear_output must use wait=True")
-        # clear_output must have been called before __enter__
-        self.assertGreater(len(enter_calls), 0, "context must still be entered")
-        self.assertEqual(len(clear_calls), 1, "clear_output called exactly once")
+        self.assertEqual(focus_calls, [])
 
 
 if __name__ == "__main__":

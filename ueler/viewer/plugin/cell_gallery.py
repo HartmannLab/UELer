@@ -5,9 +5,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-import matplotlib.pyplot as plt
 import numpy as np
-from ipywidgets import Button, Checkbox, ColorPicker, HBox, IntSlider, IntText, Layout, Output, VBox
+from ipywidgets import Button, Checkbox, ColorPicker, HBox, IntSlider, IntText, Layout, VBox
 from matplotlib.colors import to_rgb
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
@@ -23,6 +22,7 @@ from ueler.viewer.decorators import update_status_bar
 from ueler.viewer.observable import Observable
 
 from .plugin_base import PluginBase
+from .tile_gallery_widget import TileGalleryWidget, array_to_data_uri, parse_clicked_id
 
 _logger = logging.getLogger(__name__)
 
@@ -50,10 +50,9 @@ class CellGalleryDisplay(PluginBase):
         self.height = height
 
         self.data = Data()
-        self.hover_timer = None
-        self.last_hover_event = None
         self._skip_next_fov_refresh = False
-        
+        self._last_crop_width = DEFAULT_CUTOUT_SIZE
+
         # Track last rendered state to avoid unnecessary regeneration
         self._last_rendered_cells: Optional[tuple] = None
 
@@ -114,7 +113,9 @@ class CellGalleryDisplay(PluginBase):
             style={"description_width": "auto"},
         )
 
-        self.plot_output = Output(layout=Layout(max_height="300px", overflow_y="auto"))
+        # Clickable thumbnail grid (anywidget) — replaces the Matplotlib figure.
+        self.gallery = TileGalleryWidget(columns=GRID_COLUMNS)
+        self.gallery.observe(self._on_gallery_clicked, names="clicked")
 
         self.ui_component.refresh_button = Button(
             description="Refresh",
@@ -149,7 +150,9 @@ class CellGalleryDisplay(PluginBase):
                 HBox([self.ui_component.use_uniform_color_checkbox]),
             ]
         )
-        self.ui = VBox([controls, VBox([self.plot_output], layout=Layout(height="400px"))])
+        self.ui = VBox(
+            [controls, VBox([self.gallery], layout=Layout(max_height="400px", overflow_y="auto"))]
+        )
 
     def _collect_ui_values(self) -> _UiValues:
         crop_width = int(self.ui_component.cutout_size_slider.value)
@@ -176,113 +179,45 @@ class CellGalleryDisplay(PluginBase):
         )
 
     def _show_empty_message(self, message: str = "No cells selected."):
-        self.plot_output.clear_output(wait=True)
-        with self.plot_output:
-            print(message)
+        self.gallery.tiles = []
+        self.data.displayed_cells = []
         _logger.info(message)
-
-    def _update_tile_metadata(self, canvas: np.ndarray, rows: int, columns: int):
-        self.data.n = rows
-        self.data.m = columns if columns else GRID_COLUMNS
-
-        if rows > 0:
-            tile_height = (canvas.shape[0] - max(rows - 1, 0) * GRID_SPACING) // rows
-        else:
-            tile_height = canvas.shape[0]
-        if self.data.m > 0:
-            tile_width = (canvas.shape[1] - max(self.data.m - 1, 0) * GRID_SPACING) // self.data.m
-        else:
-            tile_width = canvas.shape[1]
-
-        self.data.tile_height = max(1, tile_height)
-        self.data.tile_width = max(1, tile_width)
 
     def _draw_gallery(
         self,
-        canvas: np.ndarray,
-        rows: int,
+        images: Sequence[np.ndarray],
         displayed_indices: Sequence[int],
-        crop_width: int,
     ):
-        # Clear with wait=True before entering the context so VS Code's async
-        # frontend waits for new content before removing the old figure.
-        self.plot_output.clear_output(wait=True)
+        """Encode each rendered tile to a PNG data-URI and push to the grid widget.
 
-        min_rows = 3
-        fig_height = max(rows, min_rows)
+        Tile ``id`` is the ``df`` row index (as a string); the tooltip label mirrors
+        the ``"<fov>: <mask id>"`` text previously shown by the Matplotlib hover.
+        """
+        df = self.main_viewer.cell_table
+        fov_key = self.main_viewer.fov_key
+        label_key = self.main_viewer.label_key
 
-        fig, ax = plt.subplots(figsize=(self.width * 0.9, fig_height))
-        ax.imshow(canvas)
-        ax.axis("off")
-
-        fig.canvas.header_visible = False
-        fig.tight_layout()
-
-        self.data.fig = fig
-        self.data.ax = ax
-        self.mask_id_annotation = self._create_annotation()
-
-        def on_click(event):
-            if event.inaxes != ax or event.xdata is None or event.ydata is None:
-                return
-
-            col = int(event.xdata // (self.data.tile_width + GRID_SPACING))
-            row = int(event.ydata // (self.data.tile_height + GRID_SPACING))
-
-            if row < rows and col < GRID_COLUMNS:
-                clicked_index = row * GRID_COLUMNS + col
-                if clicked_index >= len(displayed_indices):
-                    return
-                df = self.main_viewer.cell_table
-                fov_key = self.main_viewer.fov_key
-                x_key = self.main_viewer.x_key
-                y_key = self.main_viewer.y_key
-                cell_index = displayed_indices[clicked_index]
-                x = df.iloc[cell_index][x_key]
-                y = df.iloc[cell_index][y_key]
+        tiles: List[dict] = []
+        for tile, cell_index in zip(images, displayed_indices):
+            try:
                 fov = df.iloc[cell_index][fov_key]
-                image_selector = getattr(
-                    self.main_viewer.ui_component, "image_selector", None
-                )
-                prior_fov = getattr(image_selector, "value", None) if image_selector is not None else None
-                should_skip_refresh = image_selector is not None and prior_fov != fov
-                self._skip_next_fov_refresh = should_skip_refresh
+                label = df.iloc[cell_index][label_key]
+                tile_label = f"{fov}: {label}"
+            except Exception:  # pragma: no cover - defensive metadata lookup
+                tile_label = str(cell_index)
+            tiles.append(
+                {
+                    "id": str(cell_index),
+                    "src": array_to_data_uri(tile),
+                    "label": tile_label,
+                }
+            )
 
-                try:
-                    self.main_viewer.focus_on_cell(
-                        fov,
-                        x,
-                        y,
-                        radius=crop_width / 2,
-                    )
-                finally:
-                    if not should_skip_refresh:
-                        self._skip_next_fov_refresh = False
-
-        fig.canvas.mpl_connect("button_press_event", on_click)
-        fig.canvas.mpl_connect("motion_notify_event", self.on_mouse_move)
-
-        with self.plot_output:
-            plt.show(fig)
-
-        # new_timer is ipympl-specific; degrade gracefully when the backend does
-        # not support it (e.g. VS Code with a non-widget matplotlib backend).
-        try:
-            self.hover_timer = fig.canvas.new_timer(interval=HOVER_DELAY_MS)
-            self.hover_timer.single_shot = True
-            self.hover_timer.add_callback(self.process_hover_event)
-            self.hover_timer.start()
-        except AttributeError:
-            self.hover_timer = None
+        self.gallery.columns = GRID_COLUMNS
+        self.gallery.tiles = tiles
 
     def _show_warning(self, message: str) -> None:
-        """Display warning to user when display count exceeds recommended limit.
-        
-        Args:
-            message: Warning text to display
-        """
-        with self.plot_output:
-            print(f"⚠️  Warning: {message}")
+        """Log a warning when the display count exceeds the recommended limit."""
         _logger.warning(message)
 
     @update_status_bar
@@ -299,7 +234,7 @@ class CellGalleryDisplay(PluginBase):
 
         overlay_snapshot = self._capture_overlay_snapshot()
 
-        canvas, n, m, _, displayed_indices = create_gallery(
+        images, _, displayed_indices = create_gallery_tiles(
             self.main_viewer.cell_table,
             selected_indices,
             viewer=self.main_viewer,
@@ -319,73 +254,43 @@ class CellGalleryDisplay(PluginBase):
             return
 
         self.data.displayed_cells = displayed_indices
-        self._update_tile_metadata(canvas, n, m)
-        self._draw_gallery(canvas, n, displayed_indices, ui_values.crop_width)
-        
+        self._last_crop_width = ui_values.crop_width
+        self._draw_gallery(images, displayed_indices)
+
         # Track what we just rendered to avoid unnecessary regeneration
         self._last_rendered_cells = tuple(sorted(selected_indices))
 
-    def on_mouse_move(self, event):
-        if self.data.ax is None or event.inaxes != self.data.ax:
+    def _on_gallery_clicked(self, change) -> None:
+        raw = change.get("new") if isinstance(change, dict) else getattr(change, "new", "")
+        cell_id = parse_clicked_id(raw)
+        if not cell_id:
+            return
+        try:
+            cell_index = int(cell_id)
+        except (TypeError, ValueError):
             return
 
-        if self.hover_timer is not None:
-            self.hover_timer.stop()
+        df = self.main_viewer.cell_table
+        fov_key = self.main_viewer.fov_key
+        x_key = self.main_viewer.x_key
+        y_key = self.main_viewer.y_key
+        try:
+            x = df.iloc[cell_index][x_key]
+            y = df.iloc[cell_index][y_key]
+            fov = df.iloc[cell_index][fov_key]
+        except Exception:  # pragma: no cover - defensive lookup
+            return
 
-        self.last_hover_event = event
+        image_selector = getattr(self.main_viewer.ui_component, "image_selector", None)
+        prior_fov = getattr(image_selector, "value", None) if image_selector is not None else None
+        should_skip_refresh = image_selector is not None and prior_fov != fov
+        self._skip_next_fov_refresh = should_skip_refresh
 
         try:
-            self.hover_timer = self.data.fig.canvas.new_timer(interval=HOVER_DELAY_MS)
-            self.hover_timer.single_shot = True
-            self.hover_timer.add_callback(self.process_hover_event)
-            self.hover_timer.start()
-        except AttributeError:
-            pass  # hover tooltip unavailable without ipympl timer support
-
-    def process_hover_event(self):
-        event = self.last_hover_event
-        if event is None or event.xdata is None or event.ydata is None:
-            return
-
-        tile_width = self.data.tile_width
-        tile_height = self.data.tile_height
-        if tile_width <= 0 or tile_height <= 0:
-            return
-
-        col = int(event.xdata // (tile_width + GRID_SPACING))
-        row = int(event.ydata // (tile_height + GRID_SPACING))
-
-        ind = self.data.displayed_cells
-        if row < self.data.n and col < GRID_COLUMNS:
-            clicked_index = row * GRID_COLUMNS + col
-            if clicked_index >= len(ind):
-                return
-            df = self.main_viewer.cell_table
-            fov_key = self.main_viewer.fov_key
-            label_key = self.main_viewer.label_key
-            cell_index = ind[clicked_index]
-            fov = df.iloc[cell_index][fov_key]
-            label = df.iloc[cell_index][label_key]
-
-            tooltip_text = f"{fov}: {label}"
-            self.mask_id_annotation.xy = (event.xdata, event.ydata)
-            self.mask_id_annotation.set_text(tooltip_text)
-            self.mask_id_annotation.set_visible(True)
-            self.data.fig.canvas.draw_idle()
-
-    def _create_annotation(self):
-        return self.data.ax.annotate(
-            "",
-            xy=(0, 0),
-            xycoords="data",
-            textcoords="offset points",
-            xytext=(10, 10),
-            fontsize=12,
-            color="yellow",
-            bbox={"boxstyle": "round,pad=0.3", "fc": "black", "ec": "yellow", "lw": 1},
-            arrowprops={"arrowstyle": "->"},
-            visible=False,
-        )
+            self.main_viewer.focus_on_cell(fov, x, y, radius=self._last_crop_width / 2)
+        finally:
+            if not should_skip_refresh:
+                self._skip_next_fov_refresh = False
 
     def _capture_overlay_snapshot(self) -> Optional[OverlaySnapshot]:
         capture = getattr(self.main_viewer, "capture_overlay_snapshot", None)
@@ -922,7 +827,7 @@ def _render_tile_for_index(df, index: int, context: _RenderContext):
         return _create_error_placeholder(context.crop_width, str(e))
 
 
-def create_gallery(
+def create_gallery_tiles(
     df,
     selected_indices,
     *,
@@ -936,12 +841,18 @@ def create_gallery(
     mask_outline_thickness: int = 1,
     neighbor_outline_thickness: Optional[int] = None,
     use_uniform_color: bool = False,
-):
+) -> Tuple[List[np.ndarray], Dict, List[int]]:
+    """Render the selected cells to a list of per-tile RGB arrays.
+
+    Returns ``(images, color_range, displayed_indices)`` where ``images[i]``
+    corresponds to ``displayed_indices[i]`` (a row index into ``df``). This is the
+    front-end agnostic core used by both the tile-grid widget and the legacy
+    ``create_gallery`` canvas composer.
+    """
     indices = _limit_selection(selected_indices, max_displayed_cells)
 
     if not indices:
-        empty = np.zeros((crop_width, crop_width, 3), dtype=np.float32)
-        return empty, 0, GRID_COLUMNS, {}, []
+        return [], {}, []
 
     if viewer is None:
         raise ValueError("viewer must be provided to render gallery tiles.")
@@ -949,8 +860,7 @@ def create_gallery(
     marker_to_display = viewer.marker2display()
     color_range = dict(viewer.get_color_range())
     if not marker_to_display:
-        empty = np.zeros((crop_width, crop_width, 3), dtype=np.float32)
-        return empty, 0, GRID_COLUMNS, color_range, []
+        return [], color_range, []
 
     channel_settings = _build_channel_settings(marker_to_display, color_range)
     selected_channels = tuple(channel_settings.keys())
@@ -999,6 +909,40 @@ def create_gallery(
         images.append(tile)
         displayed_indices.append(idx)
 
+    return images, color_range, displayed_indices
+
+
+def create_gallery(
+    df,
+    selected_indices,
+    *,
+    viewer,
+    crop_width: int = 100,
+    max_displayed_cells: float = np.inf,
+    overlay_snapshot: Optional[OverlaySnapshot] = None,
+    downsample_factor: int = 1,
+    label_key: str = "label",
+    highlight_outline_color: Union[str, Tuple[float, float, float]] = "#FFFFFF",
+    mask_outline_thickness: int = 1,
+    neighbor_outline_thickness: Optional[int] = None,
+    use_uniform_color: bool = False,
+):
+    """Backwards-compatible wrapper composing per-tile arrays into one canvas."""
+    images, color_range, displayed_indices = create_gallery_tiles(
+        df,
+        selected_indices,
+        viewer=viewer,
+        crop_width=crop_width,
+        max_displayed_cells=max_displayed_cells,
+        overlay_snapshot=overlay_snapshot,
+        downsample_factor=downsample_factor,
+        label_key=label_key,
+        highlight_outline_color=highlight_outline_color,
+        mask_outline_thickness=mask_outline_thickness,
+        neighbor_outline_thickness=neighbor_outline_thickness,
+        use_uniform_color=use_uniform_color,
+    )
+
     if not images:
         empty = np.zeros((crop_width, crop_width, 3), dtype=np.float32)
         return empty, 0, GRID_COLUMNS, color_range, []
@@ -1011,5 +955,6 @@ __all__ = [
     "CellGalleryDisplay",
     "UiComponent",
     "create_gallery",
+    "create_gallery_tiles",
     "Data",
 ]
