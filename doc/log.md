@@ -1,4 +1,4 @@
-### v0.3.1
+### v0.4.0
 
 **Issue #109 — Heatmap remembers its scale (figure size) after updating the tree cut**
 - Changing the dendrogram cutoff rebuilds the heatmap as a brand-new `sns.clustermap` figure using the adapter's default `figsize`, which discarded the figure size the user had set by dragging the ipympl resize handle (the triangle at the bottom-right corner of the canvas). The "scale" in the request is this figure size, not the toolbar zoom. `ipympl.Canvas.handle_resize` writes the manual resize back via `fig.set_size_inches`, so `fig.get_size_inches()` reflects it.
