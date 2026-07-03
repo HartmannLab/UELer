@@ -10,6 +10,7 @@ These notes document the heatmap plugin evolution, meta-cluster management, and 
 - Define a cell-annotation checkpoint format (AnnData-based) with DAG-style lineage and marker set semantics.
 
 ## Current status
+- Heatmap rendering reliability fixed (#108): the real cause was heatmap-specific — the `sns.clustermap` figure was built **inside** the `with <output>:` display context and then `plt.show()`n, so ipympl (interactive mode) emitted the canvas twice → blank. The plugin now builds the figure with `plt.ioff()` outside the Output and emits the interactive canvas exactly once via `display(fig.canvas)` into a fresh `Output` swapped into `plot_section.children` (mirroring the Chart histogram, which builds outside and emits once). Layout-toggle double-render removed and the reparented footer canvas is force-repainted after it becomes visible. Full canvas interactivity and footer docking preserved; no static fallback. See [issue_tracking/issue108_heatmap_not_showing.md](issue_tracking/issue108_heatmap_not_showing.md).
 - Heatmap meta-cluster management tab and assignment dropdown are implemented.
 - Meta-cluster color mapping beyond cutoff is fixed and tested.
 - Z-score across markers and mode-aware colormaps are implemented with tests.

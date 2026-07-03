@@ -28,7 +28,7 @@ except Exception:  # pragma: no cover - optional in non-notebook contexts
         return None
 
 from ueler.viewer.decorators import update_status_bar
-from ipywidgets import HBox, HTML, Layout, Tab, VBox
+from ipywidgets import HBox, HTML, Layout, Output, Tab, VBox
 
 
 NO_CLUSTER_SELECTED_MSG = "No cluster selected."
@@ -738,14 +738,7 @@ class DataLayer:
 
         # 7. Re-render the heatmap from the saved state
         if self.dendrogram is not None and getattr(self.data, "dendrogram_cut", None) is not None:
-            self.restore_vertical_canvas()
-            plot_output = getattr(self, "plot_output", None)
-            if plot_output is not None:
-                with plot_output:
-                    plot_output.clear_output(wait=True)
-                    self.generate_heatmap()
-            else:
-                self.generate_heatmap()
+            self._refresh_plot()
 
         # 8. Re-apply saved palette on top of whatever generate_heatmap set
         pal = adata.uns.get("palette", {})
@@ -891,8 +884,15 @@ class InteractionLayer:
         self.on_mode_toggle(mode)
         self._reset_selection_cache()
         self._sync_panel_location()
-        if hasattr(self.main_viewer, 'refresh_bottom_panel'):
-            self.main_viewer.refresh_bottom_panel()
+        # Suppress the cached-pane refresh's render (request_cached_wide_panel_refresh
+        # early-returns while this flag is set) so refresh_bottom_panel only re-homes the
+        # footer pane; the single explicit plot_heatmap() below does the one render.
+        self._plot_refresh_inflight = True
+        try:
+            if hasattr(self.main_viewer, 'refresh_bottom_panel'):
+                self.main_viewer.refresh_bottom_panel()
+        finally:
+            self._plot_refresh_inflight = False
         self.plot_heatmap()
 
     def after_all_plugins_loaded(self):
@@ -1573,13 +1573,7 @@ class DisplayLayer:
         _logger.debug("[heatmap] plot_heatmap: generating dendrogram")
         self.dendrogram = self.generate_dendrogram()
         _logger.debug("[heatmap] plot_heatmap: dendrogram=%s", "ok" if self.dendrogram is not None else "None")
-        self.restore_vertical_canvas()
-        with self.plot_output:
-            self.plot_output.clear_output(wait=True)
-            self.generate_heatmap()
-
-        if self.adapter.is_wide() and not self._plot_output_has_widget_view():
-            self.restore_footer_canvas()
+        self._refresh_plot()
         mode = 'wide' if self.adapter.is_wide() else 'vertical'
         _logger.debug('[heatmap] plot refreshed in %s mode', mode)
 
@@ -1595,11 +1589,8 @@ class DisplayLayer:
         heatmap_df.set_index(heatmap_df.columns[0], inplace=True)
         self.heatmap_data = heatmap_df
         self._update_orientation_state()
-        self.restore_vertical_canvas()
 
-        with self.plot_output:
-            self.plot_output.clear_output(wait=True)
-            self.generate_heatmap()
+        self._refresh_plot()
 
         self.data.dendrogram_cut = cutoff
 
@@ -1617,21 +1608,107 @@ class DisplayLayer:
         self.update_text_labels()
 
     def _ensure_plot_canvas_attached(self):
+        """Make the current ``plot_output`` the sole child of ``plot_section``.
+
+        Reassigning ``.children`` is what forces the frontend to (re)instantiate the
+        Output view — the same mechanism the Chart plugin's histogram relies on.
+        """
         if getattr(self, '_restoring_plot_section', False):
             return
         plot_section = getattr(self, 'plot_section', None)
         plot_output = getattr(self, 'plot_output', None)
         if plot_section is None or plot_output is None:
             return
-        children = tuple(plot_section.children)
-        if any(child is plot_output for child in children):
+        self._restoring_plot_section = True
+        try:
+            plot_section.children = (plot_output,)
+        finally:
+            self._restoring_plot_section = False
+
+    def _refresh_plot(self):
+        """Render the heatmap into a fresh Output and swap it into ``plot_section``.
+
+        Mirrors the Chart plugin's reliable interactive histogram idiom
+        (``chart.py:_render_histogram``): the figure is **built outside** any Output
+        display context (here, with ``plt.ioff()`` so the ipympl backend does not
+        auto-emit the clustermap canvas), then the interactive canvas is **emitted exactly
+        once** via ``display(fig.canvas)`` inside a brand-new ``Output``, which is then
+        swapped into ``plot_section.children`` to force the frontend to repaint.
+
+        Building the clustermap *inside* the Output (the previous behavior) made ipympl
+        emit the canvas on creation and again on ``plt.show()`` — a duplicate/blank canvas.
+        That was the heatmap-specific interaction with ipympl behind issue #108.
+        """
+        self.restore_vertical_canvas()
+        new_out = Output(layout=Layout(width='100%'))
+
+        # Build the figure OUTSIDE the Output context with interactive auto-display off.
+        was_interactive = plt.isinteractive()
+        plt.ioff()
+        try:
+            self.generate_heatmap()
+        finally:
+            if was_interactive:
+                plt.ion()
+
+        g = getattr(self.data, 'g', None)
+        fig = getattr(g, 'fig', None) if g is not None else None
+
+        self.plot_output = new_out
+        if fig is not None:
+            canvas = getattr(fig, 'canvas', None)
+            with new_out:
+                display_target = canvas if canvas is not None else fig
+                display(display_target)
+        self._swap_plot_output_in_section(new_out)
+        self._present_footer_canvas_if_wide(fig)
+
+    def _present_footer_canvas_if_wide(self, fig):
+        """Force the (reparented) ipympl canvas to repaint once the footer is visible.
+
+        In wide mode ``plot_section`` lives inside the footer tab, which is unhidden in the
+        same synchronous handler as this render — so the canvas is drawn before the
+        frontend has laid the footer out and stays blank until a later resize. A synchronous
+        ``draw()`` is the immediate backstop (same pattern as the main image canvas in
+        ``main_viewer``); a single-shot timer then issues ``draw_idle()`` after the frontend
+        has processed the layout (same deferred-timer primitive as ``image_display``).
+        """
+        if fig is None or not self.adapter.is_wide():
+            return
+        canvas = getattr(fig, 'canvas', None)
+        if canvas is None:
+            return
+        if hasattr(canvas, 'draw'):
+            try:
+                canvas.draw()
+            except Exception:
+                pass
+        new_timer = getattr(canvas, 'new_timer', None)
+        if not callable(new_timer):
+            return
+        try:
+            timer = new_timer(interval=150)
+            timer.single_shot = True
+            timer.add_callback(self._deferred_footer_draw, canvas)
+            timer.start()
+        except Exception:
+            pass
+
+    def _deferred_footer_draw(self, canvas):
+        draw_idle = getattr(canvas, 'draw_idle', None)
+        if callable(draw_idle):
+            try:
+                draw_idle()
+            except Exception:
+                pass
+
+    def _swap_plot_output_in_section(self, new_out):
+        plot_section = getattr(self, 'plot_section', None)
+        if plot_section is None:
             return
         self._restoring_plot_section = True
         try:
-            if children:
-                plot_section.children = children + (plot_output,)
-            else:
-                plot_section.children = (plot_output,)
+            plot_section.children = (new_out,)
         finally:
             self._restoring_plot_section = False
 
@@ -1645,34 +1722,6 @@ class DisplayLayer:
             return
         self._ensure_plot_canvas_attached()
 
-        redraw_method = getattr(self, "redraw_cached_footer_canvas", None)
-        if callable(redraw_method):
-            try:
-                if redraw_method():
-                    return
-            except Exception:
-                pass
-
-        g = getattr(self.data, 'g', None)
-        fig = getattr(g, 'fig', None) if g is not None else None
-        canvas = getattr(fig, 'canvas', None) if fig is not None else None
-        if canvas is not None and hasattr(canvas, 'draw_idle'):
-            try:
-                canvas.draw_idle()
-            except Exception:
-                pass
-
-    def _plot_output_has_widget_view(self):
-        plot_output = getattr(self, 'plot_output', None)
-        outputs = getattr(plot_output, 'outputs', ()) if plot_output is not None else ()
-        for output in outputs or ():
-            if not isinstance(output, dict):
-                continue
-            data = output.get('data')
-            if isinstance(data, dict) and 'application/vnd.jupyter.widget-view+json' in data:
-                return True
-        return False
-
     def _heatmap_colormap_settings(self):
         zscore_toggle = bool(
             getattr(self.ui_component, 'zscore_across_markers_checkbox', None)
@@ -1681,38 +1730,6 @@ class DisplayLayer:
         if zscore_toggle:
             return {"cmap": "bwr", "center": 0}
         return {"cmap": "Reds", "center": None}
-
-    def redraw_cached_footer_canvas(self):
-        artifacts = getattr(self, '_cached_footer_artifacts', None)
-        if not artifacts:
-            return False
-
-        fig = artifacts.get('fig') if isinstance(artifacts, dict) else None
-        canvas = artifacts.get('canvas') if isinstance(artifacts, dict) else None
-
-        if canvas is not None and hasattr(canvas, 'draw_idle'):
-            try:
-                canvas.draw_idle()
-            except Exception:
-                pass
-
-        if self._plot_output_has_widget_view():
-            return True
-
-        with self.plot_output:
-            self.plot_output.clear_output(wait=True)
-            display_func = display
-            shim_module = sys.modules.get('viewer.plugin.heatmap_layers')
-            if shim_module is not None:
-                display_func = getattr(shim_module, 'display', display)
-
-            # Prefer replaying the ipympl canvas widget to preserve interactivity.
-            if canvas is not None and hasattr(canvas, 'model_id'):
-                display_func(canvas)
-            elif fig is not None:
-                display_func(fig)
-
-        return True
 
     @update_status_bar
     def generate_heatmap(self):
@@ -1786,6 +1803,16 @@ class DisplayLayer:
             cluster_colors_series,
             **self._heatmap_colormap_settings(),
         )
+
+        # Close the previous figure before building a new one so repeated Plot clicks and
+        # cutoff drags don't leak figures (each sns.clustermap opens a new one).
+        previous_g = getattr(self.data, 'g', None)
+        previous_fig = getattr(previous_g, 'fig', None) if previous_g is not None else None
+        if previous_fig is not None:
+            try:
+                plt.close(previous_fig)
+            except Exception:
+                pass
 
         _logger.debug("[heatmap] generate_heatmap: calling sns.clustermap (shape=%s)", plot_data.shape)
         try:
@@ -1875,29 +1902,13 @@ class DisplayLayer:
         )
 
         plt.tight_layout()
-        plt.show()
-
-        self._cached_footer_artifacts = {
-            'fig': g.fig,
-            'canvas': getattr(g.fig, 'canvas', None),
-            'axes': {
-                'heatmap': getattr(g, 'ax_heatmap', None),
-                'row_colors': getattr(g, 'ax_row_colors', None),
-                'row_dendrogram': getattr(g, 'ax_row_dendrogram', None),
-                'col_dendrogram': getattr(g, 'ax_col_dendrogram', None),
-            },
-        }
-
-        if self.adapter.is_wide() and not self._plot_output_has_widget_view():
-            canvas = self._cached_footer_artifacts.get('canvas')
-            display_func = display
-            shim_module = sys.modules.get('viewer.plugin.heatmap_layers')
-            if shim_module is not None:
-                display_func = getattr(shim_module, 'display', display)
-            if canvas is not None and hasattr(canvas, 'model_id'):
-                display_func(canvas)
-            else:
-                display_func(g.fig)
+        # NOTE: do NOT emit the figure here. Building/laying out the clustermap happens
+        # while ``_refresh_plot`` has ``plt.ioff()`` active and runs outside any Output
+        # display context, so ipympl does not auto-emit the canvas. ``_refresh_plot`` then
+        # emits the interactive canvas exactly once via ``display(fig.canvas)``. Emitting
+        # here (the old ``plt.show()``) produced a duplicate/blank ipympl canvas — the
+        # heatmap-specific difference from the Chart histogram (which builds outside its
+        # Output and emits once). See issue #108.
 
         self.display_row_colors_as_patches()
 
@@ -2034,8 +2045,4 @@ class DisplayLayer:
         self.data.g.fig.canvas.draw_idle()
 
     def apply_new_cutoff(self, *args):
-        with self.plot_output:
-            self.plot_output.clear_output(wait=True)
-            self.generate_heatmap()
-        if self.adapter.is_wide() and not self._plot_output_has_widget_view():
-            self.restore_footer_canvas()
+        self._refresh_plot()
