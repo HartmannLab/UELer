@@ -94,7 +94,7 @@ class Issue108HeatmapRefreshTests(unittest.TestCase):
         self.interactive_during_build = None
         self.canvas = _FakeCanvas()
 
-        def _fake_generate():
+        def _fake_generate(figsize_override=None):
             self.generate_calls += 1
             # Record matplotlib's interactive state at build time and publish a fake figure.
             self.interactive_during_build = plt.isinteractive()

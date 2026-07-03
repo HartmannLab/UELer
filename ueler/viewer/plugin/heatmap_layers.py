@@ -1625,7 +1625,7 @@ class DisplayLayer:
         finally:
             self._restoring_plot_section = False
 
-    def _refresh_plot(self):
+    def _refresh_plot(self, restore_size=None):
         """Render the heatmap into a fresh Output and swap it into ``plot_section``.
 
         Mirrors the Chart plugin's reliable interactive histogram idiom
@@ -1638,6 +1638,11 @@ class DisplayLayer:
         Building the clustermap *inside* the Output (the previous behavior) made ipympl
         emit the canvas on creation and again on ``plt.show()`` — a duplicate/blank canvas.
         That was the heatmap-specific interaction with ipympl behind issue #108.
+
+        ``restore_size`` (a ``(width, height)`` in inches from ``_capture_heatmap_scale``)
+        is applied as the clustermap ``figsize`` so a tree-cut update keeps the size the
+        user set with the ipympl resize triangle (issue #109). It is ``None`` for a fresh
+        Plot / load, which use the adapter's default figure size.
         """
         self.restore_vertical_canvas()
         new_out = Output(layout=Layout(width='100%'))
@@ -1646,7 +1651,7 @@ class DisplayLayer:
         was_interactive = plt.isinteractive()
         plt.ioff()
         try:
-            self.generate_heatmap()
+            self.generate_heatmap(figsize_override=restore_size)
         finally:
             if was_interactive:
                 plt.ion()
@@ -1662,6 +1667,24 @@ class DisplayLayer:
                 display(display_target)
         self._swap_plot_output_in_section(new_out)
         self._present_footer_canvas_if_wide(fig)
+
+    def _capture_heatmap_scale(self):
+        """Return the current figure size ``(width, height)`` in inches, or ``None``.
+
+        Used to remember the "scale" the user set by dragging the ipympl resize handle (the
+        triangle at the bottom-right corner) before a tree-cut rebuild (issue #109).
+        ``Canvas.handle_resize`` writes the manual resize back via ``fig.set_size_inches``,
+        so ``fig.get_size_inches()`` reflects it.
+        """
+        g = getattr(self.data, 'g', None)
+        fig = getattr(g, 'fig', None) if g is not None else None
+        if fig is None:
+            return None
+        try:
+            w, h = fig.get_size_inches()
+            return (float(w), float(h))
+        except Exception:
+            return None
 
     def _present_footer_canvas_if_wide(self, fig):
         """Force the (reparented) ipympl canvas to repaint once the footer is visible.
@@ -1732,7 +1755,7 @@ class DisplayLayer:
         return {"cmap": "Reds", "center": None}
 
     @update_status_bar
-    def generate_heatmap(self):
+    def generate_heatmap(self, figsize_override=None):
         _logger.debug("[heatmap] generate_heatmap: entry")
         markers = list(self.ui_component.channel_selector.value)
         if not markers:
@@ -1803,6 +1826,12 @@ class DisplayLayer:
             cluster_colors_series,
             **self._heatmap_colormap_settings(),
         )
+
+        # Preserve a user-set figure size (ipympl resize triangle) across a tree-cut
+        # rebuild by building the clustermap at that size, so tight_layout is correct too
+        # (issue #109). Only the cutoff path passes this; a fresh Plot uses the default.
+        if figsize_override is not None:
+            clustermap_kwargs['figsize'] = tuple(figsize_override)
 
         # Close the previous figure before building a new one so repeated Plot clicks and
         # cutoff drags don't leak figures (each sns.clustermap opens a new one).
@@ -2045,4 +2074,8 @@ class DisplayLayer:
         self.data.g.fig.canvas.draw_idle()
 
     def apply_new_cutoff(self, *args):
-        self._refresh_plot()
+        # Remember the user-set figure size (ipympl resize triangle) across the tree-cut
+        # rebuild (issue #109). Capture from the OLD figure before _refresh_plot rebuilds it
+        # (generate_heatmap reassigns self.data.g and closes the old figure).
+        saved_size = self._capture_heatmap_scale()
+        self._refresh_plot(restore_size=saved_size)
