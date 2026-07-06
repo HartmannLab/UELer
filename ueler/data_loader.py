@@ -333,11 +333,16 @@ def _ensure_tifffile():
     return tifffile
 
 
-def extract_ome_channel_names(path: str) -> List[str]:
+def extract_ome_channel_names(path: str, opener=None) -> List[str]:
     tifffile = _ensure_tifffile()
     try:
-        with tifffile.TiffFile(path) as tif:
-            xml_str = tif.ome_metadata
+        if opener is not None:
+            with opener(path) as handle:
+                with tifffile.TiffFile(handle) as tif:
+                    xml_str = tif.ome_metadata
+        else:
+            with tifffile.TiffFile(path) as tif:
+                xml_str = tif.ome_metadata
     except Exception:
         return []
 
@@ -415,10 +420,15 @@ def find_ome_tiff_files(base_folder: str) -> List[str]:
 
 
 class OMEFovWrapper:
-    def __init__(self, path: str, ds_factor: int):
+    def __init__(self, path: str, ds_factor: int, opener=None):
         self.path = path
         self.ds_factor = max(1, int(ds_factor) or 1)
         self.is_ome_tiff = True
+        # ``opener`` yields a seekable file-like object for remote paths (issue
+        # #110 BIA streaming). When set, tifffile reads over that handle instead
+        # of a local path, enabling HTTP byte-range access to the pyramid.
+        self._opener = opener
+        self._remote_handle = None
         self._channel_cache: Dict[Tuple[str, int, int], object] = {}
         self._level_specs: List[Dict[str, object]] = []
         self._level_count = 0
@@ -436,11 +446,17 @@ class OMEFovWrapper:
 
         for attempt in ({}, {"is_ome": False}):
             tif = None
+            handle = None
             try:
-                tif = tifffile.TiffFile(path, **attempt)
+                if self._opener is not None:
+                    handle = self._opener(path)
+                    tif = tifffile.TiffFile(handle, **attempt)
+                else:
+                    tif = tifffile.TiffFile(path, **attempt)
                 series = tif.series[self._series_index]
                 self._tif = tif
                 self._series = series
+                self._remote_handle = handle
                 if attempt:
                     logger.warning(
                         "[OMEFovWrapper] falling back to non-OME series parsing for %s after error: %s",
@@ -455,6 +471,11 @@ class OMEFovWrapper:
                         tif.close()
                     except Exception:
                         pass
+                if handle is not None:
+                    try:
+                        handle.close()
+                    except Exception:
+                        pass
                 # Retry without OME parsing when keyframe metadata is incompatible
                 if "incompatible keyframe" in str(exc):
                     continue
@@ -467,7 +488,7 @@ class OMEFovWrapper:
             raise last_error
         self._init_levels()
 
-        self.channel_names = extract_ome_channel_names(path)
+        self.channel_names = extract_ome_channel_names(path, opener=self._opener)
         n_channels = self._infer_channel_count()
         if not self.channel_names or len(self.channel_names) != n_channels:
             self.channel_names = [f"Channel_{i}" for i in range(n_channels)]
@@ -682,6 +703,12 @@ class OMEFovWrapper:
             self._tif.close()
         except Exception:
             pass
+        if self._remote_handle is not None:
+            try:
+                self._remote_handle.close()
+            except Exception:
+                pass
+            self._remote_handle = None
         self._closed = True
 
     def __del__(self):

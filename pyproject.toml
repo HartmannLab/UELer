@@ -36,6 +36,9 @@ dependencies = [
     "ipykernel",
     "ipympl",
     "anndata>=0.10",
+    "tifffile",
+    "fsspec[http]",
+    "requests",
 ]
 
 [project.optional-dependencies]

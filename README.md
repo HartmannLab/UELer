@@ -77,6 +77,30 @@ Make sure these paths are correctly set in the notebook for the viewer to access
 
 5. Run the code and you will see the viewer displayed.
 
+### Streaming from the BioImage Archive (BIA)
+You can explore a public BioImage Archive study (an `S-BIAD*` accession) without downloading the
+whole dataset first:
+```python
+from ueler.runner import run_viewer_bia
+
+viewer = run_viewer_bia(
+    "S-BIAD2557",                      # accession id (or a direct HTTPS base URL)
+    descriptor={                        # optional; auto-detection is attempted if omitted
+        "mode": "folder",
+        "base": "Files/spatial_murine_iCCAvsHCC/image_data",
+        "mask_dir": "Files/spatial_murine_iCCAvsHCC/segmentation/cleaned_mask",
+        "mask_glob": "{fov}_*.tiff",
+    },
+)
+```
+Because BIA studies have no standard folder layout, a small JSON **descriptor** (a dict or a path
+to a `.json` file) maps the study files onto FOVs / channels / masks; when omitted, UELer attempts
+to auto-detect the folder-per-FOV or OME-TIFF-per-FOV layouts. Pyramidal OME-TIFFs are streamed via
+HTTP byte-range requests; other files (e.g. single-resolution MIBI TIFFs) are downloaded once into a
+local cache. A per-study **workspace** at `~/.ueler/bia/<accession>/` (override with `local_dir=`)
+holds your persistent `.UELer` work (ROIs, checkpoints, palettes) plus a disposable `cache/` of
+downloaded images.
+
 ## User interface
 ![GUI_preview](/doc/GUI_preview.png)
 The GUI can be split into four main regions (wide plugins toggle the optional footer automatically):
@@ -102,6 +126,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### **UELer v0.4.0 Summary**
+- Stream/cache-load images from the BioImage Archive (#110): a new `run_viewer_bia("S-BIAD….", descriptor=…)` entry point lets you explore a public BIA study without downloading the whole dataset. Point it at an accession id (resolved via the BioStudies REST API) or a direct base URL; a small JSON descriptor maps the study's files onto FOVs/channels/masks (with best-effort auto-detection of folder-per-FOV and OME-TIFF-per-FOV layouts). Pyramidal OME-TIFFs stream over HTTP byte-range requests; other files are downloaded once into a local cache. Your ROIs, checkpoints, and palettes persist in a per-study workspace under `~/.ueler/bia/<accession>/`. See "Streaming from the BioImage Archive (BIA)" above.
 - Heatmap remembers its scale (figure size) after updating the tree cut (#109): previously, dragging the dendrogram cutoff rebuilt the heatmap at the default size, discarding the size the user had set with the ipympl resize handle (the triangle at the bottom-right corner). The plugin now captures the current `fig.get_size_inches()` before a cutoff-triggered rebuild and rebuilds the clustermap at that size, so the enlarged plot stays enlarged across re-clustering. A fresh **Plot** still uses the default size.
 - Fixed the heatmap not appearing (#108): the Heatmap plugin computed the plot (the log even said "render complete") but nothing showed — even with the interactive `ipympl` (`%matplotlib widget`) backend, which renders the Chart histogram and galleries fine. Root cause: the heatmap built its `sns.clustermap` figure **inside** the `with <output>:` display context and then called `plt.show()`, so under interactive mode ipympl emitted the canvas twice (once on creation, once on show) → a blank/duplicate canvas. The Chart histogram is reliable because it builds the figure **outside** its Output and emits it once. The heatmap now does the same: it builds with `plt.ioff()` outside the Output, then emits the interactive canvas exactly once with `display(fig.canvas)` into a fresh `Output` swapped into the panel — preserving all interactivity (cell click, dendrogram-cutoff drag, color-axis select) and the footer docking for the wide layout. The layout-switch flash-then-blank was also fixed (removed a double render on toggle; the reparented footer canvas is now force-repainted after it becomes visible). No static fallback — the live matplotlib canvas is kept.
 

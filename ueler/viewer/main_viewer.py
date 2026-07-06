@@ -245,20 +245,34 @@ def _dedupe_channel_sequence(channels: Sequence[str]) -> Tuple[str, ...]:
     return tuple(ordered)
 
 class ImageMaskViewer:
-    def __init__(self, base_folder, masks_folder=None, annotations_folder=None, debug=False):
+    def __init__(self, base_folder, masks_folder=None, annotations_folder=None, debug=False,
+                 data_source=None):
         self.initialized = False
+        # Optional remote data source (issue #110, BIA streaming). When set, FOV
+        # discovery and per-FOV image/mask reads route through it instead of the
+        # local filesystem; ``base_folder`` is then a local workspace directory
+        # used only for persistent ``.UELer`` state.
+        self._data_source = data_source
         # Set True by display_ui() once the widget tree is sent to the browser.
         # draw_idle() and on_draw-triggered renders are suppressed until then so
         # that deferred ipympl comm events don't fire against a hidden canvas and
         # crash the kernel (most visible when auto_display=False).
         self._widget_displayed = False
         self.base_folder = base_folder
-        self.masks_folder = masks_folder
-        if annotations_folder is None:
-            candidate = os.path.join(self.base_folder, "annotations")
-            self.annotations_folder = candidate if os.path.isdir(candidate) else None
+        if self._data_source is not None:
+            # Masks / annotations are served (and cached to flat local dirs) by
+            # the remote source; use those dirs so the existing loaders run as-is.
+            self.masks_folder = self._data_source.masks_folder if self._data_source.has_masks else None
+            self.annotations_folder = (
+                self._data_source.annotations_folder if self._data_source.has_annotations else None
+            )
         else:
-            self.annotations_folder = annotations_folder
+            self.masks_folder = masks_folder
+            if annotations_folder is None:
+                candidate = os.path.join(self.base_folder, "annotations")
+                self.annotations_folder = candidate if os.path.isdir(candidate) else None
+            else:
+                self.annotations_folder = annotations_folder
 
         # Add this flag
         self.masks_available = self.masks_folder is not None
@@ -324,39 +338,47 @@ class ImageMaskViewer:
 
         # Initialize variables
         self._fov_mode = "folder"
-        
-        # Get potential FOV directories (excluding hidden ones like .UELer)
-        subdirs = [d for d in os.listdir(self.base_folder) 
-                   if os.path.isdir(os.path.join(self.base_folder, d)) 
-                   and not d.startswith(".")]
-        
-        # Check which of these are actually valid FOVs
-        valid_fov_folders = [fov for fov in subdirs if self._has_tiff_files(fov)]
-        valid_fov_folders.sort()
 
-        ome_files = find_ome_tiff_files(self.base_folder)
-        
-        if valid_fov_folders:
-             self._fov_mode = "folder"
-             self.available_fovs = valid_fov_folders
-        elif ome_files:
-             self._fov_mode = "ome-tiff"
-             self.available_fovs = []
-             for f in ome_files:
-                 name = os.path.basename(f)
-                 if name.endswith(".ome.tif"):
-                     name = name[:-8]
-                 elif name.endswith(".ome.tiff"):
-                     name = name[:-9]
-                 else:
-                     name = os.path.splitext(name)[0]
-                 self.available_fovs.append(name)
-             self.available_fovs.sort()
+        if self._data_source is not None:
+            # Remote (BIA) discovery: FOV list and the underlying folder/ome mode
+            # come from the data source; local scanning is skipped entirely.
+            self._fov_mode = "bia"
+            self.available_fovs = sorted(self._data_source.list_fovs())
+            if not self.available_fovs:
+                raise ValueError("No FOVs found in the BIA study.")
         else:
-             self.available_fovs = []
+            # Get potential FOV directories (excluding hidden ones like .UELer)
+            subdirs = [d for d in os.listdir(self.base_folder)
+                       if os.path.isdir(os.path.join(self.base_folder, d))
+                       and not d.startswith(".")]
 
-        if not self.available_fovs:
-            raise ValueError("No FOVs found in the base folder.")
+            # Check which of these are actually valid FOVs
+            valid_fov_folders = [fov for fov in subdirs if self._has_tiff_files(fov)]
+            valid_fov_folders.sort()
+
+            ome_files = find_ome_tiff_files(self.base_folder)
+
+            if valid_fov_folders:
+                 self._fov_mode = "folder"
+                 self.available_fovs = valid_fov_folders
+            elif ome_files:
+                 self._fov_mode = "ome-tiff"
+                 self.available_fovs = []
+                 for f in ome_files:
+                     name = os.path.basename(f)
+                     if name.endswith(".ome.tif"):
+                         name = name[:-8]
+                     elif name.endswith(".ome.tiff"):
+                         name = name[:-9]
+                     else:
+                         name = os.path.splitext(name)[0]
+                     self.available_fovs.append(name)
+                 self.available_fovs.sort()
+            else:
+                 self.available_fovs = []
+
+            if not self.available_fovs:
+                raise ValueError("No FOVs found in the base folder.")
 
         if self._map_mode_enabled:
             self._initialize_map_descriptors()
@@ -2021,7 +2043,18 @@ class ImageMaskViewer:
                 
                 self.image_cache.move_to_end(fov_name)
 
-        # Load images if not in cache
+        # Remote (BIA) FOV population. Folder mode yields a {channel: None} dict
+        # (filled lazily below); OME mode yields an OMEFovWrapper (streamed/cached).
+        if self._fov_mode == "bia" and fov_name not in self.image_cache:
+            obj = self._data_source.open_fov(fov_name, self.current_downsample_factor)
+            self.image_cache[fov_name] = obj
+            if isinstance(obj, OMEFovWrapper):
+                obj.set_frame_index(target_frame_index)
+                self.frame_index_by_fov[fov_name] = obj.current_frame_index
+                self.ome_fov_metadata[fov_name] = obj.metadata
+            self.image_cache.move_to_end(fov_name)
+
+        # Load images if not in cache (local folder mode only)
         if fov_name not in self.image_cache:
             # Load channel structures
             channels = load_channel_struct_fov(fov_name, self.base_folder)
@@ -2044,11 +2077,17 @@ class ImageMaskViewer:
                 self._ensure_channel_max_computed(fov_name, ch)
             # for self.image_cache[fov_name][ch] is None, load the image
             elif self.image_cache[fov_name][ch] is None:
-                # Load images for FOV
-                self.image_cache[fov_name][ch] = load_one_channel_fov(
-                    fov_name, self.base_folder, self.channel_max_values, ch,
-                    compute_stats=not getattr(self, '_map_mode_active', False),
-                )
+                # Load images for FOV (remote BIA source or local disk)
+                if self._fov_mode == "bia":
+                    self.image_cache[fov_name][ch] = self._data_source.load_channel(
+                        fov_name, ch, self.channel_max_values,
+                        compute_stats=not getattr(self, '_map_mode_active', False),
+                    )
+                else:
+                    self.image_cache[fov_name][ch] = load_one_channel_fov(
+                        fov_name, self.base_folder, self.channel_max_values, ch,
+                        compute_stats=not getattr(self, '_map_mode_active', False),
+                    )
                 self._sync_channel_controls(ch)
 
         self.image_cache.move_to_end(fov_name)
@@ -2066,6 +2105,10 @@ class ImageMaskViewer:
 
         # Load masks only if masks are available
         if self.masks_available:
+            # Remote (BIA) masks are fetched into the flat local masks_folder so
+            # the existing load_masks_for_fov path runs unchanged.
+            if self._fov_mode == "bia" and fov_name not in self.mask_cache:
+                self._data_source.prefetch_masks(fov_name)
             # In map mode, skip mask loading when no mask overlay is active
             if getattr(self, '_map_mode_active', False):
                 _ui = getattr(self, 'ui_component', None)
@@ -2087,6 +2130,8 @@ class ImageMaskViewer:
         # Load annotations if available
         if self.annotations_available:
             if fov_name not in self.annotation_cache:
+                if self._fov_mode == "bia":
+                    self._data_source.prefetch_annotations(fov_name)
                 annotation_dict = load_annotations_for_fov(
                     fov_name,
                     self.annotations_folder,
