@@ -610,6 +610,39 @@ class ChartDisplayFooterTests(unittest.TestCase):
         self.assertEqual(scatter_two.applied[-1], set())
 
 
+class MultiPairScatterTests(unittest.TestCase):
+    """plot_all_pairs fans a channel selection out into pairwise scatter plots (#112)."""
+
+    def _make_chart(self, columns):
+        viewer = _StubViewer()
+        data = {col: [float(i), float(i + 1)] for i, col in enumerate(columns)}
+        viewer.cell_table = pd.DataFrame(data)
+        viewer.fov_key = "fov"
+        viewer.label_key = "label"
+        chart = ChartDisplay(viewer, width=6, height=4)
+        chart._scatter_backend = "widget"  # force the interactive fan-out path
+        return chart
+
+    def test_three_channels_produce_three_pairs(self):
+        chart = self._make_chart(["a", "b", "c"])
+        chart.ui_component.multipair_channels.value = ("a", "b", "c")
+        chart.plot_all_pairs(None)
+        # C(3, 2) == 3 pairwise scatter plots
+        self.assertEqual(len(chart._scatter_views), 3)
+
+    def test_two_channels_produce_one_pair(self):
+        chart = self._make_chart(["a", "b"])
+        chart.ui_component.multipair_channels.value = ("a", "b")
+        chart.plot_all_pairs(None)
+        self.assertEqual(len(chart._scatter_views), 1)
+
+    def test_fewer_than_two_channels_is_noop(self):
+        chart = self._make_chart(["a", "b"])
+        chart.ui_component.multipair_channels.value = ("a",)
+        chart.plot_all_pairs(None)
+        self.assertEqual(len(chart._scatter_views), 0)
+
+
 class HeatmapFooterPersistenceTests(unittest.TestCase):
     def test_heatmap_survives_chart_refresh(self):
         viewer = _ViewerWithFooter()

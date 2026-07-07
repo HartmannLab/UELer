@@ -2295,7 +2295,7 @@ class ImageMaskViewer:
 
         if self.initialized:
             if self.SidePlots:
-                chart_plugin = getattr(self.SidePlots, "chart_output", None)
+                histogram_plugin = getattr(self.SidePlots, "histogram_output", None)
                 heatmap_plugin = getattr(self.SidePlots, "heatmap_output", None)
                 heatmap_checkbox = (
                     getattr(getattr(heatmap_plugin, "ui_component", None), "main_viewer_checkbox", None)
@@ -2309,8 +2309,11 @@ class ImageMaskViewer:
                     if self._grid_display is not None:
                         self._grid_display.clear_patches()
 
-                if chart_plugin is not None:
-                    chart_plugin.highlight_cells()
+                # Re-apply the histogram cutoff highlight for the new FOV. The
+                # histogram plugin (issue #112) owns this; guard because it only
+                # highlights when a cutoff/active channel is set.
+                if histogram_plugin is not None and hasattr(histogram_plugin, "highlight_cells"):
+                    histogram_plugin.highlight_cells()
 
                 if heatmap_linked and heatmap_plugin is not None:
                     heatmap_plugin.highlight_cells()
