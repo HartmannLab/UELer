@@ -4,15 +4,22 @@ Previously histograms and scatter plots shared one render host inside
 ``ChartDisplay`` so only one could be visible at a time.  This plugin owns its
 own render area, so a histogram and a scatter plot can now be open together.
 
-Beyond feature-parity with the old histogram (single-channel cutoff + above/below
-highlighting driven into the viewer), it supports the issue's "further
-considerations":
+Rendering uses **Bokeh** (via ``jupyter_bokeh``'s ``BokehModel``), replacing the
+original matplotlib/``ipympl`` path — the fragility issue #107 moved away from.
+Bokeh gives native, kernel-backed interactivity:
 
 * **Multiple histograms** — pick several channels and see them all at once.
-* **Linked brushing** — drag a range on one histogram and (a) that cell
-  selection is reflected in the viewer / cell gallery and (b) the selected
-  subset's distribution is overlaid on *every* histogram, so you can see how a
-  selection on one channel distributes across the others.
+* **Linked brushing** — drag a range on one histogram (a ``BoxSelectTool``) and
+  (a) that cell selection is reflected in the viewer / cell gallery and (b) the
+  selected subset's distribution is overlaid on *every* histogram, so you can
+  see how a selection on one channel distributes across the others.
+* **Cutoff mode** — tap a histogram to set an above/below threshold that
+  highlights cells in the viewer (feature parity with the old histogram).
+
+Python owns all binning (so the logic stays unit-testable); Bokeh only draws the
+bars + brush and routes its events back to Python callbacks in the kernel.  When
+the Bokeh stack is unavailable (headless / CI), the plugin degrades to a notice
+and its selection logic remains callable.
 """
 
 from __future__ import annotations
@@ -20,11 +27,8 @@ from __future__ import annotations
 import logging
 from typing import Optional, Sequence, Set, Union
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-
-from IPython.display import display
 
 import ipywidgets as _ipywidgets
 
@@ -34,7 +38,6 @@ HBox = getattr(_ipywidgets, "HBox")
 HTML = getattr(_ipywidgets, "HTML")
 IntSlider = getattr(_ipywidgets, "IntSlider", None)
 Layout = getattr(_ipywidgets, "Layout")
-Output = getattr(_ipywidgets, "Output")
 SelectMultiple = getattr(_ipywidgets, "SelectMultiple")
 Tab = getattr(_ipywidgets, "Tab")
 ToggleButtons = getattr(_ipywidgets, "ToggleButtons")
@@ -52,6 +55,27 @@ if IntSlider is None:  # pragma: no cover - fallback for stub environments
 
     _ipywidgets.IntSlider = IntSlider  # type: ignore[attr-defined]
 
+# Bokeh + jupyter_bokeh are optional at import time so the plugin still imports
+# headlessly (unit tests / CI). ``bokeh`` alone is enough to *build* a layout
+# (used by tests); ``jupyter_bokeh`` is additionally needed to render it as an
+# interactive ipywidget with kernel-side event callbacks.
+try:  # pragma: no cover - exercised via the real notebook stack
+    from bokeh.plotting import figure as _bk_figure
+    from bokeh.models import BoxSelectTool, ColumnDataSource, Span
+    from bokeh.events import SelectionGeometry, Tap
+    from bokeh.layouts import column as _bk_column
+
+    _BOKEH_OK = True
+except Exception:  # pragma: no cover - bokeh missing
+    _BOKEH_OK = False
+
+try:  # pragma: no cover - exercised via the real notebook stack
+    from jupyter_bokeh import BokehModel
+
+    _JBOKEH_OK = True
+except Exception:  # pragma: no cover - jupyter_bokeh missing
+    _JBOKEH_OK = False
+
 from ueler.viewer.decorators import update_status_bar
 from ueler.viewer.observable import Observable
 
@@ -63,9 +87,25 @@ _logger = logging.getLogger(__name__)
 _SELECTION_NOTICE = (
     "<i>No histograms yet. Choose one or more channels, then click <b>Plot</b>.</i>"
 )
+_BOKEH_MISSING_NOTICE = (
+    "<b>Interactive histograms require Bokeh.</b> Install <code>bokeh</code> and "
+    "<code>jupyter_bokeh</code> (both are UELer dependencies) and restart the kernel."
+)
 
-_BASE_COLOR = "tab:blue"
-_OVERLAY_COLOR = "tab:orange"
+_BASE_COLOR = "#1f77b4"        # matplotlib tab:blue
+_OVERLAY_COLOR = "#ff7f0e"     # matplotlib tab:orange
+_FIGURE_HEIGHT = 220
+
+
+def bin_counts(values, edges) -> np.ndarray:
+    """Histogram counts of ``values`` over the explicit bin ``edges``.
+
+    Pure helper (no Bokeh) so binning stays unit-testable. Empty input yields an
+    all-zero vector of length ``len(edges) - 1``.
+    """
+    arr = np.asarray(list(values), dtype=float)
+    counts, _ = np.histogram(arr, bins=edges)
+    return counts
 
 
 class HistogramDisplay(PluginBase):
@@ -88,7 +128,10 @@ class HistogramDisplay(PluginBase):
 
         self._channels: list = []
         self._plot_data = None
-        self._span_selectors: list = []  # keep SpanSelector refs alive
+        # Bokeh render state: per-channel selected-overlay sources + cutoff spans.
+        self._sources: dict = {}
+        self._spans: dict = {}
+        self._bokeh_model = None
         self._observers_registered = False
 
         self.ui_component = UiComponent(self.main_viewer)
@@ -204,98 +247,158 @@ class HistogramDisplay(PluginBase):
         self._render()
 
     def _render(self) -> None:
-        """Rebuild the figure (one subplot per channel) and swap it into the host."""
+        """Rebuild the Bokeh layout (one figure per channel) and host it."""
         data = self._plot_data
         channels = self._channels
         if data is None or not channels:
             self._plot_host.children = [self._plot_placeholder]
             return
+        if not (_BOKEH_OK and _JBOKEH_OK):
+            self._plot_host.children = [HTML(_BOKEH_MISSING_NOTICE)]
+            return
 
-        selected_idx = self.selected_indices.value or set()
+        layout, self._sources, self._spans = self._build_figures()
+        self._bokeh_model = BokehModel(layout)
+        self._plot_host.children = [self._bokeh_model]
+        # Reflect any existing selection / cutoff on the freshly built figures.
+        self._refresh_overlays()
+        self._refresh_cutoff_spans()
+
+    def _build_figures(self):
+        """Build per-channel Bokeh figures. Returns ``(layout, sources, spans)``.
+
+        Uses only ``bokeh`` (not ``jupyter_bokeh``) so it is unit-testable.
+        Python computes the bins; each figure draws a ``quad`` for the full
+        counts and a second ``quad`` (fed by ``sources[channel]``) for the
+        selected-subset overlay, both on the **same** edges.
+        """
         bins = self.ui_component.bin_slider.value
         brush_mode = self.ui_component.interaction_mode.value == "Brush"
+        data = self._plot_data
 
-        out = Output(layout=Layout(width="100%"))
-        self._span_selectors = []
-        n = len(channels)
-        with out:
-            fig, axes = plt.subplots(
-                n, 1, figsize=(self.width * 0.9, self.height * n), squeeze=False
+        figures = []
+        sources: dict = {}
+        spans: dict = {}
+        for channel in self._channels:
+            edges = self._histogram_bin_edges(channel, bins)
+            left = edges[:-1].tolist()
+            right = edges[1:].tolist()
+            full = bin_counts(data[channel], edges).tolist()
+            full_src = ColumnDataSource(dict(left=left, right=right, top=full))
+            sel_src = ColumnDataSource(
+                dict(left=left, right=right, top=[0] * len(full))
             )
-            axes = [row[0] for row in axes]
-            for ax, channel in zip(axes, channels):
-                # Share one set of bin edges (computed from the full data range)
-                # between the base and overlay histograms so the selected-subset
-                # overlay sits on the same grid and is directly comparable (#112
-                # reply). Passing the bin *count* to each hist() would let
-                # Matplotlib recompute edges over each call's own data range,
-                # squeezing a narrow subset into its own bins.
-                edges = self._histogram_bin_edges(channel, bins)
-                ax.hist(data[channel], bins=edges, color=_BASE_COLOR, alpha=0.6, label="All")
-                # Overlay the currently-selected subset's distribution.
-                if selected_idx:
-                    valid = [i for i in selected_idx if i in data.index]
-                    if valid:
-                        ax.hist(
-                            data.loc[valid, channel],
-                            bins=edges,
-                            color=_OVERLAY_COLOR,
-                            alpha=0.7,
-                            label="Selected",
-                        )
-                        ax.legend(loc="upper right", fontsize="small")
-                ax.set_xlabel(channel)
-                ax.set_ylabel("Cell count")
-                if (
-                    self._active_histogram_column == channel
-                    and self.cutoff is not None
-                ):
-                    ax.axvline(self.cutoff, color="red", linestyle="--")
-                self._attach_axis_interactions(fig, ax, channel, brush_mode)
-            fig.tight_layout()
-            # Emit the interactive canvas exactly once (mirrors the heatmap fix
-            # from issue #108); works across the widget and headless backends.
-            display(fig.canvas)
 
-        self._plot_host.children = [out]
+            p = _bk_figure(
+                height=_FIGURE_HEIGHT,
+                sizing_mode="stretch_width",
+                tools="pan,wheel_zoom,reset",
+                title=channel,
+            )
+            p.quad(
+                left="left", right="right", bottom=0, top="top",
+                source=full_src, fill_color=_BASE_COLOR, line_color="white",
+                fill_alpha=0.6, legend_label="All",
+            )
+            p.quad(
+                left="left", right="right", bottom=0, top="top",
+                source=sel_src, fill_color=_OVERLAY_COLOR, line_color="white",
+                fill_alpha=0.75, legend_label="Selected",
+            )
+            p.xaxis.axis_label = channel
+            p.yaxis.axis_label = "Cell count"
+            p.legend.click_policy = "hide"
 
-    def _attach_axis_interactions(self, fig, ax, channel, brush_mode) -> None:
-        """Wire cutoff clicks and (optionally) range brushing to a single subplot."""
+            span = Span(
+                location=0, dimension="height",
+                line_color="red", line_dash="dashed", line_width=2, visible=False,
+            )
+            p.add_layout(span)
 
-        def onclick(event):
-            if event.inaxes != ax or brush_mode:
+            if brush_mode:
+                # Adding the tool is not enough — make it the active drag
+                # gesture, otherwise the default (pan) still handles click-drag
+                # and no range can be brushed (#112 reply).
+                box = BoxSelectTool(dimensions="width")
+                p.add_tools(box)
+                p.toolbar.active_drag = box
+                p.on_event(SelectionGeometry, self._make_range_handler(channel))
+            else:
+                p.on_event(Tap, self._make_tap_handler(channel))
+
+            figures.append(p)
+            sources[channel] = {"selected": sel_src, "edges": edges}
+            spans[channel] = span
+
+        layout = _bk_column(*figures, sizing_mode="stretch_width")
+        return layout, sources, spans
+
+    def _make_range_handler(self, channel: str):
+        """Bokeh ``SelectionGeometry`` → ``handle_range`` (brush mode)."""
+
+        def _handler(event):
+            # SelectionGeometry fires during the drag too; only act on the final
+            # (mouse-up) event so we compute the selection once per gesture.
+            if not getattr(event, "final", True):
                 return
-            if event.xdata is None:
+            geom = getattr(event, "geometry", None) or {}
+            x0 = geom.get("x0")
+            x1 = geom.get("x1")
+            if x0 is None or x1 is None:
                 return
-            self.cutoff = float(event.xdata)
+            self.handle_range(channel, float(x0), float(x1))
+
+        return _handler
+
+    def _make_tap_handler(self, channel: str):
+        """Bokeh ``Tap`` → set the cutoff for ``channel`` (cutoff mode)."""
+
+        def _handler(event):
+            x = getattr(event, "x", None)
+            if x is None:
+                return
+            self.cutoff = float(x)
             self._active_histogram_column = channel
             _logger.info("Cutoff set at %.3f on channel %s", self.cutoff, channel)
             self.highlight_cells(push_to_gallery=True)
-            self._render()
+            self._refresh_overlays()
+            self._refresh_cutoff_spans()
 
-        fig.canvas.mpl_connect("button_press_event", onclick)
+        return _handler
 
-        if brush_mode:
-            try:
-                from matplotlib.widgets import SpanSelector
+    def _refresh_overlays(self) -> None:
+        """Recompute the selected-subset bar counts for every built figure."""
+        if not self._sources or self._plot_data is None:
+            return
+        selected = self.selected_indices.value or set()
+        valid = [i for i in selected if i in self._plot_data.index]
+        for channel, info in self._sources.items():
+            edges = info["edges"]
+            if valid:
+                counts = bin_counts(self._plot_data.loc[valid, channel], edges)
+            else:
+                counts = np.zeros(len(edges) - 1, dtype=int)
+            info["selected"].data = dict(
+                left=edges[:-1].tolist(),
+                right=edges[1:].tolist(),
+                top=counts.tolist(),
+            )
 
-                selector = SpanSelector(
-                    ax,
-                    lambda lo, hi, _ch=channel: self._on_brush(_ch, lo, hi),
-                    "horizontal",
-                    useblit=False,
-                    props=dict(alpha=0.2, facecolor=_OVERLAY_COLOR),
-                )
-                self._span_selectors.append(selector)
-            except Exception:  # pragma: no cover - defensive (headless / old mpl)
-                _logger.debug("SpanSelector unavailable; brush mode disabled", exc_info=True)
+    def _refresh_cutoff_spans(self) -> None:
+        """Show the cutoff line only on the active channel."""
+        for channel, span in self._spans.items():
+            if channel == self._active_histogram_column and self.cutoff is not None:
+                span.location = self.cutoff
+                span.visible = True
+            else:
+                span.visible = False
 
     def _histogram_bin_edges(self, channel: str, bins: int):
         """Bin edges computed over the *full* plotted data for ``channel``.
 
-        Shared by the base and subset-overlay histograms so both sit on the same
-        grid; independent of the current selection (#112 reply). ``_plot_data``
-        is already NaN-dropped on the plotted channels by ``_prepare_dataframe``.
+        Shared by the base and subset-overlay bars so both sit on the same grid;
+        independent of the current selection (#112 reply). ``_plot_data`` is
+        already NaN-dropped on the plotted channels by ``_prepare_dataframe``.
         """
         return np.histogram_bin_edges(self._plot_data[channel], bins=bins)
 
@@ -311,7 +414,13 @@ class HistogramDisplay(PluginBase):
         mask = data[channel].between(lo, hi)
         return set(data.index[mask])
 
-    def _on_brush(self, channel: str, lo: float, hi: float) -> None:
+    def handle_range(self, channel: str, lo: float, hi: float) -> None:
+        """Apply a brushed [lo, hi] range on ``channel`` as a cell selection.
+
+        Pure of Bokeh (event handlers delegate here), so it is unit-testable with
+        plain floats. Publishes ``selected_indices`` (→ cell gallery + viewer when
+        linked) and refreshes the cross-histogram overlay.
+        """
         if lo == hi:
             return
         self._brush_selection = (channel, lo, hi)
@@ -321,8 +430,12 @@ class HistogramDisplay(PluginBase):
         self.selected_indices.value = indices
         if self.ui_component.mv_linked_checkbox.value:
             _chart_common.sync_mask_highlights_from_selection(self.main_viewer, indices)
-        # Redraw so every histogram shows the selected subset overlaid.
-        self._render()
+        # Update every histogram's overlay to show the selected subset.
+        self._refresh_overlays()
+
+    # Backwards-compatible alias (kept for callers/tests using the old name).
+    def _on_brush(self, channel: str, lo: float, hi: float) -> None:
+        self.handle_range(channel, lo, hi)
 
     def highlight_cells(self, *, push_to_gallery: bool = False) -> None:
         """Cutoff-based highlight: select cells above/below the active-channel cutoff."""
@@ -363,7 +476,7 @@ class HistogramDisplay(PluginBase):
         self.selected_indices.value = set()
         if self.ui_component.mv_linked_checkbox.value:
             _chart_common.sync_mask_highlights_from_selection(self.main_viewer, set())
-        self._render()
+        self._refresh_overlays()
 
     # ------------------------------------------------------------------
     # Data helpers
@@ -398,6 +511,7 @@ class HistogramDisplay(PluginBase):
     def _on_above_below_change(self, _change) -> None:
         if self._active_histogram_column is not None and self.cutoff is not None:
             self.highlight_cells(push_to_gallery=True)
+            self._refresh_overlays()
 
     def _on_interaction_mode_change(self, _change) -> None:
         if self._plot_data is not None:
@@ -443,7 +557,7 @@ class UiComponent:
             max=200,
             step=1,
             description="Bins:",
-            continuous_update=True,
+            continuous_update=False,
             style={"description_width": "auto"},
             layout=Layout(width="250px"),
         )

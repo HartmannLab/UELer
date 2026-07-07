@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ueler"
-version = "0.4.0"
+version = "0.4.1"
 description = "Usability Enhanced Linked Viewer for MIBI imaging"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -39,6 +39,8 @@ dependencies = [
     "tifffile",
     "fsspec[http]",
     "requests",
+    "bokeh>=3.0",
+    "jupyter_bokeh>=4.0",
 ]
 
 [project.optional-dependencies]

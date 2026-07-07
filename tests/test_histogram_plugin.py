@@ -87,10 +87,18 @@ import pandas as pd
 from ueler.viewer.plugin.histogram import HistogramDisplay
 
 
-def _real_matplotlib() -> bool:
-    """True when the *real* matplotlib.pyplot is importable (not a bootstrap stub)."""
-    mod = sys.modules.get("matplotlib.pyplot")
-    return bool(mod is not None and getattr(mod, "__file__", None))
+def _bokeh_available() -> bool:
+    """True when Bokeh is importable (enough to build a figure/layout)."""
+    from ueler.viewer.plugin import histogram as _h
+
+    return bool(_h._BOKEH_OK)
+
+
+def _bokeh_stack_available() -> bool:
+    """True when both bokeh and jupyter_bokeh are importable (full interactive render)."""
+    from ueler.viewer.plugin import histogram as _h
+
+    return bool(_h._BOKEH_OK and _h._JBOKEH_OK)
 
 
 # ---------------------------------------------------------------------------
@@ -273,16 +281,37 @@ class TestHistogramBrushLinking(unittest.TestCase):
         self.assertIn(2, self.viewer.image_display.last_mask_ids)
         self.assertIn(3, self.viewer.image_display.last_mask_ids)
 
-    def test_brush_triggers_rerender_for_overlay(self):
-        before = self.hist._render_calls
+    def test_handle_range_is_the_brush_alias(self):
+        """`_on_brush` delegates to the public `handle_range` (same effect)."""
         self.hist._on_brush("intensity", 4.0, 8.0)
-        self.assertGreater(self.hist._render_calls, before)
+        via_alias = set(self.hist.selected_indices.value)
+        self.hist.clear_selection()
+        self.hist.handle_range("intensity", 4.0, 8.0)
+        self.assertEqual(set(self.hist.selected_indices.value), via_alias)
 
     def test_clear_selection_empties_indices(self):
         self.hist._on_brush("intensity", 4.0, 8.0)
         self.assertTrue(self.hist.selected_indices.value)
         self.hist.clear_selection()
         self.assertEqual(self.hist.selected_indices.value, set())
+
+    def test_bin_counts_matches_numpy_histogram(self):
+        from ueler.viewer.plugin.histogram import bin_counts
+
+        edges = np.array([0.0, 2.0, 4.0, 6.0, 8.0, 10.0])
+        counts = bin_counts(self.viewer.cell_table["intensity"], edges)
+        expected, _ = np.histogram(self.viewer.cell_table["intensity"], bins=edges)
+        self.assertTrue(np.array_equal(counts, expected))
+
+    @unittest.skipUnless(_bokeh_available(), "bokeh not available")
+    def test_overlay_source_counts_match_selection(self):
+        """After a brush, each figure's 'selected' source counts the selected cells."""
+        layout, sources, spans = self.hist._build_figures()
+        self.hist._sources, self.hist._spans = sources, spans
+        self.hist.handle_range("intensity", 4.0, 8.0)
+        # intensity in [4,8] → rows with 5.0 and 7.0 → 2 cells.
+        total = sum(sources["intensity"]["selected"].data["top"])
+        self.assertEqual(total, 2)
 
     def test_bin_edges_span_full_data_range(self):
         """Edges cover the full column range and have bins+1 entries (#112 reply)."""
@@ -328,26 +357,83 @@ class TestHistogramMultiChannel(unittest.TestCase):
         self.assertEqual(self.hist._channels, [])
 
 
-class TestHistogramRendering(unittest.TestCase):
-    """Exercise the real Matplotlib render path (skipped without real matplotlib)."""
+class TestHistogramBokehLayout(unittest.TestCase):
+    """Build the Bokeh layout (bokeh only; no jupyter_bokeh needed)."""
 
     def setUp(self):
-        if not _real_matplotlib():
-            self.skipTest("real matplotlib not available in this environment")
+        if not _bokeh_available():
+            self.skipTest("bokeh not available in this environment")
+        self.viewer = _make_viewer(_two_fov_table())
+        self.hist = _make_histogram(self.viewer)
+        self.hist._plot_data = self.viewer.cell_table.copy()
+
+    def test_build_figures_one_per_channel_with_shared_edges(self):
+        self.hist._channels = ["intensity", "area"]
+        layout, sources, spans = self.hist._build_figures()
+        # A figure (and sources/spans) per channel.
+        self.assertEqual(set(sources), {"intensity", "area"})
+        self.assertEqual(set(spans), {"intensity", "area"})
+        # The selected overlay shares the same bin edges as the full histogram.
+        edges = sources["intensity"]["edges"]
+        self.assertEqual(
+            sources["intensity"]["selected"].data["left"], edges[:-1].tolist()
+        )
+
+    def test_cutoff_span_shows_only_on_active_channel(self):
+        self.hist._channels = ["intensity", "area"]
+        _layout, sources, spans = self.hist._build_figures()
+        self.hist._sources, self.hist._spans = sources, spans
+        self.hist._active_histogram_column = "intensity"
+        self.hist.cutoff = 5.0
+        self.hist._refresh_cutoff_spans()
+        self.assertTrue(spans["intensity"].visible)
+        self.assertEqual(spans["intensity"].location, 5.0)
+        self.assertFalse(spans["area"].visible)
+
+    def test_brush_mode_activates_box_select_drag(self):
+        """Brush mode must set the BoxSelectTool as the active drag gesture (#112 reply).
+
+        Without this, click-drag falls back to pan and no range can be brushed.
+        """
+        from bokeh.models import BoxSelectTool
+
+        self.hist.ui_component.interaction_mode.value = "Brush"
+        self.hist._channels = ["intensity", "area"]
+        layout, _sources, _spans = self.hist._build_figures()
+        for fig in layout.children:
+            self.assertIsInstance(fig.toolbar.active_drag, BoxSelectTool)
+
+    def test_cutoff_mode_does_not_activate_box_select(self):
+        """Cutoff mode leaves drag as pan/auto so tapping to set a cutoff still works."""
+        from bokeh.models import BoxSelectTool
+
+        self.hist.ui_component.interaction_mode.value = "Cutoff"
+        self.hist._channels = ["intensity"]
+        layout, _sources, _spans = self.hist._build_figures()
+        for fig in layout.children:
+            self.assertNotIsInstance(fig.toolbar.active_drag, BoxSelectTool)
+
+
+class TestHistogramRendering(unittest.TestCase):
+    """Exercise the full interactive render path (skipped without the Bokeh stack)."""
+
+    def setUp(self):
+        if not _bokeh_stack_available():
+            self.skipTest("bokeh + jupyter_bokeh not available in this environment")
         self.viewer = _make_viewer(_two_fov_table())
         self.hist = _make_histogram(self.viewer, patch_render=False)
 
-    def test_render_builds_output_for_multiple_channels(self):
+    def test_render_hosts_a_single_bokeh_model(self):
         self.hist.ui_component.channel_selector.value = ("intensity", "area")
         self.hist.plot_histograms(None)
-        # A single Output hosting the (multi-subplot) figure is swapped in.
+        # A single BokehModel widget hosting the multi-figure column is swapped in.
         self.assertEqual(len(self.hist._plot_host.children), 1)
+        self.assertIs(self.hist._plot_host.children[0], self.hist._bokeh_model)
 
     def test_render_with_narrow_subset_overlay_does_not_crash(self):
         """Rendering the shared-edge overlay for a narrow subset builds cleanly (#112)."""
         self.hist.ui_component.channel_selector.value = ("intensity",)
         self.hist.plot_histograms(None)
-        # Narrow selection well inside the full range; overlay uses full-data edges.
         self.hist.selected_indices.value = {1}  # intensity 5.0 (range is 1..9)
         self.hist._render()
         self.assertEqual(len(self.hist._plot_host.children), 1)

@@ -84,17 +84,38 @@ over the full plotted column), whose edges are passed to **both** the base and t
 overlay `ax.hist` calls. Regression tests assert the edges span the full range and are
 independent of the current selection.
 
-## Follow-on (approved) — re-implement on Bokeh
-The matplotlib render path rebuilds the whole figure on every brush and its
-interactivity depends on `ipympl` (the fragility #107 moved away from). The approved
-next step re-implements the Histogram plugin on **Bokeh** + **jupyter_bokeh** (accepted
-as new dependencies): per-channel `figure.quad` bars fed by `ColumnDataSource`s on
-shared bin edges, a `BoxSelectTool` whose `SelectionGeometry` event runs a kernel-side
-Python handler that computes the cell selection, drives `selected_indices` (→ viewer
-masks + cell gallery via the existing wiring), and recomputes the "selected" source for
-every channel (native cross-histogram reflection/overlay). Binning stays in Python
-(unit-testable via a thin `handle_range(channel, x0, x1)`); a static fallback covers
-environments where the interactive stack (e.g. VSCode) is unavailable. Not yet built.
+## Follow-on — re-implemented on Bokeh (done)
+The matplotlib render path rebuilt the whole figure on every brush and its
+interactivity depended on `ipympl` (the fragility #107 moved away from). The Histogram
+plugin now renders on **Bokeh** + **jupyter_bokeh** (added to `pyproject.toml`):
+
+- Per channel a Bokeh `figure` with `quad` bars for the full counts + an overlaid `quad`
+  (own `ColumnDataSource`) for the selected subset, both on the **same** bin edges.
+  N figures laid out in a `column`, hosted via `BokehModel`.
+- **Brush mode:** `BoxSelectTool` → `SelectionGeometry` event → kernel-side
+  `handle_range(channel, lo, hi)` → computes the cell selection, drives
+  `selected_indices` (→ cell gallery + viewer masks via the existing wiring), and
+  recomputes the "selected" overlay source for **every** channel in place (no full
+  re-render).
+- **Cutoff mode:** `Tap` event → existing `highlight_cells`; threshold drawn as a `Span`
+  on the active channel only.
+- Binning stays in Python and is unit-tested (`bin_counts`, `_build_figures`, pure
+  `handle_range`; `_on_brush` kept as an alias). Imports are guarded so the plugin still
+  loads headlessly; when the Bokeh stack is absent it shows an install notice instead of
+  rendering.
+
+Tests (`tests/test_histogram_plugin.py`): logic tests + a bokeh-only `_build_figures` /
+cutoff-span layout test + a full-stack `BokehModel` render smoke test (each skips if its
+dependency is missing). Full suite: failure/error set identical to baseline. The live
+brush/tap interaction is verified manually in the notebook (not headlessly testable).
+
+### Brush-activation fix
+Brush mode initially only *added* a `BoxSelectTool`; Bokeh's default active drag (pan)
+still handled click-drag, so no range could be selected. Fixed by setting
+`p.toolbar.active_drag = <BoxSelectTool>` in the brush branch of `_build_figures`, and
+guarding `_make_range_handler` on `event.final` so the selection is computed once per
+gesture (mouse-up). Regression tests assert `toolbar.active_drag` is a `BoxSelectTool` in
+Brush mode and is not in Cutoff mode.
 
 ## Out of scope / notes
 * `ueler/viewer/plugin/chart_heatmap.py` is a pre-existing stale near-duplicate
