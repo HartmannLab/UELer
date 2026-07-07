@@ -98,10 +98,96 @@ FOV0, masks detected, one channel (8.4 MB) downloaded to cache, mask prefetched 
 Full suite: no new failures/errors vs. baseline (20 failures / 40 errors pre-existing, identical
 before and after).
 
+## Descriptor reference
+
+```jsonc
+{
+  "mode": "folder",                 // "folder" | "ome-tiff"
+  "base": "Files/.../image_data",   // folder mode: dir whose subdirs (or .zip files) are FOVs
+  "fov_container": "zip",           // optional: each FOV is a <FOV>.zip of channel TIFFs
+  "fov_glob": "Files/.../*.ome.tiff", // ome mode: glob for per-FOV OME files
+
+  // Masks: either the single-dir legacy form...
+  "mask_dir": "Files/.../cleaned_mask",
+  "mask_glob": "{fov}_*.tiff",      // files already named <fov>_<label>.tiff → label = suffix
+
+  // ...or a list of sources (multiple mask folders, <fov>.tiff naming, per-FOV subfolders):
+  "masks": [
+    {"dir": "Files/segmentation_masks", "name": "segmentation"}, // match defaults to {fov}.*
+    {"dir": "Files/follicle_masks",      "name": "follicle"},
+    {"dir": "Files/mask_dir",            "per_fov": true}         // reads <dir>/<fov>/*.tiff; label = stem
+  ]
+  // "annotations": [...]  // same shape as "masks"
+}
+```
+
+Source resolution rules:
+- **`name`** → the cached file is renamed to `<fov>_<name>.tiff` so the UELer label is `name`
+  (this is how studies that name masks `<fov>.tiff` are supported). Without a `name`, the original
+  filename is kept and the label is the `<fov>_` suffix (legacy).
+- **`per_fov: true`** → the source's rasters live in `<dir>/<fov>/*.tiff`; each file's stem becomes
+  the label (cached as `<fov>_<stem>.tiff`). Default `match` is `*.tif*`.
+- **`match`** (with `{fov}`) can override per source; defaults to `{fov}.*` (named), `{fov}_*`
+  (unnamed flat), or `*.tif*` (per-FOV).
+
+`fov_container: "zip"` (folder mode) means each FOV is a `<FOV>.zip` archive of channel TIFFs.
+`list_fovs` lists the `.zip` files; a single channel is read out of the remote zip via
+`zipfile.ZipFile` over an `fsspec` HTTP handle — only that member's bytes (+ the central directory)
+are fetched, then cached to `channels/<fov>/<channel>.tiff`. No full-archive download.
+
+**Worked examples**
+- `S-BIAD2557` (folder-per-FOV, masks `<fov>_cleaned_mask.tiff`, single dir): use `mask_dir` +
+  `mask_glob="{fov}_*.tiff"`.
+- `S-BIAD2864` (folder-per-FOV under `Files/image_data`; masks `<fov>.tiff` in **two** folders
+  `segmentation_masks/` and `follicle_masks/`; base path `fire/…`): use the `masks` list with
+  `name`s. Verified live: 166 FOVs, 40 channels, masks cached as `<fov>_segmentation.tiff` /
+  `<fov>_follicle.tiff`.
+- `S-BIAD2708` (DCIS; **zipped FOVs** `image_data/<FOV>.zip`; masks in a **per-FOV subfolder**
+  `mask_dir/<FOV>/{ducts,myoep}_labeled.tiff` + flat `segmentation/deepcell_output/<FOV>_*.tiff`):
+  ```json
+  {
+    "mode": "folder",
+    "fov_container": "zip",
+    "base": "Files/DCIS/image_data",
+    "masks": [
+      {"dir": "Files/DCIS/mask_dir", "per_fov": true},
+      {"dir": "Files/DCIS/segmentation/deepcell_output", "match": "{fov}_*.tiff"}
+    ]
+  }
+  ```
+  Verified live: 162 FOVs, 48 channels/zip; opening one channel fetched **41 KB out of the 31 MB
+  zip** (per-member range read); masks cached as `<fov>_ducts_labeled.tiff`, `<fov>_myoep_labeled.tiff`,
+  `<fov>_nuclear.tiff`, `<fov>_whole_cell.tiff`.
+
+## Follow-up: zipped-FOV studies (S-BIAD2708)
+
+Added `fov_container: "zip"` (folder mode) so studies that pack each FOV's channels into a
+`<FOV>.zip` are supported without downloading the archive — a single channel is read from the remote
+zip via `zipfile.ZipFile` over an `fsspec` HTTP handle (per-member byte-range read), then cached like
+any other channel. Also added `per_fov: true` mask/annotation sources for masks stored in a per-FOV
+subfolder (`<dir>/<fov>/*.tiff`). New module helpers: `_open_zip`, `_zip_members`, `_extract_member`;
+`BIADataSource` gains `_is_zip`, `_zip_url`, `_zip_channel_map` and a zip branch in
+`list_fovs`/`open_fov`/`load_channel`. 7 new unit tests; verified live on S-BIAD2708.
+
+## Follow-up: guard against huge non-pyramidal OME downloads
+
+Some studies (e.g. `S-BSST2926`) ship enormous *single-resolution* OME-TIFFs (55.9 GB / 20.2 GB,
+`CYX` 18636², 29 ch, tiled as full-width strips, **no pyramid**). Streaming only helps with a
+pyramid, so these hit the cache fallback — which would silently download tens of GB. `open_fov` now
+checks `_remote_size` for a non-pyramidal OME and **raises a clear error above `max_download_bytes`
+(default 2 GiB)** instead of downloading. `BIADataSource(..., max_download_bytes=…)` /
+`run_viewer_bia(..., max_download_bytes=…)` raise the ceiling for anyone who truly wants the full
+download. Verified live on `S-BSST2926` (raises; no download). `MAX_OME_CACHE_BYTES` constant;
+2 new tests (refuse huge / override allows).
+
 ## Known limitations / future work
 
-- Streaming is exercised only by pyramidal OME-TIFF studies; folder-mode + non-pyramidal files
-  use the download-and-cache path.
+- Streaming (byte-range, no download) is used for pyramidal OME-TIFFs and for single zip members;
+  folder-mode plain files and *reasonably sized* non-pyramidal OME files use the download-and-cache
+  path. **Huge non-pyramidal OME-TIFFs are refused** (see above) — they need a pyramidal/OME-Zarr
+  copy or a local download. A one-time "build & cache a downsampled overview" path could lift this
+  later.
 - OME-Zarr (NGFF) not yet supported (phase 2).
 - Region CSVs (`tumor_border/` etc. in S-BIAD2557) are not imported.
-- Auto-detection finds only the FOV/channel structure; masks generally need a descriptor.
+- Auto-detection covers folder-per-FOV, OME-TIFF-per-FOV, and zip-container FOVs; masks generally
+  still need a descriptor.

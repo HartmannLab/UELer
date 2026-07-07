@@ -204,6 +204,7 @@ def run_viewer_bia(
 	*,
 	descriptor: Optional[object] = None,
 	local_dir: Optional[PathLike] = None,
+	max_download_bytes: Optional[int] = None,
 	auto_display: bool = True,
 	ensure_aliases: bool = True,
 	after_plugins: bool = True,
@@ -229,6 +230,10 @@ def run_viewer_bia(
 		``~/.ueler/bia/<accession>/``). Persistent ``.UELer`` state lives under
 		``<workspace>/.UELer`` and downloaded image/mask files under
 		``<workspace>/cache``.
+	max_download_bytes:
+		Ceiling for caching a single non-pyramidal OME-TIFF FOV (default 2 GiB).
+		Opening a larger non-pyramidal remote OME raises rather than silently
+		downloading the whole file; raise this only if you truly intend to.
 	data_source_factory:
 		Optional factory returning the data-source object; primarily for testing.
 		Defaults to :class:`ueler.bia_loader.BIADataSource`.
@@ -253,6 +258,7 @@ def run_viewer_bia(
 		source,
 		cache_dir=str(workspace / "cache"),
 		descriptor=descriptor_obj,
+		max_download_bytes=max_download_bytes,
 	)
 
 	factory: _ViewerFactory = viewer_factory or _load_viewer_factory()

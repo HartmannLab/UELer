@@ -137,7 +137,28 @@ class LayoutTest(unittest.TestCase):
         layout = _layout_from_descriptor(_folder_descriptor())
         self.assertEqual(layout.mode, "folder")
         self.assertEqual(layout.base, "Files/img")
-        self.assertEqual(layout.mask_dir, "Files/masks")
+        self.assertEqual(len(layout.mask_sources), 1)
+        src = layout.mask_sources[0]
+        self.assertEqual(src["dir"], "Files/masks")
+        self.assertEqual(src["match"], "{fov}_*.tiff")
+        self.assertIsNone(src["name"])
+
+    def test_descriptor_multiple_named_mask_sources(self):
+        layout = _layout_from_descriptor(
+            {
+                "mode": "folder",
+                "base": "Files/image_data",
+                "masks": [
+                    {"dir": "Files/segmentation_masks", "name": "segmentation"},
+                    {"dir": "Files/follicle_masks", "name": "follicle"},
+                ],
+            }
+        )
+        self.assertEqual([s["dir"] for s in layout.mask_sources],
+                         ["Files/segmentation_masks", "Files/follicle_masks"])
+        # a named source defaults its match to "{fov}.*" (no <fov>_ suffix required)
+        self.assertEqual(layout.mask_sources[0]["match"], "{fov}.*")
+        self.assertEqual(layout.mask_sources[0]["name"], "segmentation")
 
     def test_descriptor_ome_mode_splits_glob(self):
         layout = _layout_from_descriptor(
@@ -233,6 +254,59 @@ class FolderDataSourceTest(unittest.TestCase):
         self.assertIn("fov2_cleaned_mask.tiff", url)
 
 
+class NamedMaskSourceTest(unittest.TestCase):
+    """S-BIAD2864 shape: masks named ``<fov>.tiff`` in several folders."""
+
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self.tree = {
+            "Files/image_data": [("sample1_fov1", True), ("sample1_fov10", True)],
+            "Files/image_data/sample1_fov1": [("CD3e.tiff", False), ("CD4.tiff", False)],
+            "Files/image_data/sample1_fov10": [("CD3e.tiff", False)],
+            "Files/segmentation_masks": [
+                ("sample1_fov1.tiff", False),
+                ("sample1_fov10.tiff", False),
+            ],
+            "Files/follicle_masks": [
+                ("sample1_fov1.tiff", False),
+                ("sample1_fov10.tiff", False),
+            ],
+        }
+        descriptor = {
+            "mode": "folder",
+            "base": "Files/image_data",
+            "masks": [
+                {"dir": "Files/segmentation_masks", "name": "segmentation"},
+                {"dir": "Files/follicle_masks", "name": "follicle"},
+            ],
+        }
+        with patch.object(BIAStudyIndex, "from_source", return_value=FakeIndex(self.tree)):
+            self.ds = BIADataSource(
+                "https://example.org/study",
+                cache_dir=self._tmp.name,
+                descriptor=descriptor,
+            )
+        self.ds.index = FakeIndex(self.tree)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_has_masks_across_multiple_sources(self):
+        self.assertTrue(self.ds.has_masks)
+
+    def test_prefetch_renames_to_labelled_masks(self):
+        with patch.object(bia_loader, "_download") as dl:
+            self.ds.prefetch_masks("sample1_fov1")
+        dests = [str(c.args[1]) for c in dl.call_args_list]
+        self.assertEqual(len(dests), 2)
+        self.assertTrue(any(d.endswith("sample1_fov1_segmentation.tiff") for d in dests))
+        self.assertTrue(any(d.endswith("sample1_fov1_follicle.tiff") for d in dests))
+        # <fov>.* must not leak fov10's file into fov1
+        self.assertFalse(any("fov10" in d for d in dests))
+        urls = [c.args[0] for c in dl.call_args_list]
+        self.assertTrue(any(u.endswith("segmentation_masks/sample1_fov1.tiff") for u in urls))
+
+
 # --- data source (ome mode stream vs cache) --------------------------------
 class OmeDataSourceTest(unittest.TestCase):
     def setUp(self):
@@ -263,12 +337,132 @@ class OmeDataSourceTest(unittest.TestCase):
 
     def test_open_fov_caches_when_not_streamable(self):
         with patch.object(bia_loader, "_is_streamable", return_value=False), \
+                patch.object(bia_loader, "_remote_size", return_value=100 * 1024 * 1024), \
                 patch.object(bia_loader, "OMEFovWrapper") as wrapper, \
                 patch.object(bia_loader, "_download", return_value=Path("/x/fovA.ome.tiff")) as dl:
             self.ds.open_fov("fovA", ds_factor=2)
         dl.assert_called_once()
         _, kwargs = wrapper.call_args
         self.assertNotIn("opener", kwargs)
+
+    def test_open_fov_refuses_huge_non_pyramidal_ome(self):
+        huge = 56 * 1024 * 1024 * 1024  # 56 GiB, like S-BSST2926
+        with patch.object(bia_loader, "_is_streamable", return_value=False), \
+                patch.object(bia_loader, "_remote_size", return_value=huge), \
+                patch.object(bia_loader, "_download") as dl:
+            with self.assertRaises(ValueError):
+                self.ds.open_fov("fovA", ds_factor=1)
+        dl.assert_not_called()  # must NOT download the whole file
+
+    def test_max_download_bytes_override_allows_large_cache(self):
+        big = 8 * 1024 * 1024 * 1024
+        self.ds.max_download_bytes = 16 * 1024 * 1024 * 1024
+        with patch.object(bia_loader, "_is_streamable", return_value=False), \
+                patch.object(bia_loader, "_remote_size", return_value=big), \
+                patch.object(bia_loader, "OMEFovWrapper"), \
+                patch.object(bia_loader, "_download", return_value=Path("/x/fovA.ome.tiff")) as dl:
+            self.ds.open_fov("fovA", ds_factor=1)
+        dl.assert_called_once()
+
+
+# --- zip-container FOVs + per-FOV masks (S-BIAD2708 shape) -----------------
+class ZipContainerTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self.tree = {
+            "Files/DCIS/image_data": [
+                ("TA501_R3C3.zip", False),
+                ("TA501_R4C7.zip", False),
+            ],
+            "Files/DCIS/mask_dir": [("TA501_R3C3", True), ("TA501_R4C7", True)],
+            "Files/DCIS/mask_dir/TA501_R3C3": [
+                ("ducts_labeled.tiff", False),
+                ("myoep_labeled.tiff", False),
+            ],
+            "Files/DCIS/segmentation/deepcell_output": [
+                ("TA501_R3C3_nuclear.tiff", False),
+                ("TA501_R3C3_whole_cell.tiff", False),
+                ("TA501_R4C7_nuclear.tiff", False),
+            ],
+        }
+        self.descriptor = {
+            "mode": "folder",
+            "fov_container": "zip",
+            "base": "Files/DCIS/image_data",
+            "masks": [
+                {"dir": "Files/DCIS/mask_dir", "per_fov": True},
+                {"dir": "Files/DCIS/segmentation/deepcell_output", "match": "{fov}_*.tiff"},
+            ],
+        }
+        with patch.object(BIAStudyIndex, "from_source", return_value=FakeIndex(self.tree)):
+            self.ds = BIADataSource(
+                "https://example.org/study",
+                cache_dir=self._tmp.name,
+                descriptor=self.descriptor,
+            )
+        self.ds.index = FakeIndex(self.tree)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_layout_marks_zip_container(self):
+        self.assertEqual(self.ds.layout.fov_container, "zip")
+        self.assertTrue(self.ds._is_zip)
+
+    def test_list_fovs_strips_zip_suffix(self):
+        self.assertEqual(self.ds.list_fovs(), ["TA501_R3C3", "TA501_R4C7"])
+
+    def test_open_fov_reads_channels_from_zip_members(self):
+        with patch.object(bia_loader, "_zip_members",
+                          return_value={"CD45": "CD45.tiff", "CD3e": "CD3e.tiff"}) as zm:
+            obj = self.ds.open_fov("TA501_R3C3", ds_factor=1)
+        self.assertEqual(obj, {"CD45": None, "CD3e": None})
+        zm.assert_called_once()
+        self.assertTrue(zm.call_args[0][0].endswith("image_data/TA501_R3C3.zip"))
+
+    def test_load_channel_extracts_single_member(self):
+        with patch.object(bia_loader, "_zip_members",
+                          return_value={"CD45": "CD45.tiff"}), \
+                patch.object(bia_loader, "_extract_member") as extract, \
+                patch.object(bia_loader, "_download") as dl, \
+                patch.object(bia_loader, "load_one_channel_fov", return_value="ARR") as read:
+            result = self.ds.load_channel("TA501_R3C3", "CD45", {}, compute_stats=False)
+        self.assertEqual(result, "ARR")
+        dl.assert_not_called()  # only the single member is fetched, not the whole zip
+        zip_url, member, dest = extract.call_args[0]
+        self.assertTrue(zip_url.endswith("image_data/TA501_R3C3.zip"))
+        self.assertEqual(member, "CD45.tiff")
+        self.assertTrue(str(dest).endswith("channels/TA501_R3C3/CD45.tiff"))
+        self.assertTrue(read.call_args[0][1].endswith("channels"))
+
+    def test_per_fov_masks_prefetched_with_stem_labels(self):
+        with patch.object(bia_loader, "_download") as dl:
+            self.ds.prefetch_masks("TA501_R3C3")
+        dests = [str(c.args[1]) for c in dl.call_args_list]
+        # per-FOV subdir masks → <fov>_<stem>.tiff
+        self.assertTrue(any(d.endswith("TA501_R3C3_ducts_labeled.tiff") for d in dests))
+        self.assertTrue(any(d.endswith("TA501_R3C3_myoep_labeled.tiff") for d in dests))
+        # flat deepcell masks keep their <fov>_ prefix filename
+        self.assertTrue(any(d.endswith("TA501_R3C3_nuclear.tiff") for d in dests))
+        self.assertTrue(any(d.endswith("TA501_R3C3_whole_cell.tiff") for d in dests))
+        # fov4's deepcell file must not leak into fov3
+        self.assertFalse(any("R4C7" in d for d in dests))
+
+    def test_has_masks_true_for_per_fov_and_flat(self):
+        self.assertTrue(self.ds.has_masks)
+
+
+class ZipAutoDetectTest(unittest.TestCase):
+    def test_auto_detect_zip_container(self):
+        tree = {
+            "": [("Files", True)],
+            "Files": [("image_data", True)],
+            "Files/image_data": [("fovA.zip", False), ("fovB.zip", False)],
+        }
+        layout = _auto_detect_layout(FakeIndex(tree))
+        self.assertEqual(layout.mode, "folder")
+        self.assertEqual(layout.fov_container, "zip")
+        self.assertEqual(layout.base, "Files/image_data")
 
 
 # --- runner wiring ---------------------------------------------------------
@@ -283,10 +477,11 @@ class RunViewerBiaTest(unittest.TestCase):
     def test_run_viewer_bia_wires_data_source_and_workspace(self):
         made = {}
 
-        def fake_ds_factory(source, *, cache_dir, descriptor):
+        def fake_ds_factory(source, *, cache_dir, descriptor, max_download_bytes=None):
             made["source"] = source
             made["cache_dir"] = cache_dir
             made["descriptor"] = descriptor
+            made["max_download_bytes"] = max_download_bytes
             return SimpleNamespace(tag="ds")
 
         def fake_viewer_factory(base_folder, *, data_source=None, **kwargs):
@@ -322,7 +517,7 @@ class RunViewerBiaTest(unittest.TestCase):
 
         seen = {}
 
-        def fake_ds_factory(source, *, cache_dir, descriptor):
+        def fake_ds_factory(source, *, cache_dir, descriptor, max_download_bytes=None):
             seen["descriptor"] = descriptor
             return SimpleNamespace()
 

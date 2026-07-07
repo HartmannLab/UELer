@@ -53,6 +53,11 @@ OME_SUFFIXES = (".ome.tif", ".ome.tiff")
 # since range reads of a single-resolution image give little benefit.
 STREAM_SIZE_LIMIT = 256 * 1024 * 1024
 
+# A non-pyramidal OME-TIFF can only be served by downloading the whole file into
+# the cache. Refuse to do that above this size (overridable per data source) so a
+# giant single-resolution image doesn't trigger a silent multi-GB download.
+MAX_OME_CACHE_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
+
 
 # ---------------------------------------------------------------------------
 # HTTP helpers
@@ -223,6 +228,63 @@ def _has_suffix(name: str, suffixes: Tuple[str, ...]) -> bool:
 # ---------------------------------------------------------------------------
 # Layout classification
 # ---------------------------------------------------------------------------
+def _normalise_sources(descriptor, list_key, dir_key, glob_key, name_key):
+    """Normalise a descriptor's mask/annotation config into a list of sources.
+
+    Each source is ``{"dir": str, "match": str, "name": Optional[str]}``.  Two
+    descriptor forms are accepted:
+
+    * A list under ``list_key`` (``masks`` / ``annotations``) of
+      ``{"dir", "name"?, "match"?}`` entries — for studies with several mask
+      folders and/or ``<fov>.tiff`` naming.
+    * The legacy single ``dir_key`` / ``glob_key`` (+ optional ``name_key``).
+
+    When ``name`` is set, the cached file is renamed to ``<fov>_<name>.tiff`` so
+    the mask/annotation label becomes ``name``; the default ``match`` is then
+    ``{fov}.*``.  When ``name`` is absent the original filename is kept and the
+    default ``match`` is ``{fov}_*`` (the label is the ``<fov>_`` suffix, matching
+    the local loaders).
+    """
+
+    def _default_match(name, per_fov):
+        if per_fov:
+            return "*.tif*"  # every raster in the per-FOV subdir
+        return "{fov}.*" if name else "{fov}_*"
+
+    raw = descriptor.get(list_key)
+    sources = []
+    if isinstance(raw, (list, tuple)):
+        for entry in raw:
+            if not isinstance(entry, dict) or not entry.get("dir"):
+                continue
+            name = entry.get("name")
+            name = str(name) if name else None
+            per_fov = bool(entry.get("per_fov", False))
+            sources.append(
+                {
+                    "dir": str(entry["dir"]).strip("/"),
+                    "match": str(entry.get("match", _default_match(name, per_fov))),
+                    "name": name,
+                    "per_fov": per_fov,
+                }
+            )
+        return sources
+
+    directory = descriptor.get(dir_key)
+    if directory:
+        name = descriptor.get(name_key)
+        name = str(name) if name else None
+        sources.append(
+            {
+                "dir": str(directory).strip("/"),
+                "match": str(descriptor.get(glob_key, _default_match(name, False))),
+                "name": name,
+                "per_fov": False,
+            }
+        )
+    return sources
+
+
 class BIALayout:
     """Normalised description of where FOVs / channels / masks live."""
 
@@ -231,25 +293,29 @@ class BIALayout:
         mode: str,
         *,
         base: str = "",
-        mask_dir: Optional[str] = None,
-        mask_glob: str = "{fov}_*",
-        annotation_dir: Optional[str] = None,
-        annotation_glob: str = "{fov}_*",
+        mask_sources: Optional[List[dict]] = None,
+        annotation_sources: Optional[List[dict]] = None,
         fov_dir: str = "",
         fov_glob: str = "*.ome.tiff",
+        fov_container: Optional[str] = None,
     ):
         self.mode = mode  # "folder" | "ome-tiff"
         self.base = base.strip("/")
-        self.mask_dir = mask_dir.strip("/") if mask_dir else None
-        self.mask_glob = mask_glob
-        self.annotation_dir = annotation_dir.strip("/") if annotation_dir else None
-        self.annotation_glob = annotation_glob
+        self.mask_sources = list(mask_sources or [])
+        self.annotation_sources = list(annotation_sources or [])
         self.fov_dir = fov_dir.strip("/")
         self.fov_glob = fov_glob
+        # None → each FOV is a directory of channel TIFFs; "zip" → each FOV is a
+        # <FOV>.zip archive of channel TIFFs (read per-member over HTTP ranges).
+        self.fov_container = fov_container
 
 
 def _layout_from_descriptor(descriptor: Dict[str, object]) -> BIALayout:
     mode = str(descriptor.get("mode", "folder"))
+    mask_sources = _normalise_sources(descriptor, "masks", "mask_dir", "mask_glob", "mask_name")
+    annotation_sources = _normalise_sources(
+        descriptor, "annotations", "annotation_dir", "annotation_glob", "annotation_name"
+    )
     if mode == "ome-tiff":
         fov_glob = str(descriptor.get("fov_glob", "*.ome.tiff"))
         fov_dir = os.path.dirname(fov_glob)
@@ -258,18 +324,16 @@ def _layout_from_descriptor(descriptor: Dict[str, object]) -> BIALayout:
             "ome-tiff",
             fov_dir=fov_dir,
             fov_glob=pattern,
-            mask_dir=descriptor.get("mask_dir"),
-            mask_glob=str(descriptor.get("mask_glob", "{fov}_*")),
-            annotation_dir=descriptor.get("annotation_dir"),
-            annotation_glob=str(descriptor.get("annotation_glob", "{fov}_*")),
+            mask_sources=mask_sources,
+            annotation_sources=annotation_sources,
         )
+    container = descriptor.get("fov_container")
     return BIALayout(
         "folder",
         base=str(descriptor.get("base", "")),
-        mask_dir=descriptor.get("mask_dir"),
-        mask_glob=str(descriptor.get("mask_glob", "{fov}_*")),
-        annotation_dir=descriptor.get("annotation_dir"),
-        annotation_glob=str(descriptor.get("annotation_glob", "{fov}_*")),
+        mask_sources=mask_sources,
+        annotation_sources=annotation_sources,
+        fov_container=str(container) if container else None,
     )
 
 
@@ -292,6 +356,11 @@ def _auto_detect_layout(index: BIAStudyIndex, max_depth: int = 4) -> BIALayout:
 
         if any(_has_suffix(f, OME_SUFFIXES) for f in files):
             return BIALayout("ome-tiff", fov_dir=rel, fov_glob="*.ome.tif*")
+
+        # zip-container FOVs: a directory whose files are predominantly .zip
+        zips = [f for f in files if f.lower().endswith(".zip")]
+        if zips and len(zips) >= max(1, len(files) // 2):
+            return BIALayout("folder", base=rel, fov_container="zip")
 
         # folder-per-FOV: every sampled subdir holds at least one *plain* TIFF
         # (a lone .ome.tif(f) marks an OME FOV file, handled by the branch above).
@@ -351,6 +420,79 @@ def _download(url: str, dest: Path) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# Zip-container FOVs (per-member HTTP byte-range reads)
+# ---------------------------------------------------------------------------
+def _open_zip(zip_url: str):
+    """Open a remote ZIP over an fsspec HTTP handle.
+
+    ``zipfile.ZipFile`` reads the central directory (and later, any single member)
+    via byte-range requests, so nothing beyond the requested bytes is downloaded.
+    Returns ``(ZipFile, handle)``; close both when done.
+    """
+    import zipfile
+
+    handle = _open_remote(zip_url)
+    try:
+        return zipfile.ZipFile(handle), handle
+    except Exception:
+        try:
+            handle.close()
+        except Exception:
+            pass
+        raise
+
+
+def _zip_members(zip_url: str) -> Dict[str, str]:
+    """Map ``channel_stem -> member`` for top-level ``*.tif(f)`` members of a zip."""
+    zf, handle = _open_zip(zip_url)
+    try:
+        mapping: Dict[str, str] = {}
+        for member in zf.namelist():
+            if member.endswith("/") or "/" in member.strip("/"):
+                continue  # only top-level files
+            if _has_suffix(member, TIFF_SUFFIXES):
+                mapping[os.path.splitext(os.path.basename(member))[0]] = member
+        return mapping
+    finally:
+        zf.close()
+        try:
+            handle.close()
+        except Exception:
+            pass
+
+
+def _extract_member(zip_url: str, member: str, dest: Path) -> Path:
+    """Range-read one *member* out of the remote zip and write it to *dest* once."""
+    dest = Path(dest)
+    if dest.exists() and dest.stat().st_size > 0:
+        return dest
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    zf, handle = _open_zip(zip_url)
+    fd, tmp_name = tempfile.mkstemp(dir=str(dest.parent), suffix=".part")
+    tmp = Path(tmp_name)
+    try:
+        with zf.open(member) as src, os.fdopen(fd, "wb") as out:
+            while True:
+                chunk = src.read(1024 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+        os.replace(tmp, dest)
+    finally:
+        zf.close()
+        try:
+            handle.close()
+        except Exception:
+            pass
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+    return dest
+
+
+# ---------------------------------------------------------------------------
 # Data source
 # ---------------------------------------------------------------------------
 class BIADataSource:
@@ -368,6 +510,7 @@ class BIADataSource:
         *,
         cache_dir: str,
         descriptor: Optional[Dict[str, object]] = None,
+        max_download_bytes: Optional[int] = None,
     ):
         self.index = BIAStudyIndex.from_source(source)
         self.cache_dir = Path(cache_dir)
@@ -377,6 +520,11 @@ class BIADataSource:
             else _auto_detect_layout(self.index)
         )
         self.fov_mode = self.layout.mode
+        # Guard against silently downloading a huge non-pyramidal OME-TIFF via the
+        # cache fallback. Pyramidal files stream regardless of size and bypass this.
+        self.max_download_bytes = (
+            MAX_OME_CACHE_BYTES if max_download_bytes is None else int(max_download_bytes)
+        )
 
         self._channel_root = self.cache_dir / "channels"   # mirrors <fov>/<channel>.tiff
         self._ome_root = self.cache_dir / "ome"
@@ -385,8 +533,21 @@ class BIADataSource:
 
         self._fov_names: Optional[List[str]] = None
         self._channels_cache: Dict[str, Dict[str, str]] = {}
-        self._mask_index: Optional[List[str]] = None
-        self._annotation_index: Optional[List[str]] = None
+        self._dir_files: Dict[str, List[str]] = {}  # remote dir -> tiff file names
+        self._zip_members_cache: Dict[str, Dict[str, str]] = {}  # fov -> {channel: member}
+
+    @property
+    def _is_zip(self) -> bool:
+        return self.layout.mode == "folder" and self.layout.fov_container == "zip"
+
+    def _zip_url(self, fov: str) -> str:
+        rel = _urljoin(self.layout.base, f"{fov}.zip") if self.layout.base else f"{fov}.zip"
+        return self.index.url_for(rel)
+
+    def _zip_channel_map(self, fov: str) -> Dict[str, str]:
+        if fov not in self._zip_members_cache:
+            self._zip_members_cache[fov] = _zip_members(self._zip_url(fov))
+        return self._zip_members_cache[fov]
 
     # -- discovery ----------------------------------------------------------
     def list_fovs(self) -> List[str]:
@@ -405,6 +566,11 @@ class BIADataSource:
                 else:
                     names.append(os.path.splitext(name)[0])
             self._fov_names = sorted(names)
+        elif self._is_zip:
+            self._fov_names = sorted(
+                f[:-4] for f in self.index.list_files(self.layout.base)
+                if f.lower().endswith(".zip")
+            )
         else:
             self._fov_names = sorted(self.index.list_subdirs(self.layout.base))
         if not self._fov_names:
@@ -436,20 +602,45 @@ class BIADataSource:
             if _is_streamable(url):
                 logger.info("[BIA] streaming OME-TIFF FOV %s", fov)
                 return OMEFovWrapper(url, ds_factor=ds_factor, opener=_open_remote)
+            # Non-pyramidal: the only way to serve it is to cache the whole file.
+            size = _remote_size(url)
+            if size is not None and size > self.max_download_bytes:
+                raise ValueError(
+                    f"[BIA] FOV '{fov}' is a {size / 1e9:.1f} GB non-pyramidal OME-TIFF. "
+                    "UELer streams pyramidal images only; serving this would download the "
+                    "entire file. Use a pyramidal / OME-Zarr copy, download it locally and "
+                    "open it with run_viewer(...), or raise the ceiling via "
+                    "run_viewer_bia(..., max_download_bytes=<bytes>)."
+                )
+            if size is None:
+                logger.warning(
+                    "[BIA] FOV '%s' size is unknown; caching may download a large file.", fov
+                )
             logger.info("[BIA] caching OME-TIFF FOV %s (non-pyramidal)", fov)
             local = _download(url, self._ome_root / f"{fov}{self._ome_suffix(url)}")
             return OMEFovWrapper(str(local), ds_factor=ds_factor)
+        if self._is_zip:
+            return {name: None for name in self._zip_channel_map(fov)}
         return {name: None for name in self._channels_for(fov)}
 
     def load_channel(self, fov: str, channel: str, channel_max_values, compute_stats: bool = True):
-        """Cache one folder-mode channel file and read it via the local loader."""
-        channels = self._channels_for(fov)
-        url = channels.get(channel)
-        if url is None:
-            logger.warning("[BIA] channel '%s' not found for FOV '%s'", channel, fov)
-            return None
-        suffix = os.path.splitext(url)[1] or ".tiff"
-        _download(url, self._channel_root / fov / f"{channel}{suffix}")
+        """Fetch one folder-mode channel (from a plain file or a zip member) and
+        read it via the unchanged local loader."""
+        if self._is_zip:
+            member = self._zip_channel_map(fov).get(channel)
+            if member is None:
+                logger.warning("[BIA] channel '%s' not found in zip for FOV '%s'", channel, fov)
+                return None
+            ext = os.path.splitext(member)[1] or ".tiff"
+            _extract_member(self._zip_url(fov), member, self._channel_root / fov / f"{channel}{ext}")
+        else:
+            channels = self._channels_for(fov)
+            url = channels.get(channel)
+            if url is None:
+                logger.warning("[BIA] channel '%s' not found for FOV '%s'", channel, fov)
+                return None
+            suffix = os.path.splitext(url)[1] or ".tiff"
+            _download(url, self._channel_root / fov / f"{channel}{suffix}")
         return load_one_channel_fov(
             fov,
             str(self._channel_root),
@@ -479,11 +670,11 @@ class BIADataSource:
     # -- masks / annotations ------------------------------------------------
     @property
     def has_masks(self) -> bool:
-        return self.layout.mask_dir is not None and bool(self._mask_files())
+        return any(self._source_has_content(s) for s in self.layout.mask_sources)
 
     @property
     def has_annotations(self) -> bool:
-        return self.layout.annotation_dir is not None and bool(self._annotation_files())
+        return any(self._source_has_content(s) for s in self.layout.annotation_sources)
 
     @property
     def masks_folder(self) -> str:
@@ -493,47 +684,70 @@ class BIADataSource:
     def annotations_folder(self) -> str:
         return str(self._annotations_dir)
 
-    def _mask_files(self) -> List[str]:
-        if self._mask_index is None:
-            if self.layout.mask_dir is None:
-                self._mask_index = []
-            else:
-                try:
-                    self._mask_index = [
-                        f for f in self.index.list_files(self.layout.mask_dir)
-                        if _has_suffix(f, TIFF_SUFFIXES)
-                    ]
-                except Exception:
-                    self._mask_index = []
-        return self._mask_index
+    def _source_files(self, source: dict) -> List[str]:
+        """TIFF file names in a flat mask/annotation source directory (cached)."""
+        directory = source["dir"]
+        if directory not in self._dir_files:
+            try:
+                self._dir_files[directory] = [
+                    f for f in self.index.list_files(directory)
+                    if _has_suffix(f, TIFF_SUFFIXES)
+                ]
+            except Exception:
+                self._dir_files[directory] = []
+        return self._dir_files[directory]
 
-    def _annotation_files(self) -> List[str]:
-        if self._annotation_index is None:
-            if self.layout.annotation_dir is None:
-                self._annotation_index = []
-            else:
-                try:
-                    self._annotation_index = [
-                        f for f in self.index.list_files(self.layout.annotation_dir)
-                        if _has_suffix(f, TIFF_SUFFIXES)
-                    ]
-                except Exception:
-                    self._annotation_index = []
-        return self._annotation_index
+    def _source_has_content(self, source: dict) -> bool:
+        if source.get("per_fov"):
+            try:
+                return bool(self.index.list_subdirs(source["dir"]))
+            except Exception:
+                return False
+        return bool(self._source_files(source))
+
+    def _source_fov_files(self, source: dict, fov: str) -> Tuple[str, List[str]]:
+        """Return ``(rel_dir, tiff_filenames)`` for this source and FOV.
+
+        Flat sources read from ``<dir>/``; per-FOV sources from ``<dir>/<fov>/``.
+        """
+        if source.get("per_fov"):
+            rel_dir = _urljoin(source["dir"], fov)
+            try:
+                files = [f for f in self.index.list_files(rel_dir) if _has_suffix(f, TIFF_SUFFIXES)]
+            except Exception:
+                files = []
+            return rel_dir, files
+        return source["dir"], self._source_files(source)
 
     def prefetch_masks(self, fov: str) -> None:
-        self._prefetch(fov, self.layout.mask_dir, self.layout.mask_glob,
-                       self._mask_files(), self._masks_dir)
+        self._prefetch(fov, self.layout.mask_sources, self._masks_dir)
 
     def prefetch_annotations(self, fov: str) -> None:
-        self._prefetch(fov, self.layout.annotation_dir, self.layout.annotation_glob,
-                       self._annotation_files(), self._annotations_dir)
+        self._prefetch(fov, self.layout.annotation_sources, self._annotations_dir)
 
-    def _prefetch(self, fov, remote_dir, glob_tmpl, files, dest_dir):
-        if remote_dir is None:
-            return
-        pattern = glob_tmpl.format(fov=fov)
-        for fname in files:
-            if fnmatch.fnmatch(fname, pattern):
-                rel = _urljoin(remote_dir, fname)
-                _download(self.index.url_for(rel), Path(dest_dir) / fname)
+    def _prefetch(self, fov: str, sources: List[dict], dest_dir: Path) -> None:
+        """Download the FOV's raster files into a flat local dir, renaming to
+        ``<fov>_<label>.tiff`` so the local loaders derive a clean mask label.
+
+        * per-FOV source (``<dir>/<fov>/*.tiff``): label = file stem.
+        * named flat source: label = the source ``name``.
+        * unnamed flat source: original filename (label = its ``<fov>_`` suffix).
+        """
+        for source in sources:
+            pattern = source["match"].format(fov=fov)
+            rel_dir, files = self._source_fov_files(source, fov)
+            per_fov = bool(source.get("per_fov"))
+            for fname in files:
+                if not fnmatch.fnmatch(fname, pattern):
+                    continue
+                ext = os.path.splitext(fname)[1] or ".tiff"
+                if per_fov:
+                    stem = os.path.splitext(fname)[0]
+                    label = f"{source['name']}_{stem}" if source["name"] else stem
+                    local_name = f"{fov}_{label}{ext}"
+                elif source["name"]:
+                    local_name = f"{fov}_{source['name']}{ext}"
+                else:
+                    local_name = fname
+                rel = _urljoin(rel_dir, fname)
+                _download(self.index.url_for(rel), Path(dest_dir) / local_name)

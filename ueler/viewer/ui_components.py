@@ -356,7 +356,6 @@ def display_ui(viewer):
     top_part_widgets = VBox(
         [
             viewer.ui_component.image_selector,
-            viewer.ui_component.lasso_select_toggle,
             viewer.ui_component.map_controls_box,
             control_panel_stack,
             VBox([viewer.ui_component.advanced_settings_accordion]),
@@ -374,8 +373,14 @@ def display_ui(viewer):
         layout=Layout(width='350px', overflow_x='hidden', overflow_y='auto', gap='10px')
     )
 
+    # Lasso Select lives at the top of the middle (viewer) panel so it reads
+    # as a control that acts on the image, not a stray left-panel button (#111).
+    lasso_toolbar = HBox(
+        [viewer.ui_component.lasso_select_toggle],
+        layout=Layout(justify_content='flex-start', padding='0 0 4px 0'),
+    )
     center_area = VBox(
-        [viewer.image_output, viewer.grid_output],
+        [lasso_toolbar, viewer.image_output, viewer.grid_output],
         layout=Layout()
     )
 

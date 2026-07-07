@@ -95,11 +95,22 @@ viewer = run_viewer_bia(
 ```
 Because BIA studies have no standard folder layout, a small JSON **descriptor** (a dict or a path
 to a `.json` file) maps the study files onto FOVs / channels / masks; when omitted, UELer attempts
-to auto-detect the folder-per-FOV or OME-TIFF-per-FOV layouts. Pyramidal OME-TIFFs are streamed via
-HTTP byte-range requests; other files (e.g. single-resolution MIBI TIFFs) are downloaded once into a
-local cache. A per-study **workspace** at `~/.ueler/bia/<accession>/` (override with `local_dir=`)
-holds your persistent `.UELer` work (ROIs, checkpoints, palettes) plus a disposable `cache/` of
-downloaded images.
+to auto-detect the folder-per-FOV, OME-TIFF-per-FOV, or zip-container layouts. The descriptor is
+flexible enough for the variation seen across real studies:
+- **Masks** accept either a single `mask_dir`/`mask_glob`, or a `masks` list of sources — each with
+  an optional `name` (renames masks named `<fov>.tiff` to a clean label) or `per_fov: true` (masks
+  stored in a per-FOV subfolder `<dir>/<fov>/*.tiff`). `annotations` uses the same shape.
+- **Zipped FOVs**: set `"fov_container": "zip"` when each FOV is a `<FOV>.zip` of channel TIFFs —
+  UELer reads a single channel straight out of the remote zip via an HTTP byte-range request rather
+  than downloading the whole archive.
+
+Pyramidal OME-TIFFs and single zip members are streamed via HTTP byte-range requests; other files
+(e.g. single-resolution MIBI TIFFs) are downloaded once into a local cache. A per-study
+**workspace** at `~/.ueler/bia/<accession>/` (override with `local_dir=`) holds your persistent
+`.UELer` work (ROIs, checkpoints, palettes) plus a disposable `cache/` of downloaded images.
+
+Examples for three real studies — `S-BIAD2557` (single-dir masks), `S-BIAD2864` (two named mask
+folders), and `S-BIAD2708` (zipped FOVs + per-FOV masks) — are in `script/run_ueler_BIA.ipynb`.
 
 ## User interface
 ![GUI_preview](/doc/GUI_preview.png)
@@ -126,6 +137,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### **UELer v0.4.0 Summary**
+- Moved the **Lasso Select** toggle to the top of the image viewer (#111): it previously sat in the second row of the left control panel; it now lives at the top of the middle (viewer) panel, so it's clearer that it selects cell masks in the image. Behavior is unchanged.
 - Stream/cache-load images from the BioImage Archive (#110): a new `run_viewer_bia("S-BIAD….", descriptor=…)` entry point lets you explore a public BIA study without downloading the whole dataset. Point it at an accession id (resolved via the BioStudies REST API) or a direct base URL; a small JSON descriptor maps the study's files onto FOVs/channels/masks (with best-effort auto-detection of folder-per-FOV and OME-TIFF-per-FOV layouts). Pyramidal OME-TIFFs stream over HTTP byte-range requests; other files are downloaded once into a local cache. Your ROIs, checkpoints, and palettes persist in a per-study workspace under `~/.ueler/bia/<accession>/`. See "Streaming from the BioImage Archive (BIA)" above.
 - Heatmap remembers its scale (figure size) after updating the tree cut (#109): previously, dragging the dendrogram cutoff rebuilt the heatmap at the default size, discarding the size the user had set with the ipympl resize handle (the triangle at the bottom-right corner). The plugin now captures the current `fig.get_size_inches()` before a cutoff-triggered rebuild and rebuilds the clustermap at that size, so the enlarged plot stays enlarged across re-clustering. A fresh **Plot** still uses the default size.
 - Fixed the heatmap not appearing (#108): the Heatmap plugin computed the plot (the log even said "render complete") but nothing showed — even with the interactive `ipympl` (`%matplotlib widget`) backend, which renders the Chart histogram and galleries fine. Root cause: the heatmap built its `sns.clustermap` figure **inside** the `with <output>:` display context and then called `plt.show()`, so under interactive mode ipympl emitted the canvas twice (once on creation, once on show) → a blank/duplicate canvas. The Chart histogram is reliable because it builds the figure **outside** its Output and emits it once. The heatmap now does the same: it builds with `plt.ioff()` outside the Output, then emits the interactive canvas exactly once with `display(fig.canvas)` into a fresh `Output` swapped into the panel — preserving all interactivity (cell click, dendrogram-cutoff drag, color-axis select) and the footer docking for the wide layout. The layout-switch flash-then-blank was also fixed (removed a double render on toggle; the reparented footer canvas is now force-repainted after it becomes visible). No static fallback — the live matplotlib canvas is kept.
