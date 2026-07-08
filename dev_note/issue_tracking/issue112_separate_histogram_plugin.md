@@ -109,6 +109,34 @@ cutoff-span layout test + a full-stack `BokehModel` render smoke test (each skip
 dependency is missing). Full suite: failure/error set identical to baseline. The live
 brush/tap interaction is verified manually in the notebook (not headlessly testable).
 
+### BokehJS auto-load (VSCode)
+The `BokehModel` only rendered once BokehJS had been loaded into the notebook frontend (the
+`output_notebook()` banner). JupyterLab's `jupyter_bokeh` extension loads it automatically;
+VSCode's notebook frontend does not, so the widget stayed blank until a cell called
+`output_notebook()`. Fixed by loading it from the plugin: guarded, idempotent
+`_ensure_bokehjs()` calls `bokeh.io.output_notebook(hide_banner=True)` once — from
+`__init__` (a reliable display context during the `run_viewer` cell) with a backstop call in
+`_render`. It no-ops when `get_ipython() is None` (unit tests / headless). Regression test
+covers the no-op guard.
+
+### Scroll fix
+Stacking several histograms overflowed the plugin with no scrollbar. The scroll is applied
+to the **BokehModel widget itself** in `_render`: `_scroll_height()` returns a fixed height
+(`_MAX_PLOT_HEIGHT`, 560px) once the estimated stack exceeds it, set together with
+`overflow="hidden auto"` on `self._bokeh_model.layout`; a short stack is left unconstrained.
+
+Two dead ends (both verified live in the notebook before landing the fix):
+1. `overflow_y="auto"` / `overflow_x="hidden"` — **ipywidgets 8 removed the per-axis
+   `overflow_x`/`overflow_y` Layout traits**, so those kwargs are silently dropped (no CSS).
+2. `max_height`+`overflow="hidden auto"` on the parent `plot_section` VBox — does **not**
+   clip the Bokeh column; Bokeh sizes the column on its own DOM node, so the outer VBox never
+   sees overflow. The scroll must live on the `BokehModel` widget.
+
+Regression tests: `_scroll_height` threshold (headless) + a bokeh-stack test asserting a tall
+stack sets the model's `height`/`overflow` and a short stack does not. (`ui_components.py`
+still uses the removed `overflow_x`/`overflow_y` traits in ~10 places — a separate latent
+issue, not addressed here.)
+
 ### Brush-activation fix
 Brush mode initially only *added* a `BoxSelectTool`; Bokeh's default active drag (pan)
 still handled click-drag, so no range could be selected. Fixed by setting

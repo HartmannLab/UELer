@@ -356,6 +356,35 @@ class TestHistogramMultiChannel(unittest.TestCase):
         self.hist.plot_histograms(None)
         self.assertEqual(self.hist._channels, [])
 
+    def test_ensure_bokehjs_is_noop_outside_a_kernel(self):
+        """Preloading BokehJS must not raise or mark loaded when there's no IPython kernel."""
+        from ueler.viewer.plugin import histogram as h
+
+        h._bokehjs_loaded = False
+        h._ensure_bokehjs()  # unit tests have no interactive kernel → no-op
+        self.assertFalse(h._bokehjs_loaded)
+
+    def test_scroll_height_kicks_in_only_when_stack_is_tall(self):
+        """`_scroll_height` returns a fixed px height once the stack exceeds the cap.
+
+        The scroll is applied to the BokehModel in `_render`; ipywidgets 8 removed
+        the per-axis overflow traits, and a `max-height` on the parent VBox does not
+        clip the Bokeh column, so the height must live on the model itself (#112 reply 2).
+        """
+        from ueler.viewer.plugin.histogram import (
+            _FIGURE_HEIGHT, _MAX_PLOT_HEIGHT, _ROW_OVERHEAD,
+        )
+
+        per = _FIGURE_HEIGHT + _ROW_OVERHEAD
+        few = max(1, _MAX_PLOT_HEIGHT // per)          # fits within the cap
+        many = (_MAX_PLOT_HEIGHT // per) + 2           # exceeds the cap
+
+        self.hist._channels = ["c%d" % i for i in range(few)]
+        self.assertIsNone(self.hist._scroll_height())
+
+        self.hist._channels = ["c%d" % i for i in range(many)]
+        self.assertEqual(self.hist._scroll_height(), f"{_MAX_PLOT_HEIGHT}px")
+
 
 class TestHistogramBokehLayout(unittest.TestCase):
     """Build the Bokeh layout (bokeh only; no jupyter_bokeh needed)."""
@@ -437,6 +466,31 @@ class TestHistogramRendering(unittest.TestCase):
         self.hist.selected_indices.value = {1}  # intensity 5.0 (range is 1..9)
         self.hist._render()
         self.assertEqual(len(self.hist._plot_host.children), 1)
+
+    def test_tall_stack_applies_scroll_to_the_model(self):
+        """A tall histogram stack sets a fixed height + overflow on the BokehModel (#112 reply 2)."""
+        from ueler.viewer.plugin.histogram import _MAX_PLOT_HEIGHT
+
+        # Enough numeric channels to exceed the scroll cap.
+        table = pd.DataFrame(
+            {
+                "fov": ["f1", "f1", "f1"],
+                "label": [1, 2, 3],
+                **{f"m{i}": [1.0, 2.0, 3.0] for i in range(5)},
+            }
+        )
+        viewer = _make_viewer(table)
+        hist = _make_histogram(viewer, patch_render=False)
+        hist.ui_component.channel_selector.value = tuple(f"m{i}" for i in range(5))
+        hist.plot_histograms(None)
+        self.assertEqual(hist._bokeh_model.layout.height, f"{_MAX_PLOT_HEIGHT}px")
+        self.assertIn("auto", hist._bokeh_model.layout.overflow)
+
+    def test_short_stack_leaves_model_unconstrained(self):
+        """A single histogram renders at natural height (no scroll height on the model)."""
+        self.hist.ui_component.channel_selector.value = ("intensity",)
+        self.hist.plot_histograms(None)
+        self.assertIsNone(self.hist._bokeh_model.layout.height)
 
 
 if __name__ == "__main__":

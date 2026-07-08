@@ -84,6 +84,32 @@ from .plugin_base import PluginBase
 
 _logger = logging.getLogger(__name__)
 
+# BokehJS must be present in the notebook frontend for a `BokehModel` to render.
+# JupyterLab's jupyter_bokeh extension loads it automatically, but VSCode's
+# notebook frontend does not — there the widget stays blank until something calls
+# `output_notebook()`. We load it once, up front, so the histogram renders without
+# the user having to run a priming cell (#112 reply). Guarded so it is a no-op
+# outside an interactive kernel (unit tests) and loads at most once per session.
+_bokehjs_loaded = False
+
+
+def _ensure_bokehjs() -> None:
+    global _bokehjs_loaded
+    if _bokehjs_loaded or not (_BOKEH_OK and _JBOKEH_OK):
+        return
+    try:
+        from IPython import get_ipython
+
+        if get_ipython() is None:
+            return  # not in an interactive kernel (e.g. unit tests / headless)
+        from bokeh.io import output_notebook
+
+        output_notebook(hide_banner=True)
+        _bokehjs_loaded = True
+    except Exception:  # pragma: no cover - defensive; never block plugin load
+        _logger.debug("Could not preload BokehJS via output_notebook()", exc_info=True)
+
+
 _SELECTION_NOTICE = (
     "<i>No histograms yet. Choose one or more channels, then click <b>Plot</b>.</i>"
 )
@@ -95,6 +121,8 @@ _BOKEH_MISSING_NOTICE = (
 _BASE_COLOR = "#1f77b4"        # matplotlib tab:blue
 _OVERLAY_COLOR = "#ff7f0e"     # matplotlib tab:orange
 _FIGURE_HEIGHT = 220
+_ROW_OVERHEAD = 40             # approx. per-figure title + axis label DOM height
+_MAX_PLOT_HEIGHT = 560         # scroll the stack once it exceeds this many px
 
 
 def bin_counts(values, edges) -> np.ndarray:
@@ -143,6 +171,9 @@ class HistogramDisplay(PluginBase):
         self._wire_events()
         self._build_layout()
         self.setup_widget_observers()
+        # Load BokehJS while the viewer cell is executing (a reliable display
+        # context), so the histogram renders on first Plot even in VSCode.
+        _ensure_bokehjs()
 
     # ------------------------------------------------------------------
     # UI wiring
@@ -212,12 +243,19 @@ class HistogramDisplay(PluginBase):
             layout=Layout(width="100%", gap="10px"),
         )
         self.controls_section = VBox(children=[controls], layout=Layout(width="100%", gap="12px"))
+        # Bound the plot area and scroll it, so stacking several histograms shows
+        # an internal scrollbar instead of overflowing the plugin (#112 reply 2).
+        # Controls stay fixed above the scroll region.
+        # The scroll region is applied to the BokehModel widget in _render (not
+        # here): Bokeh manages the column's height on its own DOM node, so a
+        # max-height on this outer VBox never sees the overflow. See _render /
+        # _scroll_height (#112 reply 2).
         self.plot_section = VBox(
-            children=[self._plot_host], layout=Layout(width="100%", flex="1 1 auto")
+            children=[self._plot_host], layout=Layout(width="100%")
         )
         self.ui = VBox(
             children=[self.controls_section, self.plot_section],
-            layout=Layout(width="100%", max_height="700px", gap="12px"),
+            layout=Layout(width="100%", gap="12px"),
         )
 
     # ------------------------------------------------------------------
@@ -256,13 +294,27 @@ class HistogramDisplay(PluginBase):
         if not (_BOKEH_OK and _JBOKEH_OK):
             self._plot_host.children = [HTML(_BOKEH_MISSING_NOTICE)]
             return
+        _ensure_bokehjs()  # backstop (idempotent) in case init couldn't load it
 
         layout, self._sources, self._spans = self._build_figures()
         self._bokeh_model = BokehModel(layout)
+        # Scroll the stack once it gets tall. The scroll must live on the
+        # BokehModel widget itself — Bokeh sizes the column on its own DOM node,
+        # so a max-height on the parent VBox never triggers overflow (#112 reply 2).
+        scroll_h = self._scroll_height()
+        if scroll_h is not None:
+            self._bokeh_model.layout.height = scroll_h
+            self._bokeh_model.layout.overflow = "hidden auto"
         self._plot_host.children = [self._bokeh_model]
         # Reflect any existing selection / cutoff on the freshly built figures.
         self._refresh_overlays()
         self._refresh_cutoff_spans()
+
+    def _scroll_height(self):
+        """Return a fixed pixel height ('<N>px') once the stack exceeds the cap,
+        else ``None`` (few histograms render at natural height, no scrollbar)."""
+        total = len(self._channels) * (_FIGURE_HEIGHT + _ROW_OVERHEAD)
+        return f"{_MAX_PLOT_HEIGHT}px" if total > _MAX_PLOT_HEIGHT else None
 
     def _build_figures(self):
         """Build per-channel Bokeh figures. Returns ``(layout, sources, spans)``.
