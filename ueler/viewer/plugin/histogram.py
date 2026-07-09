@@ -193,11 +193,27 @@ class HistogramDisplay(PluginBase):
         self.ui_component.clear_selection_button.on_click(
             lambda _btn: self.clear_selection()
         )
+        self.ui_component.channel_selector_bundle.load_button.on_click(
+            lambda _btn: _chart_common.apply_marker_set_to_selector(
+                self.ui_component.channel_selector_bundle, self.main_viewer
+            )
+        )
+
+    def on_marker_sets_changed(self):
+        """Keep the marker-set dropdown in sync with the left panel (#113)."""
+        _chart_common.refresh_marker_set_options(
+            self.ui_component.channel_selector_bundle, self.main_viewer
+        )
+
+    def after_all_plugins_loaded(self):
+        super().after_all_plugins_loaded()
+        # Marker sets are restored from widget_states.json after plugin __init__,
+        # so populate the dropdown once everything is loaded.
+        self.on_marker_sets_changed()
 
     def _build_layout(self) -> None:
         plot_controls = VBox(
             children=[
-                self.ui_component.channel_selector,
                 HBox(
                     children=[
                         self.ui_component.bin_slider,
@@ -239,7 +255,11 @@ class HistogramDisplay(PluginBase):
         self._plot_tabs.set_title(2, "Linked plugins")
 
         controls = VBox(
-            children=[self.ui_component.plot_button, self._plot_tabs],
+            children=[
+                self.ui_component.channel_selector_bundle.box,
+                self.ui_component.plot_button,
+                self._plot_tabs,
+            ],
             layout=Layout(width="100%", gap="10px"),
         )
         self.controls_section = VBox(children=[controls], layout=Layout(width="100%", gap="12px"))
@@ -585,17 +605,11 @@ class HistogramDisplay(PluginBase):
 
 class UiComponent:
     def __init__(self, viewer):
-        numeric_columns = [
-            col
-            for col in viewer.cell_table.columns
-            if pd.api.types.is_numeric_dtype(viewer.cell_table[col])
-        ]
-        self.channel_selector = SelectMultiple(
-            options=numeric_columns,
-            description="Channels:",
-            style={"description_width": "auto"},
-            layout=Layout(width="100%", height="140px"),
-        )
+        # Left-panel-consistent channel picker with marker-set loading (#113).
+        # ``channel_selector`` stays as an alias to the bundle's TagsInput so
+        # ``plot_histograms`` (which reads ``channel_selector.value``) is unchanged.
+        self.channel_selector_bundle = _chart_common.build_channel_selector(viewer)
+        self.channel_selector = self.channel_selector_bundle.tags
         self.plot_button = Button(
             description="Plot",
             button_style="",

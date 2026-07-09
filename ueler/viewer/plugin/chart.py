@@ -14,6 +14,7 @@ import pandas as pd
 
 import ipywidgets as _ipywidgets
 
+Box = getattr(_ipywidgets, "Box")
 Button = getattr(_ipywidgets, "Button")
 Checkbox = getattr(_ipywidgets, "Checkbox")
 Dropdown = getattr(_ipywidgets, "Dropdown")
@@ -55,6 +56,12 @@ class ChartDisplay(PluginBase):
         self.selected_indices: Observable = Observable(set())
 
         self._scatter_views: "OrderedDict[str, ScatterPlotWidget]" = OrderedDict()
+        # (x, y) channel pair per scatter id — used to lay out the triangular
+        # matrix (ScatterViewState does not expose x/y). (#113)
+        self._scatter_pairs: "OrderedDict[str, Tuple[str, str]]" = OrderedDict()
+        # Channels of the most recent "Plot all pairs" — anchors the triangular
+        # matrix so later single-pair plots append below it rather than resetting.
+        self._multipair_channels_last: list = []
         self._id_counter = itertools.count(1)
         self._observers_registered = False
 
@@ -102,6 +109,11 @@ class ChartDisplay(PluginBase):
     def _wire_events(self) -> None:
         self.ui_component.plot_button.on_click(self.plot_chart)
         self.ui_component.plot_pairs_button.on_click(self.plot_all_pairs)
+        self.ui_component.channel_selector_bundle.load_button.on_click(
+            lambda _btn: _chart_common.apply_marker_set_to_selector(
+                self.ui_component.channel_selector_bundle, self.main_viewer
+            )
+        )
         self.ui_component.trace_button.on_click(self.trace_cells)
         self.ui_component.point_size_slider.observe(
             self._on_point_size_change, names="value"
@@ -123,10 +135,27 @@ class ChartDisplay(PluginBase):
         )
 
     def _build_layout(self) -> None:
+        # Multi-pair selector is now the always-visible picker on top (#113).
         multipair_controls = VBox(
             children=[
-                self.ui_component.multipair_channels,
+                self.ui_component.channel_selector_bundle.box,
                 self.ui_component.plot_pairs_button,
+            ],
+            layout=Layout(width="100%", gap="8px"),
+        )
+
+        # Single-pair X/Y/Color selector moved into a tab (#113).
+        singlepair_controls = VBox(
+            children=[
+                HBox(
+                    children=[
+                        self.ui_component.x_axis_selector,
+                        self.ui_component.y_axis_selector,
+                        self.ui_component.color_selector,
+                    ],
+                    layout=Layout(gap="8px", align_items="center"),
+                ),
+                self.ui_component.plot_button,
             ],
             layout=Layout(width="100%", gap="8px"),
         )
@@ -177,29 +206,21 @@ class ChartDisplay(PluginBase):
         self._plot_tabs = Tab(
             children=[
                 scatter_controls,
-                multipair_controls,
+                singlepair_controls,
                 subset_controls,
                 trace_controls,
                 link_controls,
             ]
         )
         self._plot_tabs.set_title(0, "Scatter plot")
-        self._plot_tabs.set_title(1, "Multi-pair")
+        self._plot_tabs.set_title(1, "Single-pair")
         self._plot_tabs.set_title(2, "Subset")
         self._plot_tabs.set_title(3, "Trace")
         self._plot_tabs.set_title(4, "Linked plugins")
 
         chart_widgets = VBox(
             children=[
-                HBox(
-                    children=[
-                        self.ui_component.x_axis_selector,
-                        self.ui_component.y_axis_selector,
-                        self.ui_component.color_selector,
-                    ],
-                    layout=Layout(gap="8px", align_items="center"),
-                ),
-                self.ui_component.plot_button,
+                multipair_controls,
                 self._plot_tabs,
             ],
             layout=Layout(width="100%", gap="10px"),
@@ -259,6 +280,9 @@ class ChartDisplay(PluginBase):
         if len(channels) < 2:
             _logger.warning("Select at least two channels to plot all pairs.")
             return
+        # Anchor the triangular matrix on this channel set (#113).
+        self._multipair_channels_last = list(dict.fromkeys(channels))
+        channels = self._multipair_channels_last
         c_col = self.ui_component.color_selector.value
 
         required_columns = list(dict.fromkeys(channels + ([c_col] if c_col != "None" else [])))
@@ -301,6 +325,7 @@ class ChartDisplay(PluginBase):
         scatter.add_selection_listener(self._on_scatter_selection)
         scatter.add_hover_listener(self._on_scatter_hover)
         self._scatter_views[scatter_id] = scatter
+        self._scatter_pairs[scatter_id] = (x_col, y_col)
         self._update_scatter_controls(selected_id=scatter_id)
         return scatter_id
 
@@ -444,6 +469,12 @@ class ChartDisplay(PluginBase):
             view = next(iter(self._scatter_views.values()))
             self._plot_host.children = [view.widget()]
             return
+        grid = self._triangular_grid()
+        if grid is not None:
+            self._plot_host.children = [grid]
+            return
+        # Fallback: no active pairwise matrix (purely single-pair or manually
+        # added/removed views) — keep the previous 2-column compose grid.
         entries = [view.compose_entry() for view in self._scatter_views.values()]
         cols = min(2, len(entries))
         grid = compose(
@@ -454,6 +485,78 @@ class ChartDisplay(PluginBase):
             row_height=320,
         )
         self._plot_host.children = [grid]
+
+    def _triangular_grid(self):
+        """Lay the pairwise scatters out as an upper-triangular matrix (#113).
+
+        Built as a ``VBox`` of ``HBox`` rows (plain flexbox) rather than a
+        CSS-grid ``GridBox``: every row has exactly ``N-1`` equal-flex cells so
+        the columns line up, blank cells fill the lower triangle, and each cell
+        lets its scatter self-size (no fixed height, so axes are never clipped).
+
+        Returns the ``VBox`` when a full pairwise matrix for
+        ``self._multipair_channels_last`` is present — with any extra
+        (single-pair) views appended as new rows below it — or ``None`` when
+        there is no active matrix to anchor the layout (callers then fall back
+        to ``compose``).
+        """
+        channels = self._multipair_channels_last
+        if len(channels) < 2:
+            return None
+        matrix_pairs = list(itertools.combinations(channels, 2))
+        present = set(self._scatter_pairs.values())
+        # The matrix is only "active" while all of its pairs are still shown.
+        if not all(pair in present for pair in matrix_pairs):
+            return None
+
+        n = len(channels)
+        cols = n - 1
+        matrix_pair_set = set(matrix_pairs)
+        view_by_pair = {
+            self._scatter_pairs[sid]: view
+            for sid, view in self._scatter_views.items()
+        }
+
+        rows = []
+        # Matrix rows: row i has i leading blanks, then plots for (i, j), j>i.
+        for i in range(n - 1):
+            cells = [self._blank_cell() for _ in range(i)]
+            for j in range(i + 1, n):
+                cells.append(self._plot_cell(view_by_pair[(channels[i], channels[j])]))
+            rows.append(self._grid_row(cells))
+
+        # Extra views (e.g. single-pair plots added after the matrix): append as
+        # new full rows below, flowing left→right, padded with blanks to N-1.
+        extras = [
+            view
+            for sid, view in self._scatter_views.items()
+            if self._scatter_pairs.get(sid) not in matrix_pair_set
+        ]
+        for start in range(0, len(extras), cols):
+            chunk = extras[start:start + cols]
+            cells = [self._plot_cell(view) for view in chunk]
+            cells.extend(self._blank_cell() for _ in range(cols - len(chunk)))
+            rows.append(self._grid_row(cells))
+
+        return VBox(children=rows, layout=Layout(width="100%", gap="8px"))
+
+    @staticmethod
+    def _plot_cell(view) -> "Box":
+        return Box(
+            children=[view.widget()],
+            layout=Layout(flex="1 1 0%", min_width="0"),
+        )
+
+    @staticmethod
+    def _blank_cell() -> "Box":
+        return Box(children=[], layout=Layout(flex="1 1 0%", min_width="0"))
+
+    @staticmethod
+    def _grid_row(cells) -> "HBox":
+        return HBox(
+            children=cells,
+            layout=Layout(width="100%", gap="4px", align_items="stretch"),
+        )
 
     def _render_scatter_matplotlib(
         self, data: pd.DataFrame, x_col: str, y_col: str, c_col: Optional[str]
@@ -509,6 +612,7 @@ class ChartDisplay(PluginBase):
         if not selected_id or selected_id not in self._scatter_views:
             return
         scatter = self._scatter_views.pop(selected_id)
+        self._scatter_pairs.pop(selected_id, None)
         scatter.dispose()
         self._update_scatter_controls()
         self._render_scatter_area()
@@ -518,6 +622,8 @@ class ChartDisplay(PluginBase):
         for scatter in self._scatter_views.values():
             scatter.dispose()
         self._scatter_views.clear()
+        self._scatter_pairs.clear()
+        self._multipair_channels_last = []
         self._update_scatter_controls()
         self._render_scatter_area()
         self._sync_panel_location()
@@ -572,8 +678,16 @@ class ChartDisplay(PluginBase):
         self._place_sections_vertical()
         return None
 
+    def on_marker_sets_changed(self):
+        """Keep the marker-set dropdown in sync with the left panel (#113)."""
+        _chart_common.refresh_marker_set_options(
+            self.ui_component.channel_selector_bundle, self.main_viewer
+        )
+
     def after_all_plugins_loaded(self):
         super().after_all_plugins_loaded()
+        # Marker sets are restored from widget_states.json after plugin __init__.
+        self.on_marker_sets_changed()
         layout_changed = self._sync_panel_location()
         if (
             not layout_changed
@@ -657,13 +771,13 @@ class UiComponent:
             layout=Layout(width="120px"),
         )
 
-        # Multi-pair scatter: pick several channels, plot every pairwise combination.
-        self.multipair_channels = SelectMultiple(
-            options=[col for col in dropdown_options if col != "None"],
-            description="Channels:",
-            style={'description_width': 'auto'},
-            layout=Layout(width="100%", height="140px"),
-        )
+        # Multi-pair scatter: pick several channels, plot every pairwise
+        # combination. Uses the left-panel-consistent channel picker (with
+        # marker-set loading) shared with the histogram plugin (#113).
+        # ``multipair_channels`` stays as an alias to the bundle's TagsInput so
+        # ``plot_all_pairs`` (which reads ``multipair_channels.value``) is unchanged.
+        self.channel_selector_bundle = _chart_common.build_channel_selector(viewer)
+        self.multipair_channels = self.channel_selector_bundle.tags
         self.plot_pairs_button = Button(
             description="Plot all pairs",
             button_style="",

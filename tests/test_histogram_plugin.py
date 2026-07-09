@@ -386,6 +386,49 @@ class TestHistogramMultiChannel(unittest.TestCase):
         self.assertEqual(self.hist._scroll_height(), f"{_MAX_PLOT_HEIGHT}px")
 
 
+class TestHistogramChannelSelector(unittest.TestCase):
+    """Left-panel-consistent channel selector + marker-set loading (#113)."""
+
+    def setUp(self):
+        self.viewer = _make_viewer(_two_fov_table())
+        # A left-panel channel selector we can assert is NOT mutated by loading.
+        self.viewer.ui_component.channel_selector = SimpleNamespace(value=("untouched",))
+        self.viewer.marker_sets = {}
+        self.hist = _make_histogram(self.viewer)
+
+    def test_channel_selector_is_shared_bundle(self):
+        bundle = self.hist.ui_component.channel_selector_bundle
+        self.assertIs(self.hist.ui_component.channel_selector, bundle.tags)
+
+    def test_load_marker_set_populates_channels_locally(self):
+        self.viewer.marker_sets = {
+            "T cells": {"selected_channels": ["intensity", "area"]}
+        }
+        self.hist.on_marker_sets_changed()
+        bundle = self.hist.ui_component.channel_selector_bundle
+        bundle.marker_set_dropdown.value = "T cells"
+        from ueler.viewer.plugin import _chart_common
+
+        _chart_common.apply_marker_set_to_selector(bundle, self.viewer)
+        self.assertEqual(list(bundle.tags.value), ["intensity", "area"])
+        # Loading a set into the plugin must not disturb the left-panel selector.
+        self.assertEqual(self.viewer.ui_component.channel_selector.value, ("untouched",))
+
+    def test_load_marker_set_filters_unknown_channels(self):
+        self.viewer.marker_sets = {
+            "mixed": {"selected_channels": ["intensity", "does_not_exist", "fov"]}
+        }
+        self.hist.on_marker_sets_changed()
+        bundle = self.hist.ui_component.channel_selector_bundle
+        bundle.marker_set_dropdown.value = "mixed"
+        from ueler.viewer.plugin import _chart_common
+
+        _chart_common.apply_marker_set_to_selector(bundle, self.viewer)
+        # Only numeric cell-table columns survive; "fov" (object) and the absent
+        # channel are filtered out.
+        self.assertEqual(list(bundle.tags.value), ["intensity"])
+
+
 class TestHistogramBokehLayout(unittest.TestCase):
     """Build the Bokeh layout (bokeh only; no jupyter_bokeh needed)."""
 

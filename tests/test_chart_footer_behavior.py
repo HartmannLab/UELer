@@ -642,6 +642,60 @@ class MultiPairScatterTests(unittest.TestCase):
         chart.plot_all_pairs(None)
         self.assertEqual(len(chart._scatter_views), 0)
 
+    def test_multipair_uses_shared_channel_selector(self):
+        chart = self._make_chart(["a", "b", "c"])
+        bundle = chart.ui_component.channel_selector_bundle
+        self.assertIs(chart.ui_component.multipair_channels, bundle.tags)
+
+    @staticmethod
+    def _is_plot_cell(cell):
+        # A plot cell wraps a scatter widget; a blank (lower-triangle) cell is empty.
+        return len(getattr(cell, "children", ())) > 0
+
+    def test_plot_all_pairs_renders_triangular_rows(self):
+        chart = self._make_chart(["a", "b", "c"])
+        chart.ui_component.multipair_channels.value = ("a", "b", "c")
+        chart.plot_all_pairs(None)
+
+        grid = chart._plot_host.children[0]
+        rows = grid.children
+        # N-1 == 2 rows for 3 channels, each with N-1 == 2 cells.
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(all(len(row.children) == 2 for row in rows))
+        # Row 0 (channel a): both cells are plots (a,b) and (a,c).
+        self.assertEqual([self._is_plot_cell(c) for c in rows[0].children], [True, True])
+        # Row 1 (channel b): a leading blank, then the (b,c) plot.
+        self.assertEqual([self._is_plot_cell(c) for c in rows[1].children], [False, True])
+
+    def test_single_pair_after_matrix_goes_to_new_row(self):
+        chart = self._make_chart(["a", "b", "c", "d"])
+        chart.ui_component.multipair_channels.value = ("a", "b", "c")
+        chart.plot_all_pairs(None)  # 3-view triangular matrix (2 rows)
+
+        # Add a single-pair plot for a pair outside the matrix.
+        chart.ui_component.x_axis_selector.value = "a"
+        chart.ui_component.y_axis_selector.value = "d"
+        chart.ui_component.color_selector.value = "None"
+        chart.plot_chart(None)
+
+        grid = chart._plot_host.children[0]
+        rows = grid.children
+        # Matrix keeps its 2 rows; the extra single-pair view lands on a 3rd row.
+        self.assertEqual(len(rows), 3)
+        self.assertTrue(self._is_plot_cell(rows[2].children[0]))
+
+    def test_removing_matrix_view_falls_back_to_compose(self):
+        chart = self._make_chart(["a", "b", "c"])
+        chart.ui_component.multipair_channels.value = ("a", "b", "c")
+        chart.plot_all_pairs(None)
+        # Remove one matrix view → matrix no longer complete → compose fallback.
+        first_id = next(iter(chart._scatter_views))
+        chart.ui_component.scatter_set_selector.value = first_id
+        with patch("ueler.viewer.plugin.chart.compose") as mock_compose:
+            mock_compose.return_value = ("grid",)
+            chart._remove_selected_scatter(None)
+        self.assertTrue(mock_compose.called)
+
 
 class HeatmapFooterPersistenceTests(unittest.TestCase):
     def test_heatmap_survives_chart_refresh(self):
