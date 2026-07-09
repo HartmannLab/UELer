@@ -1,66 +1,149 @@
 # Get Started
 
-This page walks you through launching UELer for the first time.
+This page walks you through launching UELer for the first time — either instantly in your browser,
+or locally on your own data.
 
 ---
 
-## Prerequisites
+## Try It Instantly (no installation)
 
-Make sure you have completed [installation](installation.md) before proceeding.
+The fastest way to see UELer is on **Binder**. The demo notebook **streams a public
+[BioImage Archive](https://www.ebi.ac.uk/bioimage-archive/) study directly over the network**, so
+there is nothing to download and no data to configure — the viewer opens on a real multiplexed
+imaging dataset.
 
----
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/HartmannLab/UELer/main?urlpath=%2Fdoc%2Ftree%2Fscript%2Frun_ueler_binder.ipynb)
 
-## 1. Open the Notebook
+Click the badge, wait for the environment to build, then run all cells. The first field of view is
+fetched on demand — only the channels you open are streamed.
 
-1. Activate your environment:
-
-    ```shell
-    micromamba activate ark-analysis-ueler
-    ```
-
-2. Open your notebook environment (JupyterLab, Jupyter Notebook, or VS Code).
-3. Navigate to the cloned UELer repository and open:
-
-    ```
-    script/run_ueler.ipynb
-    ```
-
-4. Select the **ark-analysis-ueler** kernel for the notebook.
+!!! note "First launch can be slow"
+    Binder builds a fresh environment on first use, which may take a few minutes. Subsequent
+    launches are faster while the image is cached.
 
 ---
 
-## 2. Configure Your Data Paths
+## Run Locally
 
-The notebook requires you to set a few paths at the top. Edit the configuration cell:
+To work with your own data, run UELer inside a Jupyter notebook.
 
-```python
-base_folder = "/path/to/your/image_data"          # Required
-masks_folder = "/path/to/segmentation/output"     # Optional
-annotations_folder = "/path/to/annotations"        # Optional
-cell_table_path = "/path/to/cell_table.csv"       # Optional
+### Prerequisites
+
+Make sure you have completed [installation](installation.md) and activated the environment:
+
+```shell
+micromamba activate ark-analysis-ueler
 ```
 
-| Variable | Description | Required |
+### 1. Open the Notebook
+
+Open your notebook environment (JupyterLab, Jupyter Notebook, or VS Code), navigate to the cloned
+UELer repository, and open:
+
+```
+script/run_ueler.ipynb
+```
+
+Select the **ark-analysis-ueler** kernel for the notebook.
+
+### 2. Set Your Data Paths
+
+Edit the paths cell near the top of the notebook. Only `base_folder` is required — masks,
+annotations, and the cell table are all optional, and the viewer simply skips those features when a
+path is not provided.
+
+```python
+base_folder = "/path/to/your/image_data"                     # Required
+masks_folder = "/path/to/segmentation/output"                # Optional
+annotations_folder = "/path/to/annotations"                  # Optional
+cell_table_path = "/path/to/cell_table.csv"                  # Optional
+```
+
+| Variable | Purpose | Required |
 |---|---|---|
-| `base_folder` | Directory containing the FOV folders with channel images | ✅ Yes |
-| `masks_folder` | Directory containing segmentation `.tif` files | ❌ Optional |
-| `annotations_folder` | Directory containing annotation raster `.tif` files | ❌ Optional |
-| `cell_table_path` | Path to the CSV cell table | ❌ Optional |
+| `base_folder` | FOV folders containing per-channel TIFF images | ✅ Yes |
+| `masks_folder` | Segmentation `.tif` rasters | ❌ Optional |
+| `annotations_folder` | Annotation raster `.tif` files | ❌ Optional |
+| `cell_table_path` | Per-cell feature table (CSV) | ❌ Optional |
 
-!!! note "Minimal setup"
-    You can run UELer with only `base_folder` set. Masks, annotations, and the cell table are all optional — the viewer will simply skip those features when the paths are not provided.
+### 3. Launch the Viewer
+
+UELer is launched from Python. Start with the minimal call and add data sources as you need them.
+
+**Minimal — images only:**
+
+```python
+import ueler
+%matplotlib widget
+
+viewer = ueler.run_viewer(base_folder)
+```
+
+`run_viewer` also accepts `masks_folder=...` and `annotations_folder=...` if you want segmentation
+and annotation overlays without a cell table.
+
+**Full — masks, annotations, and a cell table:**
+
+```python
+import ueler
+import pandas as pd
+from ueler import load_cell_table
+%matplotlib widget
+
+# 1. Build the viewer with images + overlays (do not display yet)
+viewer = ueler.run_viewer(
+    base_folder,
+    masks_folder=masks_folder,
+    annotations_folder=annotations_folder,
+    auto_display=False,
+)
+
+# 2. Attach the cell table, then display
+cell_table = pd.read_csv(cell_table_path)
+load_cell_table(viewer, cell_table=cell_table, auto_display=True, after_plugins=True)
+```
+
+!!! note "Why two steps?"
+    `run_viewer` builds and displays the image and mask viewer. The cell table is attached
+    **separately** with `load_cell_table`, which re-renders the UI with the linked scatter and
+    histogram plots and the cell gallery enabled. If you have no cell table, skip step 2 and let
+    `run_viewer` display on its own (`auto_display` defaults to `True`).
+
+!!! tip "`%matplotlib widget`"
+    The `%matplotlib widget` magic enables the interactive backend used by the viewer. Run it once
+    per kernel session before launching.
 
 ---
 
-## 3. Run the Notebook
+## Stream Any BioImage Archive Study
 
-Run all cells in `run_ueler.ipynb`. The viewer will appear inline in the notebook output.
+You are not limited to local folders. `run_viewer_bia` streams a public BioImage Archive study
+(`S-BIAD*`) without downloading the whole dataset — pass an accession id (or a direct HTTPS URL) and
+an optional layout descriptor:
+
+```python
+import ueler
+%matplotlib widget
+
+viewer = ueler.run_viewer_bia(
+    "S-BIAD2557",
+    descriptor={
+        "mode": "folder",
+        "base": "Files/spatial_murine_iCCAvsHCC/image_data",
+        "mask_dir": "Files/spatial_murine_iCCAvsHCC/segmentation/cleaned_mask",
+        "mask_glob": "{fov}_*.tiff",
+    },
+)
+```
+
+See `script/run_ueler_BIA.ipynb` for more worked examples across several studies.
 
 ---
 
-## 4. Expected Folder Structure
+## Expected Folder Structure
 
-UELer expects your image data to follow this layout:
+For local data, UELer expects one subdirectory per FOV, each containing single-channel TIFF images
+named by the channel/marker:
 
 ```
 base_folder/
@@ -74,20 +157,10 @@ base_folder/
 └── ...
 ```
 
-Each subdirectory is treated as one FOV (Field of View). Channel files must be single-channel TIFF images named by the channel/marker.
-
----
-
-## 5. Try It on Binder
-
-No local setup? Try UELer directly in your browser:
-
-[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/HartmannLab/UELer/binder-app?urlpath=%2Fdoc%2Ftree%2Fscript%2Frun_ueler.ipynb)
-
 ---
 
 ## Next Steps
 
 - Learn the [User Interface](tutorials/user-interface.md) layout.
-- Explore [Tutorials](tutorials/index.md) for more advanced features.
+- Explore the [Tutorials](tutorials/index.md) for individual features.
 - Check the [FAQ](faq.md) if you run into issues.
