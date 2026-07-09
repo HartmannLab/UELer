@@ -10,10 +10,25 @@ import pandas as pd
 
 from .observable import Observable
 
-__all__ = ["ROI_COLUMNS", "ROIManager"]
+__all__ = ["ROI_COLUMNS", "ROIManager", "format_roi_label"]
+
+
+def format_roi_label(record: dict) -> str:
+    """Return a consistent display label for an ROI record."""
+    fov = str(record.get("fov") or "")
+    map_id = str(record.get("map_id") or "")
+    marker = record.get("marker_set") or "—"
+    tags = record.get("tags") or ""
+    tag_display = f" [{tags}]" if tags else ""
+    roi_id = str(record.get("roi_id") or "")
+    location = fov if fov else (f"[MAP:{map_id}]" if map_id else "—")
+    name = str(record.get("name") or "").strip()
+    suffix = name if name else roi_id[:8]
+    return f"{location} · {marker}{tag_display} · {suffix}"
 
 ROI_COLUMNS = [
     "roi_id",
+    "name",
     "fov",
     "map_id",
     "x",
@@ -30,6 +45,7 @@ ROI_COLUMNS = [
     "annotation_palette",
     "mask_color_set",
     "mask_visibility",
+    "mask_painter_state",
     "comment",
     "created_at",
     "updated_at",
@@ -43,19 +59,21 @@ def _ensure_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             ""
             if col
             in {
+                "name",
                 "fov",
                 "marker_set",
                 "tags",
                 "annotation_palette",
                 "mask_color_set",
                 "mask_visibility",
+                "mask_painter_state",
                 "comment",
                 "map_id",
             }
             else 0.0
         )
     df = df[ROI_COLUMNS]
-    for col in ["fov", "marker_set", "tags", "annotation_palette", "mask_color_set", "mask_visibility", "comment", "map_id"]:
+    for col in ["name", "fov", "marker_set", "tags", "annotation_palette", "mask_color_set", "mask_visibility", "mask_painter_state", "comment", "map_id"]:
         if col in df.columns:
             df[col] = (
                 df[col]
@@ -129,6 +147,7 @@ class ROIManager:
             "annotation_palette": "",
             "mask_color_set": "",
             "mask_visibility": "",
+            "mask_painter_state": "",
             "comment": "",
             "created_at": ts,
             "updated_at": ts,

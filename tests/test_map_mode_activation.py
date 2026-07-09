@@ -739,6 +739,70 @@ class CenterOnRoiMapModeTests(unittest.TestCase):
         # inverted y
         self.assertEqual(self.ax.get_ylim(), (300.0, 100.0))
 
+    def test_center_on_roi_activates_map_mode_when_inactive(self):
+        """center_on_roi should activate the map before centering on a map-mode ROI."""
+        activate_calls = []
+        refresh_calls = []
+        self.viewer._map_mode_active = False
+        self.viewer._active_map_id = None
+
+        def _fake_activate(map_id):
+            activate_calls.append(map_id)
+            self.viewer._map_mode_active = True
+            self.viewer._active_map_id = map_id
+
+        def _fake_refresh():
+            refresh_calls.append(1)
+
+        self.viewer._activate_map_mode = _fake_activate
+        self.viewer._refresh_map_controls = _fake_refresh
+        self.viewer._debug = False
+
+        record = {"fov": "", "map_id": "m1", "x_min": 10.0, "x_max": 60.0, "y_min": 20.0, "y_max": 70.0}
+        self.viewer.center_on_roi(record)
+
+        self.assertEqual(activate_calls, ["m1"], "_activate_map_mode should be called with the map_id")
+        self.assertTrue(refresh_calls, "_refresh_map_controls should be called")
+        # After activation, viewport should be set on the (now map-mode) canvas.
+        self.assertEqual(self.ax.get_xlim(), (10.0, 60.0))
+        self.assertEqual(self.ax.get_ylim(), (70.0, 20.0))
+
+    def test_center_on_roi_switches_map_when_wrong_map_active(self):
+        """center_on_roi should switch to the correct map when a different map is active."""
+        activate_calls = []
+        self.viewer._map_mode_active = True
+        self.viewer._active_map_id = "other-map"
+
+        def _fake_activate(map_id):
+            activate_calls.append(map_id)
+            self.viewer._active_map_id = map_id
+
+        self.viewer._activate_map_mode = _fake_activate
+        self.viewer._refresh_map_controls = lambda: None
+        self.viewer._debug = False
+
+        record = {"fov": "", "map_id": "m1", "x_min": 5.0, "x_max": 50.0, "y_min": 5.0, "y_max": 50.0}
+        self.viewer.center_on_roi(record)
+
+        self.assertEqual(activate_calls, ["m1"], "_activate_map_mode must switch to the target map")
+        self.assertEqual(self.ax.get_xlim(), (5.0, 50.0))
+
+    def test_center_on_roi_skips_activation_when_correct_map_already_active(self):
+        """center_on_roi should not call _activate_map_mode when the map is already active."""
+        activate_calls = []
+        self.viewer._map_mode_active = True
+        self.viewer._active_map_id = "m1"
+
+        self.viewer._activate_map_mode = lambda mid: activate_calls.append(mid)
+        self.viewer._refresh_map_controls = lambda: None
+        self.viewer._debug = False
+
+        record = {"fov": "", "map_id": "m1", "x_min": 0.0, "x_max": 100.0, "y_min": 0.0, "y_max": 100.0}
+        self.viewer.center_on_roi(record)
+
+        self.assertFalse(activate_calls, "_activate_map_mode should NOT be called when map already active")
+        self.assertEqual(self.ax.get_xlim(), (0.0, 100.0))
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

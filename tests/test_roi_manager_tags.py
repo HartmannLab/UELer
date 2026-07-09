@@ -1,3 +1,4 @@
+import json
 import math
 import os
 import sys
@@ -6,6 +7,7 @@ import unittest
 
 from types import SimpleNamespace
 from ipywidgets import Output, VBox
+from ueler.rendering import MaskPainterSnapshot
 
 # Provide lightweight stubs for heavy optional dependencies used by the plugin.
 if "cv2" not in sys.modules:
@@ -352,8 +354,6 @@ def make_plugin():
     plugin._browser_expression_cache = None
     plugin._browser_expression_error = None
     plugin._browser_tag_buttons = {}
-    plugin._browser_expression_selection = (0, 0)
-    plugin._use_browser_expression_js = False
     plugin._thumbnail_downsample_cache = {}
     plugin.THUMBNAIL_MAX_EDGE = ROIManagerPlugin.THUMBNAIL_MAX_EDGE
     plugin.width = 6
@@ -361,6 +361,24 @@ def make_plugin():
 
     plugin._build_widgets()
     return plugin
+
+
+def trigger_button(button):
+    pre_click = getattr(button, "_ueler_pre_click_handler", None)
+    if callable(pre_click):
+        pre_click(button)
+
+    click = getattr(button, "click", None)
+    if callable(click):
+        click()
+        return
+
+    handler = getattr(button, "_ueler_click_handler", None)
+    if callable(handler):
+        handler(button)
+        return
+
+    raise AssertionError("Button does not expose a callable click handler")
 
 
 class FakeArray:
@@ -374,20 +392,57 @@ class ROIManagerTagsTests(unittest.TestCase):
         tags_widget = plugin.ui_component.tags
         self.assertTrue(getattr(tags_widget, "allow_new", False))
 
+    def test_capture_and_apply_roi_preserves_mask_painter_payload(self):
+        plugin = make_plugin()
+        applied = {}
+        plugin.refresh_roi_table = lambda *args, **kwargs: None
+        plugin.set_status = lambda *args, **kwargs: None
+
+        class _PainterStub:
+            def capture_snapshot(self):
+                return MaskPainterSnapshot(
+                    mask_name="cell",
+                    identifier="cell_type",
+                    active_classes=("Tumor",),
+                    class_colors={"Tumor": "#00ff00"},
+                    class_visible={"Tumor": True},
+                    class_fill={"Tumor": True},
+                    class_opacity={"Tumor": 60},
+                    default_color="#ffffff",
+                    global_fill_opacity=35,
+                    show_borders_on_filled=True,
+                    outline_thickness=2,
+                )
+
+            def apply_snapshot(self, snapshot):
+                applied["snapshot"] = snapshot
+                return True
+
+        plugin.main_viewer.mask_painter_plugin = _PainterStub()
+
+        plugin._capture_current_view(None)
+        payload = plugin.main_viewer.roi_manager.last_added["mask_painter_state"]
+
+        self.assertTrue(payload)
+        decoded = json.loads(payload)
+        self.assertEqual(decoded["identifier"], "cell_type")
+
+        ok, missing = plugin._apply_roi_presets({"mask_painter_state": payload})
+
+        self.assertTrue(ok)
+        self.assertEqual(missing, [])
+        self.assertIsNotNone(applied.get("snapshot"))
+        self.assertEqual(applied["snapshot"].class_opacity["Tumor"], 60)
+
     def test_browser_output_widget_scrolls_within_fixed_height(self):
         plugin = make_plugin()
-        # browser_output is now a VBox wrapper with fixed height (matching cell gallery)
+        # browser_output wraps the tile-grid widget, which owns its own internal
+        # vertical scroll via the max_height trait (no VBox overflow needed).
         wrapper = plugin.ui_component.browser_output
         self.assertIsInstance(wrapper, VBox)
         self.assertEqual(len(wrapper.children), 1)
-        self.assertEqual(getattr(wrapper.layout, "height", None), "400px")
-        
-        # Inner Output widget has max_height and scrolling
-        inner_output = plugin.ui_component.browser_output_inner
-        self.assertIsInstance(inner_output, Output)
-        inner_layout = inner_output.layout
-        self.assertEqual(getattr(inner_layout, "max_height", None), "400px")
-        self.assertEqual(getattr(inner_layout, "overflow_y", None), "auto")
+        self.assertIs(wrapper.children[0], plugin.ui_component.browser_gallery)
+        self.assertEqual(plugin.ui_component.browser_gallery.max_height, "400px")
 
     def test_browser_root_layout_can_shrink(self):
         plugin = make_plugin()
@@ -395,14 +450,10 @@ class ROIManagerTagsTests(unittest.TestCase):
         self.assertEqual(getattr(layout, "min_width", None), "0")
         self.assertEqual(plugin.ui_component.browser_root.children[2], plugin.ui_component.browser_pagination)
 
-    def test_gallery_layout_respects_width_ratio_and_columns(self):
+    def test_browser_gallery_uses_configured_columns(self):
         plugin = make_plugin()
-        columns, rows, fig_width, fig_height = plugin._determine_gallery_layout(2)
-        self.assertEqual(columns, plugin.BROWSER_COLUMNS)
-        self.assertEqual(rows, 1)
-        # Static narrow width approach to prevent clipping
-        self.assertAlmostEqual(fig_width, 4.8)
-        self.assertAlmostEqual(fig_height, fig_width / columns)
+        gallery = plugin.ui_component.browser_gallery
+        self.assertEqual(int(gallery.columns), int(plugin.BROWSER_COLUMNS))
 
     def test_new_tags_extend_allowed_pool(self):
         plugin = make_plugin()
@@ -477,58 +528,64 @@ class ROIManagerTagsTests(unittest.TestCase):
         self.assertIsNone(invalid)
         self.assertIsNotNone(plugin._browser_expression_error)
 
-    def test_expression_restores_tail_selection_for_backend_updates(self):
+    def test_expression_insertion_at_end_of_expression(self):
+        """Insertion logic is now JS-only; verify _format_expression_insertion still works."""
         plugin = make_plugin()
-        widget = plugin.ui_component.browser_expression_input
+        # Empty field: no leading space needed
+        ins, _ = plugin._format_expression_insertion("", "", "alpha")
+        self.assertEqual(ins, "alpha")
+        # Ends with alphanumeric: leading space added before operator
+        ins, _ = plugin._format_expression_insertion("alpha", "", "&")
+        self.assertEqual(ins, " &")
+        # Ends with boundary char '&': no extra leading space before next token
+        ins, _ = plugin._format_expression_insertion("alpha &", "", "beta")
+        self.assertEqual(ins, "beta")
 
-        # Avoid DataFrame-dependent paths for this focused caret test.
-        plugin._refresh_browser_gallery = lambda: None
-
-        expression = "(good&hi)|~bad"
-        widget.value = expression
-
-        # Simulate a backend-driven value restore while selection is unknown.
-        plugin._browser_expression_selection = None
-        plugin._on_browser_expression_change({
-            "name": "value",
-            "new": expression,
-        })
-
-        expected_tail = (len(expression), len(expression))
-        self.assertEqual(plugin._browser_expression_selection, expected_tail)
-
-        # Inserting an operator should now append at the tail rather than prefixing.
-        plugin._insert_browser_expression_snippet("&")
-        updated_value = plugin.ui_component.browser_expression_input.value
-        self.assertTrue(updated_value.rstrip().endswith("&"))
-
-    def test_expression_insertion_respects_cached_selection(self):
+    def test_refresh_tag_buttons_updates_editor_tags(self):
         plugin = make_plugin()
-        widget = plugin.ui_component.browser_expression_input
+        plugin._refresh_expression_tag_buttons(["alpha", "beta"])
+        self.assertEqual(plugin.ui_component.browser_expression_editor.tags, ["alpha", "beta"])
 
-        plugin._refresh_browser_gallery = lambda: None
-
-        widget.value = "alpha beta"
-        plugin._browser_expression_selection = (5, 5)
-
-        plugin._insert_browser_expression_snippet("&")
-
-        self.assertEqual(widget.value, "alpha & beta")
-        self.assertEqual(plugin._browser_expression_selection, (7, 7))
-
-    def test_expression_insertion_replaces_highlighted_range(self):
+    def test_apply_button_widget_exists(self):
         plugin = make_plugin()
-        widget = plugin.ui_component.browser_expression_input
+        editor = getattr(plugin.ui_component, "browser_expression_editor", None)
+        self.assertIsNotNone(editor)
+
+    def test_apply_button_triggers_gallery_refresh(self):
+        plugin = make_plugin()
+        plugin.ui_component.browser_expression_editor.expression = "alpha & beta"
+
+        refresh_calls = []
+        plugin._refresh_browser_gallery = lambda: refresh_calls.append(1)
+
+        # Switch to advanced mode so _apply_browser_expression triggers refresh
+        plugin.ui_component.browser_filter_tabs.selected_index = 1
+
+        plugin._on_apply_expression_click(None)
+
+        self.assertEqual(len(refresh_calls), 1)
+
+    def test_apply_button_compiles_expression_and_clears_error(self):
+        plugin = make_plugin()
+        plugin.ui_component.browser_expression_editor.expression = "alpha & beta"
 
         plugin._refresh_browser_gallery = lambda: None
+        plugin.ui_component.browser_filter_tabs.selected_index = 1
 
-        widget.value = "alpha beta"
-        plugin._browser_expression_selection = (6, 10)
+        plugin._on_apply_expression_click(None)
 
-        plugin._insert_browser_expression_snippet("gamma")
+        self.assertIsNone(plugin._browser_expression_error)
 
-        self.assertEqual(widget.value, "alpha gamma")
-        self.assertEqual(plugin._browser_expression_selection, (11, 11))
+    def test_apply_button_shows_error_for_invalid_expression(self):
+        plugin = make_plugin()
+        plugin.ui_component.browser_expression_editor.expression = "alpha & | beta"  # invalid syntax
+
+        plugin._refresh_browser_gallery = lambda: None
+        plugin.ui_component.browser_filter_tabs.selected_index = 1
+
+        plugin._on_apply_expression_click(None)
+
+        self.assertIsNotNone(plugin._browser_expression_error)
 
     def test_thumbnail_downsample_uses_roi_viewport_dimensions(self):
         plugin = make_plugin()
@@ -599,8 +656,6 @@ class ROIManagerMapModeTests(unittest.TestCase):
         p._browser_expression_cache = None
         p._browser_expression_error = None
         p._browser_tag_buttons = {}
-        p._browser_expression_selection = (0, 0)
-        p._use_browser_expression_js = False
         p._thumbnail_downsample_cache = {}
         p.THUMBNAIL_MAX_EDGE = ROIManagerPlugin.THUMBNAIL_MAX_EDGE
         p.width = 6
@@ -775,6 +830,236 @@ class ROIManagerMapModeTests(unittest.TestCase):
         plugin._render_map_roi_tile(record, profile)
 
         self.assertEqual(stub_layer._viewport, original_vp, "Viewport should be restored after thumbnail rendering")
+
+    def test_render_map_roi_tile_applies_bounds_offset(self):
+        """_render_map_roi_tile adds map_bounds() origin when converting canvas pixels to µm."""
+        import numpy as np
+
+        plugin = self._make_plugin(map_mode_active=True)
+
+        viewport_calls = []
+
+        class _StubLayerOffset:
+            _allowed_downsample = (1, 2, 4)
+            _viewport = None
+
+            def base_pixel_size_um(self):
+                return 0.5  # 0.5 µm per canvas pixel
+
+            def map_bounds(self):
+                # Non-zero stage origin: x from 1000 µm, y from 4000 µm
+                return (1000.0, 3000.0, 4000.0, 6000.0)
+
+            def set_viewport(self, xmin_um, xmax_um, ymin_um, ymax_um, *, downsample_factor):
+                viewport_calls.append((xmin_um, xmax_um, ymin_um, ymax_um))
+                self._viewport = (xmin_um, xmax_um, ymin_um, ymax_um, downsample_factor)
+
+            def render(self, channels):
+                return np.ones((8, 8, 3), dtype=np.float32)
+
+        stub_layer = _StubLayerOffset()
+        plugin.main_viewer._active_map_id = "slide-1"
+        plugin.main_viewer._get_map_layer = lambda mid: stub_layer
+
+        profile = _MarkerProfile(
+            name="test",
+            selected_channels=("DAPI",),
+            channel_settings={},
+        )
+        # Canvas pixels: x=[200,400], y=[80,280].
+        # Expected µm: xmin = 1000 + 200*0.5 = 1100, xmax = 1000 + 400*0.5 = 1200
+        #              ymin = 4000 + 80*0.5  = 4040, ymax = 4000 + 280*0.5 = 4140
+        record = {"fov": "", "map_id": "slide-1", "x_min": 200.0, "x_max": 400.0, "y_min": 80.0, "y_max": 280.0}
+        result = plugin._render_map_roi_tile(record, profile)
+
+        self.assertIsNotNone(result, "Should produce a rendered thumbnail")
+        self.assertEqual(len(viewport_calls), 1, "set_viewport should be called once")
+        xmin_um, xmax_um, ymin_um, ymax_um = viewport_calls[0]
+        self.assertAlmostEqual(xmin_um, 1100.0, msg="xmin_um must include bounds origin")
+        self.assertAlmostEqual(xmax_um, 1200.0, msg="xmax_um must include bounds origin")
+        self.assertAlmostEqual(ymin_um, 4040.0, msg="ymin_um must include bounds origin")
+        self.assertAlmostEqual(ymax_um, 4140.0, msg="ymax_um must include bounds origin")
+
+    def test_render_map_roi_tile_replays_saved_painter_snapshot(self):
+        """Map-mode ROI thumbnails should replay the saved painter snapshot onto the stitched image."""
+        import numpy as np
+
+        plugin = self._make_plugin(map_mode_active=True)
+
+        class _StubLayer:
+            _allowed_downsample = (1, 2, 4)
+            _viewport = None
+
+            def base_pixel_size_um(self):
+                return 1.0
+
+            def map_bounds(self):
+                return (0.0, 10.0, 0.0, 10.0)
+
+            def set_viewport(self, xmin_um, xmax_um, ymin_um, ymax_um, *, downsample_factor):
+                self._viewport = (xmin_um, xmax_um, ymin_um, ymax_um, downsample_factor)
+
+            def render(self, channels):
+                return np.zeros((6, 6, 3), dtype=np.float32)
+
+        stub_layer = _StubLayer()
+        plugin.main_viewer._active_map_id = "slide-1"
+        plugin.main_viewer._get_map_layer = lambda _mid: stub_layer
+        snapshot = SimpleNamespace(mask_painter=object())
+        plugin._build_overlay_snapshot = lambda *_args, **_kwargs: snapshot
+
+        replay_calls = []
+
+        def _apply_map_snapshot(image, **kwargs):
+            replay_calls.append(kwargs)
+            return image + 0.25
+
+        plugin.main_viewer.apply_overlay_snapshot_to_map_array = _apply_map_snapshot
+
+        profile = _MarkerProfile(
+            name="test",
+            selected_channels=("CHANNEL",),
+            channel_settings={},
+        )
+        record = {"fov": "", "map_id": "slide-1", "x_min": 5.0, "x_max": 25.0, "y_min": 10.0, "y_max": 30.0}
+
+        result = plugin._render_map_roi_tile(record, profile)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(len(replay_calls), 1)
+        self.assertIs(replay_calls[0]["snapshot"], snapshot)
+        self.assertTrue(np.allclose(result, 0.25))
+
+    def test_build_overlay_snapshot_carries_no_image_mode(self):
+        plugin = self._make_plugin(map_mode_active=True)
+        plugin.main_viewer.is_no_image_mode_enabled = lambda: True
+        plugin._resolve_annotation_overlay = lambda _record: None
+        plugin._resolve_mask_overlays = lambda _record, _fov: ()
+        plugin._resolve_mask_painter_snapshot = lambda _record: object()
+
+        snapshot = plugin._build_overlay_snapshot({"fov": "FOV1"}, "FOV1")
+
+        self.assertIsNotNone(snapshot)
+        self.assertTrue(snapshot.skip_image_layer)
+
+
+class ROIManagerThumbnailRenderTests(unittest.TestCase):
+    """Regression tests for FOV-based ROI thumbnail rendering (Reply to issue #107).
+
+    Guards against the snapshot-ordering bug where ``snapshot`` was referenced in the
+    ``render_roi_to_array`` call before assignment, raising UnboundLocalError that the
+    surrounding ``except`` swallowed — so every FOV-based ROI showed "Preview unavailable".
+    """
+
+    def _prepare(self, plugin, snapshot):
+        import numpy as np
+
+        plugin.main_viewer.load_fov = lambda *a, **k: None
+        plugin.main_viewer.image_cache = {"FOV1": {"CHANNEL": np.zeros((4, 4), dtype=np.float32)}}
+        plugin._resolve_thumbnail_downsample = lambda *a, **k: 1
+        plugin._resolve_roi_overlays = lambda *a, **k: (None, ())
+        plugin._build_overlay_snapshot = lambda *a, **k: snapshot
+
+    def test_fov_tile_renders_when_snapshot_is_none(self):
+        import numpy as np
+        from unittest.mock import patch
+
+        plugin = make_plugin()
+        self._prepare(plugin, snapshot=None)
+
+        profile = _MarkerProfile(
+            name="current", selected_channels=("CHANNEL",), channel_settings={}
+        )
+        record = {"fov": "FOV1", "roi_id": "r1"}
+        expected = np.ones((4, 4, 3), dtype=np.float32) * 0.5
+        captured = {}
+
+        def _fake_render(*_args, **kwargs):
+            captured.update(kwargs)
+            return expected
+
+        with patch(
+            "ueler.viewer.plugin.roi_manager_plugin.render_roi_to_array",
+            side_effect=_fake_render,
+        ):
+            result = plugin._render_roi_tile(record, profile)
+
+        self.assertIsNotNone(result, "FOV-based ROI tile must not fall back to None")
+        np.testing.assert_allclose(result, expected)
+        self.assertFalse(captured.get("skip_image_layer"))
+
+    def test_fov_tile_honours_skip_image_layer_from_snapshot(self):
+        import numpy as np
+        from unittest.mock import patch
+
+        plugin = make_plugin()
+        # x_max <= x_min so the overlay-apply branch is skipped without a viewer stub.
+        self._prepare(plugin, snapshot=SimpleNamespace(skip_image_layer=True))
+
+        profile = _MarkerProfile(
+            name="current", selected_channels=("CHANNEL",), channel_settings={}
+        )
+        record = {"fov": "FOV1", "roi_id": "r2"}
+        captured = {}
+
+        def _fake_render(*_args, **kwargs):
+            captured.update(kwargs)
+            return np.zeros((4, 4, 3), dtype=np.float32)
+
+        with patch(
+            "ueler.viewer.plugin.roi_manager_plugin.render_roi_to_array",
+            side_effect=_fake_render,
+        ):
+            result = plugin._render_roi_tile(record, profile)
+
+        self.assertIsNotNone(result)
+        self.assertTrue(captured.get("skip_image_layer"))
+
+
+class FormatROILabelTests(unittest.TestCase):
+    """Tests for format_roi_label with and without a custom name."""
+
+    def test_format_roi_label_uses_name_when_set(self):
+        """When name is non-empty, the label suffix is the custom name."""
+        from ueler.viewer.roi_manager import format_roi_label
+        record = {
+            "roi_id": "abcdef1234567890",
+            "fov": "FOV1",
+            "map_id": "",
+            "marker_set": "panel1",
+            "tags": "",
+            "name": "my_roi",
+        }
+        label = format_roi_label(record)
+        self.assertTrue(label.endswith("my_roi"), f"Expected label to end with 'my_roi', got: {label!r}")
+        self.assertNotIn("abcdef12", label)
+
+    def test_format_roi_label_falls_back_to_id_when_name_empty(self):
+        """When name is empty, the label suffix is roi_id[:8]."""
+        from ueler.viewer.roi_manager import format_roi_label
+        record = {
+            "roi_id": "abcdef1234567890",
+            "fov": "FOV1",
+            "map_id": "",
+            "marker_set": "panel1",
+            "tags": "",
+            "name": "",
+        }
+        label = format_roi_label(record)
+        self.assertTrue(label.endswith("abcdef12"), f"Expected label to end with 'abcdef12', got: {label!r}")
+
+    def test_format_roi_label_name_none_falls_back_to_id(self):
+        """When name is None (missing from record), falls back to roi_id[:8]."""
+        from ueler.viewer.roi_manager import format_roi_label
+        record = {
+            "roi_id": "abcdef1234567890",
+            "fov": "FOV1",
+            "map_id": "",
+            "marker_set": "panel1",
+            "tags": "",
+        }
+        label = format_roi_label(record)
+        self.assertTrue(label.endswith("abcdef12"), f"Expected label to end with 'abcdef12', got: {label!r}")
 
 
 if __name__ == "__main__":  # pragma: no cover

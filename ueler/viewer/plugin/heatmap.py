@@ -1,5 +1,7 @@
 # viewer/cell_gallery.py
 
+import logging
+
 from ipywidgets import (SelectMultiple, FloatSlider, Dropdown, VBox, Output, TagsInput,
                         Checkbox, Text, Button, HBox, Layout, IntSlider, Tab, RadioButtons, HTML)
 from scipy.cluster.hierarchy import dendrogram
@@ -8,6 +10,8 @@ from ueler.viewer.observable import Observable
 from ueler.viewer.plugin.plugin_base import PluginBase
 from ueler.viewer.plugin.heatmap_adapter import HeatmapModeAdapter
 from ueler.viewer.plugin.heatmap_layers import DataLayer, InteractionLayer, DisplayLayer
+
+_logger = logging.getLogger(__name__)
 
 class HeatmapDisplay(DataLayer, InteractionLayer, DisplayLayer, PluginBase):
     def __init__(self, main_viewer, width, height):
@@ -63,31 +67,31 @@ class HeatmapDisplay(DataLayer, InteractionLayer, DisplayLayer, PluginBase):
 
         if new_value:
             reason = self._cutoff_lock_reason or "Cutoff lock engaged"
-            print(f"{reason}. Use 'Unlock once' before editing the dendrogram.")
+            _logger.warning("%s. Use 'Unlock once' before editing the dendrogram.", reason)
             self._lock_override_requested = False
             self.ui_component.lock_override_button.disabled = False
             return
 
         if self._lock_override_requested:
-            print("Cutoff unlock granted. Adjust the dendrogram, then reapply the lock when done.")
+            _logger.info("Cutoff unlock granted. Adjust the dendrogram, then reapply the lock when done.")
             self._lock_override_requested = False
             self._cutoff_lock_reason = None
             return
 
-        print("Cutoff edits require the lock. Use 'Unlock once' to temporarily disable it.")
+        _logger.warning("Cutoff edits require the lock. Use 'Unlock once' to temporarily disable it.")
         self._suppress_lock_observer = True
         owner.value = True
         self._suppress_lock_observer = False
 
     def _request_lock_override(self, *_):
         if not self.ui_component.lock_cutoff_button.value:
-            print("Cutoff is already unlocked.")
+            _logger.info("Cutoff is already unlocked.")
             return
 
         self._lock_override_requested = True
         self._cutoff_lock_reason = None
         self.ui_component.lock_override_button.disabled = True
-        print("Unlock request accepted. You may adjust the dendrogram until it relocks.")
+        _logger.info("Unlock request accepted. You may adjust the dendrogram until it relocks.")
         self.ui_component.lock_cutoff_button.value = False
 
 class UiComponent:

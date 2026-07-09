@@ -10,6 +10,8 @@ These notes document the heatmap plugin evolution, meta-cluster management, and 
 - Define a cell-annotation checkpoint format (AnnData-based) with DAG-style lineage and marker set semantics.
 
 ## Current status
+- Heatmap remembers its scale (figure size) across tree-cut updates (#109): `apply_new_cutoff` captures `fig.get_size_inches()` before the rebuild and `_refresh_plot(restore_size=...)` → `generate_heatmap(figsize_override=...)` rebuilds the clustermap at that size, so the size set via the ipympl resize triangle survives re-clustering (fresh Plot uses the default). See [issue_tracking/issue109_heatmap_remember_zoom.md](issue_tracking/issue109_heatmap_remember_zoom.md).
+- Heatmap rendering reliability fixed (#108): the real cause was heatmap-specific — the `sns.clustermap` figure was built **inside** the `with <output>:` display context and then `plt.show()`n, so ipympl (interactive mode) emitted the canvas twice → blank. The plugin now builds the figure with `plt.ioff()` outside the Output and emits the interactive canvas exactly once via `display(fig.canvas)` into a fresh `Output` swapped into `plot_section.children` (mirroring the Chart histogram, which builds outside and emits once). Layout-toggle double-render removed and the reparented footer canvas is force-repainted after it becomes visible. Full canvas interactivity and footer docking preserved; no static fallback. See [issue_tracking/issue108_heatmap_not_showing.md](issue_tracking/issue108_heatmap_not_showing.md).
 - Heatmap meta-cluster management tab and assignment dropdown are implemented.
 - Meta-cluster color mapping beyond cutoff is fixed and tested.
 - Z-score across markers and mode-aware colormaps are implemented with tests.

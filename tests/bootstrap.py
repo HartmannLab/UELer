@@ -191,6 +191,45 @@ class _BootstrapSeries(list):
         self._loc = _BootstrapSeriesLocIndexer(self)
         self._iloc = _BootstrapSeriesILocIndexer(self)
 
+    def __getitem__(self, key):
+        if isinstance(key, str) and key in self.index:
+            pos = self.index.get_loc(key)
+            return list.__getitem__(self, pos)
+        return list.__getitem__(self, key)
+
+    @property
+    def dtype(self):  # pragma: no cover - simple stub
+        import numpy as np
+        return np.dtype("object")
+
+    def __eq__(self, other):  # element-wise comparison, returns boolean Series
+        if isinstance(other, _BootstrapSeries):
+            result = [a == b for a, b in zip(self, other)]
+        else:
+            result = [item == other for item in self]
+        return _BootstrapSeries(result, index=list(self.index))
+
+    def __ne__(self, other):  # element-wise not-equal
+        if isinstance(other, _BootstrapSeries):
+            result = [a != b for a, b in zip(self, other)]
+        else:
+            result = [item != other for item in self]
+        return _BootstrapSeries(result, index=list(self.index))
+
+    def __and__(self, other):  # element-wise AND for boolean series
+        if isinstance(other, _BootstrapSeries):
+            result = [bool(a) and bool(b) for a, b in zip(self, other)]
+        else:
+            result = [bool(item) and bool(other) for item in self]
+        return _BootstrapSeries(result, index=list(self.index))
+
+    def __or__(self, other):  # element-wise OR for boolean series
+        if isinstance(other, _BootstrapSeries):
+            result = [bool(a) or bool(b) for a, b in zip(self, other)]
+        else:
+            result = [bool(item) or bool(other) for item in self]
+        return _BootstrapSeries(result, index=list(self.index))
+
     def dropna(self):
         result = _BootstrapSeries(value for value in self if value is not None)
         result.index = [idx for value, idx in zip(self, self.index) if value is not None]
@@ -418,6 +457,15 @@ class _BootstrapDataFrame:
     def dropna(self):  # pragma: no cover - simple stub
         return self
 
+    def select_dtypes(self, include=None, exclude=None):  # pragma: no cover - simple stub
+        return self
+
+    def iterrows(self):  # pragma: no cover - simple stub
+        columns = list(self.columns)
+        for i, label in enumerate(self.index):
+            row_data = [self._data[col][i] for col in columns]
+            yield label, _BootstrapSeries(row_data, index=columns)
+
     def unique(self):  # pragma: no cover - helper for chained calls
         return _BootstrapSeries(self._data.keys())
 
@@ -472,11 +520,16 @@ class _BootstrapDataFrame:
         if isinstance(column_label, slice):
             raise NotImplementedError("slice access not supported in stub")
         row_positions = self._resolve_row_positions(row_label)
+        row_index = self._normalize_row_labels(row_label)
+        if isinstance(column_label, (list, tuple)):
+            # Multi-column loc: return a new DataFrame with the requested columns
+            subset_data = {col: [self._data[col][pos] for pos in row_positions] for col in column_label}
+            return _BootstrapDataFrame(subset_data, index=row_index)
         values = [self._data[column_label][pos] for pos in row_positions]
-        if len(row_positions) == 1:
+        # Return a scalar only for a single scalar row label (not for boolean masks)
+        if len(row_positions) == 1 and not isinstance(row_label, _BootstrapSeries):
             return values[0]
-        labels = self._normalize_row_labels(row_label)
-        series = _BootstrapSeries(values, index=labels)
+        series = _BootstrapSeries(values, index=row_index)
         return series
 
     def _resolve_row_positions(self, row_label):
@@ -663,6 +716,7 @@ def _build_ipywidgets_stub():
     # Map all widget types we rely on to the base ``Widget`` implementation.
     for name in [
         "Widget",
+        "BoundedIntText",
         "Button",
         "Box",
         "Checkbox",
@@ -942,9 +996,24 @@ def _ensure_matplotlib_stub() -> None:
         def disconnect_events(self):  # pragma: no cover - simple stub
             return None
 
+    class _LassoSelector:  # pragma: no cover - simple stub
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def disconnect_events(self):  # pragma: no cover - simple stub
+            return None
+
     widgets_stub.RectangleSelector = _RectangleSelector  # type: ignore[attr-defined]
+    widgets_stub.LassoSelector = _LassoSelector  # type: ignore[attr-defined]
     matplotlib_stub.widgets = widgets_stub  # type: ignore[attr-defined]
     sys.modules[widgets_name] = widgets_stub
+
+    font_manager_name = f"{_MATPLOTLIB}.font_manager"
+    font_manager_stub = types.ModuleType(font_manager_name)
+    font_manager_stub.FontProperties = lambda **_: None  # type: ignore[attr-defined]
+    matplotlib_stub.font_manager = font_manager_stub  # type: ignore[attr-defined]
+    sys.modules[font_manager_name] = font_manager_stub
+
 
 def _install_seaborn_stub() -> None:
     sys.modules.pop(_SEABORN, None)
@@ -1145,6 +1214,18 @@ def _ensure_dask_stub() -> None:
         _protect_module(_DASK, dask_module)
         return
 
+    # Prefer the real dask when it is importable.  The stub's __spec__ is None
+    # which causes importlib.util.find_spec("dask") to raise ValueError, breaking
+    # any library (e.g. anndata) that probes for dask via find_spec.
+    try:
+        import importlib as _importlib
+        _real = _importlib.import_module(_DASK)
+        if getattr(_real, "__file__", None):
+            _protect_module(_DASK, _real)
+            return
+    except Exception:
+        pass
+
     class _DelayedComputation:
         def __init__(self, func, args, kwargs):
             self._func = func
@@ -1172,6 +1253,17 @@ def _ensure_cv2_stub() -> None:
     cv2_stub = types.ModuleType(_CV2)
     cv2_stub.__bootstrap_stub__ = True  # type: ignore[attr-defined]
     sys.modules[_CV2] = cv2_stub
+
+
+def _ensure_tifffile_stub() -> None:
+    if "tifffile" in sys.modules and getattr(sys.modules["tifffile"], "__file__", None):
+        return
+    if "tifffile" in sys.modules:
+        return
+    tifffile_stub = types.ModuleType("tifffile")
+    tifffile_stub.__bootstrap_stub__ = True  # type: ignore[attr-defined]
+    tifffile_stub.imread = lambda path, **_kwargs: None  # type: ignore[attr-defined]
+    sys.modules["tifffile"] = tifffile_stub
 
 
 def _ensure_heatmap_dependency_stubs() -> None:
@@ -1592,6 +1684,7 @@ def initialize():
     _ensure_skimage_stub()
     _ensure_dask_stub()
     _ensure_cv2_stub()
+    _ensure_tifffile_stub()
     _patch_heatmap_utilities()
     _preload_viewer_plugins()
 

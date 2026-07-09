@@ -36,3 +36,6 @@ specs/
 script/*.ipynb
 !script/run_ueler.ipynb
 site/
+
+CLAUDE.md
+.claude/

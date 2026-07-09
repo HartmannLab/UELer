@@ -91,9 +91,15 @@ class RunnerSmokeTest(unittest.TestCase):
 	def _make_viewer_mock(self) -> MagicMock:
 		viewer = MagicMock()
 		viewer.current_downsample_factor = 8
+		viewer._map_mode_active = False
+		viewer._active_map_id = None
+		viewer.ui_component = MagicMock()
+		viewer.ui_component.map_selector.value = None
 		viewer.update_marker_set_dropdown = MagicMock()
 		viewer.update_controls = MagicMock()
 		viewer.on_image_change = MagicMock()
+		viewer._activate_map_mode = MagicMock()
+		viewer._refresh_map_controls = MagicMock()
 		viewer.update_display = MagicMock()
 		viewer.update_keys = MagicMock()
 		viewer.refresh_bottom_panel = MagicMock()
@@ -157,6 +163,45 @@ class RunnerSmokeTest(unittest.TestCase):
 		viewer.refresh_bottom_panel.assert_called_once()
 		viewer.inform_plugins.assert_called_once_with('refresh_roi_table')
 		viewer.after_all_plugins_loaded.assert_called_once()
+		viewer._activate_map_mode.assert_not_called()
+		viewer._refresh_map_controls.assert_not_called()
+
+	def test_load_cell_table_reactivates_active_map_mode(self) -> None:
+		viewer = self._make_viewer_mock()
+		viewer.set_cell_table = MagicMock()
+		viewer._map_mode_active = True
+		viewer._active_map_id = "map_A"
+
+		fake_df = object()
+		load_cell_table(
+			viewer,
+			cell_table=fake_df,
+			auto_display=False,
+			after_plugins=False,
+		)
+
+		viewer.set_cell_table.assert_called_once_with(fake_df)
+		viewer._activate_map_mode.assert_called_once_with("map_A")
+		viewer._refresh_map_controls.assert_called_once()
+		viewer.update_display.assert_called_once_with(viewer.current_downsample_factor)
+
+	def test_load_cell_table_reactivates_map_using_selector_fallback(self) -> None:
+		viewer = self._make_viewer_mock()
+		viewer.set_cell_table = MagicMock()
+		viewer._map_mode_active = True
+		viewer._active_map_id = None
+		viewer.ui_component.map_selector.value = "map_from_selector"
+
+		fake_df = object()
+		load_cell_table(
+			viewer,
+			cell_table=fake_df,
+			auto_display=False,
+			after_plugins=False,
+		)
+
+		viewer._activate_map_mode.assert_called_once_with("map_from_selector")
+		viewer._refresh_map_controls.assert_called_once()
 
 	def test_load_cell_table_validation(self) -> None:
 		viewer = self._make_viewer_mock()

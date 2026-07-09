@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
-import matplotlib.pyplot as plt
 import numpy as np
-from ipywidgets import Button, Checkbox, ColorPicker, HBox, IntSlider, IntText, Layout, Output, VBox
+from ipywidgets import Button, Checkbox, ColorPicker, HBox, IntSlider, IntText, VBox
 from matplotlib.colors import to_rgb
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
@@ -22,6 +22,9 @@ from ueler.viewer.decorators import update_status_bar
 from ueler.viewer.observable import Observable
 
 from .plugin_base import PluginBase
+from .tile_gallery_widget import TileGalleryWidget, array_to_data_uri, parse_clicked_id
+
+_logger = logging.getLogger(__name__)
 
 
 GRID_COLUMNS = 5
@@ -47,10 +50,9 @@ class CellGalleryDisplay(PluginBase):
         self.height = height
 
         self.data = Data()
-        self.hover_timer = None
-        self.last_hover_event = None
         self._skip_next_fov_refresh = False
-        
+        self._last_crop_width = DEFAULT_CUTOUT_SIZE
+
         # Track last rendered state to avoid unnecessary regeneration
         self._last_rendered_cells: Optional[tuple] = None
 
@@ -111,7 +113,10 @@ class CellGalleryDisplay(PluginBase):
             style={"description_width": "auto"},
         )
 
-        self.plot_output = Output(layout=Layout(max_height="300px", overflow_y="auto"))
+        # Clickable thumbnail grid (anywidget) — replaces the Matplotlib figure.
+        # The widget owns its own internal vertical scroll via max_height.
+        self.gallery = TileGalleryWidget(columns=GRID_COLUMNS, max_height="400px")
+        self.gallery.observe(self._on_gallery_clicked, names="clicked")
 
         self.ui_component.refresh_button = Button(
             description="Refresh",
@@ -146,7 +151,7 @@ class CellGalleryDisplay(PluginBase):
                 HBox([self.ui_component.use_uniform_color_checkbox]),
             ]
         )
-        self.ui = VBox([controls, VBox([self.plot_output], layout=Layout(height="400px"))])
+        self.ui = VBox([controls, VBox([self.gallery])])
 
     def _collect_ui_values(self) -> _UiValues:
         crop_width = int(self.ui_component.cutout_size_slider.value)
@@ -173,104 +178,46 @@ class CellGalleryDisplay(PluginBase):
         )
 
     def _show_empty_message(self, message: str = "No cells selected."):
-        with self.plot_output:
-            self.plot_output.clear_output()
-            print(message)
-
-    def _update_tile_metadata(self, canvas: np.ndarray, rows: int, columns: int):
-        self.data.n = rows
-        self.data.m = columns if columns else GRID_COLUMNS
-
-        if rows > 0:
-            tile_height = (canvas.shape[0] - max(rows - 1, 0) * GRID_SPACING) // rows
-        else:
-            tile_height = canvas.shape[0]
-        if self.data.m > 0:
-            tile_width = (canvas.shape[1] - max(self.data.m - 1, 0) * GRID_SPACING) // self.data.m
-        else:
-            tile_width = canvas.shape[1]
-
-        self.data.tile_height = max(1, tile_height)
-        self.data.tile_width = max(1, tile_width)
+        self.gallery.tiles = []
+        self.data.displayed_cells = []
+        _logger.info(message)
 
     def _draw_gallery(
         self,
-        canvas: np.ndarray,
-        rows: int,
+        images: Sequence[np.ndarray],
         displayed_indices: Sequence[int],
-        crop_width: int,
     ):
-        with self.plot_output:
-            self.plot_output.clear_output()
+        """Encode each rendered tile to a PNG data-URI and push to the grid widget.
 
-            min_rows = 3
-            fig_height = max(rows, min_rows)
+        Tile ``id`` is the ``df`` row index (as a string); the tooltip label mirrors
+        the ``"<fov>: <mask id>"`` text previously shown by the Matplotlib hover.
+        """
+        df = self.main_viewer.cell_table
+        fov_key = self.main_viewer.fov_key
+        label_key = self.main_viewer.label_key
 
-            fig, ax = plt.subplots(figsize=(self.width * 0.9, fig_height))
-            ax.imshow(canvas)
-            ax.axis("off")
+        tiles: List[dict] = []
+        for tile, cell_index in zip(images, displayed_indices):
+            try:
+                fov = df.iloc[cell_index][fov_key]
+                label = df.iloc[cell_index][label_key]
+                tile_label = f"{fov}: {label}"
+            except Exception:  # pragma: no cover - defensive metadata lookup
+                tile_label = str(cell_index)
+            tiles.append(
+                {
+                    "id": str(cell_index),
+                    "src": array_to_data_uri(tile),
+                    "label": tile_label,
+                }
+            )
 
-            fig.canvas.header_visible = False
-            fig.tight_layout()
-            plt.show()
-
-            self.data.fig = fig
-            self.data.ax = ax
-            self.mask_id_annotation = self._create_annotation()
-
-            def on_click(event):
-                if event.inaxes != ax or event.xdata is None or event.ydata is None:
-                    return
-
-                col = int(event.xdata // (self.data.tile_width + GRID_SPACING))
-                row = int(event.ydata // (self.data.tile_height + GRID_SPACING))
-
-                if row < rows and col < GRID_COLUMNS:
-                    clicked_index = row * GRID_COLUMNS + col
-                    if clicked_index >= len(displayed_indices):
-                        return
-                    df = self.main_viewer.cell_table
-                    fov_key = self.main_viewer.fov_key
-                    x_key = self.main_viewer.x_key
-                    y_key = self.main_viewer.y_key
-                    cell_index = displayed_indices[clicked_index]
-                    x = df.iloc[cell_index][x_key]
-                    y = df.iloc[cell_index][y_key]
-                    fov = df.iloc[cell_index][fov_key]
-                    image_selector = getattr(
-                        self.main_viewer.ui_component, "image_selector", None
-                    )
-                    prior_fov = getattr(image_selector, "value", None) if image_selector is not None else None
-                    should_skip_refresh = image_selector is not None and prior_fov != fov
-                    self._skip_next_fov_refresh = should_skip_refresh
-
-                    try:
-                        self.main_viewer.focus_on_cell(
-                            fov,
-                            x,
-                            y,
-                            radius=crop_width / 2,
-                        )
-                    finally:
-                        if not should_skip_refresh:
-                            self._skip_next_fov_refresh = False
-
-            fig.canvas.mpl_connect("button_press_event", on_click)
-            fig.canvas.mpl_connect("motion_notify_event", self.on_mouse_move)
-
-            self.hover_timer = fig.canvas.new_timer(interval=HOVER_DELAY_MS)
-            self.hover_timer.single_shot = True
-            self.hover_timer.add_callback(self.process_hover_event)
-            self.hover_timer.start()
+        self.gallery.columns = GRID_COLUMNS
+        self.gallery.tiles = tiles
 
     def _show_warning(self, message: str) -> None:
-        """Display warning to user when display count exceeds recommended limit.
-        
-        Args:
-            message: Warning text to display
-        """
-        with self.plot_output:
-            print(f"⚠️  Warning: {message}")
+        """Log a warning when the display count exceeds the recommended limit."""
+        _logger.warning(message)
 
     @update_status_bar
     def plot_gellery(self):  # noqa: N802 - preserve legacy method name
@@ -286,7 +233,7 @@ class CellGalleryDisplay(PluginBase):
 
         overlay_snapshot = self._capture_overlay_snapshot()
 
-        canvas, n, m, _, displayed_indices = create_gallery(
+        images, _, displayed_indices = create_gallery_tiles(
             self.main_viewer.cell_table,
             selected_indices,
             viewer=self.main_viewer,
@@ -306,70 +253,43 @@ class CellGalleryDisplay(PluginBase):
             return
 
         self.data.displayed_cells = displayed_indices
-        self._update_tile_metadata(canvas, n, m)
-        self._draw_gallery(canvas, n, displayed_indices, ui_values.crop_width)
-        
+        self._last_crop_width = ui_values.crop_width
+        self._draw_gallery(images, displayed_indices)
+
         # Track what we just rendered to avoid unnecessary regeneration
         self._last_rendered_cells = tuple(sorted(selected_indices))
 
-    def on_mouse_move(self, event):
-        if self.data.ax is None or event.inaxes != self.data.ax:
+    def _on_gallery_clicked(self, change) -> None:
+        raw = change.get("new") if isinstance(change, dict) else getattr(change, "new", "")
+        cell_id = parse_clicked_id(raw)
+        if not cell_id:
+            return
+        try:
+            cell_index = int(cell_id)
+        except (TypeError, ValueError):
             return
 
-        if self.hover_timer is not None:
-            self.hover_timer.stop()
-
-        self.last_hover_event = event
-
-        self.hover_timer = self.data.fig.canvas.new_timer(interval=HOVER_DELAY_MS)
-        self.hover_timer.single_shot = True
-        self.hover_timer.add_callback(self.process_hover_event)
-        self.hover_timer.start()
-
-    def process_hover_event(self):
-        event = self.last_hover_event
-        if event is None or event.xdata is None or event.ydata is None:
-            return
-
-        tile_width = self.data.tile_width
-        tile_height = self.data.tile_height
-        if tile_width <= 0 or tile_height <= 0:
-            return
-
-        col = int(event.xdata // (tile_width + GRID_SPACING))
-        row = int(event.ydata // (tile_height + GRID_SPACING))
-
-        ind = self.data.displayed_cells
-        if row < self.data.n and col < GRID_COLUMNS:
-            clicked_index = row * GRID_COLUMNS + col
-            if clicked_index >= len(ind):
-                return
-            df = self.main_viewer.cell_table
-            fov_key = self.main_viewer.fov_key
-            label_key = self.main_viewer.label_key
-            cell_index = ind[clicked_index]
+        df = self.main_viewer.cell_table
+        fov_key = self.main_viewer.fov_key
+        x_key = self.main_viewer.x_key
+        y_key = self.main_viewer.y_key
+        try:
+            x = df.iloc[cell_index][x_key]
+            y = df.iloc[cell_index][y_key]
             fov = df.iloc[cell_index][fov_key]
-            label = df.iloc[cell_index][label_key]
+        except Exception:  # pragma: no cover - defensive lookup
+            return
 
-            tooltip_text = f"{fov}: {label}"
-            self.mask_id_annotation.xy = (event.xdata, event.ydata)
-            self.mask_id_annotation.set_text(tooltip_text)
-            self.mask_id_annotation.set_visible(True)
-            self.data.fig.canvas.draw_idle()
+        image_selector = getattr(self.main_viewer.ui_component, "image_selector", None)
+        prior_fov = getattr(image_selector, "value", None) if image_selector is not None else None
+        should_skip_refresh = image_selector is not None and prior_fov != fov
+        self._skip_next_fov_refresh = should_skip_refresh
 
-    def _create_annotation(self):
-        return self.data.ax.annotate(
-            "",
-            xy=(0, 0),
-            xycoords="data",
-            textcoords="offset points",
-            xytext=(10, 10),
-            fontsize=12,
-            color="yellow",
-            bbox={"boxstyle": "round,pad=0.3", "fc": "black", "ec": "yellow", "lw": 1},
-            arrowprops={"arrowstyle": "->"},
-            visible=False,
-        )
+        try:
+            self.main_viewer.focus_on_cell(fov, x, y, radius=self._last_crop_width / 2)
+        finally:
+            if not should_skip_refresh:
+                self._skip_next_fov_refresh = False
 
     def _capture_overlay_snapshot(self) -> Optional[OverlaySnapshot]:
         capture = getattr(self.main_viewer, "capture_overlay_snapshot", None)
@@ -377,7 +297,7 @@ class CellGalleryDisplay(PluginBase):
             try:
                 return capture()
             except Exception as exc:  # pragma: no cover - non-critical
-                print(f"Failed to capture overlay snapshot: {exc}")
+                _logger.warning("Failed to capture overlay snapshot: %s", exc)
         return None
 
     def refresh_gallery(self, _button=None):
@@ -453,6 +373,12 @@ class CellGalleryDisplay(PluginBase):
         self._last_rendered_cells = None
         
         # Refresh the gallery if there are selected cells
+        selected = getattr(self.data.selected_cells, "value", None)
+        if selected:
+            self.plot_gellery()
+
+    def on_no_image_toggle(self) -> None:
+        self._last_rendered_cells = None
         selected = getattr(self.data.selected_cells, "value", None)
         if selected:
             self.plot_gellery()
@@ -547,14 +473,14 @@ def _limit_selection(indices, max_displayed: float) -> List[int]:
     if max_displayed is None or np.isinf(max_displayed) or len(indices) <= max_displayed:
         return list(indices)
 
-    print(f"{len(indices)} cells selected, which exceeds the maximum number of cells to display.")
+    _logger.warning("%d cells selected, which exceeds the maximum number of cells to display.", len(indices))
     safe_indices = np.asarray(indices, dtype=int)
     seed = int(abs(int(safe_indices.sum()))) % (2**32)
     rng = np.random.default_rng(seed=seed)
     
     sample_size = max(1, int(max_displayed))
     sampled = rng.choice(safe_indices, size=sample_size, replace=False)
-    print(f"Randomly sampled {sample_size} cells for display.")
+    _logger.info("Randomly sampled %d cells for display.", sample_size)
     return sorted(int(i) for i in sampled.tolist())
 
 
@@ -772,6 +698,62 @@ def _render_tile_for_index(df, index: int, context: _RenderContext):
             # If no painted colors exist, falls back to viewer's mask overlay settings
             # Maintains same two-pass z-order logic as uniform mode
             if mask_array is not None:
+                painter_snapshot = getattr(context.overlay_snapshot, "mask_painter", None)
+                painter_color_map = {}
+                painter_border_color_map = {}
+                painter_mode_map = {}
+                painter_opacity_map = {}
+                show_borders_on_filled = False
+                if painter_snapshot is not None:
+                    resolver = getattr(viewer, "resolve_mask_painter_snapshot_for_fov", None)
+                    if callable(resolver):
+                        (
+                            painter_color_map,
+                            painter_border_color_map,
+                            painter_mode_map,
+                            painter_opacity_map,
+                            show_borders_on_filled,
+                        ) = resolver(painter_snapshot, fov)
+
+                def _append_cell_mask(cell_id: int, cell_color, thickness: int) -> None:
+                    cell_mode = painter_mode_map.get(int(cell_id), "outline")
+                    cell_alpha = float(painter_opacity_map.get(int(cell_id), 0.0))
+                    border_color = painter_border_color_map.get(int(cell_id), cell_color)
+                    mask_region = mask_array == cell_id
+                    if cell_mode == "fill":
+                        if cell_alpha > 0.0:
+                            masks.append(
+                                MaskRenderSettings(
+                                    array=mask_region,
+                                    color=cell_color,
+                                    mode="fill",
+                                    alpha=cell_alpha,
+                                    outline_thickness=thickness,
+                                    downsample_factor=context.downsample_factor,
+                                )
+                            )
+                        if show_borders_on_filled or cell_alpha <= 0.0:
+                            masks.append(
+                                MaskRenderSettings(
+                                    array=mask_region,
+                                    color=to_rgb(border_color) if isinstance(border_color, str) else border_color,
+                                    mode="outline",
+                                    outline_thickness=thickness,
+                                    downsample_factor=context.downsample_factor,
+                                )
+                            )
+                        return
+
+                    masks.append(
+                        MaskRenderSettings(
+                            array=mask_region,
+                            color=cell_color,
+                            mode="outline",
+                            outline_thickness=thickness,
+                            downsample_factor=context.downsample_factor,
+                        )
+                    )
+
                 # Calculate crop region bounds
                 half_size = max(1, int(context.crop_width) // 2)
                 center_x = int(round(center_xy[0]))
@@ -796,8 +778,7 @@ def _render_tile_for_index(df, index: int, context: _RenderContext):
                 
                 # First pass: Add all neighboring cells with painted colors
                 for cell_id in unique_ids:
-                    # Check if this cell has a user-painted color from ROI manager
-                    painted_color = get_cell_color(fov, int(cell_id))
+                    painted_color = painter_color_map.get(int(cell_id)) or get_cell_color(fov, int(cell_id))
                     
                     if painted_color:
                         # This cell has a user-painted color - convert to RGB tuple
@@ -809,15 +790,7 @@ def _render_tile_for_index(df, index: int, context: _RenderContext):
                                 centered_cell_data = (cell_id, cell_color, context.outline_thickness)
                             else:
                                 # Add neighbor immediately - uses neighbor thickness (from global setting)
-                                masks.append(
-                                    MaskRenderSettings(
-                                        array=mask_array == cell_id,
-                                        color=cell_color,
-                                        mode="outline",
-                                        outline_thickness=context.neighbor_outline_thickness,
-                                        downsample_factor=context.downsample_factor,
-                                    )
-                                )
+                                _append_cell_mask(int(cell_id), cell_color, context.neighbor_outline_thickness)
                                 cells_with_colors += 1
                         except (ValueError, TypeError):
                             # Skip cells with invalid colors
@@ -826,15 +799,7 @@ def _render_tile_for_index(df, index: int, context: _RenderContext):
                 # Second pass: Add centered cell LAST so it renders on top
                 if centered_cell_data is not None:
                     cell_id, cell_color, thickness = centered_cell_data
-                    masks.append(
-                        MaskRenderSettings(
-                            array=mask_array == cell_id,
-                            color=cell_color,
-                            mode="outline",
-                            outline_thickness=thickness,
-                            downsample_factor=context.downsample_factor,
-                        )
-                    )
+                    _append_cell_mask(int(cell_id), cell_color, thickness)
                     cells_with_colors += 1
                 
                 # If no cells have painted colors, fall back to viewer overlays
@@ -851,16 +816,17 @@ def _render_tile_for_index(df, index: int, context: _RenderContext):
             downsample_factor=context.downsample_factor,
             annotation=annotation_settings,
             masks=tuple(masks),
+            skip_image_layer=bool(getattr(context.overlay_snapshot, "skip_image_layer", False)),
         )
         return np.clip(tile, 0.0, 1.0)
     
     except Exception as e:
         # If any error occurs during tile rendering, return error placeholder
-        print(f"[ERROR] Failed to render tile for index={index}: {e}")
+        _logger.error("Failed to render tile for index=%s: %s", index, e, exc_info=True)
         return _create_error_placeholder(context.crop_width, str(e))
 
 
-def create_gallery(
+def create_gallery_tiles(
     df,
     selected_indices,
     *,
@@ -874,12 +840,18 @@ def create_gallery(
     mask_outline_thickness: int = 1,
     neighbor_outline_thickness: Optional[int] = None,
     use_uniform_color: bool = False,
-):
+) -> Tuple[List[np.ndarray], Dict, List[int]]:
+    """Render the selected cells to a list of per-tile RGB arrays.
+
+    Returns ``(images, color_range, displayed_indices)`` where ``images[i]``
+    corresponds to ``displayed_indices[i]`` (a row index into ``df``). This is the
+    front-end agnostic core used by both the tile-grid widget and the legacy
+    ``create_gallery`` canvas composer.
+    """
     indices = _limit_selection(selected_indices, max_displayed_cells)
 
     if not indices:
-        empty = np.zeros((crop_width, crop_width, 3), dtype=np.float32)
-        return empty, 0, GRID_COLUMNS, {}, []
+        return [], {}, []
 
     if viewer is None:
         raise ValueError("viewer must be provided to render gallery tiles.")
@@ -887,8 +859,7 @@ def create_gallery(
     marker_to_display = viewer.marker2display()
     color_range = dict(viewer.get_color_range())
     if not marker_to_display:
-        empty = np.zeros((crop_width, crop_width, 3), dtype=np.float32)
-        return empty, 0, GRID_COLUMNS, color_range, []
+        return [], color_range, []
 
     channel_settings = _build_channel_settings(marker_to_display, color_range)
     selected_channels = tuple(channel_settings.keys())
@@ -937,6 +908,40 @@ def create_gallery(
         images.append(tile)
         displayed_indices.append(idx)
 
+    return images, color_range, displayed_indices
+
+
+def create_gallery(
+    df,
+    selected_indices,
+    *,
+    viewer,
+    crop_width: int = 100,
+    max_displayed_cells: float = np.inf,
+    overlay_snapshot: Optional[OverlaySnapshot] = None,
+    downsample_factor: int = 1,
+    label_key: str = "label",
+    highlight_outline_color: Union[str, Tuple[float, float, float]] = "#FFFFFF",
+    mask_outline_thickness: int = 1,
+    neighbor_outline_thickness: Optional[int] = None,
+    use_uniform_color: bool = False,
+):
+    """Backwards-compatible wrapper composing per-tile arrays into one canvas."""
+    images, color_range, displayed_indices = create_gallery_tiles(
+        df,
+        selected_indices,
+        viewer=viewer,
+        crop_width=crop_width,
+        max_displayed_cells=max_displayed_cells,
+        overlay_snapshot=overlay_snapshot,
+        downsample_factor=downsample_factor,
+        label_key=label_key,
+        highlight_outline_color=highlight_outline_color,
+        mask_outline_thickness=mask_outline_thickness,
+        neighbor_outline_thickness=neighbor_outline_thickness,
+        use_uniform_color=use_uniform_color,
+    )
+
     if not images:
         empty = np.zeros((crop_width, crop_width, 3), dtype=np.float32)
         return empty, 0, GRID_COLUMNS, color_range, []
@@ -949,5 +954,6 @@ __all__ = [
     "CellGalleryDisplay",
     "UiComponent",
     "create_gallery",
+    "create_gallery_tiles",
     "Data",
 ]

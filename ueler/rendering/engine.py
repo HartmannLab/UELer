@@ -111,11 +111,31 @@ class MaskOverlaySnapshot:
 
 
 @dataclass(frozen=True)
+class MaskPainterSnapshot:
+    mask_name: str
+    identifier: str
+    active_classes: Tuple[str, ...]
+    class_colors: Mapping[str, str]
+    class_visible: Mapping[str, bool]
+    class_fill: Mapping[str, bool]
+    class_opacity: Mapping[str, int]
+    default_color: str
+    global_fill: bool = False
+    global_fill_opacity: int = 35
+    show_borders_on_filled: bool = False
+    border_color_mode: str = "mask_type_color"
+    mask_type_color: str = "#FFFFFF"
+    outline_thickness: int = 1
+
+
+@dataclass(frozen=True)
 class OverlaySnapshot:
     include_annotations: bool
     include_masks: bool
+    skip_image_layer: bool = False
     annotation: Optional[AnnotationOverlaySnapshot] = None
     masks: Tuple[MaskOverlaySnapshot, ...] = ()
+    mask_painter: Optional[MaskPainterSnapshot] = None
 
 
 def _infer_region(channel_arrays: Mapping[str, object], selected: Sequence[str]) -> Region:
@@ -448,18 +468,26 @@ def render_fov_to_array(
     region_ds: Optional[Region] = None,
     annotation: Optional[AnnotationRenderSettings] = None,
     masks: Optional[Iterable[MaskRenderSettings]] = None,
+    skip_image_layer: bool = False,
 ) -> np.ndarray:
     if downsample_factor < 1:
         raise ValueError("downsample_factor must be >= 1")
 
-    missing_channels = [ch for ch in selected_channels if ch not in channel_arrays]
+    selected_tuple = tuple(selected_channels)
+    missing_channels = [ch for ch in selected_tuple if ch not in channel_arrays]
     if missing_channels:
         raise KeyError(
             f"FOV '{fov_name}' does not provide channels: {', '.join(missing_channels)}"
         )
 
-    bounds = _infer_region(channel_arrays, selected_channels)
-    region_xy = _ensure_region_within_bounds(region_xy or bounds, bounds)
+    if selected_tuple:
+        bounds = _infer_region(channel_arrays, selected_tuple)
+        region_xy = _ensure_region_within_bounds(region_xy or bounds, bounds)
+    elif region_xy is None:
+        raise ValueError(
+            "region_xy is required when rendering without selected channels"
+        )
+
     region_ds = region_ds or _derive_downsampled_region(region_xy, downsample_factor)
 
     ymin_ds, ymax_ds = region_ds[2], region_ds[3]
@@ -467,15 +495,18 @@ def render_fov_to_array(
     height = max(1, ymax_ds - ymin_ds)
     width = max(1, xmax_ds - xmin_ds)
 
-    composite = _composite_channels(
-        channel_arrays,
-        selected_channels,
-        channel_settings,
-        region_xy,
-        downsample_factor,
-        (height, width),
-        region_ds=region_ds,
-    )
+    if skip_image_layer or not selected_tuple:
+        composite = np.zeros((height, width, 3), dtype=np.float32)
+    else:
+        composite = _composite_channels(
+            channel_arrays,
+            selected_tuple,
+            channel_settings,
+            region_xy,
+            downsample_factor,
+            (height, width),
+            region_ds=region_ds,
+        )
     composite = _apply_annotation_overlay(composite, annotation, region_ds)
     composite = _apply_mask_overlays(composite, masks, region_ds)
     return composite.astype(np.float32, copy=False)
@@ -492,6 +523,7 @@ def render_crop_to_array(
     downsample_factor: int,
     annotation: Optional[AnnotationRenderSettings] = None,
     masks: Optional[Iterable[MaskRenderSettings]] = None,
+    skip_image_layer: bool = False,
 ) -> np.ndarray:
     bounds = _infer_region(channel_arrays, selected_channels)
     half_size = max(1, int(size_px) // 2)
@@ -515,6 +547,7 @@ def render_crop_to_array(
         region_ds=region_ds,
         annotation=annotation,
         masks=masks,
+        skip_image_layer=skip_image_layer,
     )
 
 
@@ -528,6 +561,7 @@ def render_roi_to_array(
     downsample_factor: int,
     annotation: Optional[AnnotationRenderSettings] = None,
     masks: Optional[Iterable[MaskRenderSettings]] = None,
+    skip_image_layer: bool = False,
 ) -> np.ndarray:
     has_bounds = {"x_min", "x_max", "y_min", "y_max"}.issubset(roi_definition)
     has_center = {"x", "y", "width", "height"}.issubset(roi_definition)
@@ -550,6 +584,7 @@ def render_roi_to_array(
         region_ds=region_ds,
         annotation=annotation,
         masks=masks,
+        skip_image_layer=skip_image_layer,
     )
 
 
@@ -560,7 +595,8 @@ def render_roi_to_array(
 # This allows all rendering contexts (main viewer, cell gallery, ROI gallery,
 # batch export) to access the same painted color mappings.
 
-_CELL_COLOR_REGISTRY: dict[tuple[str, int], str] = {}
+# Nested dict: fov -> {mask_id -> color}.  Keyed by FOV for O(1) per-FOV access.
+_CELL_COLOR_REGISTRY: dict[str, dict[int, str]] = {}
 
 
 def set_cell_color(fov: str, mask_id: int, color: str) -> None:
@@ -575,7 +611,22 @@ def set_cell_color(fov: str, mask_id: int, color: str) -> None:
         mask_id: The mask/label ID of the cell
         color: The color string (e.g., "#00FFFF" for cyan)
     """
-    _CELL_COLOR_REGISTRY[(fov, mask_id)] = color
+    _CELL_COLOR_REGISTRY.setdefault(fov, {})[mask_id] = color
+
+
+def set_cell_colors_bulk(entries: dict[str, dict[int, str]]) -> None:
+    """Register colors for many cells across multiple FOVs in one call.
+
+    Significantly faster than calling :func:`set_cell_color` in a loop because
+    the per-FOV sub-dicts are updated with a single ``dict.update()`` each,
+    avoiding per-cell Python overhead.
+
+    Args:
+        entries: Mapping of ``fov -> {mask_id -> color}`` pairs to merge into
+            the registry.  Existing entries for the same cells are overwritten.
+    """
+    for fov, colors in entries.items():
+        _CELL_COLOR_REGISTRY.setdefault(fov, {}).update(colors)
 
 
 def get_cell_color(fov: str, mask_id: int) -> Optional[str]:
@@ -588,7 +639,7 @@ def get_cell_color(fov: str, mask_id: int) -> Optional[str]:
     Returns:
         The color string if one has been set, None otherwise
     """
-    return _CELL_COLOR_REGISTRY.get((fov, mask_id))
+    return _CELL_COLOR_REGISTRY.get(fov, {}).get(mask_id)
 
 
 def clear_cell_colors(fov: Optional[str] = None) -> None:
@@ -600,9 +651,7 @@ def clear_cell_colors(fov: Optional[str] = None) -> None:
     if fov is None:
         _CELL_COLOR_REGISTRY.clear()
     else:
-        keys_to_remove = [key for key in _CELL_COLOR_REGISTRY if key[0] == fov]
-        for key in keys_to_remove:
-            del _CELL_COLOR_REGISTRY[key]
+        _CELL_COLOR_REGISTRY.pop(fov, None)
 
 
 def get_all_cell_colors_for_fov(fov: str) -> dict[int, str]:
@@ -614,7 +663,7 @@ def get_all_cell_colors_for_fov(fov: str) -> dict[int, str]:
     Returns:
         Dictionary mapping mask_id -> color for all cells in the FOV
     """
-    return {mask_id: color for (fov_name, mask_id), color in _CELL_COLOR_REGISTRY.items() if fov_name == fov}
+    return dict(_CELL_COLOR_REGISTRY.get(fov, {}))
 
 
 __all__ = [
@@ -622,6 +671,7 @@ __all__ = [
     "AnnotationRenderSettings",
     "ChannelRenderSettings",
     "MaskOverlaySnapshot",
+    "MaskPainterSnapshot",
     "MaskRenderSettings",
     "OverlaySnapshot",
     "scale_outline_thickness",
@@ -630,6 +680,7 @@ __all__ = [
     "render_fov_to_array",
     "render_roi_to_array",
     "set_cell_color",
+    "set_cell_colors_bulk",
     "get_cell_color",
     "clear_cell_colors",
     "get_all_cell_colors_for_fov",

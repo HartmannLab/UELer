@@ -377,6 +377,14 @@ class _DummyScatter:
     def __init__(self, title):
         self.identifier = title
         self.state = SimpleNamespace(title=title)
+        self.applied = []
+        self.announce_flags = []
+
+    def apply_selection(self, indices, *, announce=True):
+        normalized = set(indices)
+        self.applied.append(normalized)
+        self.announce_flags.append(announce)
+        return normalized
 
     def dispose(self):
         return None
@@ -568,6 +576,125 @@ class ChartDisplayFooterTests(unittest.TestCase):
         _args, kwargs = mock_compose.call_args
         self.assertIn("sync_selection", kwargs)
         self.assertFalse(kwargs["sync_selection"])
+
+    def test_widget_selection_syncs_all_active_scatter_views(self):
+        scatter_one = _DummyScatter("s1")
+        scatter_two = _DummyScatter("s2")
+        self.chart._scatter_views = OrderedDict(
+            [
+                (scatter_one.identifier, scatter_one),
+                (scatter_two.identifier, scatter_two),
+            ]
+        )
+
+        self.chart._on_scatter_selection({7, 8}, "widget")
+
+        self.assertEqual(scatter_one.applied[-1], {7, 8})
+        self.assertEqual(scatter_two.applied[-1], {7, 8})
+        self.assertFalse(scatter_one.announce_flags[-1])
+        self.assertFalse(scatter_two.announce_flags[-1])
+
+    def test_empty_selection_clears_all_active_scatter_views(self):
+        scatter_one = _DummyScatter("s1")
+        scatter_two = _DummyScatter("s2")
+        self.chart._scatter_views = OrderedDict(
+            [
+                (scatter_one.identifier, scatter_one),
+                (scatter_two.identifier, scatter_two),
+            ]
+        )
+
+        self.chart._on_scatter_selection(set(), "widget")
+
+        self.assertEqual(scatter_one.applied[-1], set())
+        self.assertEqual(scatter_two.applied[-1], set())
+
+
+class MultiPairScatterTests(unittest.TestCase):
+    """plot_all_pairs fans a channel selection out into pairwise scatter plots (#112)."""
+
+    def _make_chart(self, columns):
+        viewer = _StubViewer()
+        data = {col: [float(i), float(i + 1)] for i, col in enumerate(columns)}
+        viewer.cell_table = pd.DataFrame(data)
+        viewer.fov_key = "fov"
+        viewer.label_key = "label"
+        chart = ChartDisplay(viewer, width=6, height=4)
+        chart._scatter_backend = "widget"  # force the interactive fan-out path
+        return chart
+
+    def test_three_channels_produce_three_pairs(self):
+        chart = self._make_chart(["a", "b", "c"])
+        chart.ui_component.multipair_channels.value = ("a", "b", "c")
+        chart.plot_all_pairs(None)
+        # C(3, 2) == 3 pairwise scatter plots
+        self.assertEqual(len(chart._scatter_views), 3)
+
+    def test_two_channels_produce_one_pair(self):
+        chart = self._make_chart(["a", "b"])
+        chart.ui_component.multipair_channels.value = ("a", "b")
+        chart.plot_all_pairs(None)
+        self.assertEqual(len(chart._scatter_views), 1)
+
+    def test_fewer_than_two_channels_is_noop(self):
+        chart = self._make_chart(["a", "b"])
+        chart.ui_component.multipair_channels.value = ("a",)
+        chart.plot_all_pairs(None)
+        self.assertEqual(len(chart._scatter_views), 0)
+
+    def test_multipair_uses_shared_channel_selector(self):
+        chart = self._make_chart(["a", "b", "c"])
+        bundle = chart.ui_component.channel_selector_bundle
+        self.assertIs(chart.ui_component.multipair_channels, bundle.tags)
+
+    @staticmethod
+    def _is_plot_cell(cell):
+        # A plot cell wraps a scatter widget; a blank (lower-triangle) cell is empty.
+        return len(getattr(cell, "children", ())) > 0
+
+    def test_plot_all_pairs_renders_triangular_rows(self):
+        chart = self._make_chart(["a", "b", "c"])
+        chart.ui_component.multipair_channels.value = ("a", "b", "c")
+        chart.plot_all_pairs(None)
+
+        grid = chart._plot_host.children[0]
+        rows = grid.children
+        # N-1 == 2 rows for 3 channels, each with N-1 == 2 cells.
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(all(len(row.children) == 2 for row in rows))
+        # Row 0 (channel a): both cells are plots (a,b) and (a,c).
+        self.assertEqual([self._is_plot_cell(c) for c in rows[0].children], [True, True])
+        # Row 1 (channel b): a leading blank, then the (b,c) plot.
+        self.assertEqual([self._is_plot_cell(c) for c in rows[1].children], [False, True])
+
+    def test_single_pair_after_matrix_goes_to_new_row(self):
+        chart = self._make_chart(["a", "b", "c", "d"])
+        chart.ui_component.multipair_channels.value = ("a", "b", "c")
+        chart.plot_all_pairs(None)  # 3-view triangular matrix (2 rows)
+
+        # Add a single-pair plot for a pair outside the matrix.
+        chart.ui_component.x_axis_selector.value = "a"
+        chart.ui_component.y_axis_selector.value = "d"
+        chart.ui_component.color_selector.value = "None"
+        chart.plot_chart(None)
+
+        grid = chart._plot_host.children[0]
+        rows = grid.children
+        # Matrix keeps its 2 rows; the extra single-pair view lands on a 3rd row.
+        self.assertEqual(len(rows), 3)
+        self.assertTrue(self._is_plot_cell(rows[2].children[0]))
+
+    def test_removing_matrix_view_falls_back_to_compose(self):
+        chart = self._make_chart(["a", "b", "c"])
+        chart.ui_component.multipair_channels.value = ("a", "b", "c")
+        chart.plot_all_pairs(None)
+        # Remove one matrix view → matrix no longer complete → compose fallback.
+        first_id = next(iter(chart._scatter_views))
+        chart.ui_component.scatter_set_selector.value = first_id
+        with patch("ueler.viewer.plugin.chart.compose") as mock_compose:
+            mock_compose.return_value = ("grid",)
+            chart._remove_selected_scatter(None)
+        self.assertTrue(mock_compose.called)
 
 
 class HeatmapFooterPersistenceTests(unittest.TestCase):

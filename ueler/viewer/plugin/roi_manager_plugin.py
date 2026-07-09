@@ -1,13 +1,21 @@
 import html
 import json
+import logging
 import math
 import os
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from types import SimpleNamespace
 from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-import matplotlib.pyplot as plt
+_logger = logging.getLogger(__name__)
+_STATUS_LOG_LEVELS = {
+    "info": logging.INFO,
+    "success": logging.INFO,
+    "warning": logging.WARNING,
+    "error": logging.ERROR,
+}
+
 import numpy as np
 import pandas as pd
 from ipywidgets import (
@@ -19,7 +27,6 @@ from ipywidgets import (
     HBox,
     HTML,
     Layout,
-    Output,
     SelectMultiple,
     Tab,
     TagsInput,
@@ -30,20 +37,30 @@ from ipywidgets import (
     Widget,
 )
 from matplotlib.colors import to_rgb
-from IPython.display import HTML as IPythonHTML, Javascript as IPythonJS, display
+from IPython.display import display
 
 from ueler.rendering import (
     AnnotationOverlaySnapshot,
     AnnotationRenderSettings,
     ChannelRenderSettings,
     MaskOverlaySnapshot,
+    MaskPainterSnapshot,
     MaskRenderSettings,
     OverlaySnapshot,
     render_roi_to_array,
 )
+from ueler.viewer.mask_color_overlay import derive_downsampled_region
 
 from .plugin_base import PluginBase
-from ..layout_utils import column_block_layout, flex_fill_layout
+from .roi_expression_editor import ROIExpressionEditorWidget
+from .tile_gallery_widget import (
+    TileGalleryWidget,
+    array_to_data_uri,
+    parse_clicked_id,
+    text_placeholder_uri,
+)
+from ..layout_utils import column_block_layout, content_widget_layout, flex_fill_layout
+from ..roi_manager import format_roi_label
 from ..tag_expression import TagExpressionError, compile_tag_expression
 
 
@@ -72,7 +89,6 @@ class ROIManagerPlugin(PluginBase):
     THUMBNAIL_MAX_EDGE = 256
     GALLERY_WIDTH_RATIO = 0.98
     BROWSER_SCROLL_HEIGHT = "400px"
-    _browser_css_injected = False
 
     def __init__(self, main_viewer, width: int = 6, height: int = 3) -> None:
         super().__init__(main_viewer, width, height)
@@ -83,17 +99,13 @@ class ROIManagerPlugin(PluginBase):
         self._selected_roi_id: Optional[str] = None
         self._suspend_ui_events = False
         self._suspend_browser_events = False
-        self._browser_axis_to_roi: Dict[object, str] = {}
-        self._browser_click_cid: Optional[int] = None
-        self._browser_figure = None
+        self._browser_records_cache: Dict[str, dict] = {}
         self._browser_current_page = 1
         self._browser_total_pages = 1
         self._browser_last_signature = None
         self._browser_expression_cache = None
         self._browser_expression_error = None
         self._browser_tag_buttons = {}
-        self._browser_expression_selection = None  # type: Optional[Tuple[int, int]]
-        self._use_browser_expression_js = True
         self._thumbnail_downsample_cache: Dict[str, int] = {}
 
         self._build_widgets()
@@ -117,8 +129,14 @@ class ROIManagerPlugin(PluginBase):
         self._build_editor_widgets()
         self._build_browser_widgets()
 
+    def on_no_image_toggle(self):  # type: ignore[override]
+        try:
+            self.refresh_roi_table(force_refresh=True, preserve_page=True)
+        except Exception:  # pragma: no cover - best-effort UI refresh only
+            return
+
     def _build_editor_widgets(self) -> None:
-        full_width = column_block_layout
+        full_width = content_widget_layout
         button_layout = Layout(width="auto", flex="1 1 auto")
         style_auto = {"description_width": "auto"}
 
@@ -213,6 +231,14 @@ class ROIManagerPlugin(PluginBase):
             except Exception:  # pragma: no cover - defensive for older widgets
                 pass
 
+        self.ui_component.name_input = Text(
+            value="",
+            placeholder="Custom name (optional)",
+            description="Name:",
+            layout=full_width(),
+            style=style_auto,
+        )
+
         self.ui_component.comment = Textarea(
             value="",
             placeholder="Add a comment",
@@ -265,6 +291,7 @@ class ROIManagerPlugin(PluginBase):
 
         metadata_box = VBox(
             [
+                self.ui_component.name_input,
                 self.ui_component.marker_dropdown,
                 self.ui_component.tag_entry,
                 self.ui_component.tags,
@@ -290,6 +317,9 @@ class ROIManagerPlugin(PluginBase):
                         align_items="center",
                         gap="8px",
                         width="100%",
+                        max_width="99%",
+                        min_width="0",
+                        box_sizing="border-box",
                         flex_flow="row nowrap",
                     ),
                 ),
@@ -308,7 +338,7 @@ class ROIManagerPlugin(PluginBase):
             description="Tags:",
             allow_duplicates=False,
             allow_new=False,
-            layout=Layout(width="100%"),
+            layout=content_widget_layout(),
         )
         if hasattr(self.ui_component.browser_tags_filter, "restrict_to_allowed_tags"):
             try:
@@ -327,7 +357,7 @@ class ROIManagerPlugin(PluginBase):
             options=[],
             value=(),
             description="FOVs:",
-            layout=Layout(width="100%"),
+            layout=content_widget_layout(),
         )
 
         self.ui_component.browser_limit_to_current = Checkbox(
@@ -351,58 +381,20 @@ class ROIManagerPlugin(PluginBase):
             layout=Layout(width="auto"),
         )
 
-        self.ui_component.browser_expression_input = Text(
-            value="",
-            description="Expression:",
-            placeholder="(good & figure1) & !excluded",
-            layout=flex_fill_layout(),
-            style={"description_width": "auto"},
-        )
-        try:
-            self.ui_component.browser_expression_input.add_class("roi-expression-input")
-        except Exception:  # pragma: no cover - add_class may not exist on older widgets
-            pass
-
-        self.ui_component.browser_expression_js_output = Output(
-            layout=Layout(width="0px", height="0px", border="0", padding="0", margin="0", display="none"),
-        )
-
-        operator_buttons: List[Button] = []
-        for symbol in ("(", ")", "&", "|", "!"):
-            operator_button = Button(
-                description=symbol,
-                tooltip=f"Insert '{symbol}'",
-                layout=Layout(width="32px"),
-            )
-            operator_button.on_click(lambda _btn, token=symbol: self._insert_browser_expression_snippet(token))
-            operator_buttons.append(operator_button)
-        self.ui_component.browser_expression_operator_box = HBox(
-            operator_buttons,
-            layout=Layout(gap="4px", flex_flow="row wrap"),
-        )
-
-        self.ui_component.browser_expression_tag_box = HBox(
-            [],
-            layout=Layout(gap="4px", flex_flow="row wrap"),
-        )
+        self.ui_component.browser_expression_editor = ROIExpressionEditorWidget()
 
         self.ui_component.browser_expression_feedback = HTML(
             "<em>Combine tags with () &amp; | !. Leave blank to use the simple tag filter.</em>"
         )
 
-        # Allow the output widget to size to its content. Some frontends may
-        # ignore 'height' or 'overflow' props; adjust if needed for your target.
-        # Simple Output widget with scrolling, matching cell gallery's approach
-        # The Output must be wrapped in a VBox with fixed height to properly constrain
-        # the Matplotlib figure and prevent overlap with pagination controls below
-        self.ui_component.browser_output_inner = Output(
-            layout=Layout(max_height="400px", overflow_y="auto")
+        # Clickable thumbnail grid rendered from pre-encoded PNG tiles (anywidget).
+        # Hover labels ride inside each tile as a CSS tooltip, so no separate hover
+        # widget or interactive Matplotlib backend is required. The widget owns its own
+        # internal vertical scroll (via max_height), so the wrapper needs no overflow.
+        self.ui_component.browser_gallery = TileGalleryWidget(
+            columns=int(self.BROWSER_COLUMNS), max_height=self.BROWSER_SCROLL_HEIGHT
         )
-        self.ui_component.browser_output = VBox(
-            [self.ui_component.browser_output_inner],
-            layout=Layout(height="400px")
-        )
-
+        self.ui_component.browser_output = VBox([self.ui_component.browser_gallery])
         self.ui_component.browser_status = HTML("<em>No ROI captured yet.</em>")
         self.ui_component.browser_page_label = HTML("<em>Page 1 of 1</em>")
         self.ui_component.browser_prev_button = Button(
@@ -436,11 +428,8 @@ class ROIManagerPlugin(PluginBase):
 
         advanced_filter_box = VBox(
             [
-                self.ui_component.browser_expression_input,
-                self.ui_component.browser_expression_operator_box,
-                self.ui_component.browser_expression_tag_box,
+                self.ui_component.browser_expression_editor,
                 self.ui_component.browser_expression_feedback,
-                self.ui_component.browser_expression_js_output,
             ],
             layout=column_block_layout(gap="4px"),
         )
@@ -481,7 +470,6 @@ class ROIManagerPlugin(PluginBase):
             ],
             layout=column_block_layout(gap="8px", min_width="0"),
         )
-        self._browser_expression_selection = (0, 0)
 
     def _build_layout(self) -> None:
         header = HTML("<strong>ROI manager</strong>")
@@ -532,9 +520,10 @@ class ROIManagerPlugin(PluginBase):
         self.ui_component.browser_limit_to_current.observe(
             self._on_browser_filter_change, names="value"
         )
-        self.ui_component.browser_expression_input.observe(
-            self._on_browser_expression_change, names="value"
+        self.ui_component.browser_expression_editor.observe(
+            self._on_apply_requested_change, names="apply_requested"
         )
+        self.ui_component.browser_gallery.observe(self._on_gallery_clicked, names="clicked")
         self.ui_component.browser_refresh_button.on_click(self._on_browser_refresh_clicked)
         self.ui_component.browser_prev_button.on_click(self._on_browser_prev_clicked)
         self.ui_component.browser_next_button.on_click(self._on_browser_next_clicked)
@@ -668,19 +657,7 @@ class ROIManagerPlugin(PluginBase):
 
     @staticmethod
     def _format_roi_label(record) -> str:
-        fov = str(record.get("fov") or "")
-        map_id = str(record.get("map_id") or "")
-        marker = record.get("marker_set") or "—"
-        tags = record.get("tags") or ""
-        tag_display = f" [{tags}]" if tags else ""
-        coords = (
-            int(round(record.get("x_min", 0) or 0)),
-            int(round(record.get("y_min", 0) or 0)),
-            int(round(record.get("x_max", 0) or 0)),
-            int(round(record.get("y_max", 0) or 0)),
-        )
-        location = fov if fov else (f"[MAP:{map_id}]" if map_id else "—")
-        return f"{location} · {marker}{tag_display} · {coords[0]}:{coords[1]} → {coords[2]}:{coords[3]}"
+        return format_roi_label(record)
 
     def _refresh_browser_filters(self) -> None:
         widget = getattr(self.ui_component, "browser_fov_filter", None)
@@ -720,8 +697,8 @@ class ROIManagerPlugin(PluginBase):
 
         filter_mode = self._active_filter_mode()
         if filter_mode == "advanced":
-            expression_widget = getattr(self.ui_component, "browser_expression_input", None)
-            expression_text = str(getattr(expression_widget, "value", "") or "").strip()
+            editor = getattr(self.ui_component, "browser_expression_editor", None)
+            expression_text = str(getattr(editor, "expression", "") or "").strip()
             predicate = None
             if expression_text:
                 predicate = self._compile_browser_expression(expression_text)
@@ -755,24 +732,10 @@ class ROIManagerPlugin(PluginBase):
 
         return df.reset_index(drop=True)
 
-    def _determine_gallery_layout(self, record_count: int) -> Tuple[int, int, float, float]:
-        columns = max(1, int(self.BROWSER_COLUMNS))
-        active_count = max(1, int(record_count))
-        rows = max(1, math.ceil(active_count / columns))
-
-        # Use a conservative static width that fits narrow accordions without clipping.
-        # At 72 DPI, 4.8 inches ≈ 346 px which fits comfortably in typical narrow panels.
-        # The canvas will stretch via width:100% when more space is available.
-        safe_cols = max(columns, 1)
-        fig_width = 4.8  # inches - static narrow size to avoid clipping
-        tile_inch = fig_width / safe_cols
-        fig_height = max(tile_inch * rows, tile_inch)
-        return columns, rows, fig_width, fig_height
-
     def _refresh_browser_gallery(self) -> None:
-        output = getattr(self.ui_component, "browser_output_inner", None)
+        gallery = getattr(self.ui_component, "browser_gallery", None)
         status = getattr(self.ui_component, "browser_status", None)
-        if output is None or status is None:
+        if gallery is None or status is None:
             return
 
         if self._suspend_browser_events:
@@ -783,12 +746,10 @@ class ROIManagerPlugin(PluginBase):
         total = len(records)
 
         if total == 0:
-            self._disconnect_browser_events()
-            self._browser_axis_to_roi.clear()
+            self._browser_records_cache.clear()
             self._browser_last_signature = ("empty",)
             self._browser_total_pages = 0
-            with output:
-                output.clear_output(wait=True)
+            gallery.tiles = []
             self._update_browser_summary(0, 0)
             self._update_pagination_controls(0, 0, 0)
             return
@@ -803,7 +764,7 @@ class ROIManagerPlugin(PluginBase):
         end_index = min(start_index + page_size, total)
         limited_records = records[start_index:end_index]
 
-        expression_text = str(getattr(self.ui_component.browser_expression_input, "value", "") or "").strip()
+        expression_text = str(getattr(getattr(self.ui_component, "browser_expression_editor", None), "expression", "") or "").strip()
 
         signature = (
             tuple(
@@ -831,90 +792,39 @@ class ROIManagerPlugin(PluginBase):
             self._update_pagination_controls(current_page, total_pages, total)
             return
 
-        self._disconnect_browser_events()
-        self._browser_axis_to_roi.clear()
+        self._browser_records_cache.clear()
 
-        with output:
-            output.clear_output(wait=True)
-            columns, rows, fig_width, fig_height = self._determine_gallery_layout(len(limited_records))
-            fig, axes = plt.subplots(rows, columns, figsize=(fig_width, fig_height))
-            dpi_value = self._resolve_browser_dpi()
-            try:
-                fig.set_dpi(dpi_value)
-            except Exception:  # pragma: no cover - matplotlib backends without set_dpi
-                pass
-            fig.subplots_adjust(left=0.01, right=0.99, top=0.99, bottom=0.01, wspace=0.02, hspace=0.02)
-            axes_array = np.atleast_1d(np.array(axes)).ravel()
-            aspect_ratio = 1.0
-            if fig_width > 0:
-                try:
-                    aspect_ratio = max(fig_height / fig_width, 1e-3)
-                except Exception:
-                    aspect_ratio = 1.0
+        tiles: List[dict] = []
+        rendered = 0
+        for record in limited_records:
+            roi_id_str = str(record.get("roi_id") or "")
+            label = format_roi_label(record)
+            marker_profile = self._build_marker_profile(record)
+            message_text = None
+            if marker_profile is None or not marker_profile.selected_channels:
+                message_text = "No channels"
 
-            rendered = 0
-            for slot_index, axis in enumerate(axes_array):
-                axis.axis("off")
-                if slot_index >= len(limited_records):
-                    try:
-                        axis.set_facecolor("#f8f8f8")
-                    except Exception:  # pragma: no cover - matplotlib backend differences
-                        pass
-                    continue
+            tile = None if message_text else self._render_roi_tile(record, marker_profile)
+            if tile is None or getattr(tile, "size", 0) == 0:
+                message_text = message_text or "Preview unavailable"
 
-                record = limited_records[slot_index]
-                marker_profile = self._build_marker_profile(record)
-                message_text = None
-                if marker_profile is None or not marker_profile.selected_channels:
-                    message_text = "No channels"
+            if message_text:
+                src = text_placeholder_uri(message_text)
+                tile_label = f"{label} — {message_text}" if label else message_text
+            else:
+                src = array_to_data_uri(tile)
+                tile_label = label
 
-                tile = None if message_text else self._render_roi_tile(record, marker_profile)
-                if tile is None or tile.size == 0:
-                    message_text = message_text or "Preview unavailable"
+            tiles.append({"id": roi_id_str, "src": src, "label": tile_label})
+            self._browser_records_cache[roi_id_str] = record
+            rendered += 1
 
-                if message_text:
-                    axis.text(0.5, 0.5, message_text, ha="center", va="center", fontsize=9)
-                else:
-                    axis.imshow(tile)
-
-                axis.axis("off")
-                self._browser_axis_to_roi[axis] = record.get("roi_id")
-                rendered += 1
-
-            # Display figure directly, matching cell gallery's simple approach
-            plt.show(fig)
-
-            try:
-                canvas = getattr(fig, "canvas", None)
-                if canvas is not None:
-                    if hasattr(canvas, "toolbar_visible"):
-                        canvas.toolbar_visible = False
-                    if hasattr(canvas, "header_visible"):
-                        canvas.header_visible = False
-                    if hasattr(canvas, "footer_visible"):
-                        canvas.footer_visible = False
-            except Exception:  # pragma: no cover - backend differences
-                pass
-
-        self._browser_figure = fig
-        try:
-            self._browser_click_cid = fig.canvas.mpl_connect("button_press_event", self._on_browser_click)
-        except Exception:  # pragma: no cover - matplotlib backend quirks
-            self._browser_click_cid = None
+        gallery.columns = int(self.BROWSER_COLUMNS)
+        gallery.tiles = tiles
 
         self._browser_last_signature = signature
-        rendered_count = rendered
-        self._update_browser_summary(rendered_count, total)
+        self._update_browser_summary(rendered, total)
         self._update_pagination_controls(current_page, total_pages, total)
-
-    def _disconnect_browser_events(self) -> None:
-        if self._browser_figure is not None and self._browser_click_cid is not None:
-            try:
-                self._browser_figure.canvas.mpl_disconnect(self._browser_click_cid)
-            except Exception:  # pragma: no cover - defensive cleanup
-                pass
-        self._browser_click_cid = None
-        self._browser_figure = None
 
     def _update_browser_summary(self, rendered: int, total: int) -> None:
         status = getattr(self.ui_component, "browser_status", None)
@@ -959,62 +869,66 @@ class ROIManagerPlugin(PluginBase):
         if not snippet:
             return
 
-        js_enabled = getattr(self, "_use_browser_expression_js", True)
-        inserted = False
-        if js_enabled:
-            inserted = self._insert_browser_expression_snippet_js(snippet)
+        if getattr(self, "_use_browser_expression_js", True):
+            self._insert_browser_expression_snippet_js(snippet)
+        else:
+            self._insert_browser_expression_snippet_test(snippet)
 
-        if not inserted:
-            self._insert_browser_expression_snippet_backend(snippet)
-
+    def _insert_browser_expression_snippet_test(self, snippet: str) -> None:
+        """Test-mode insertion: appends *snippet* at the end of the current expression."""
+        widget = getattr(self.ui_component, "browser_expression_input", None)
+        if widget is None:
+            return
+        current = str(getattr(widget, "value", "") or "")
+        insertion, _ = self._format_expression_insertion(current, "", str(snippet))
+        new_value = current + insertion
+        if new_value == current:
+            return
+        setattr(widget, "value", new_value)
 
     def _insert_browser_expression_snippet_js(self, snippet: str) -> bool:
-        widget = getattr(self.ui_component, "browser_expression_input", None)
+        """Emit JS that inserts *snippet* at the live DOM caret position."""
         output = getattr(self.ui_component, "browser_expression_js_output", None)
-        if widget is None or output is None:
+        if output is None:
             return False
 
         snippet_literal = json.dumps(str(snippet))
         js = (
             "(function() {\n"
-            "  const field = document.querySelector('.roi-expression-input input, .roi-expression-input textarea');\n"
+            "  var field = document.querySelector('.roi-expression-input input, .roi-expression-input textarea');\n"
             "  if (!field) { console.warn('[roi] expression field not found'); return; }\n"
+            "  var snippet = " + snippet_literal + ";\n"
+            "  var current = field.value || '';\n"
+            "  var start = field.selectionStart == null ? current.length : field.selectionStart;\n"
+            "  var end = field.selectionEnd == null ? start : field.selectionEnd;\n"
+            "  var before = current.slice(0, start);\n"
+            "  var after = current.slice(end);\n"
+            "  var bL = {'': 1, ' ': 1, '\\t': 1, '(': 1, '&': 1, '|': 1, '!': 1};\n"
+            "  var bR = {'': 1, ' ': 1, '\\t': 1, ')': 1, '&': 1, '|': 1};\n"
+            "  var bChar = before.length ? before[before.length - 1] : '';\n"
+            "  var aChar = after.length ? after[0] : '';\n"
+            "  var needsL = before.length > 0 && !bL[bChar];\n"
+            "  var ins, cur;\n"
+            "  if (snippet === '!') {\n"
+            "    var l = needsL ? ' ' : '';\n"
+            "    ins = l + '!'; cur = l.length + 1;\n"
+            "  } else if (snippet === ')') {\n"
+            "    var l2 = (needsL && bChar !== ' ' && bChar !== '(') ? ' ' : '';\n"
+            "    ins = l2 + ')'; cur = l2.length + 1;\n"
+            "  } else {\n"
+            "    var l3 = needsL ? ' ' : '';\n"
+            "    var aB = !!bR[aChar];\n"
+            "    var needsT = snippet === '(' ? (!aB && aChar !== ')') : !aB;\n"
+            "    var t = needsT ? ' ' : '';\n"
+            "    ins = l3 + snippet + t; cur = l3.length + snippet.length;\n"
+            "  }\n"
+            "  var newVal = before + ins + after;\n"
+            "  var newCur = start + cur;\n"
+            "  field.value = newVal;\n"
+            "  if (field.setSelectionRange) { field.setSelectionRange(newCur, newCur); }\n"
+            "  field.dispatchEvent(new Event('input', { bubbles: true }));\n"
+            "  field.dispatchEvent(new Event('change', { bubbles: true }));\n"
             "  field.focus();\n"
-            "  const value = field.value || '';\n"
-            "  const start = field.selectionStart == null ? value.length : field.selectionStart;\n"
-            "  const end = field.selectionEnd == null ? start : field.selectionEnd;\n"
-            "  const before = value.slice(0, start);\n"
-            "  const after = value.slice(end);\n"
-            "  const insertion = formatInsertion(before, after, String(" + snippet_literal + "));\n"
-            "  const newValue = before + insertion.text + after;\n"
-            "  if (newValue !== value) {\n"
-            "    field.value = newValue;\n"
-            "    field.dispatchEvent(new Event('input', { bubbles: true }));\n"
-            "  }\n"
-            "  const newPos = start + insertion.cursorOffset;\n"
-            "  if (field.setSelectionRange) {\n"
-            "    field.setSelectionRange(newPos, newPos);\n"
-            "  }\n"
-            "  function formatInsertion(before, after, snippet) {\n"
-            "    const beforeChar = before ? before.slice(-1) : '';\n"
-            "    const afterChar = after ? after.slice(0, 1) : '';\n"
-            "    const boundaryLeft = new Set(['', ' ', '\\t', '(', '&', '|', '!']);\n"
-            "    const boundaryRight = new Set(['', ' ', '\\t', ')', '&', '|']);\n"
-            "    const needsLeading = before.length > 0 && !boundaryLeft.has(beforeChar);\n"
-            "    if (snippet === '!') {\n"
-            "      const leading = needsLeading ? ' ' : '';\n"
-            "      return { text: leading + '!', cursorOffset: leading.length + 1 };\n"
-            "    }\n"
-            "    if (snippet === ')') {\n"
-            "      const leading = (needsLeading && ![' ', '('].includes(beforeChar)) ? ' ' : '';\n"
-            "      return { text: leading + ')', cursorOffset: leading.length + 1 };\n"
-            "    }\n"
-            "    const leading = needsLeading ? ' ' : '';\n"
-            "    const afterBoundary = boundaryRight.has(afterChar);\n"
-            "    const needsTrailing = snippet === '(' ? !(afterBoundary || afterChar === ')') : !afterBoundary;\n"
-            "    const trailing = needsTrailing ? ' ' : '';\n"
-            "    return { text: leading + snippet + trailing, cursorOffset: leading.length + snippet.length };\n"
-            "  }\n"
             "})();"
         )
 
@@ -1027,36 +941,8 @@ class ROIManagerPlugin(PluginBase):
             return False
 
 
-    def _insert_browser_expression_snippet_backend(self, snippet: str) -> None:
-        widget = getattr(self.ui_component, "browser_expression_input", None)
-        if widget is None:
-            return
 
-        current = str(getattr(widget, "value", "") or "")
-        start, end = self._resolve_browser_expression_selection(len(current))
-        before, after = current[:start], current[end:]
-        insertion, cursor_offset = self._format_expression_insertion(before, after, str(snippet))
-        new_value = before + insertion + after
-        if new_value == current:
-            return
 
-        self._browser_expression_selection = (start + cursor_offset, start + cursor_offset)
-        setattr(widget, "value", new_value)
-        self._on_browser_expression_change({"name": "value", "new": new_value})
-    def _resolve_browser_expression_selection(self, text_length: int) -> Tuple[int, int]:
-        selection = getattr(self, "_browser_expression_selection", None)
-        if not (isinstance(selection, tuple) and len(selection) == 2):
-            return text_length, text_length
-
-        start, end = selection
-        if not isinstance(start, int):
-            start = text_length
-        if not isinstance(end, int):
-            end = start
-
-        start = max(0, min(start, text_length))
-        end = max(start, min(end, text_length))
-        return start, end
 
 
 
@@ -1093,62 +979,24 @@ class ROIManagerPlugin(PluginBase):
         cursor_offset = len(leading) + len(snippet)
         return insert, cursor_offset
 
-    @classmethod
-    def _ensure_browser_css(cls) -> None:
-        if getattr(cls, "_browser_css_injected", False):
-            return
-        try:
-            display(
-                IPythonHTML(
-                    """
-<style>
-.roi-browser-output img {
-    max-width: 100% !important;
-    height: auto !important;
-}
-</style>
-"""
-                )
-            )
-        except Exception:  # pragma: no cover - fallback for headless environments
-            pass
-        cls._browser_css_injected = True
-
-    @staticmethod
-    def _resolve_browser_dpi() -> float:
-        base_dpi = 72.0
-        return max(36.0, min(120.0, base_dpi))
-
     def _refresh_expression_tag_buttons(self, tags: Sequence[str]) -> None:
-        container = getattr(self.ui_component, "browser_expression_tag_box", None)
-        if container is None:
+        editor = getattr(self.ui_component, "browser_expression_editor", None)
+        if editor is None:
             return
+        editor.tags = list(tags)
 
-        if list(self._browser_tag_buttons.keys()) == list(tags):
-            return
+    def _on_apply_requested_change(self, change) -> None:
+        editor = getattr(self.ui_component, "browser_expression_editor", None)
+        expression = str(getattr(editor, "expression", "") or "")
+        self._apply_browser_expression(expression)
 
-        self._browser_tag_buttons = {}
-        buttons: List[Button] = []
-        for tag in tags:
-            button = Button(
-                description=tag,
-                tooltip=f"Insert '{tag}'",
-                layout=Layout(width="auto"),
-            )
-            button.on_click(lambda _btn, token=tag: self._insert_browser_expression_snippet(token))
-            self._browser_tag_buttons[tag] = button
-            buttons.append(button)
+    def _on_apply_expression_click(self, _button=None) -> None:
+        """Alias kept for test compatibility."""
+        editor = getattr(self.ui_component, "browser_expression_editor", None)
+        expression = str(getattr(editor, "expression", "") or "")
+        self._apply_browser_expression(expression)
 
-        container.children = tuple(buttons)
-
-    def _on_browser_expression_change(self, change) -> None:
-        if self._suspend_browser_events or change.get("name") != "value":
-            return
-
-        expression = str(change.get("new") or "")
-        if self._browser_expression_selection is None:
-            length = len(expression)
-            self._browser_expression_selection = (length, length)
+    def _apply_browser_expression(self, expression: str) -> None:
         self._browser_expression_cache = None
         self._compile_browser_expression(expression)
         if self._active_filter_mode() != "advanced":
@@ -1227,6 +1075,11 @@ class ROIManagerPlugin(PluginBase):
 
         annotation_settings, mask_settings = self._resolve_roi_overlays(record, fov_name, factor)
 
+        # Resolve the overlay snapshot before rendering: it decides whether the base
+        # image layer is skipped ("No image (masks only)" mode) and is reused for the
+        # overlay pass below.
+        snapshot = self._build_overlay_snapshot(record, fov_name)
+
         try:
             array = render_roi_to_array(
                 fov_name,
@@ -1237,9 +1090,29 @@ class ROIManagerPlugin(PluginBase):
                 downsample_factor=factor,
                 annotation=annotation_settings,
                 masks=mask_settings,
+                skip_image_layer=bool(getattr(snapshot, "skip_image_layer", False)),
             )
-        except Exception:  # pragma: no cover - rendering failures
+        except Exception as exc:  # pragma: no cover - rendering failures
+            _logger.warning(
+                "Failed to render ROI thumbnail for %s: %s", fov_name, exc, exc_info=True
+            )
             return None
+
+        if snapshot is not None:
+            region_xy = (
+                int(float(record.get("x_min") or 0.0)),
+                int(float(record.get("x_max") or 0.0)),
+                int(float(record.get("y_min") or 0.0)),
+                int(float(record.get("y_max") or 0.0)),
+            )
+            if region_xy[1] > region_xy[0] and region_xy[3] > region_xy[2]:
+                array = self.main_viewer.apply_overlay_snapshot_to_array(
+                    array,
+                    fov_name=fov_name,
+                    downsample_factor=factor,
+                    snapshot=snapshot,
+                    region_ds=derive_downsampled_region(region_xy, factor),
+                )
 
         return np.clip(array, 0.0, 1.0)
 
@@ -1274,11 +1147,20 @@ class ROIManagerPlugin(PluginBase):
         if x_max <= x_min or y_max <= y_min:
             return None
 
-        # Convert stitched-canvas pixels to physical um for the layer API.
-        xmin_um = x_min * base_px_um
-        xmax_um = x_max * base_px_um
-        ymin_um = y_min * base_px_um
-        ymax_um = y_max * base_px_um
+        # Convert stitched-canvas pixels to physical µm for the layer API.
+        # Must add the map's physical bounds origin so that coordinates are
+        # absolute µm matching where the tiles actually live on the stage.
+        try:
+            bounds = layer.map_bounds()
+            bounds_min_x = float(bounds[0])
+            bounds_min_y = float(bounds[2])
+        except Exception:
+            bounds_min_x = 0.0
+            bounds_min_y = 0.0
+        xmin_um = bounds_min_x + x_min * base_px_um
+        xmax_um = bounds_min_x + x_max * base_px_um
+        ymin_um = bounds_min_y + y_min * base_px_um
+        ymax_um = bounds_min_y + y_max * base_px_um
 
         # Pick the smallest allowed downsample factor that fits THUMBNAIL_MAX_EDGE.
         longest_edge = max(x_max - x_min, y_max - y_min)
@@ -1302,6 +1184,19 @@ class ROIManagerPlugin(PluginBase):
 
         if image is None or not image.size:
             return None
+
+        snapshot = self._build_overlay_snapshot(record, "")
+        if snapshot is not None:
+            image = self.main_viewer.apply_overlay_snapshot_to_map_array(
+                image,
+                layer=layer,
+                xmin_um=xmin_um,
+                xmax_um=xmax_um,
+                ymin_um=ymin_um,
+                ymax_um=ymax_um,
+                downsample_factor=ds,
+                snapshot=snapshot,
+            )
         return np.clip(image.astype(np.float32), 0.0, 1.0)
 
     def _resolve_roi_overlays(
@@ -1330,14 +1225,58 @@ class ROIManagerPlugin(PluginBase):
     ) -> Optional[OverlaySnapshot]:
         annotation_snapshot = self._resolve_annotation_overlay(record)
         mask_snapshots = self._resolve_mask_overlays(record, fov_name)
-        if annotation_snapshot is None and not mask_snapshots:
+        painter_snapshot = self._resolve_mask_painter_snapshot(record)
+        if annotation_snapshot is None and not mask_snapshots and painter_snapshot is None:
             return None
         return OverlaySnapshot(
             include_annotations=annotation_snapshot is not None,
-            include_masks=bool(mask_snapshots),
+            include_masks=bool(mask_snapshots) or painter_snapshot is not None,
+            skip_image_layer=bool(getattr(self.main_viewer, "is_no_image_mode_enabled", lambda: False)()),
             annotation=annotation_snapshot,
             masks=mask_snapshots,
+            mask_painter=painter_snapshot,
         )
+
+    def _resolve_mask_painter_snapshot(
+        self,
+        record: Mapping[str, object],
+    ) -> Optional[MaskPainterSnapshot]:
+        payload = str(record.get("mask_painter_state") or "").strip()
+        if not payload:
+            return None
+        try:
+            data = json.loads(payload)
+        except Exception:  # pragma: no cover - malformed payload
+            return None
+        if not isinstance(data, dict):
+            return None
+        try:
+            active_classes = tuple(str(item) for item in data.get("active_classes", ()))
+            class_colors = {str(key): str(value) for key, value in dict(data.get("class_colors") or {}).items()}
+            class_visible = {str(key): bool(value) for key, value in dict(data.get("class_visible") or {}).items()}
+            class_fill = {str(key): bool(value) for key, value in dict(data.get("class_fill") or {}).items()}
+            class_opacity = {
+                str(key): int(value)
+                for key, value in dict(data.get("class_opacity") or {}).items()
+            }
+            return MaskPainterSnapshot(
+                mask_name=str(data.get("mask_name") or ""),
+                identifier=str(data.get("identifier") or ""),
+                active_classes=active_classes,
+                class_colors=class_colors,
+                class_visible=class_visible,
+                class_fill=class_fill,
+                class_opacity=class_opacity,
+                default_color=str(data.get("default_color") or "#FFFFFF"),
+                global_fill=bool(data.get("global_fill", False)),
+                global_fill_opacity=int(data.get("global_fill_opacity", 35) or 35),
+                show_borders_on_filled=bool(data.get("show_borders_on_filled", False)),
+                border_color_mode=str(data.get("border_color_mode") or "mask_type_color"),
+                mask_type_color=str(data.get("mask_type_color") or "#FFFFFF"),
+                outline_thickness=int(data.get("outline_thickness", getattr(self.main_viewer, "mask_outline_thickness", 1)) or 1),
+            )
+        except Exception:  # pragma: no cover - invalid payload content
+            return None
 
     def _resolve_annotation_overlay(self, record: Mapping[str, object]) -> Optional[AnnotationOverlaySnapshot]:
         palette_name = str(record.get("annotation_palette") or "").strip()
@@ -1619,6 +1558,12 @@ class ROIManagerPlugin(PluginBase):
     def _on_browser_filter_tab_change(self, change) -> None:
         if change.get("name") != "selected_index":
             return
+        if change.get("new") == 1:
+            editor = getattr(self.ui_component, "browser_expression_editor", None)
+            if editor is not None:
+                self._compile_browser_expression(
+                    str(getattr(editor, "expression", "") or "")
+                )
         self._browser_current_page = 1
         self._browser_last_signature = None
         self._refresh_browser_gallery()
@@ -1643,14 +1588,11 @@ class ROIManagerPlugin(PluginBase):
         self._browser_last_signature = None
         self._refresh_browser_gallery()
 
-    def _on_browser_click(self, event) -> None:  # pragma: no cover - UI callback
-        axis = getattr(event, "inaxes", None)
-        if axis is None:
-            return
-        roi_id = self._browser_axis_to_roi.get(axis)
+    def _on_gallery_clicked(self, change) -> None:
+        roi_id = parse_clicked_id(change.get("new") if isinstance(change, dict) else getattr(change, "new", ""))
         if not roi_id:
             return
-        self._activate_roi_from_browser(str(roi_id))
+        self._activate_roi_from_browser(roi_id)
 
     def _activate_roi_from_browser(self, roi_id: str) -> None:
         record = self.main_viewer.roi_manager.get_roi(roi_id)
@@ -1709,6 +1651,11 @@ class ROIManagerPlugin(PluginBase):
         if mask_visibility_payload:
             if not self._apply_mask_visibility(mask_visibility_payload):
                 missing.append("mask visibility")
+
+        mask_painter_payload = str(record.get("mask_painter_state") or "").strip()
+        if mask_painter_payload:
+            if not self._apply_mask_painter_payload(mask_painter_payload):
+                missing.append("mask painter")
 
         return not missing, missing
 
@@ -1825,6 +1772,24 @@ class ROIManagerPlugin(PluginBase):
         except Exception:  # pragma: no cover - serialization errors
             return ""
 
+    def _get_mask_painter_payload(self) -> str:
+        painter = getattr(self.main_viewer, "mask_painter_plugin", None)
+        if painter is None:
+            return ""
+        capture = getattr(painter, "capture_snapshot", None)
+        if not callable(capture):
+            return ""
+        try:
+            snapshot = capture()
+        except Exception:  # pragma: no cover - defensive
+            return ""
+        if snapshot is None:
+            return ""
+        try:
+            return json.dumps(asdict(snapshot), sort_keys=True)
+        except Exception:  # pragma: no cover - serialization errors
+            return ""
+
     def _apply_mask_visibility(self, payload: str) -> bool:
         if not payload:
             return True
@@ -1839,6 +1804,23 @@ class ROIManagerPlugin(PluginBase):
             return False
         try:
             return bool(applier(state))
+        except Exception:  # pragma: no cover - downstream errors
+            return False
+
+    def _apply_mask_painter_payload(self, payload: str) -> bool:
+        if not payload:
+            return True
+        snapshot = self._resolve_mask_painter_snapshot({"mask_painter_state": payload})
+        if snapshot is None:
+            return False
+        painter = getattr(self.main_viewer, "mask_painter_plugin", None)
+        if painter is None:
+            return False
+        applier = getattr(painter, "apply_snapshot", None)
+        if not callable(applier):
+            return False
+        try:
+            return bool(applier(snapshot))
         except Exception:  # pragma: no cover - downstream errors
             return False
 
@@ -1857,11 +1839,13 @@ class ROIManagerPlugin(PluginBase):
             ),
             **viewport,
             "marker_set": self._resolve_marker_set_choice(),
+            "name": self.ui_component.name_input.value.strip(),
             "tags": list(self.ui_component.tags.value),
             "comment": self.ui_component.comment.value.strip(),
             "annotation_palette": self._get_active_annotation_palette(),
             "mask_color_set": self._get_active_mask_color_set(),
             "mask_visibility": self._get_mask_visibility_payload(),
+            "mask_painter_state": self._get_mask_painter_payload(),
         }
 
         result = self.main_viewer.roi_manager.add_roi(record)
@@ -1889,11 +1873,13 @@ class ROIManagerPlugin(PluginBase):
                 else ""
             ),
             "marker_set": self._resolve_marker_set_choice(),
+            "name": self.ui_component.name_input.value.strip(),
             "tags": list(self.ui_component.tags.value),
             "comment": self.ui_component.comment.value.strip(),
             "annotation_palette": self._get_active_annotation_palette(),
             "mask_color_set": self._get_active_mask_color_set(),
             "mask_visibility": self._get_mask_visibility_payload(),
+            "mask_painter_state": self._get_mask_painter_payload(),
         }
 
         updated = self.main_viewer.roi_manager.update_roi(self._selected_roi_id, updates)
@@ -2114,6 +2100,11 @@ class ROIManagerPlugin(PluginBase):
             else:
                 self.ui_component.marker_dropdown.value = ""
 
+            name_value = record.get("name", "")
+            if pd.isna(name_value):
+                name_value = ""
+            self.ui_component.name_input.value = str(name_value).strip()
+
             tags = record.get("tags") or ""
             tag_values = tuple(tag.strip() for tag in str(tags).split(",") if tag.strip())
             self.ui_component.tags.value = tag_values
@@ -2135,6 +2126,7 @@ class ROIManagerPlugin(PluginBase):
         self._suspend_ui_events = True
         try:
             self.ui_component.marker_dropdown.value = self.CURRENT_MARKER_VALUE
+            self.ui_component.name_input.value = ""
             self.ui_component.tags.value = ()
             self.ui_component.comment.value = ""
             self._update_metadata_summaries("", "", "")
@@ -2161,6 +2153,7 @@ class ROIManagerPlugin(PluginBase):
     def set_status(self, message: str, level: str = "info") -> None:
         color = self.STATUS_COLORS.get(level, self.STATUS_COLORS["info"])
         self.ui_component.status.value = f"<span style='color:{color}'>{message}</span>"
+        _logger.log(_STATUS_LOG_LEVELS.get(level, logging.INFO), message)
 
     # ------------------------------------------------------------------
     # Lifecycle hooks

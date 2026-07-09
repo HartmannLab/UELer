@@ -83,6 +83,45 @@ class RenderingHelpersTests(unittest.TestCase):
         expected = 0.5 * np.array([1.0, 0.5, 0.0]) + 0.5 * np.array([0.0, 0.0, 1.0])
         np.testing.assert_allclose(result[0, 0], expected, atol=1e-6)
 
+    def test_render_fov_to_array_skips_image_layer_but_preserves_masks(self) -> None:
+        mask_array = np.zeros((4, 4), dtype=bool)
+        mask_array[0, 0] = True
+        mask = MaskRenderSettings(array=mask_array, color=(0.0, 0.0, 1.0))
+
+        result = render_fov_to_array(
+            "FOV",
+            self.channels,
+            ("A", "B"),
+            self.settings,
+            downsample_factor=1,
+            masks=[mask],
+            skip_image_layer=True,
+        )
+
+        np.testing.assert_allclose(result[0, 0], [0.0, 0.0, 1.0], atol=1e-6)
+        np.testing.assert_allclose(result[1, 1], [0.0, 0.0, 0.0], atol=1e-6)
+
+    def test_render_fov_to_array_without_channels_can_render_overlays(self) -> None:
+        mask_array = np.zeros((4, 4), dtype=bool)
+        mask_array[2, 3] = True
+        mask = MaskRenderSettings(array=mask_array, color=(0.0, 0.0, 1.0))
+
+        result = render_fov_to_array(
+            "FOV",
+            self.channels,
+            (),
+            {},
+            downsample_factor=1,
+            region_xy=(0, 4, 0, 4),
+            region_ds=(0, 4, 0, 4),
+            masks=[mask],
+            skip_image_layer=True,
+        )
+
+        self.assertEqual(result.shape, (4, 4, 3))
+        np.testing.assert_allclose(result[2, 3], [0.0, 0.0, 1.0], atol=1e-6)
+        np.testing.assert_allclose(result[0, 0], [0.0, 0.0, 0.0], atol=1e-6)
+
     def test_render_fov_to_array_outline_mode_without_skimage(self) -> None:
         from ueler.viewer import rendering as rendering_mod
 

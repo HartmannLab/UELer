@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from ipywidgets import Widget
+
+_logger = logging.getLogger(__name__)
 
 
 class PluginBase:
@@ -69,6 +72,11 @@ class PluginBase:
 
         pass
 
+    def on_no_image_toggle(self):
+        """Hook invoked when the viewer toggles image-layer rendering."""
+
+        pass
+
     def on_widget_value_change(self, change):  # NOSONAR - legacy signature
         """Callback function to handle widget value changes."""
         if self.initialized:
@@ -119,13 +127,12 @@ class PluginBase:
         with open(file_path, 'w') as f:
             json.dump(state, f, indent=4, default=default_serializer)
 
-        if self.main_viewer._debug:
-            print(f"{self.displayed_name} widget states saved to {file_path}")
+        _logger.debug("%s widget states saved to %s", self.displayed_name, file_path)
 
     def load_widget_states(self, file_path):  # NOSONAR - legacy complexity
         """Load the state of all widgets from a JSON file."""
         if not os.path.exists(file_path):
-            print(f"No widget states file found at {file_path}")
+            _logger.debug("No widget states file found at %s", file_path)
             return
 
         with open(file_path, 'r') as f:
@@ -134,48 +141,38 @@ class PluginBase:
         for attr_name, value in state.items():
             if hasattr(self.ui_component, attr_name):
                 widget = getattr(self.ui_component, attr_name)
-                if self.main_viewer._debug:
-                    print(f"Restoring state for widget {attr_name}")
+                _logger.debug("Restoring state for widget %s", attr_name)
                 try:
                     if isinstance(widget, Widget):
                         if hasattr(widget, 'value'):
                             if hasattr(widget, 'options'):
                                 if value in widget.options:
                                     setattr(widget, 'value', value)
-                                    if self.main_viewer._debug:
-                                        print(f" Value {value} set for widget {attr_name}")
+                                    _logger.debug(" Value %s set for widget %s", value, attr_name)
                                 else:
-                                    if self.main_viewer._debug:
-                                        print(f" Value {value} not found in widget options")
+                                    _logger.debug(" Value %s not found in widget options", value)
                             else:
                                 setattr(widget, 'value', value)
-                                if self.main_viewer._debug:
-                                    print(f" Value {value} set for widget {attr_name}")
+                                _logger.debug(" Value %s set for widget %s", value, attr_name)
                         else:
-                            if self.main_viewer._debug:
-                                print(f" Widget {attr_name} has no 'value' attribute")
+                            _logger.debug(" Widget %s has no 'value' attribute", attr_name)
                     elif isinstance(widget, dict):
                         for key, widget_value in value.items():
                             if key in widget:
                                 sub_widget = widget[key]
                                 if isinstance(sub_widget, Widget) and hasattr(sub_widget, 'value'):
                                     setattr(sub_widget, 'value', widget_value)
-                                    if self.main_viewer._debug:
-                                        print(f" Value {widget_value} set for widget {key} in {attr_name}")
+                                    _logger.debug(" Value %s set for widget %s in %s", widget_value, key, attr_name)
                                 else:
-                                    if self.main_viewer._debug:
-                                        print(f" Widget {key} in {attr_name} is not a valid widget")
+                                    _logger.debug(" Widget %s in %s is not a valid widget", key, attr_name)
                     else:
-                        if self.main_viewer._debug:
-                            print(f"Attribute {attr_name} is not a valid widget")
+                        _logger.debug("Attribute %s is not a valid widget", attr_name)
                 except Exception as e:  # pragma: no cover - defensive guard
-                    if self.main_viewer._debug:
-                        print(f"Error setting value for widget {attr_name}: {e}")
+                    _logger.debug("Error setting value for widget %s: %s", attr_name, e)
             else:
-                if self.main_viewer._debug:
-                    print(f"Attribute {attr_name} not found in ui_component")
+                _logger.debug("Attribute %s not found in ui_component", attr_name)
 
-        print(f"\n{self.displayed_name} widget states loaded from {file_path}")
+        _logger.debug("%s widget states loaded from %s", self.displayed_name, file_path)
 
 
 __all__ = ["PluginBase"]

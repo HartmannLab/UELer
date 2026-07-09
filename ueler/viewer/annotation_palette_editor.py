@@ -27,7 +27,9 @@ class AnnotationPaletteEditor(VBox):
 		apply_callback: Callable[[str, Dict[str, str], Dict[str, str]], None],
 		close_callback: Optional[Callable[[], None]] = None,
 	) -> None:
-		super().__init__(layout=Layout(width="100%", gap="8px"))
+		super().__init__(
+			layout=Layout(width="100%", max_width="99%", min_width="0", box_sizing="border-box", gap="8px")
+		)
 		self._apply_callback = apply_callback
 		self._close_callback = close_callback
 		self._current_annotation: Optional[str] = None

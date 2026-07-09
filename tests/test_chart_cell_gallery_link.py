@@ -1,8 +1,9 @@
-"""Tests for histogram cutoff → cell gallery linking (issue #77).
+"""Tests for the scatter-plot plugin's selection → cell-gallery / mask linking.
 
-Verifies that calling highlight_cells() updates selected_indices and
-consequently triggers the cell-gallery observer when the linking checkbox
-is enabled.
+Since issue #112 split histograms into their own plugin, the histogram-cutoff
+tests moved to ``test_histogram_plugin.py``; this file now covers the scatter
+selection → mask-highlight and scatter → cell-gallery forwarding paths that
+remain in ``ChartDisplay``.
 """
 from __future__ import annotations
 
@@ -182,9 +183,15 @@ from ueler.viewer.plugin.chart import ChartDisplay
 class _FakeImageDisplay:
     def __init__(self):
         self.last_mask_ids: list = []
+        self.last_fov_mask_pairs = None
 
-    def set_mask_ids(self, *, mask_name, mask_ids):
-        self.last_mask_ids = list(mask_ids)
+    def set_mask_ids(self, *, mask_name, mask_ids, fov_mask_pairs=None):
+        if fov_mask_pairs is not None:
+            self.last_fov_mask_pairs = list(fov_mask_pairs)
+            self.last_mask_ids = []
+        else:
+            self.last_mask_ids = list(mask_ids)
+            self.last_fov_mask_pairs = None
 
 
 class _FakeCellGallery:
@@ -193,6 +200,20 @@ class _FakeCellGallery:
 
     def set_selected_cells(self, indices):
         self.received = indices
+
+
+class _FakeScatterView:
+    def __init__(self, identifier: str):
+        self.identifier = identifier
+        self.state = SimpleNamespace(title=identifier)
+        self.applied: list[set] = []
+        self.announce_flags: list[bool] = []
+
+    def apply_selection(self, indices, *, announce=True):
+        normalized = set(indices)
+        self.applied.append(normalized)
+        self.announce_flags.append(announce)
+        return normalized
 
 
 def _make_viewer(cell_table: "pd.DataFrame") -> SimpleNamespace:
@@ -213,6 +234,7 @@ def _make_viewer(cell_table: "pd.DataFrame") -> SimpleNamespace:
         ui_component=ui_component,
         image_display=image_display,
         SidePlots=side_plots,
+        get_active_fov=lambda: ui_component.image_selector.value,
     )
     return viewer
 
@@ -239,149 +261,153 @@ def _two_fov_table() -> "pd.DataFrame":
 # Tests
 # ---------------------------------------------------------------------------
 
-class TestHistogramCutoffGalleryLink(unittest.TestCase):
-    """highlight_cells() → selected_indices → cell gallery forwarding."""
+# ---------------------------------------------------------------------------
+# Scatter selection → mask highlights
+# ---------------------------------------------------------------------------
+
+class TestScatterSelectionMaskHighlights(unittest.TestCase):
+    """_on_scatter_selection / _apply_external_selection update mask highlights."""
+
+    def setUp(self):
+        table = _two_fov_table()
+        self.viewer = _make_viewer(table)
+        self.chart = _make_chart(self.viewer)
+        self.image_display: _FakeImageDisplay = self.viewer.image_display
+        self.chart.ui_component.cell_gallery_linked_checkbox.value = False
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+    def _trigger_scatter_selection(self, row_indices):
+        """Simulate jscatter firing a selection event for the given row indices."""
+        self.chart._on_scatter_selection(set(row_indices), origin="test")
+
+    # ------------------------------------------------------------------
+    # Single-FOV mode (get_active_fov returns "fov1")
+    # ------------------------------------------------------------------
+    def test_scatter_highlights_current_fov_cells(self):
+        """Scatter selection → set_mask_ids with only the active-FOV mask IDs."""
+        # rows 1 and 3 are in fov1 (labels 2 and 3); row 3 is in fov2 (label 4)
+        self.chart.ui_component.mv_linked_checkbox.value = True
+        self._trigger_scatter_selection([1, 2, 3])  # row indices (0-based)
+        # fov1 rows: index 1 (label 2), index 2 (label 3)
+        self.assertIn(2, self.image_display.last_mask_ids)
+        self.assertIn(3, self.image_display.last_mask_ids)
+        # fov2 row (index 3, label 4) must NOT appear in single-FOV highlight
+        self.assertNotIn(4, self.image_display.last_mask_ids)
+
+    def test_scatter_clears_highlights_on_empty_selection(self):
+        """Empty scatter selection → highlights cleared."""
+        self.chart.ui_component.mv_linked_checkbox.value = True
+        self.image_display.last_mask_ids = [1, 2]  # pretend something is highlighted
+        self._trigger_scatter_selection([])
+        self.assertEqual(self.image_display.last_mask_ids, [])
+
+    def test_scatter_no_highlights_when_mv_not_linked(self):
+        """When mv_linked_checkbox is off, scatter selection must not touch mask IDs."""
+        self.chart.ui_component.mv_linked_checkbox.value = False
+        self.image_display.last_mask_ids = []
+        self._trigger_scatter_selection([1, 2])
+        # Nothing should have been written
+        self.assertEqual(self.image_display.last_mask_ids, [])
+
+    # ------------------------------------------------------------------
+    # Map mode (get_active_fov returns None)
+    # ------------------------------------------------------------------
+    def test_scatter_highlights_map_mode_uses_fov_mask_pairs(self):
+        """In map mode scatter selection passes fov_mask_pairs, not mask_ids."""
+        self.viewer.get_active_fov = lambda: None  # simulate map mode
+        self.chart.ui_component.mv_linked_checkbox.value = True
+
+        self._trigger_scatter_selection([1, 2, 3])  # rows from both fov1 and fov2
+
+        # fov_mask_pairs must have been set (last_fov_mask_pairs populated)
+        self.assertIsNotNone(self.image_display.last_fov_mask_pairs)
+        pairs = self.image_display.last_fov_mask_pairs
+        # Row 1 → fov1 / label 2; row 2 → fov1 / label 3; row 3 → fov2 / label 4
+        self.assertIn(("fov1", 2), pairs)
+        self.assertIn(("fov1", 3), pairs)
+        self.assertIn(("fov2", 4), pairs)
+
+    # ------------------------------------------------------------------
+    # _apply_external_selection path (trace + clear button)
+    # ------------------------------------------------------------------
+    def test_apply_external_selection_syncs_highlights(self):
+        """_apply_external_selection with indices → mask highlights updated."""
+        self.chart.ui_component.mv_linked_checkbox.value = True
+        self.chart._apply_external_selection([0, 1])  # rows 0,1 are both fov1
+        # fov1 rows: index 0 (label 1), index 1 (label 2)
+        self.assertIn(1, self.image_display.last_mask_ids)
+        self.assertIn(2, self.image_display.last_mask_ids)
+
+    def test_apply_external_selection_clears_highlights(self):
+        """_apply_external_selection(set()) → highlights cleared."""
+        self.chart.ui_component.mv_linked_checkbox.value = True
+        self.image_display.last_mask_ids = [1]
+        self.chart._apply_external_selection(set())
+        self.assertEqual(self.image_display.last_mask_ids, [])
+
+    def test_scatter_selection_syncs_other_views_and_highlights(self):
+        """Widget-originated selection fans out to sibling scatters and keeps highlights."""
+        scatter_one = _FakeScatterView("s1")
+        scatter_two = _FakeScatterView("s2")
+        self.chart._scatter_views = {
+            scatter_one.identifier: scatter_one,
+            scatter_two.identifier: scatter_two,
+        }
+        self.chart.ui_component.mv_linked_checkbox.value = True
+
+        self.chart._on_scatter_selection({1, 2}, origin="widget")
+
+        self.assertEqual(scatter_one.applied[-1], {1, 2})
+        self.assertEqual(scatter_two.applied[-1], {1, 2})
+        self.assertFalse(scatter_one.announce_flags[-1])
+        self.assertFalse(scatter_two.announce_flags[-1])
+        self.assertIn(2, self.image_display.last_mask_ids)
+        self.assertIn(3, self.image_display.last_mask_ids)
+
+
+class TestScatterToGalleryForwarding(unittest.TestCase):
+    """Scatter selection → gallery forwarding via forward_to_cell_gallery observer.
+
+    Regression tests for issue #93: multi-cell scatter selections must reach the
+    gallery; single-cell clicks must remain blocked (intentional guard).
+    """
 
     def setUp(self):
         table = _two_fov_table()
         self.viewer = _make_viewer(table)
         self.chart = _make_chart(self.viewer)
         self.gallery: _FakeCellGallery = self.viewer.SidePlots.cell_gallery_output
-
-        # Configure chart state to simulate a histogram cutoff
-        self.chart.ui_component.x_axis_selector.value = "intensity"
-        self.chart.ui_component.above_below_buttons.value = "above"
         self.chart.ui_component.cell_gallery_linked_checkbox.value = True
-        self.chart.cutoff = 4.0
 
-    def test_gallery_receives_all_fov_indices_above_cutoff(self):
-        """Gallery should get row indices from ALL fovs whose intensity > cutoff."""
-        self.chart.highlight_cells(push_to_gallery=True)
-        # intensity > 4.0: rows with intensity 5.0, 9.0, 7.0 (indices 1, 2, 4)
-        self.assertIsNotNone(self.gallery.received)
-        received = set(self.gallery.received)
-        table = self.viewer.cell_table
-        expected = set(table.loc[table["intensity"] > 4.0].index)
-        self.assertEqual(received, expected)
+    def test_multi_cell_scatter_selection_reaches_gallery(self):
+        """Lasso/box selection of multiple scatter points must update the gallery."""
+        self.chart._on_scatter_selection({0, 1, 2}, origin="widget")
+        self.assertIsNotNone(self.gallery.received, "gallery should have received indices")
+        self.assertEqual(set(self.gallery.received), {0, 1, 2})
 
-    def test_gallery_not_updated_when_checkbox_off(self):
-        """When linking checkbox is False, gallery must not receive new indices."""
+    def test_single_cell_scatter_click_does_not_reach_gallery(self):
+        """Single-cell click is intentionally blocked — main viewer shows that cell."""
+        self.chart._on_scatter_selection({2}, origin="widget")
+        self.assertIsNone(
+            self.gallery.received,
+            "single-cell click guard must remain; gallery must not be updated",
+        )
+
+    def test_multi_cell_gallery_update_respects_linked_checkbox(self):
+        """Gallery must not be updated when the linking checkbox is unchecked."""
         self.chart.ui_component.cell_gallery_linked_checkbox.value = False
-        self.chart.highlight_cells(push_to_gallery=True)
+        self.chart._on_scatter_selection({0, 1, 2}, origin="widget")
         self.assertIsNone(self.gallery.received)
 
-    def test_gallery_receives_indices_below_cutoff(self):
-        """Selecting 'below' sends indices whose intensity < cutoff to gallery."""
-        self.chart.ui_component.above_below_buttons.value = "below"
-        self.chart.highlight_cells(push_to_gallery=True)
-        table = self.viewer.cell_table
-        expected = set(table.loc[table["intensity"] < 4.0].index)
-        received = set(self.gallery.received)
-        self.assertEqual(received, expected)
+    def test_second_multi_cell_selection_overwrites_first(self):
+        """A subsequent multi-cell selection should replace the gallery contents."""
+        self.chart._on_scatter_selection({0, 1}, origin="widget")
+        self.assertEqual(set(self.gallery.received), {0, 1})
 
-    def test_gallery_uses_all_fovs_not_just_current(self):
-        """Gallery indices must include cells from fov2, not only from fov1."""
-        self.chart.highlight_cells(push_to_gallery=True)
-        table = self.viewer.cell_table
-        fov2_indices = set(table.loc[table["fov"] == "fov2"].index)
-        received = set(self.gallery.received)
-        # At least one fov2 row (intensity 7.0 > 4.0) must appear
-        self.assertTrue(received & fov2_indices, "gallery should include fov2 cells")
-
-    def test_image_display_still_limited_to_current_fov(self):
-        """Image highlighting should still be restricted to the current FOV."""
-        self.chart.highlight_cells(push_to_gallery=True)
-        image_display: _FakeImageDisplay = self.viewer.image_display
-        # fov1 has labels 1, 2, 3; only 2 and 3 have intensity > 4.0
-        self.assertNotIn(1, image_display.last_mask_ids)
-        self.assertIn(2, image_display.last_mask_ids)
-        self.assertIn(3, image_display.last_mask_ids)
-        # fov2 labels must NOT appear in image highlight
-        for label in [4, 5]:
-            self.assertNotIn(label, image_display.last_mask_ids)
-
-    def test_no_crash_when_cutoff_is_none(self):
-        """highlight_cells() with no cutoff set should return silently."""
-        self.chart.cutoff = None
-        self.chart.highlight_cells(push_to_gallery=True)  # should not raise
-        self.assertIsNone(self.gallery.received)
-
-    def test_no_crash_when_x_col_is_none(self):
-        """highlight_cells() with x_axis set to 'None' should return silently."""
-        self.chart.ui_component.x_axis_selector.value = "None"
-        self.chart.highlight_cells(push_to_gallery=True)
-        self.assertIsNone(self.gallery.received)
-
-    def test_auto_rerender_does_not_update_gallery(self):
-        """Automatic histogram re-renders (FOV/bin change) must NOT override gallery."""
-        # Simulate a scatter-driven gallery update first
-        self.gallery.received = {99}  # pretend scatter already set indices
-        # Auto re-render path (push_to_gallery=False, the default)
-        self.chart.highlight_cells(push_to_gallery=False)
-        # Gallery must be unchanged
-        self.assertEqual(self.gallery.received, {99})
-
-
-class TestAboveBelowToggleAutoUpdate(unittest.TestCase):
-    """Toggling above_below_buttons should re-trigger highlight_cells()."""
-
-    def setUp(self):
-        table = _two_fov_table()
-        self.viewer = _make_viewer(table)
-        chart = ChartDisplay(self.viewer, width=4, height=3)
-
-        # Replace with a controllable stub BEFORE setup_observe() so the
-        # observer lambda is registered on our stub rather than on the real
-        # ToggleButtons (which doesn't fire in a non-notebook test context).
-        class _ToggleStub:
-            def __init__(self, value: str):
-                self.value = value
-                self._cbs: list = []
-
-            def observe(self, callback, names=None):
-                self._cbs.append(callback)
-
-            def _trigger(self, new_value: str):
-                self.value = new_value
-                for cb in self._cbs:
-                    cb(SimpleNamespace(new=new_value))
-
-        chart.ui_component.above_below_buttons = _ToggleStub("above")
-        chart.setup_observe()
-        self.chart = chart
-        self.chart.ui_component.x_axis_selector.value = "intensity"
-        self.chart.ui_component.cell_gallery_linked_checkbox.value = True
-        self.chart.cutoff = 4.0
-        self.gallery: _FakeCellGallery = self.viewer.SidePlots.cell_gallery_output
-
-    def test_toggle_below_updates_gallery_automatically(self):
-        """Switching toggle from 'above' to 'below' should push new indices."""
-        # Simulate initial state via explicit apply
-        self.chart.highlight_cells(push_to_gallery=True)
-        table = self.viewer.cell_table
-        above_set = set(table.loc[table["intensity"] > 4.0].index)
-        self.assertEqual(set(self.gallery.received), above_set)
-
-        # Simulate widget toggle (above_below_buttons is a _Widget with observe support)
-        self.chart.ui_component.above_below_buttons._trigger("below")
-
-        below_set = set(table.loc[table["intensity"] < 4.0].index)
-        self.assertEqual(set(self.gallery.received), below_set)
-
-    def test_toggle_above_updates_gallery_automatically(self):
-        """After switching to 'below', switching back to 'above' updates gallery."""
-        self.chart.ui_component.above_below_buttons._trigger("below")
-        self.chart.ui_component.above_below_buttons._trigger("above")
-        table = self.viewer.cell_table
-        expected = set(table.loc[table["intensity"] > 4.0].index)
-        self.assertEqual(set(self.gallery.received), expected)
-
-    def test_toggle_no_op_when_cutoff_not_set(self):
-        """Toggle before any cutoff is set should not crash and gallery unchanged."""
-        self.chart.cutoff = None
-        prev = self.gallery.received
-        self.chart.ui_component.above_below_buttons._trigger("below")
-        self.assertEqual(self.gallery.received, prev)
+        self.chart._on_scatter_selection({2, 3}, origin="widget")
+        self.assertEqual(set(self.gallery.received), {2, 3})
 
 
 if __name__ == "__main__":

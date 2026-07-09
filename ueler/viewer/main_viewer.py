@@ -17,7 +17,7 @@ from matplotlib.text import Annotation
 import cv2
 from collections import OrderedDict
 from types import SimpleNamespace
-from ipywidgets import IntText, Output, Dropdown, FloatSlider, Checkbox, Button, VBox, HBox, Layout, Widget
+from ipywidgets import IntText, Output, Dropdown, FloatSlider, Checkbox, Button, HTML, VBox, HBox, Layout, Widget
 from IPython.display import display
 import pandas as pd
 # Import modules
@@ -64,6 +64,7 @@ from ueler.rendering import (
     AnnotationRenderSettings,
     ChannelRenderSettings,
     MaskOverlaySnapshot,
+    MaskPainterSnapshot,
     MaskRenderSettings,
     OverlaySnapshot,
     render_fov_to_array,
@@ -87,7 +88,7 @@ from weakref import WeakKeyDictionary
 
 from skimage.io import imsave
 from skimage.segmentation import find_boundaries
-from ueler.rendering.engine import scale_outline_thickness, thicken_outline
+from ueler.rendering.engine import scale_outline_thickness, thicken_outline, get_all_cell_colors_for_fov
 # from dask.distributed import LocalCluster, Client
 
 # # Create a LocalCluster with a memory limit of 4 GB per worker
@@ -165,16 +166,113 @@ def _unique_annotation_values(array):
         return np.array([], dtype=np.int32)
     return finite_values.astype(np.int32, copy=False)
 
+
+def _channel_color_dropdown_layout(color_options: Optional[Sequence[str]] = None) -> Layout:
+    """Content-driven compact color dropdown sizing for per-channel header rows."""
+    options = [str(opt) for opt in (color_options or ())]
+    longest = max((len(opt) for opt in options), default=8)
+    width_ch = min(14, max(7, longest + 1))
+    width = f'{width_ch}ch'
+    return Layout(
+        width=width,
+        min_width='68px',
+        max_width=width,
+        flex='0 0 auto',
+        margin='0 0 0 -5px',
+        box_sizing='border-box',
+    )
+
+
+def _channel_visibility_checkbox_layout() -> Layout:
+    """Compact fixed-size checkbox layout for per-channel visibility controls."""
+    return Layout(width='20px', min_width='20px', max_width='20px', margin='0')
+
+
+def _channel_slider_layout() -> Layout:
+    """Slider row layout tuned for maximum usable track length."""
+    return Layout(
+        width='calc(100% - 5px)',
+        max_width='calc(100% - 5px)',
+        min_width='0',
+        box_sizing='border-box',
+        flex='0 0 auto',
+    )
+
+
+def _channel_marker_label_layout() -> Layout:
+    """Marker label layout for per-channel header rows."""
+    return Layout(flex='1 1 auto', min_width='0', overflow='hidden')
+
+
+def _channel_header_row_layout() -> Layout:
+    """Row layout for visibility checkbox + marker label + color dropdown."""
+    return Layout(
+        display='flex',
+        align_items='center',
+        justify_content='flex-start',
+        gap='4px',
+        min_height='30px',
+        overflow='hidden',
+        width='100%',
+        max_width='calc(100% - 5px)',
+        min_width='0',
+        box_sizing='border-box',
+    )
+
+
+def _channel_group_layout() -> Layout:
+    """Grouped channel block layout containing header, Min, and Max rows."""
+    return Layout(
+        width='100%',
+        max_width='calc(100% - 5px)',
+        min_width='0',
+        box_sizing='border-box',
+        gap='2px',
+        flex='0 0 auto',
+    )
+
+
+def _dedupe_channel_sequence(channels: Sequence[str]) -> Tuple[str, ...]:
+    """Return channels in first-seen order with duplicates removed."""
+    ordered = []
+    seen = set()
+    for ch in channels:
+        name = str(ch)
+        if name in seen:
+            continue
+        seen.add(name)
+        ordered.append(name)
+    return tuple(ordered)
+
 class ImageMaskViewer:
-    def __init__(self, base_folder, masks_folder=None, annotations_folder=None):
+    def __init__(self, base_folder, masks_folder=None, annotations_folder=None, debug=False,
+                 data_source=None):
         self.initialized = False
+        # Optional remote data source (issue #110, BIA streaming). When set, FOV
+        # discovery and per-FOV image/mask reads route through it instead of the
+        # local filesystem; ``base_folder`` is then a local workspace directory
+        # used only for persistent ``.UELer`` state.
+        self._data_source = data_source
+        # Set True by display_ui() once the widget tree is sent to the browser.
+        # draw_idle() and on_draw-triggered renders are suppressed until then so
+        # that deferred ipympl comm events don't fire against a hidden canvas and
+        # crash the kernel (most visible when auto_display=False).
+        self._widget_displayed = False
         self.base_folder = base_folder
-        self.masks_folder = masks_folder
-        if annotations_folder is None:
-            candidate = os.path.join(self.base_folder, "annotations")
-            self.annotations_folder = candidate if os.path.isdir(candidate) else None
+        if self._data_source is not None:
+            # Masks / annotations are served (and cached to flat local dirs) by
+            # the remote source; use those dirs so the existing loaders run as-is.
+            self.masks_folder = self._data_source.masks_folder if self._data_source.has_masks else None
+            self.annotations_folder = (
+                self._data_source.annotations_folder if self._data_source.has_annotations else None
+            )
         else:
-            self.annotations_folder = annotations_folder
+            self.masks_folder = masks_folder
+            if annotations_folder is None:
+                candidate = os.path.join(self.base_folder, "annotations")
+                self.annotations_folder = candidate if os.path.isdir(candidate) else None
+            else:
+                self.annotations_folder = annotations_folder
 
         # Add this flag
         self.masks_available = self.masks_folder is not None
@@ -200,6 +298,7 @@ class ImageMaskViewer:
         self._map_pixel_size_nm = None
         self._map_canvas_size = None
         self._last_viewport_px: Optional[Tuple[float, float, float, float, int]] = None
+        self._skip_image_layer = False
         # When True, update_display returns immediately without rendering.
         # Used to suppress the cascade of renders triggered by widget observers
         # during load_widget_states (which fires one observer per widget).
@@ -226,7 +325,11 @@ class ImageMaskViewer:
         self.mask_key = "mask"
         self.fov_key = "fov"
 
-        self._debug = False
+        self._debug = debug
+        if debug:
+            # Raise the ueler package logger to DEBUG so plugin traces
+            # (e.g. [heatmap], [cell_annotation]) reach the kernel console.
+            logging.getLogger("ueler").setLevel(logging.DEBUG)
 
         # Frame selection for stacked imagery (OME-TIFF)
         self.current_frame_index: int = 0
@@ -235,44 +338,52 @@ class ImageMaskViewer:
 
         # Initialize variables
         self._fov_mode = "folder"
-        
-        # Get potential FOV directories (excluding hidden ones like .UELer)
-        subdirs = [d for d in os.listdir(self.base_folder) 
-                   if os.path.isdir(os.path.join(self.base_folder, d)) 
-                   and not d.startswith(".")]
-        
-        # Check which of these are actually valid FOVs
-        valid_fov_folders = [fov for fov in subdirs if self._has_tiff_files(fov)]
-        valid_fov_folders.sort()
 
-        ome_files = find_ome_tiff_files(self.base_folder)
-        
-        if valid_fov_folders:
-             self._fov_mode = "folder"
-             self.available_fovs = valid_fov_folders
-        elif ome_files:
-             self._fov_mode = "ome-tiff"
-             self.available_fovs = []
-             for f in ome_files:
-                 name = os.path.basename(f)
-                 if name.endswith(".ome.tif"):
-                     name = name[:-8]
-                 elif name.endswith(".ome.tiff"):
-                     name = name[:-9]
-                 else:
-                     name = os.path.splitext(name)[0]
-                 self.available_fovs.append(name)
-             self.available_fovs.sort()
+        if self._data_source is not None:
+            # Remote (BIA) discovery: FOV list and the underlying folder/ome mode
+            # come from the data source; local scanning is skipped entirely.
+            self._fov_mode = "bia"
+            self.available_fovs = sorted(self._data_source.list_fovs())
+            if not self.available_fovs:
+                raise ValueError("No FOVs found in the BIA study.")
         else:
-             self.available_fovs = []
+            # Get potential FOV directories (excluding hidden ones like .UELer)
+            subdirs = [d for d in os.listdir(self.base_folder)
+                       if os.path.isdir(os.path.join(self.base_folder, d))
+                       and not d.startswith(".")]
 
-        if not self.available_fovs:
-            raise ValueError("No FOVs found in the base folder.")
+            # Check which of these are actually valid FOVs
+            valid_fov_folders = [fov for fov in subdirs if self._has_tiff_files(fov)]
+            valid_fov_folders.sort()
+
+            ome_files = find_ome_tiff_files(self.base_folder)
+
+            if valid_fov_folders:
+                 self._fov_mode = "folder"
+                 self.available_fovs = valid_fov_folders
+            elif ome_files:
+                 self._fov_mode = "ome-tiff"
+                 self.available_fovs = []
+                 for f in ome_files:
+                     name = os.path.basename(f)
+                     if name.endswith(".ome.tif"):
+                         name = name[:-8]
+                     elif name.endswith(".ome.tiff"):
+                         name = name[:-9]
+                     else:
+                         name = os.path.splitext(name)[0]
+                     self.available_fovs.append(name)
+                 self.available_fovs.sort()
+            else:
+                 self.available_fovs = []
+
+            if not self.available_fovs:
+                raise ValueError("No FOVs found in the base folder.")
 
         if self._map_mode_enabled:
             self._initialize_map_descriptors()
         if self._debug:
-            print("[INIT DEBUG] _initialize_map_descriptors done", flush=True)
+            logger.debug("[INIT DEBUG] _initialize_map_descriptors done")
 
         # Initialize caches and other variables
         self.max_cache_size = 100
@@ -328,12 +439,12 @@ class ImageMaskViewer:
         # Load the status images
         self.load_status_images()
         if self._debug:
-            print("[INIT DEBUG] load_status_images done", flush=True)
+            logger.debug("[INIT DEBUG] load_status_images done")
 
         # Load the first FOV and set image dimensions
         initial_fov = self.available_fovs[0]
         if self._debug:
-            print(f"[INIT DEBUG] loading initial FOV: {initial_fov}", flush=True)
+            logger.debug(f"[INIT DEBUG] loading initial FOV: {initial_fov}")
         self.load_fov(initial_fov)
         fov_images = self.image_cache[initial_fov]
         if isinstance(fov_images, OMEFovWrapper):
@@ -358,7 +469,7 @@ class ImageMaskViewer:
                 )
             self.height, self.width = first_channel_image.shape
         if self._debug:
-            print(f"[INIT DEBUG] initial FOV loaded, size={self.width}x{self.height}", flush=True)
+            logger.debug(f"[INIT DEBUG] initial FOV loaded, size={self.width}x{self.height}")
 
         # Calculate the downsample factor based on image size
         initial_factor = select_downsample_factor(
@@ -369,18 +480,18 @@ class ImageMaskViewer:
         )
         self.on_downsample_factor_changed(initial_factor)
         if self._debug:
-            print(f"[INIT DEBUG] downsample factor set to {self.current_downsample_factor}", flush=True)
+            logger.debug(f"[INIT DEBUG] downsample factor set to {self.current_downsample_factor}")
 
         # Initialize image output and image display
         self.image_output = Output()
         if self._debug:
-            print("[INIT DEBUG] creating ImageDisplay + plt.show()", flush=True)
+            logger.debug("[INIT DEBUG] creating ImageDisplay + plt.show()")
         with self.image_output:
             self.image_display = ImageDisplay(self.width, self.height)
             self.image_display.main_viewer = self
             plt.show()
         if self._debug:
-            print("[INIT DEBUG] ImageDisplay created", flush=True)
+            logger.debug("[INIT DEBUG] ImageDisplay created")
 
         # Grid-view output (hidden until the user activates channel grid mode)
         self.grid_output = Output()
@@ -389,13 +500,13 @@ class ImageMaskViewer:
 
         # Initialize widgets
         if self._debug:
-            print("[INIT DEBUG] calling create_widgets", flush=True)
+            logger.debug("[INIT DEBUG] calling create_widgets")
         create_widgets(self)
         if self._debug:
-            print("[INIT DEBUG] create_widgets done; calling _refresh_map_controls", flush=True)
+            logger.debug("[INIT DEBUG] create_widgets done; calling _refresh_map_controls")
         self._refresh_map_controls()
         if self._debug:
-            print("[INIT DEBUG] _refresh_map_controls done", flush=True)
+            logger.debug("[INIT DEBUG] _refresh_map_controls done")
         pixel_widget = getattr(self.ui_component, "pixel_size_inttext", None)
         if pixel_widget is not None:
             try:
@@ -420,63 +531,66 @@ class ImageMaskViewer:
         self._initialize_annotation_palette_manager()
         self._refresh_annotation_control_states()
         if self._debug:
-            print("[INIT DEBUG] annotation palette manager ready", flush=True)
+            logger.debug("[INIT DEBUG] annotation palette manager ready")
 
         # Setup widget observers
         if self._debug:
-            print("[INIT DEBUG] calling setup_widget_observers", flush=True)
+            logger.debug("[INIT DEBUG] calling setup_widget_observers")
         self.setup_widget_observers()
         if self._debug:
-            print("[INIT DEBUG] setup_widget_observers done", flush=True)
+            logger.debug("[INIT DEBUG] setup_widget_observers done")
 
         # Setup event connections
         if self._debug:
-            print("[INIT DEBUG] calling setup_event_connections", flush=True)
+            logger.debug("[INIT DEBUG] calling setup_event_connections")
         self.setup_event_connections()
         if self._debug:
-            print("[INIT DEBUG] setup_event_connections done", flush=True)
+            logger.debug("[INIT DEBUG] setup_event_connections done")
 
         # Initial setup
         if self._debug:
-            print("[INIT DEBUG] calling update_marker_set_dropdown", flush=True)
+            logger.debug("[INIT DEBUG] calling update_marker_set_dropdown")
         self.update_marker_set_dropdown()
         if self._debug:
-            print("[INIT DEBUG] calling update_controls", flush=True)
+            logger.debug("[INIT DEBUG] calling update_controls")
         self.update_controls(None)
         if self._debug:
-            print("[INIT DEBUG] update_controls done; calling on_image_change", flush=True)
+            logger.debug("[INIT DEBUG] update_controls done; calling on_image_change")
         self.on_image_change(None)
         if self._debug:
-            print("[INIT DEBUG] on_image_change done; calling update_display", flush=True)
+            logger.debug("[INIT DEBUG] on_image_change done; calling update_display")
         self.update_display(self.current_downsample_factor)
         if self._debug:
-            print("[INIT DEBUG] update_display done", flush=True)
+            logger.debug("[INIT DEBUG] update_display done")
 
         self.SidePlots = SimpleNamespace()
         self.BottomPlots = SimpleNamespace()
         if self._debug:
-            print("[INIT DEBUG] SidePlots/BottomPlots set", flush=True)
+            logger.debug("[INIT DEBUG] SidePlots/BottomPlots set")
 
         # Suppress the per-widget update_display observers that fire while
         # restoring saved states, then do exactly one render at the end.
         if self._debug:
-            print("[INIT DEBUG] entering load_widget_states", flush=True)
+            logger.debug("[INIT DEBUG] entering load_widget_states")
         self._suspend_display_updates = True
         try:
             self.load_widget_states(os.path.join(self.base_folder, ".UELer", 'widget_states.json'))
         finally:
             self._suspend_display_updates = False
+        # One render after widget-state restoration so the display reflects
+        # the restored channel/contrast/FOV selections (fixes #84).
+        self.update_display(self.current_downsample_factor)
         if self._debug:
-            print("[INIT DEBUG] load_widget_states done", flush=True)
+            logger.debug("[INIT DEBUG] load_widget_states done")
 
         # Setup attribute observers
         if self._debug:
-            print("[INIT DEBUG] calling setup_attr_observers", flush=True)
+            logger.debug("[INIT DEBUG] calling setup_attr_observers")
         self.setup_attr_observers()
 
         self.initialized = True
         if self._debug:
-            print("[INIT DEBUG] __init__ COMPLETE", flush=True)
+            logger.debug("[INIT DEBUG] __init__ COMPLETE")
     
     def _has_tiff_files(self, fov_name):
         """Check if a directory contains .tif or .tiff files, including in 'rescaled' subdirectory."""
@@ -536,7 +650,7 @@ class ImageMaskViewer:
         self._map_mode_messages.append(text)
         logger.warning(text)
         try:
-            print(f"Map mode warning: {message}")
+            logger.warning(f"Map mode warning: {message}")
         except Exception:  # pragma: no cover - console output best effort
             pass
 
@@ -657,6 +771,20 @@ class ImageMaskViewer:
         # canvas, which can exhaust memory on large datasets.
         display.prev_center_x = width_px / 2.0
         display.prev_center_y = height_px / 2.0
+        # Seed the viewport size trackers so on_draw's size-equality check is
+        # initialised to the full canvas dimensions.  This preserves the
+        # memory-safety guard: subsequent background draw events from ipympl
+        # short-circuit without triggering a full tile load, while actual user
+        # zoom (which changes size) bypasses the short-circuit correctly.
+        display.prev_viewport_width = float(width_px)
+        display.prev_viewport_height = float(height_px)
+        # Signal that the very first on_draw AFTER the widget becomes visible
+        # must bypass the short-circuit and render real tiles.  This is needed
+        # because the pre-display update_display() call fires before ipympl has
+        # sent anything to the browser; the draw_idle() produced there never
+        # reaches the client, so the widget appears with the 1×1 black
+        # placeholder until forced here.
+        display._map_needs_initial_render = True
         self._sync_navigation_home_view()
 
     def _sync_canvas_to_current_fov(self) -> None:
@@ -729,7 +857,7 @@ class ImageMaskViewer:
     def on_map_mode_toggle(self, change):
         new_value = bool(change.get("new"))
         if self._debug:
-            print(f"[INIT DEBUG] on_map_mode_toggle fired: new_value={new_value}, _map_mode_active={self._map_mode_active}", flush=True)
+            logger.debug(f"[INIT DEBUG] on_map_mode_toggle fired: new_value={new_value}, _map_mode_active={self._map_mode_active}")
         if new_value == self._map_mode_active:
             return
         # Grid view is incompatible with map mode — deactivate it cleanly
@@ -798,7 +926,7 @@ class ImageMaskViewer:
             self.label_masks_cache[fov_name] = {}
             for mask_name, mask in masks_dict.items():
                 if mask is None or mask.size == 0:
-                    print(f"Warning: Mask '{mask_name}' in FOV '{fov_name}' is empty or invalid.")
+                    logger.warning(f"Warning: Mask '{mask_name}' in FOV '{fov_name}' is empty or invalid.")
                     continue
 
                 self.edge_masks_cache[fov_name][mask_name] = {}
@@ -815,7 +943,7 @@ class ImageMaskViewer:
             removed_fov, _ = self.mask_cache.popitem(last=False)
             self.edge_masks_cache.pop(removed_fov, None)
             self.label_masks_cache.pop(removed_fov, None)
-            print(f"Removed FOV '{removed_fov}' from mask cache.")
+            logger.info(f"Removed FOV '{removed_fov}' from mask cache.")
 
     def _get_label_mask_at_factor(self, fov_name: str, mask_name: str, factor: int):
         """Return the downsampled label mask for *fov_name*/*mask_name* at *factor*.
@@ -834,17 +962,17 @@ class ImageMaskViewer:
 
     def _activate_map_mode(self, map_id: str) -> None:
         if self._debug:
-            print(f"[INIT DEBUG] _activate_map_mode: map_id={map_id!r}", flush=True)
+            logger.debug(f"[INIT DEBUG] _activate_map_mode: map_id={map_id!r}")
         if map_id not in self._map_descriptors:
             raise KeyError(map_id)
         if self._debug:
-            print("[INIT DEBUG] _activate_map_mode: calling _get_map_layer", flush=True)
+            logger.debug("[INIT DEBUG] _activate_map_mode: calling _get_map_layer")
         layer = self._get_map_layer(map_id)
         if self._debug:
-            print("[INIT DEBUG] _activate_map_mode: computing canvas dimensions", flush=True)
+            logger.debug("[INIT DEBUG] _activate_map_mode: computing canvas dimensions")
         width_px, height_px, base_pixel = self._compute_map_canvas_dimensions(layer)
         if self._debug:
-            print(f"[INIT DEBUG] _activate_map_mode: canvas={width_px}x{height_px}px, pixel={base_pixel}um", flush=True)
+            logger.debug(f"[INIT DEBUG] _activate_map_mode: canvas={width_px}x{height_px}px, pixel={base_pixel}um")
         self._map_mode_active = True
         self._active_map_id = map_id
         self._map_pixel_size_nm = base_pixel * 1000.0
@@ -858,17 +986,17 @@ class ImageMaskViewer:
         if selector is not None:
             selector.disabled = False
         if self._debug:
-            print(f"[INIT DEBUG] _activate_map_mode: calling _set_map_canvas_dimensions({width_px}, {height_px})", flush=True)
+            logger.debug(f"[INIT DEBUG] _activate_map_mode: calling _set_map_canvas_dimensions({width_px}, {height_px})")
         self._set_map_canvas_dimensions(width_px, height_px)
         descriptor = self._map_descriptors[map_id]
         tile_names = [spec.name for spec in getattr(descriptor, 'fovs', ())]
         if self._debug:
-            print(f"[INIT DEBUG] _activate_map_mode: {len(tile_names)} tiles, _batch_compute_channel_stats follows (enabled={self._map_batch_stats_enabled})", flush=True)
+            logger.debug(f"[INIT DEBUG] _activate_map_mode: {len(tile_names)} tiles, _batch_compute_channel_stats follows (enabled={self._map_batch_stats_enabled})")
         channel_selector = getattr(getattr(self, 'ui_component', None), 'channel_selector', None)
         selected_channels = list(getattr(channel_selector, 'value', ())) if channel_selector is not None else []
         self._batch_compute_channel_stats(tile_names, selected_channels)
         if self._debug:
-            print("[INIT DEBUG] _activate_map_mode: _batch_compute_channel_stats done", flush=True)
+            logger.debug("[INIT DEBUG] _activate_map_mode: _batch_compute_channel_stats done")
         # Reset lazy-stats tracking so the new map starts fresh.
         self._stats_computed_fovs = set()
         try:
@@ -882,7 +1010,7 @@ class ImageMaskViewer:
         except Exception:
             pass
         if self._debug:
-            print("[INIT DEBUG] _activate_map_mode: DONE", flush=True)
+            logger.debug("[INIT DEBUG] _activate_map_mode: DONE")
 
     def _deactivate_map_mode(self) -> None:
         self._map_mode_active = False
@@ -1121,7 +1249,40 @@ class ImageMaskViewer:
                 layer.invalidate_for_fov(fov_name)
             except Exception:
                 if self._debug:
-                    print(f"[viewer] Failed to invalidate map cache for {fov_name}")
+                    logger.debug(f"[viewer] Failed to invalidate map cache for {fov_name}")
+
+    def _invalidate_all_map_tiles(self) -> None:
+        self._map_tile_cache.clear()
+
+    def is_no_image_mode_enabled(self) -> bool:
+        checkbox = getattr(getattr(self, "ui_component", None), "no_image_checkbox", None)
+        if checkbox is not None:
+            try:
+                return bool(getattr(checkbox, "value", False))
+            except Exception:
+                return bool(getattr(self, "_skip_image_layer", False))
+        return bool(getattr(self, "_skip_image_layer", False))
+
+    def on_no_image_toggle(self, change):
+        self._skip_image_layer = bool(change.get("new"))
+        if self._map_mode_active:
+            self._invalidate_all_map_tiles()
+        self.update_display(self.current_downsample_factor)
+        self.inform_plugins('on_no_image_toggle')
+
+    def on_lasso_select_toggle(self, change):
+        image_display = getattr(self, "image_display", None)
+        if image_display is None:
+            return
+        if change.get("new"):
+            image_display.enable_lasso_selector(on_complete=self._on_lasso_complete)
+        else:
+            image_display.disable_lasso_selector()
+
+    def _on_lasso_complete(self):
+        toggle = getattr(getattr(self, "ui_component", None), "lasso_select_toggle", None)
+        if toggle is not None:
+            toggle.value = False
 
     def _map_state_signature(
         self,
@@ -1219,8 +1380,9 @@ class ImageMaskViewer:
         painter_signature = (bool(self._is_mask_painter_enabled()), painter_selected)
 
         return (
-            "v1",
+            "v2",
             int(downsample_factor),
+            bool(self.is_no_image_mode_enabled()),
             tuple(channel_entries),
             mask_signature,
             annotation_signature,
@@ -1358,7 +1520,7 @@ class ImageMaskViewer:
             self.load_fov(fov_name)
         except Exception:
             if self._debug:
-                print(f"[viewer] Failed to prime mask cache for {fov_name}")
+                logger.debug(f"[viewer] Failed to prime mask cache for {fov_name}")
 
     def _get_mask_array(self, fov_name: str, mask_name: str):
         self._ensure_mask_cache(fov_name)
@@ -1584,17 +1746,156 @@ class ImageMaskViewer:
         else:
             display.img_display.set_data(base_image)
         display.fig.canvas.draw_idle()
+
+    def _apply_map_painter_overlay(self) -> None:
+        """Overlay mask painter colors on the current map view.
+
+        This method is analogous to ``_update_map_mask_highlights`` but reads
+        from the global cell-color registry (populated by the mask painter
+        plugin) instead of the highlight selection set.  It applies colored
+        outlines for each class directly onto the already-rendered stitched
+        map image, bypassing the per-tile render cache.
+
+        Call order in ``update_display``:
+            1. ``_apply_map_painter_overlay()`` — paint class colors onto base
+            2. ``_update_map_mask_highlights()`` — overlay selection highlights
+               on top
+        """
+        if not (self._map_mode_active and self._active_map_id and self._is_mask_painter_enabled()):
+            return
+
+        display = getattr(self, "image_display", None)
+        if display is None:
+            return
+
+        base_image = display._materialize_combined()
+        if base_image is None:
+            return
+
+        try:
+            layer = self._get_map_layer(self._active_map_id)
+        except Exception:
+            return
+
+        tile_viewports = layer.last_tile_viewports()
+        if not tile_viewports:
+            return
+
+        mask_key = getattr(self, "mask_key", None)
+        if not mask_key:
+            return
+
+        overlay = np.array(base_image, copy=True)
+        applied = False
+        painter = self._get_mask_painter()
+
+        for fov_name, viewport_info in tile_viewports.items():
+            if painter is not None:
+                state_maps_helper = getattr(painter, "get_effective_state_maps_for_fov", None)
+                if callable(state_maps_helper):
+                    (cell_colors, border_color_map_for_fov,
+                     mode_map_for_fov, opacity_map_for_fov) = state_maps_helper(str(fov_name))
+                else:
+                    color_helper = getattr(painter, "get_effective_color_map_for_fov", None)
+                    cell_colors = color_helper(str(fov_name)) if callable(color_helper) else get_all_cell_colors_for_fov(str(fov_name))
+                    mode_helper = getattr(painter, "get_effective_mode_map_for_fov", None)
+                    mode_map_for_fov = mode_helper(str(fov_name)) if callable(mode_helper) else painter.get_mode_map_for_fov(str(fov_name))
+                    opacity_helper = getattr(painter, "get_effective_opacity_map_for_fov", None)
+                    opacity_map_for_fov = opacity_helper(str(fov_name)) if callable(opacity_helper) else painter.get_opacity_map_for_fov(str(fov_name))
+                    border_color_helper = getattr(painter, "get_effective_border_color_map_for_fov", None)
+                    border_color_map_for_fov = border_color_helper(str(fov_name)) if callable(border_color_helper) else {}
+            else:
+                cell_colors = get_all_cell_colors_for_fov(str(fov_name))
+                mode_map_for_fov = {}
+                opacity_map_for_fov = {}
+                border_color_map_for_fov = {}
+            if not cell_colors:
+                continue
+
+            mask_array = self._get_mask_array(str(fov_name), str(mask_key))
+            if mask_array is None or mask_array.size == 0:
+                continue
+
+            region_xy = getattr(viewport_info, "region_xy", None)
+            if region_xy is None:
+                continue
+
+            try:
+                x_min_px = int(region_xy[0])
+                x_max_px = int(region_xy[1])
+                y_min_px = int(region_xy[2])
+                y_max_px = int(region_xy[3])
+            except Exception:
+                continue
+
+            if x_min_px >= x_max_px or y_min_px >= y_max_px:
+                continue
+
+            try:
+                mask_region = mask_array[y_min_px:y_max_px, x_min_px:x_max_px]
+            except Exception:
+                continue
+            if mask_region.size == 0:
+                continue
+
+            downsample = max(1, int(getattr(viewport_info, "downsample_factor", 1)))
+            mask_region_ds = mask_region[::downsample, ::downsample]
+            if mask_region_ds.size == 0:
+                continue
+
+            dest_x0 = max(0, int(getattr(viewport_info, "dest_x0", 0)))
+            dest_x1 = max(dest_x0, int(getattr(viewport_info, "dest_x1", dest_x0)))
+            dest_y0 = max(0, int(getattr(viewport_info, "dest_y0", 0)))
+            dest_y1 = max(dest_y0, int(getattr(viewport_info, "dest_y1", dest_y0)))
+
+            if dest_x0 >= dest_x1 or dest_y0 >= dest_y1:
+                continue
+
+            section_view = overlay[dest_y0:dest_y1, dest_x0:dest_x1]
+            if section_view.size == 0:
+                continue
+
+            show_borders_on_filled = painter.get_show_borders_on_filled() if painter is not None else False
+
+            rows = min(section_view.shape[0], mask_region_ds.shape[0])
+            cols = min(section_view.shape[1], mask_region_ds.shape[1])
+            if rows <= 0 or cols <= 0:
+                continue
+
+            painted = apply_registry_colors(
+                section_view[:rows, :cols],
+                fov=str(fov_name),
+                mask_regions={str(mask_key): mask_region_ds[:rows, :cols]},
+                outline_thickness=int(getattr(self, "mask_outline_thickness", 1)),
+                downsample_factor=downsample,
+                color_map=cell_colors,
+                border_color_map=border_color_map_for_fov,
+                mode_map=mode_map_for_fov,
+                opacity_map=opacity_map_for_fov,
+                show_borders_on_filled=show_borders_on_filled,
+            )
+            if np.any(painted != section_view[:rows, :cols]):
+                section_view[:rows, :cols] = painted
+                applied = True
+
+        if applied:
+            # Update combined so _update_map_mask_highlights builds on top of
+            # the painted image rather than the raw rendered base.
+            display.combined = overlay
+            display.img_display.set_data(overlay)
+            display.fig.canvas.draw_idle()
+
     def after_all_plugins_loaded(self):
         # loop through all the attributes of self.SidePlots, call the `after_all_plugins_loaded`` method
         for attr_name in dir(self.SidePlots):
             attr = getattr(self.SidePlots, attr_name)
             if isinstance(attr, PluginBase):
                 if self._debug:
-                    print(f"Calling after_all_plugins_loaded for {attr_name}")
-                attr.after_all_plugins_loaded()
-            else:
-                if self._debug:
-                    print(f"Skipping {attr_name}")
+                    logger.debug(f"Calling after_all_plugins_loaded for {attr_name}")
+                try:
+                    attr.after_all_plugins_loaded()
+                except Exception as exc:
+                    logger.warning(f"[viewer] after_all_plugins_loaded failed for {attr_name}: {exc}")
 
 
     def dynamically_load_plugins(self, allow_plugins: Optional[Iterable[str]] = None):
@@ -1603,7 +1904,7 @@ class ImageMaskViewer:
         for filename in os.listdir(plugin_dir):
             if filename.endswith('.py') and not filename.startswith('_'):
                 if self._debug:
-                    print(f"Loading plugin: {filename}")
+                    logger.debug(f"Loading plugin: {filename}")
                 module_name = filename[:-3]
                 if allowed is not None and module_name not in allowed:
                     continue
@@ -1617,10 +1918,13 @@ class ImageMaskViewer:
                         and issubclass(plugin_candidate, PluginBase)
                         and plugin_candidate is not PluginBase
                     ):
-                        instance = plugin_candidate(self, 6, 3)
-                        self.SidePlots.__dict__[f"{module_name}_output"] = instance
-                        if module_name == 'roi_manager_plugin':
-                            self.roi_plugin = instance
+                        try:
+                            instance = plugin_candidate(self, 6, 3)
+                            self.SidePlots.__dict__[f"{module_name}_output"] = instance
+                            if module_name == 'roi_manager_plugin':
+                                self.roi_plugin = instance
+                        except Exception as exc:
+                            logger.warning(f"[viewer] Failed to load plugin {module_name}: {exc}")
                         
 
     def setup_event_connections(self):
@@ -1652,29 +1956,29 @@ class ImageMaskViewer:
                 close_fn()
             except Exception:
                 if self._debug:
-                    print(f"[viewer] Failed to close image resource: {resource}")
+                    logger.debug(f"[viewer] Failed to close image resource: {resource}")
 
     def on_cache_size_change(self, change):
         """Handle changes to the cache size input."""
         self.max_cache_size = self.ui_component.cache_size_input.value
-        print(f"Cache size set to {self.max_cache_size}.")
+        logger.info(f"Cache size set to {self.max_cache_size}.")
 
         # Trim caches if necessary
         while len(self.image_cache) > self.max_cache_size:
             removed_fov, resource = self.image_cache.popitem(last=False)
             self._close_image_resource(resource)
-            print(f"Removed FOV '{removed_fov}' from image cache due to cache size limit.")
+            logger.info(f"Removed FOV '{removed_fov}' from image cache due to cache size limit.")
 
         while len(self.mask_cache) > self.max_cache_size:
             removed_fov, _ = self.mask_cache.popitem(last=False)
             self.edge_masks_cache.pop(removed_fov, None)
             self.label_masks_cache.pop(removed_fov, None)
-            print(f"Removed FOV '{removed_fov}' from mask cache due to cache size limit.")
+            logger.info(f"Removed FOV '{removed_fov}' from mask cache due to cache size limit.")
 
         while len(self.annotation_cache) > self.max_cache_size:
             removed_fov, _ = self.annotation_cache.popitem(last=False)
             self.annotation_label_cache.pop(removed_fov, None)
-            print(f"Removed FOV '{removed_fov}' from annotation cache due to cache size limit.")
+            logger.info(f"Removed FOV '{removed_fov}' from annotation cache due to cache size limit.")
 
     def _ensure_channel_max_computed(self, fov_name, channel_name):
         if channel_name in self.channel_max_values:
@@ -1739,7 +2043,18 @@ class ImageMaskViewer:
                 
                 self.image_cache.move_to_end(fov_name)
 
-        # Load images if not in cache
+        # Remote (BIA) FOV population. Folder mode yields a {channel: None} dict
+        # (filled lazily below); OME mode yields an OMEFovWrapper (streamed/cached).
+        if self._fov_mode == "bia" and fov_name not in self.image_cache:
+            obj = self._data_source.open_fov(fov_name, self.current_downsample_factor)
+            self.image_cache[fov_name] = obj
+            if isinstance(obj, OMEFovWrapper):
+                obj.set_frame_index(target_frame_index)
+                self.frame_index_by_fov[fov_name] = obj.current_frame_index
+                self.ome_fov_metadata[fov_name] = obj.metadata
+            self.image_cache.move_to_end(fov_name)
+
+        # Load images if not in cache (local folder mode only)
         if fov_name not in self.image_cache:
             # Load channel structures
             channels = load_channel_struct_fov(fov_name, self.base_folder)
@@ -1762,11 +2077,17 @@ class ImageMaskViewer:
                 self._ensure_channel_max_computed(fov_name, ch)
             # for self.image_cache[fov_name][ch] is None, load the image
             elif self.image_cache[fov_name][ch] is None:
-                # Load images for FOV
-                self.image_cache[fov_name][ch] = load_one_channel_fov(
-                    fov_name, self.base_folder, self.channel_max_values, ch,
-                    compute_stats=not getattr(self, '_map_mode_active', False),
-                )
+                # Load images for FOV (remote BIA source or local disk)
+                if self._fov_mode == "bia":
+                    self.image_cache[fov_name][ch] = self._data_source.load_channel(
+                        fov_name, ch, self.channel_max_values,
+                        compute_stats=not getattr(self, '_map_mode_active', False),
+                    )
+                else:
+                    self.image_cache[fov_name][ch] = load_one_channel_fov(
+                        fov_name, self.base_folder, self.channel_max_values, ch,
+                        compute_stats=not getattr(self, '_map_mode_active', False),
+                    )
                 self._sync_channel_controls(ch)
 
         self.image_cache.move_to_end(fov_name)
@@ -1775,7 +2096,7 @@ class ImageMaskViewer:
         while len(self.image_cache) > self.max_cache_size:
             removed_fov, resource = self.image_cache.popitem(last=False)
             self._close_image_resource(resource)
-            print(f"Removed FOV '{removed_fov}' from image cache.")
+            logger.info(f"Removed FOV '{removed_fov}' from image cache.")
             self._invalidate_map_tiles_for_fov(removed_fov)
 
         else:
@@ -1784,6 +2105,10 @@ class ImageMaskViewer:
 
         # Load masks only if masks are available
         if self.masks_available:
+            # Remote (BIA) masks are fetched into the flat local masks_folder so
+            # the existing load_masks_for_fov path runs unchanged.
+            if self._fov_mode == "bia" and fov_name not in self.mask_cache:
+                self._data_source.prefetch_masks(fov_name)
             # In map mode, skip mask loading when no mask overlay is active
             if getattr(self, '_map_mode_active', False):
                 _ui = getattr(self, 'ui_component', None)
@@ -1805,6 +2130,8 @@ class ImageMaskViewer:
         # Load annotations if available
         if self.annotations_available:
             if fov_name not in self.annotation_cache:
+                if self._fov_mode == "bia":
+                    self._data_source.prefetch_annotations(fov_name)
                 annotation_dict = load_annotations_for_fov(
                     fov_name,
                     self.annotations_folder,
@@ -1877,12 +2204,19 @@ class ImageMaskViewer:
                     getattr(first_channel_image, "shape", None),
                 )
             self.height, self.width = first_channel_image.shape
-        self.image_display.height = self.height
-        self.image_display.width = self.width
+        # In map mode the canvas viewport and image_display dimensions are
+        # managed exclusively by _set_map_canvas_dimensions().  Overwriting
+        # them here with single-FOV pixel dimensions (e.g. 1024×1024) places
+        # the viewport inside the map's coordinate space at a region that has
+        # no tiles, producing a black square view.  on_image_change is invoked
+        # by load_cell_table → _refresh_viewer_state regardless of map mode.
+        if not getattr(self, '_map_mode_active', False):
+            self.image_display.height = self.height
+            self.image_display.width = self.width
 
-        # Update axis limits
-        self.image_display.ax.set_xlim(0, self.width)
-        self.image_display.ax.set_ylim(self.height, 0)
+            # Update axis limits
+            self.image_display.ax.set_xlim(0, self.width)
+            self.image_display.ax.set_ylim(self.height, 0)
 
         # Update channel names
         new_channel_options = list(fov_images.keys())
@@ -1893,8 +2227,11 @@ class ImageMaskViewer:
         new_selection = tuple(ch for ch in previous_channels if ch in new_channel_options)
         if new_selection:
             self.ui_component.channel_selector.value = new_selection
-        elif self.cell_table is not None:
-            self.ui_component.channel_selector.value = (new_channel_options[0],)
+        elif self.cell_table is not None or not self.initialized:
+            # During initial startup (not yet initialized) always select the first
+            # channel so update_display produces a visible image even in simple
+            # viewer mode (no cell_table). Fixes #84.
+            self.ui_component.channel_selector.value = (new_channel_options[0],) if new_channel_options else ()
         else:
             self.ui_component.channel_selector.value = ()
 
@@ -1958,7 +2295,7 @@ class ImageMaskViewer:
 
         if self.initialized:
             if self.SidePlots:
-                chart_plugin = getattr(self.SidePlots, "chart_output", None)
+                histogram_plugin = getattr(self.SidePlots, "histogram_output", None)
                 heatmap_plugin = getattr(self.SidePlots, "heatmap_output", None)
                 heatmap_checkbox = (
                     getattr(getattr(heatmap_plugin, "ui_component", None), "main_viewer_checkbox", None)
@@ -1972,8 +2309,11 @@ class ImageMaskViewer:
                     if self._grid_display is not None:
                         self._grid_display.clear_patches()
 
-                if chart_plugin is not None:
-                    chart_plugin.highlight_cells()
+                # Re-apply the histogram cutoff highlight for the new FOV. The
+                # histogram plugin (issue #112) owns this; guard because it only
+                # highlights when a cutoff/active channel is set.
+                if histogram_plugin is not None and hasattr(histogram_plugin, "highlight_cells"):
+                    histogram_plugin.highlight_cells()
 
                 if heatmap_linked and heatmap_plugin is not None:
                     heatmap_plugin.highlight_cells()
@@ -2054,7 +2394,7 @@ class ImageMaskViewer:
 
         new_key = change['new']
         setattr(self, key_name, new_key)
-        print(f"{key_name} set to '{new_key}'.")
+        logger.info(f"{key_name} set to '{new_key}'.")
 
     def _restore_pixel_size_widget(self) -> None:
         widget = getattr(self.ui_component, "pixel_size_inttext", None)
@@ -2075,7 +2415,7 @@ class ImageMaskViewer:
             plugin.on_viewer_pixel_size_change(pixel_nm)
         except Exception:
             if self._debug:
-                print("[viewer] Plugin notification for pixel size change failed")
+                logger.debug("[viewer] Plugin notification for pixel size change failed")
 
     def get_pixel_size_nm(self) -> float:
         if self._map_mode_active and self._map_pixel_size_nm is not None:
@@ -2294,13 +2634,13 @@ class ImageMaskViewer:
             g = int(max(0, min(255, round(rgb[1] * 255))))
             b = int(max(0, min(255, round(rgb[2] * 255))))
             lines.append(
-                f"<div style=\"color: rgb({r}, {g}, {b}); font-weight: 600;\">{safe_name}</div>"
+                f"<div style=\"color: rgb({r}, {g}, {b}); font-weight: 600; overflow-wrap: anywhere; word-break: break-word;\">{safe_name}</div>"
             )
 
         return (
             "<div style=\"background: rgba(255, 255, 255, 0.85); "
             "border: 1px solid #cccccc; border-radius: 4px; padding: 6px; "
-            "font-size: 12px; line-height: 1.2;\">"
+            "font-size: 12px; line-height: 1.2; max-width: 100%; overflow: hidden; box-sizing: border-box;\">"
             + "".join(lines)
             + "</div>"
         )
@@ -2332,7 +2672,7 @@ class ImageMaskViewer:
                 self.image_display.update_channel_legend(entries, enabled=enabled)
             except Exception:
                 if self._debug:
-                    print("[viewer] Failed to update channel legend overlay")
+                    logger.debug("[viewer] Failed to update channel legend overlay")
 
     def on_channel_legend_toggle(self, change) -> None:
         self._refresh_channel_legend()
@@ -2442,6 +2782,7 @@ class ImageMaskViewer:
     def update_controls(self, change):
         """Create widgets dynamically based on selected channels and masks, and attach update callbacks."""
         channel_widgets = []
+        color_options = tuple(self.predefined_colors.keys())
 
         # Ensure max values are computed for selected channels
         fov_name = self.ui_component.image_selector.value
@@ -2456,17 +2797,17 @@ class ImageMaskViewer:
             # Reuse existing controls if they exist
             if channel in self.ui_component.color_controls:
                 color_dropdown = self.ui_component.color_controls[channel]
-                color_dropdown.description = "Color"
-                color_dropdown.style = {'description_width': '50px'}
-                color_dropdown.layout = Layout(width='auto', min_width='0px', flex='1 1 auto')
+                color_dropdown.description = ""
+                color_dropdown.style = {'description_width': '0px'}
+                color_dropdown.layout = _channel_color_dropdown_layout(color_options)
             else:
                 color_dropdown = Dropdown(
-                    options=list(self.predefined_colors.keys()),
+                    options=list(color_options),
                     value="Red",
-                    description="Color",
+                    description="",
                     disabled=False,
-                    layout=Layout(width='auto', min_width='0px', flex='1 1 auto'),
-                    style={'description_width': '50px'}
+                    layout=_channel_color_dropdown_layout(color_options),
+                    style={'description_width': '0px'}
                 )
                 color_dropdown.observe(lambda change, ch=channel: self.update_display(self.current_downsample_factor), names='value')
                 self.ui_component.color_controls[channel] = color_dropdown
@@ -2479,10 +2820,11 @@ class ImageMaskViewer:
                     description="",
                     disabled=False,
                     indent=False,
-                    layout=Layout(width='28px', min_width='28px', max_width='28px', margin='0 4px 0 0')
+                    layout=_channel_visibility_checkbox_layout()
                 )
                 visibility_checkbox.observe(lambda change, ch=channel: self.update_display(self.current_downsample_factor), names='value')
                 self.ui_component.channel_visibility_controls[channel] = visibility_checkbox
+            visibility_checkbox.layout = _channel_visibility_checkbox_layout()
 
             if channel in self.ui_component.contrast_min_controls:
                 contrast_min_slider = self.ui_component.contrast_min_controls[channel]
@@ -2490,15 +2832,20 @@ class ImageMaskViewer:
                 contrast_min_slider.step = step_size
                 contrast_min_slider.readout_format = readout_format
                 contrast_min_slider.value = min(contrast_min_slider.value, max_value)
+                contrast_min_slider.layout = _channel_slider_layout()
+                contrast_min_slider.description = 'Min'
+                contrast_min_slider.style = {'description_width': '42px'}
             else:
                 contrast_min_slider = FloatSlider(
                     value=0.0,
                     min=0.0,
                     max=max_value,
                     step=step_size,
-                    description=f"Min {channel}",
+                    description='Min',
                     continuous_update=False,
-                    readout_format=readout_format
+                    readout_format=readout_format,
+                    layout=_channel_slider_layout(),
+                    style={'description_width': '42px'},
                 )
                 contrast_min_slider.observe(lambda change, ch=channel: self.update_display(self.current_downsample_factor), names='value')
                 self.ui_component.contrast_min_controls[channel] = contrast_min_slider
@@ -2509,32 +2856,39 @@ class ImageMaskViewer:
                 contrast_max_slider.step = step_size
                 contrast_max_slider.readout_format = readout_format
                 contrast_max_slider.value = max(min(contrast_max_slider.value, max_value), contrast_min_slider.value)
+                contrast_max_slider.layout = _channel_slider_layout()
+                contrast_max_slider.description = 'Max'
+                contrast_max_slider.style = {'description_width': '42px'}
             else:
                 contrast_max_slider = FloatSlider(
                     value=max_value,
                     min=0.0,
                     max=max_value,
                     step=step_size,
-                    description=f"Max {channel}",
+                    description='Max',
                     continuous_update=False,
-                    readout_format=readout_format
+                    readout_format=readout_format,
+                    layout=_channel_slider_layout(),
+                    style={'description_width': '42px'},
                 )
                 contrast_max_slider.observe(lambda change, ch=channel: self.update_display(self.current_downsample_factor), names='value')
                 self.ui_component.contrast_max_controls[channel] = contrast_max_slider
 
-            channel_header = HBox(
-                [visibility_checkbox, color_dropdown],
-                layout=Layout(
-                    display='flex',
-                    align_items='center',
-                    justify_content='flex-start',
-                    gap='6px',
-                    min_height='30px',
-                    overflow='visible',
-                    width='100%'
-                )
+            marker_name_label = HTML(
+                value=f"<div style='font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;'>{html_lib.escape(str(channel))}</div>",
+                layout=_channel_marker_label_layout(),
             )
-            channel_widgets.extend([channel_header, contrast_min_slider, contrast_max_slider])
+
+            channel_header = HBox(
+                [visibility_checkbox, marker_name_label, color_dropdown],
+                layout=_channel_header_row_layout()
+            )
+
+            channel_group = VBox(
+                [channel_header, contrast_min_slider, contrast_max_slider],
+                layout=_channel_group_layout(),
+            )
+            channel_widgets.append(channel_group)
 
         if channel_widgets:
             self.ui_component.channel_controls_box.children = tuple(channel_widgets)
@@ -2568,13 +2922,26 @@ class ImageMaskViewer:
                 # Dropdown to select mask color
                 if mask_name in self.ui_component.mask_color_controls:
                     mask_color_dropdown = self.ui_component.mask_color_controls[mask_name]
+                    mask_color_dropdown.layout = Layout(
+                        width='calc(100% - 5px)',
+                        max_width='calc(100% - 5px)',
+                        min_width='0',
+                        box_sizing='border-box',
+                        flex='1 1 auto',
+                    )
                 else:
                     mask_color_dropdown = Dropdown(
                         options=list(self.predefined_colors.keys()),
                         value="White",
                         description=f"Mask {mask_name}",
                         disabled=False,
-                        layout=Layout(width='250px'),
+                        layout=Layout(
+                            width='calc(100% - 5px)',
+                            max_width='calc(100% - 5px)',
+                            min_width='0',
+                            box_sizing='border-box',
+                            flex='1 1 auto',
+                        ),
                         style={'description_width': '150px'}
                     )
                     mask_color_dropdown.observe(lambda change, mn=mask_name: self.update_display(self.current_downsample_factor), names='value')
@@ -2588,7 +2955,11 @@ class ImageMaskViewer:
                         justify_content='flex-start',
                         gap='10px',
                         min_height='30px',
-                        overflow='hidden'
+                        overflow='hidden',
+                        width='100%',
+                        max_width='99%',
+                        min_width='0',
+                        box_sizing='border-box',
                     )
                 )
                 mask_widgets.append(mask_control)
@@ -2652,7 +3023,10 @@ class ImageMaskViewer:
 
         if not section_children:
             section_children = (
-                VBox([self.ui_component.empty_controls_placeholder], layout=Layout(width="100%")),
+                VBox(
+                    [self.ui_component.empty_controls_placeholder],
+                    layout=Layout(width="100%", max_width='99%', min_width='0', box_sizing='border-box'),
+                ),
             )
             section_titles = ["Controls"]
 
@@ -2836,6 +3210,7 @@ class ImageMaskViewer:
         dropdown.value = ""
 
     def _log_annotation_palette(self, message: str, *, error: bool = False, clear: bool = False) -> None:
+        logger.warning(message) if error else logger.info(message)
         output = getattr(self.ui_component, "annotation_palette_feedback", None)
         if output is None:
             return
@@ -3383,6 +3758,7 @@ class ImageMaskViewer:
 
     def center_on_roi(self, record):
         target_fov = record.get("fov") or ""
+        map_id = str(record.get("map_id") or "").strip()
         x_min = record.get("x_min", 0.0)
         x_max = record.get("x_max", self.width)
         y_min = record.get("y_min", 0.0)
@@ -3391,6 +3767,19 @@ class ImageMaskViewer:
         ax = getattr(self.image_display, "ax", None)
         if ax is None:
             return
+
+        # If this is a map-mode ROI, ensure the correct map is active before centering.
+        if not target_fov and map_id:
+            needs_activation = not self._map_mode_active
+            needs_switch = self._map_mode_active and self._active_map_id != map_id
+            if needs_activation or needs_switch:
+                try:
+                    self._activate_map_mode(map_id)
+                    self._refresh_map_controls()
+                    self.update_display(self.current_downsample_factor)
+                except Exception:
+                    if self._debug:
+                        logger.debug(f"[viewer] center_on_roi: failed to activate map {map_id!r}")
 
         if self._map_mode_active:
             if target_fov:
@@ -3448,7 +3837,7 @@ class ImageMaskViewer:
                 self.update_display(self.current_downsample_factor)
             except Exception:
                 if self._debug:
-                    print("[viewer] Failed to refresh display after map switch")
+                    logger.debug("[viewer] Failed to refresh display after map switch")
 
         ax = getattr(display, "ax", None)
         if ax is None:
@@ -3541,13 +3930,17 @@ class ImageMaskViewer:
         region_xy: Tuple[int, int, int, int],
         region_ds: Tuple[int, int, int, int],
     ) -> np.ndarray:
-        if not selected_channels:
+        skip_image_layer = bool(self.is_no_image_mode_enabled())
+        if not selected_channels and not skip_image_layer:
             height = max(1, region_ds[3] - region_ds[2])
             width = max(1, region_ds[1] - region_ds[0])
             return np.zeros((height, width, 3), dtype=np.float32)
 
-        self.load_fov(fov_name, selected_channels)
-        fov_images = self.image_cache[fov_name]
+        if selected_channels:
+            self.load_fov(fov_name, selected_channels)
+            fov_images = self.image_cache[fov_name]
+        else:
+            fov_images = self.image_cache.get(fov_name, {})
 
         controls = self.ui_component
         channel_settings = {}
@@ -3594,6 +3987,37 @@ class ImageMaskViewer:
                     mode=self.annotation_overlay_mode,
                 )
 
+        painter = self._get_mask_painter() if self._is_mask_painter_enabled() else None
+        painter_color_map = None
+        painter_border_color_map = None
+        painter_mode_map = None
+        painter_opacity_map = None
+        painter_show_borders_on_filled = False
+        if painter is not None:
+            state_maps_helper = getattr(painter, "get_effective_state_maps_for_fov", None)
+            if callable(state_maps_helper):
+                (painter_color_map, painter_border_color_map,
+                 painter_mode_map, painter_opacity_map) = state_maps_helper(fov_name)
+            else:
+                color_helper = getattr(painter, "get_effective_color_map_for_fov", None)
+                if callable(color_helper):
+                    painter_color_map = color_helper(fov_name)
+                border_color_helper = getattr(painter, "get_effective_border_color_map_for_fov", None)
+                if callable(border_color_helper):
+                    painter_border_color_map = border_color_helper(fov_name)
+                mode_helper = getattr(painter, "get_effective_mode_map_for_fov", None)
+                if callable(mode_helper):
+                    painter_mode_map = mode_helper(fov_name)
+                elif hasattr(painter, "get_mode_map_for_fov"):
+                    painter_mode_map = painter.get_mode_map_for_fov(fov_name)
+                opacity_helper = getattr(painter, "get_effective_opacity_map_for_fov", None)
+                if callable(opacity_helper):
+                    painter_opacity_map = opacity_helper(fov_name)
+            border_helper = getattr(painter, "get_show_borders_on_filled", None)
+            if callable(border_helper):
+                painter_show_borders_on_filled = bool(border_helper())
+        painter_controls_primary_mask = bool(painter_color_map)
+
         mask_settings = []
         mask_regions = {}
         if self.masks_available:
@@ -3602,7 +4026,13 @@ class ImageMaskViewer:
                 for mask_name, cb in controls.mask_display_controls.items()
                 if getattr(cb, "value", False)
             ]
+            painter_mask_key = getattr(self, "mask_key", None)
             for mask_name in selected_masks:
+                # When the painter is active it takes exclusive rendering control
+                # of the primary mask key — skip it here so the painter's per-cell
+                # coloring is the only contribution for that mask layer.
+                if painter_controls_primary_mask and painter_mask_key and mask_name == painter_mask_key:
+                    continue
                 label_mask_ds = self._get_label_mask_at_factor(fov_name, mask_name, downsample_factor)
                 if label_mask_ds is None:
                     continue
@@ -3646,10 +4076,10 @@ class ImageMaskViewer:
             region_ds=region_ds,
             annotation=annotation_settings,
             masks=mask_settings,
+            skip_image_layer=skip_image_layer,
         )
 
-        painter_enabled = self._is_mask_painter_enabled()
-        if painter_enabled and mask_regions:
+        if painter_controls_primary_mask and mask_regions:
             excluded = (
                 set(self.image_display.selected_cells)
                 if hasattr(self.image_display, "selected_cells")
@@ -3662,6 +4092,11 @@ class ImageMaskViewer:
                 outline_thickness=int(self.mask_outline_thickness),
                 downsample_factor=downsample_factor,
                 exclude_ids=excluded,
+                color_map=painter_color_map,
+                border_color_map=painter_border_color_map,
+                mode_map=painter_mode_map,
+                opacity_map=painter_opacity_map,
+                show_borders_on_filled=painter_show_borders_on_filled,
             )
 
         return combined
@@ -3749,6 +4184,13 @@ class ImageMaskViewer:
         
         return bool(getattr(checkbox, "value", False))
 
+    def _get_mask_painter(self):
+        """Return the MaskPainterDisplay plugin instance, or None."""
+        sideplots = getattr(self, "SidePlots", None)
+        if sideplots is None:
+            return None
+        return getattr(sideplots, "mask_painter_output", None)
+
     # ------------------------------------------------------------------
     # Export overlay helpers
     # ------------------------------------------------------------------
@@ -3774,8 +4216,17 @@ class ImageMaskViewer:
             )
 
         mask_snapshots: list[MaskOverlaySnapshot] = []
+        painter_snapshot: Optional[MaskPainterSnapshot] = None
         use_masks = bool(include_masks and self.masks_available)
         if use_masks:
+            painter = self._get_mask_painter() if self._is_mask_painter_enabled() else None
+            if painter is not None:
+                capture_painter = getattr(painter, "capture_snapshot", None)
+                if callable(capture_painter):
+                    try:
+                        painter_snapshot = capture_painter()
+                    except Exception:
+                        painter_snapshot = None
             mask_controls = getattr(self.ui_component, "mask_display_controls", {})
             color_controls = getattr(self.ui_component, "mask_color_controls", {})
             for mask_name, checkbox in mask_controls.items():
@@ -3800,9 +4251,193 @@ class ImageMaskViewer:
         return OverlaySnapshot(
             include_annotations=use_annotations,
             include_masks=use_masks,
+            skip_image_layer=bool(self.is_no_image_mode_enabled()),
             annotation=annotation_snapshot,
             masks=tuple(mask_snapshots),
+            mask_painter=painter_snapshot,
         )
+
+    def resolve_mask_painter_snapshot_for_fov(
+        self,
+        snapshot: Optional[MaskPainterSnapshot],
+        fov_name: str,
+    ) -> tuple[Dict[int, str], Dict[int, str], Dict[int, str], Dict[int, float], bool]:
+        if snapshot is None or self.cell_table is None:
+            return {}, {}, {}, {}, False
+
+        from ueler.viewer.plugin.mask_painter import build_painter_state_maps_for_fov
+
+        color_map, border_color_map, mode_map, opacity_map = build_painter_state_maps_for_fov(
+            cell_table=self.cell_table,
+            fov_key=self.fov_key,
+            label_key=self.label_key,
+            fov=fov_name,
+            identifier=snapshot.identifier,
+            active_classes=snapshot.active_classes,
+            class_colors=snapshot.class_colors,
+            class_visible=snapshot.class_visible,
+            class_fill=snapshot.class_fill,
+            class_opacity=snapshot.class_opacity,
+            default_color=snapshot.default_color,
+            global_fill=getattr(snapshot, "global_fill", False),
+            global_fill_opacity=snapshot.global_fill_opacity,
+            border_color_mode=getattr(snapshot, "border_color_mode", "mask_type_color"),
+            mask_type_color=getattr(snapshot, "mask_type_color", snapshot.default_color),
+        )
+        return color_map, border_color_map, mode_map, opacity_map, bool(snapshot.show_borders_on_filled)
+
+    def apply_overlay_snapshot_to_array(
+        self,
+        array: np.ndarray,
+        *,
+        fov_name: str,
+        downsample_factor: int,
+        snapshot: Optional[OverlaySnapshot],
+        region_ds: Optional[tuple[int, int, int, int]] = None,
+    ) -> np.ndarray:
+        painter_snapshot = getattr(snapshot, "mask_painter", None)
+        if snapshot is None or painter_snapshot is None:
+            return array
+
+        mask_name = str(getattr(painter_snapshot, "mask_name", "") or getattr(self, "mask_key", "") or "")
+        if not mask_name:
+            return array
+
+        label_mask_ds = self._get_label_mask_at_factor(fov_name, mask_name, downsample_factor)
+        if label_mask_ds is None:
+            raw_mask = self.mask_cache.get(fov_name, {}).get(mask_name)
+            if raw_mask is not None:
+                label_mask_ds = raw_mask[::downsample_factor, ::downsample_factor]
+        if label_mask_ds is None:
+            return array
+
+        try:
+            mask_array = label_mask_ds.compute()
+        except AttributeError:
+            mask_array = np.asarray(label_mask_ds)
+        if mask_array.size == 0:
+            return array
+
+        if region_ds is not None:
+            xmin_ds, xmax_ds, ymin_ds, ymax_ds = region_ds
+            mask_region = mask_array[ymin_ds:ymax_ds, xmin_ds:xmax_ds]
+        else:
+            mask_region = mask_array
+        if mask_region.size == 0:
+            return array
+
+        color_map, border_color_map, mode_map, opacity_map, show_borders = self.resolve_mask_painter_snapshot_for_fov(
+            painter_snapshot,
+            fov_name,
+        )
+        if not color_map:
+            return array
+
+        return apply_registry_colors(
+            array,
+            fov=fov_name,
+            mask_regions={mask_name: mask_region},
+            outline_thickness=int(getattr(painter_snapshot, "outline_thickness", getattr(self, "mask_outline_thickness", 1))),
+            downsample_factor=downsample_factor,
+            color_map=color_map,
+            border_color_map=border_color_map,
+            mode_map=mode_map,
+            opacity_map=opacity_map,
+            show_borders_on_filled=show_borders,
+        )
+
+    def apply_overlay_snapshot_to_map_array(
+        self,
+        array: np.ndarray,
+        *,
+        layer,
+        xmin_um: float,
+        xmax_um: float,
+        ymin_um: float,
+        ymax_um: float,
+        downsample_factor: int,
+        snapshot: Optional[OverlaySnapshot],
+    ) -> np.ndarray:
+        painter_snapshot = getattr(snapshot, "mask_painter", None)
+        if snapshot is None or painter_snapshot is None or array.size == 0:
+            return array
+
+        mask_name = str(getattr(painter_snapshot, "mask_name", "") or getattr(self, "mask_key", "") or "")
+        if not mask_name:
+            return array
+
+        visible_tiles = layer._collect_visible_tiles(xmin_um, xmax_um, ymin_um, ymax_um)
+        if not visible_tiles:
+            return array
+
+        pixel_size_global = float(layer.base_pixel_size_um()) * max(1, int(downsample_factor))
+        overlay = np.array(array, copy=True)
+        applied = False
+
+        for tile, intersection in visible_tiles:
+            region = layer._compute_tile_region(tile, intersection, downsample_factor)
+            if region is None:
+                continue
+            region_xy, _region_ds = region
+
+            mask_array = self._get_mask_array(str(tile.name), mask_name)
+            if mask_array is None or mask_array.size == 0:
+                continue
+
+            x_min_px, x_max_px, y_min_px, y_max_px = (int(value) for value in region_xy)
+            if x_min_px >= x_max_px or y_min_px >= y_max_px:
+                continue
+
+            mask_region = mask_array[y_min_px:y_max_px, x_min_px:x_max_px]
+            if mask_region.size == 0:
+                continue
+            mask_region_ds = mask_region[::downsample_factor, ::downsample_factor]
+            if mask_region_ds.size == 0:
+                continue
+
+            ix_min, _, iy_min, _ = intersection
+            x_start = int(math.floor((ix_min - xmin_um) / pixel_size_global))
+            y_start = int(math.floor((iy_min - ymin_um) / pixel_size_global))
+            x_end = x_start + mask_region_ds.shape[1]
+            y_end = y_start + mask_region_ds.shape[0]
+
+            dest_x0 = max(0, x_start)
+            dest_y0 = max(0, y_start)
+            dest_x1 = min(overlay.shape[1], x_end)
+            dest_y1 = min(overlay.shape[0], y_end)
+            if dest_x0 >= dest_x1 or dest_y0 >= dest_y1:
+                continue
+
+            section_view = overlay[dest_y0:dest_y1, dest_x0:dest_x1]
+            rows = min(section_view.shape[0], mask_region_ds.shape[0])
+            cols = min(section_view.shape[1], mask_region_ds.shape[1])
+            if rows <= 0 or cols <= 0:
+                continue
+
+            color_map, border_color_map, mode_map, opacity_map, show_borders = self.resolve_mask_painter_snapshot_for_fov(
+                painter_snapshot,
+                str(tile.name),
+            )
+            if not color_map:
+                continue
+
+            painted = apply_registry_colors(
+                section_view[:rows, :cols],
+                fov=str(tile.name),
+                mask_regions={mask_name: mask_region_ds[:rows, :cols]},
+                outline_thickness=int(getattr(painter_snapshot, "outline_thickness", getattr(self, "mask_outline_thickness", 1))),
+                downsample_factor=downsample_factor,
+                color_map=color_map,
+                border_color_map=border_color_map,
+                mode_map=mode_map,
+                opacity_map=opacity_map,
+                show_borders_on_filled=show_borders,
+            )
+            if np.any(painted != section_view[:rows, :cols]):
+                section_view[:rows, :cols] = painted
+                applied = True
+
+        return overlay if applied else array
 
     def build_overlay_settings_from_snapshot(
         self,
@@ -3903,15 +4538,17 @@ class ImageMaskViewer:
         self._refresh_channel_legend(visible_channels)
 
         if not visible_channels:
-            # If no channels selected, display black image sized to the current viewport
-            viewport_height = max(1, int(xym_ds[3] - xym_ds[2]))
-            viewport_width = max(1, int(xym_ds[1] - xym_ds[0]))
-            blank = np.zeros((viewport_height, viewport_width, 3), dtype=np.float32)
-            self.image_display.img_display.set_data(blank)
-            self.image_display.img_display.set_extent(xym_r)
-            self.image_display.combined = blank
-            self.image_display.fig.canvas.draw_idle()
-            return
+            if not self.is_no_image_mode_enabled():
+                # If no channels selected, display black image sized to the current viewport
+                viewport_height = max(1, int(xym_ds[3] - xym_ds[2]))
+                viewport_width = max(1, int(xym_ds[1] - xym_ds[0]))
+                blank = np.zeros((viewport_height, viewport_width, 3), dtype=np.float32)
+                self.image_display.img_display.set_data(blank)
+                self.image_display.img_display.set_extent(xym_r)
+                self.image_display.combined = blank
+                if self._widget_displayed:
+                    self.image_display.fig.canvas.draw_idle()
+                return
 
         visible_fovs: Tuple[str, ...] = ()
         if self._map_mode_active and self._active_map_id:
@@ -3958,7 +4595,8 @@ class ImageMaskViewer:
         self.image_display.img_display.set_data(combined)
         self.image_display.combined = combined
         self.image_display.img_display.set_extent(xym_r)
-        self.image_display.fig.canvas.draw_idle()
+        if self._widget_displayed:
+            self.image_display.fig.canvas.draw_idle()
 
         self._visible_map_fovs = visible_fovs
 
@@ -3966,10 +4604,15 @@ class ImageMaskViewer:
         self.update_scale_bar()
         if self._map_mode_active and self._active_map_id:
             try:
+                self._apply_map_painter_overlay()
+            except Exception:
+                if self._debug:
+                    logger.debug("[viewer] Failed to apply map painter overlay")
+            try:
                 self._update_map_mask_highlights()
             except Exception:
                 if self._debug:
-                    print("[viewer] Failed to refresh map mask highlights")
+                    logger.debug("[viewer] Failed to refresh map mask highlights")
 
     # ------------------------------------------------------------------
     # Mask outline controls
@@ -4005,7 +4648,7 @@ class ImageMaskViewer:
                 self.update_display(self.current_downsample_factor)
             except Exception:
                 if self._debug:
-                    print("[viewer] Failed to refresh display after mask outline update")
+                    logger.debug("[viewer] Failed to refresh display after mask outline update")
         self._notify_plugins_mask_outline_changed(thickness)
 
     def _notify_plugins_mask_outline_changed(self, thickness: int) -> None:
@@ -4020,7 +4663,7 @@ class ImageMaskViewer:
                 plugin.on_viewer_mask_outline_change(thickness)
             except Exception:
                 if self._debug:
-                    print("[viewer] Plugin notification for mask outline change failed")
+                    logger.debug("[viewer] Plugin notification for mask outline change failed")
         
         # Notify cell gallery plugin
         cell_gallery_plugin = getattr(sideplots, "cell_gallery_output", None)
@@ -4029,7 +4672,7 @@ class ImageMaskViewer:
                 cell_gallery_plugin.on_viewer_mask_outline_change(thickness)
             except Exception:
                 if self._debug:
-                    print("[viewer] Cell gallery notification for mask outline change failed")
+                    logger.debug("[viewer] Cell gallery notification for mask outline change failed")
 
     def on_plugin_mask_outline_change(self, thickness: int) -> None:
         try:
@@ -4045,7 +4688,7 @@ class ImageMaskViewer:
                 self.update_display(self.current_downsample_factor)
             except Exception:
                 if self._debug:
-                    print("[viewer] Failed to refresh display after plugin mask outline change")
+                    logger.debug("[viewer] Failed to refresh display after plugin mask outline change")
         self._notify_plugins_mask_outline_changed(thickness)
         
     
@@ -4078,22 +4721,22 @@ class ImageMaskViewer:
                     getattr(attr, method_name)()
                 except AttributeError:
                     if self._debug:
-                        print(f"Skipping {attr_name}")
+                        logger.debug(f"Skipping {attr_name}")
 
 
     def save_marker_set(self, button):
         set_name = self.ui_component.marker_set_name_input.value.strip()
         if not set_name:
-            print("Please enter a valid marker set name.")
+            logger.warning("Please enter a valid marker set name.")
             return
         if set_name in self.marker_sets:
-            print(f"A marker set named '{set_name}' already exists.")
+            logger.warning(f"A marker set named '{set_name}' already exists.")
             return
 
         # Capture current settings
-        selected_channels = list(self.ui_component.channel_selector.value)
+        selected_channels = list(_dedupe_channel_sequence(self.ui_component.channel_selector.value))
         if not selected_channels:
-            print("No channels selected to save.")
+            logger.warning("No channels selected to save.")
             return
 
         channel_settings = {}
@@ -4111,20 +4754,20 @@ class ImageMaskViewer:
         }
         # Update the marker set dropdown
         self.update_marker_set_dropdown()
-        print(f"Marker set '{set_name}' saved.")
+        logger.info(f"Marker set '{set_name}' saved.")
         # clear the marker_set_name_input value
         self.ui_component.marker_set_name_input.value = ""
 
     def update_marker_set(self, button):
         set_name = self.ui_component.marker_set_dropdown.value
         if not set_name:
-            print("No marker set selected to update.")
+            logger.warning("No marker set selected to update.")
             return
 
         # Capture current settings
-        selected_channels = list(self.ui_component.channel_selector.value)
+        selected_channels = list(_dedupe_channel_sequence(self.ui_component.channel_selector.value))
         if not selected_channels:
-            print("No channels selected to save.")
+            logger.warning("No channels selected to save.")
             return
 
         channel_settings = {}
@@ -4140,42 +4783,42 @@ class ImageMaskViewer:
             'selected_channels': selected_channels,
             'channel_settings': channel_settings
         }
-        print(f"Marker set '{set_name}' updated.")
+        logger.info(f"Marker set '{set_name}' updated.")
         self.update_marker_set_dropdown()
 
     def delete_marker_set(self, button):
         set_name = self.ui_component.marker_set_dropdown.value
         if not set_name:
-            print("No marker set selected to delete.")
+            logger.warning("No marker set selected to delete.")
             return
 
         # Check if deletion is confirmed
         if not self.ui_component.delete_confirmation_checkbox.value:
-            print("Please check 'Confirm Deletion' to delete the marker set.")
+            logger.warning("Please check 'Confirm Deletion' to delete the marker set.")
             return
 
         del self.marker_sets[set_name]
         # Update the marker set dropdown
         self.update_marker_set_dropdown()
         self.ui_component.delete_confirmation_checkbox.value = False  # Reset the checkbox
-        print(f"Marker set '{set_name}' deleted.")
+        logger.info(f"Marker set '{set_name}' deleted.")
 
     def _apply_marker_set(self, set_name: str, *, silent: bool = False) -> bool:
         if not set_name:
             if not silent:
-                print("Please provide a valid marker set name.")
+                logger.warning("Please provide a valid marker set name.")
             return False
 
         marker_set = self.marker_sets.get(set_name)
         if marker_set is None:
             if not silent:
-                print(f"Marker set '{set_name}' not found.")
+                logger.warning(f"Marker set '{set_name}' not found.")
             return False
 
-        selected_channels = tuple(marker_set.get('selected_channels', ()))
+        selected_channels = _dedupe_channel_sequence(marker_set.get('selected_channels', ()))
         if not selected_channels:
             if not silent:
-                print(f"Marker set '{set_name}' has no channels saved.")
+                logger.info(f"Marker set '{set_name}' has no channels saved.")
             return False
 
         channel_settings = marker_set.get('channel_settings', {}) or {}
@@ -4189,11 +4832,14 @@ class ImageMaskViewer:
         selector = getattr(self.ui_component, 'channel_selector', None)
         if selector is None:
             if not silent:
-                print("Channel selector widget unavailable; cannot load marker set.")
+                logger.warning("Channel selector widget unavailable; cannot load marker set.")
             return False
 
-        selector.value = selected_channels
-        self.update_controls(None)
+        existing_channels = _dedupe_channel_sequence(getattr(selector, 'value', ()))
+        if existing_channels != selected_channels:
+            selector.value = selected_channels
+        else:
+            self.update_controls(None)
 
         color_controls = getattr(self.ui_component, 'color_controls', {}) or {}
         min_controls = getattr(self.ui_component, 'contrast_min_controls', {}) or {}
@@ -4222,17 +4868,17 @@ class ImageMaskViewer:
             self.update_display(self.current_downsample_factor)
         except Exception:  # pragma: no cover - rendering safeguards
             if not silent:
-                print("Marker set applied, but display refresh failed.")
+                logger.warning("Marker set applied, but display refresh failed.")
 
         self.active_marker_set_name = set_name
         if not silent:
-            print(f"Marker set '{set_name}' loaded.")
+            logger.info(f"Marker set '{set_name}' loaded.")
         return True
 
     def load_marker_set(self, button):
         set_name = self.ui_component.marker_set_dropdown.value
         if not set_name:
-            print("No marker set selected to load.")
+            logger.warning("No marker set selected to load.")
             return
         self._apply_marker_set(set_name, silent=False)
 
@@ -4264,14 +4910,42 @@ class ImageMaskViewer:
             visible=False
         )
 
+        # Map mode: synchronously flush tiles into the canvas buffer BEFORE
+        # display_ui() sends the widget to the browser.  The backstop
+        # update_display() at the end uses draw_idle() (deferred), so without
+        # this flush the browser receives the stale 1×1 black placeholder that
+        # was set by _set_map_canvas_dimensions() during __init__.
+        if getattr(self, '_map_mode_active', False):
+            self.update_display(self.current_downsample_factor)
+            try:
+                self.image_display.fig.canvas.draw()
+            except Exception:
+                pass
+
         # Display the main UI
         display_ui(self)
+
+        # Map mode: re-sync the toolbar home view now that the toolbar is
+        # fully wired.  ipympl may reinitialise its nav stack on first widget
+        # show, overwriting the home entry that was patched during __init__
+        # before the toolbar existed.  Pressing Home without this fix zooms to
+        # a stale single-FOV region (small black square) instead of the full
+        # map extent.
+        if getattr(self, '_map_mode_active', False):
+            try:
+                self._sync_navigation_home_view()
+            except Exception:
+                pass
+
         self.after_all_plugins_loaded()
+        # Backstop render: the full widget tree is now visible; ensure the
+        # image canvas reflects the current state (fixes #84).
+        self.update_display(self.current_downsample_factor)
 
     def refresh_bottom_panel(self, ordering=None):
         debug_enabled = getattr(self, '_debug', False)
         if debug_enabled:
-            print("Refreshing bottom panel...")
+            logger.debug("Refreshing bottom panel...")
         update_wide_plugin_panel(self, ordering)
 
     def save_widget_states(self, file_path):
@@ -4311,6 +4985,11 @@ class ImageMaskViewer:
         # Save additional viewer attributes
         state['marker_sets'] = self.marker_sets
         
+        no_image_checkbox = getattr(self.ui_component, "no_image_checkbox", None)
+        if no_image_checkbox is not None:
+            no_image_checkbox.disabled = not self.masks_available
+            if no_image_checkbox.disabled and bool(getattr(no_image_checkbox, "value", False)):
+                no_image_checkbox.value = False
         if self.masks_available:
             state['mask_names'] = self.mask_names
 
@@ -4323,22 +5002,22 @@ class ImageMaskViewer:
             json.dump(state, f, indent=4)
         
         if self._debug:
-            print(f"Widget states saved to {file_path}")
+            logger.debug(f"Widget states saved to {file_path}")
 
     def load_widget_states(self, file_path):
         """Load the state of all widgets from a JSON file."""
         # When the json file does not exist, do nothing
         if not os.path.exists(file_path):
             if self._debug:
-                print("[INIT DEBUG] load_widget_states: no saved state file, skipping", flush=True)
+                logger.debug("[INIT DEBUG] load_widget_states: no saved state file, skipping")
             return
 
         if self._debug:
-            print(f"[INIT DEBUG] load_widget_states: reading {file_path}", flush=True)
+            logger.debug(f"[INIT DEBUG] load_widget_states: reading {file_path}")
         with open(file_path, 'r') as f:
             state = json.load(f)
         if self._debug:
-            print(f"[INIT DEBUG] load_widget_states: {len(state)} keys to restore", flush=True)
+            logger.debug(f"[INIT DEBUG] load_widget_states: {len(state)} keys to restore")
 
         selected_section_index = state.get('control_sections_selected_index')
 
@@ -4358,10 +5037,10 @@ class ImageMaskViewer:
                     # If the widget has a 'value' attribute, set it to the saved value
                     if hasattr(attr, 'value'):
                         if self._debug:
-                            print(f"[INIT DEBUG] restoring widget '{attr_name}' = {value!r}", flush=True)
+                            logger.debug(f"[INIT DEBUG] restoring widget '{attr_name}' = {value!r}")
                         attr.value = value
                         if self._debug:
-                            print(f"[INIT DEBUG] widget '{attr_name}' restored ok", flush=True)
+                            logger.debug(f"[INIT DEBUG] widget '{attr_name}' restored ok")
                     else:
                         # Skip widgets without a 'value' attribute
                         pass
@@ -4388,19 +5067,19 @@ class ImageMaskViewer:
 
         # Update the marker set dropdown and controls
         if self._debug:
-            print("[INIT DEBUG] load_widget_states: calling update_marker_set_dropdown", flush=True)
+            logger.debug("[INIT DEBUG] load_widget_states: calling update_marker_set_dropdown")
         self.update_marker_set_dropdown()
         if self._debug:
-            print("[INIT DEBUG] load_widget_states: calling update_controls", flush=True)
+            logger.debug("[INIT DEBUG] load_widget_states: calling update_controls")
         self.update_controls(None)
         if self._debug:
-            print("[INIT DEBUG] load_widget_states: calling update_display (suppressed if _suspend_display_updates)", flush=True)
+            logger.debug("[INIT DEBUG] load_widget_states: calling update_display (suppressed if _suspend_display_updates)")
         self.update_display(self.current_downsample_factor)
         if self._debug:
-            print("[INIT DEBUG] load_widget_states: calling update_keys", flush=True)
+            logger.debug("[INIT DEBUG] load_widget_states: calling update_keys")
         self.update_keys(None)
         if self._debug:
-            print("[INIT DEBUG] load_widget_states: update_keys done", flush=True)
+            logger.debug("[INIT DEBUG] load_widget_states: update_keys done")
 
         accordion = getattr(self.ui_component, 'control_sections', None)
         if accordion is not None:
@@ -4413,13 +5092,13 @@ class ImageMaskViewer:
                 accordion.selected_index = selected_section_index
 
         if self._debug:
-            print(f"Widget states loaded from {file_path}")
+            logger.debug(f"Widget states loaded from {file_path}")
         if self._debug:
-            print("[INIT DEBUG] load_widget_states: calling inform_plugins", flush=True)
+            logger.debug("[INIT DEBUG] load_widget_states: calling inform_plugins")
         self.inform_plugins('on_marker_sets_changed')
         self.inform_plugins('refresh_roi_table')
         if self._debug:
-            print("[INIT DEBUG] load_widget_states: DONE", flush=True)
+            logger.debug("[INIT DEBUG] load_widget_states: DONE")
     
     def load_status_images(self):
         self._status_image["processing"] = load_asset_bytes("loading.gif")
@@ -4458,7 +5137,7 @@ class ImageMaskViewer:
                 color_rgb = to_rgb(color_value)
                 marker_to_color[marker] = color_rgb
             except ValueError as e:
-                print(f"Invalid color value for marker '{marker}': {color_value}")
+                logger.warning(f"Invalid color value for marker '{marker}': {color_value}")
                 # Handle the error as needed (e.g., default to black or raise an exception)
                 marker_to_color[marker] = (0, 0, 0)  # Default to black
         return marker_to_color

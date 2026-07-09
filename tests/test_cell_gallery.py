@@ -1,6 +1,6 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call, patch
 
 import numpy as np
 import pandas as pd
@@ -17,6 +17,7 @@ from ueler.rendering import (
     clear_cell_colors,
     ChannelRenderSettings,
 )
+from ueler.viewer.decorators import update_status_bar
 
 
 class ComposeCanvasTestCase(unittest.TestCase):
@@ -332,6 +333,47 @@ class TestCellGalleryColors(unittest.TestCase):
             color = get_cell_color('FOV_001', mask_id)
             self.assertIsNone(color, f"Cell {mask_id} should have no painted color")
 
+    def test_painted_mode_uses_snapshot_fill_and_border_settings(self):
+        """Captured painter snapshots should drive painted gallery tiles, including fill-plus-border rendering."""
+        context = self._create_render_context(use_uniform_color=False, include_overlay=False)
+        context.overlay_snapshot = SimpleNamespace(mask_painter=object())
+        self.viewer.resolve_mask_painter_snapshot_for_fov = MagicMock(
+            return_value=({1: "#00ff00"}, {1: "#0000ff"}, {1: "fill"}, {1: 0.6}, True)
+        )
+
+        captured = {}
+
+        def _capture_render(*args, **kwargs):
+            captured["masks"] = kwargs.get("masks")
+            return np.zeros((20, 20, 3), dtype=np.float32)
+
+        with patch("ueler.viewer.plugin.cell_gallery.render_crop_to_array", side_effect=_capture_render):
+            tile = _render_tile_for_index(self.df, 0, context)
+
+        self.assertIsNotNone(tile)
+        self.assertEqual(len(captured["masks"]), 2)
+        self.assertEqual(captured["masks"][0].mode, "fill")
+        self.assertAlmostEqual(captured["masks"][0].alpha, 0.6)
+        self.assertEqual(captured["masks"][1].mode, "outline")
+        self.assertEqual(captured["masks"][1].color, (0.0, 0.0, 1.0))
+        self.assertEqual(captured["masks"][1].outline_thickness, context.outline_thickness)
+
+    def test_gallery_forwards_skip_image_layer_from_snapshot(self):
+        context = self._create_render_context(use_uniform_color=False, include_overlay=False)
+        context.overlay_snapshot = SimpleNamespace(skip_image_layer=True, mask_painter=None)
+
+        captured = {}
+
+        def _capture_render(*args, **kwargs):
+            captured["skip_image_layer"] = kwargs.get("skip_image_layer")
+            return np.zeros((20, 20, 3), dtype=np.float32)
+
+        with patch("ueler.viewer.plugin.cell_gallery.render_crop_to_array", side_effect=_capture_render):
+            tile = _render_tile_for_index(self.df, 0, context)
+
+        self.assertIsNotNone(tile)
+        self.assertTrue(captured["skip_image_layer"])
+
     def test_colors_persist_across_fovs(self):
         """Verify color assignments are global across FOVs.
         
@@ -623,41 +665,181 @@ class TestErrorHandling(unittest.TestCase):
             self.assertTrue(np.all(placeholder <= 1.0))
     
     def test_warning_above_100_cells(self):
-        """Verify warning is displayed when max_cells exceeds 100."""
+        """Verify a performance warning is logged when max_cells exceeds 100."""
         from ueler.viewer.plugin.cell_gallery import CellGalleryDisplay
-        from unittest.mock import Mock, patch, MagicMock
-        from io import StringIO
-        
-        # Create a properly mocked gallery instance
-        # We don't need to actually create a full CellGalleryDisplay, 
-        # just test the _show_warning method
-        mock_plot_output = MagicMock()
-        
-        # Create a minimal mock instance with just the plot_output
+
         gallery = SimpleNamespace()
-        gallery.plot_output = mock_plot_output
-        
-        # Bind the _show_warning method to our namespace
-        def show_warning(message: str) -> None:
-            with gallery.plot_output:
-                print(f"⚠️  Warning: {message}")
-        
-        gallery._show_warning = show_warning
-        
-        # Capture the print output
-        with patch('sys.stdout', new=StringIO()) as fake_out:
-            # Call _show_warning with performance message
-            gallery._show_warning(
+        with self.assertLogs("ueler.viewer.plugin.cell_gallery", level="WARNING") as captured:
+            CellGalleryDisplay._show_warning(
+                gallery,
                 "Performance may degrade above 100 cells. "
-                "Consider reducing display count for better responsiveness."
+                "Consider reducing display count for better responsiveness.",
             )
-            output = fake_out.getvalue()
-        
-        # Assert: Warning message was printed
-        self.assertIn("⚠️", output)
-        self.assertIn("Warning", output)
-        self.assertIn("Performance may degrade", output)
-        self.assertIn("100 cells", output)
+
+        self.assertTrue(any("Performance may degrade" in line for line in captured.output))
+        self.assertTrue(any("100 cells" in line for line in captured.output))
+
+
+class TestUpdateStatusBarDecorator(unittest.TestCase):
+    """Verify that @update_status_bar propagates exceptions rather than swallowing them.
+
+    Regression guard for issue #93: the decorator previously caught AttributeError
+    silently, causing plot_gellery() failures to appear only as a status-bar flash
+    with no visible error or gallery update.
+    """
+
+    def _make_viewer_stub(self):
+        """Minimal viewer stub that satisfies _resolve_viewer / _set_status_bar."""
+        status_bar = SimpleNamespace(value=None, format=None, width=None, height=None)
+        ui_component = SimpleNamespace(status_bar=status_bar)
+        return SimpleNamespace(
+            main_viewer=None,
+            ui_component=ui_component,
+            _status_image={"processing": "proc", "ready": "rdy"},
+            _debug=False,
+        )
+
+    def test_attribute_error_propagates(self):
+        """AttributeError must no longer be caught by the decorator."""
+        class _Stub:
+            def __init__(self):
+                self.main_viewer = SimpleNamespace(
+                    ui_component=SimpleNamespace(
+                        status_bar=SimpleNamespace(value=None, format=None, width=None, height=None)
+                    ),
+                    _status_image={"processing": "proc", "ready": "rdy"},
+                    _debug=False,
+                )
+
+            @update_status_bar
+            def broken_method(self):
+                raise AttributeError("simulated missing attribute")
+
+        with self.assertRaises(AttributeError):
+            _Stub().broken_method()
+
+    def test_status_bar_resets_on_attribute_error(self):
+        """Status bar must still be reset to 'ready' even when AttributeError propagates."""
+        calls_log = []
+
+        class _Stub:
+            def __init__(self):
+                self.main_viewer = None
+
+            @update_status_bar
+            def broken_method(self):
+                raise AttributeError("simulated")
+
+        stub = _Stub()
+        with patch("ueler.viewer.decorators._set_status_bar", side_effect=lambda *a, **k: calls_log.append(a[1])):
+            with self.assertRaises(AttributeError):
+                stub.broken_method()
+
+        self.assertEqual(calls_log, ["processing", "ready"])
+
+    def test_status_bar_resets_on_success(self):
+        """Status bar is set to 'processing' then 'ready' for a normal call."""
+        calls_log = []
+
+        class _Stub:
+            def __init__(self):
+                self.main_viewer = None
+
+            @update_status_bar
+            def ok_method(self):
+                return 42
+
+        stub = _Stub()
+        with patch("ueler.viewer.decorators._set_status_bar", side_effect=lambda *a, **k: calls_log.append(a[1])):
+            result = stub.ok_method()
+
+        self.assertEqual(result, 42)
+        self.assertEqual(calls_log, ["processing", "ready"])
+
+
+class TestTileGalleryRendering(unittest.TestCase):
+    """Tests for the anywidget tile-grid rendering path (issue #107).
+
+    The cell gallery no longer draws a Matplotlib figure; it encodes each rendered
+    tile to a PNG data-URI and pushes ``{id, src, label}`` entries to a
+    TileGalleryWidget. Clicks arrive as a ``clicked`` traitlet change.
+    """
+
+    def _make_gallery(self, df):
+        from ueler.viewer.plugin.cell_gallery import CellGalleryDisplay
+        from ueler.viewer.plugin.tile_gallery_widget import TileGalleryWidget
+
+        gallery = SimpleNamespace()
+        gallery.gallery = TileGalleryWidget(columns=1)
+        gallery.data = SimpleNamespace(displayed_cells=[1, 2, 3])
+        gallery._skip_next_fov_refresh = False
+        gallery._last_crop_width = 50
+        gallery.main_viewer = SimpleNamespace(
+            cell_table=df,
+            fov_key="fov",
+            x_key="x",
+            y_key="y",
+            label_key="label",
+            ui_component=SimpleNamespace(image_selector=None),
+        )
+        return gallery, CellGalleryDisplay
+
+    def test_draw_gallery_populates_tiles(self):
+        from ueler.viewer.plugin.cell_gallery import GRID_COLUMNS
+
+        df = pd.DataFrame(
+            {"fov": ["F1", "F2"], "label": [10, 20], "x": [1.0, 2.0], "y": [3.0, 4.0]}
+        )
+        gallery, CGD = self._make_gallery(df)
+        img = np.zeros((4, 4, 3), dtype=np.float32)
+
+        CGD._draw_gallery(gallery, [img, img], [0, 1])
+
+        tiles = gallery.gallery.tiles
+        self.assertEqual([t["id"] for t in tiles], ["0", "1"])
+        self.assertEqual([t["label"] for t in tiles], ["F1: 10", "F2: 20"])
+        self.assertTrue(all(t["src"].startswith("data:image/png;base64,") for t in tiles))
+        self.assertEqual(int(gallery.gallery.columns), GRID_COLUMNS)
+
+    def test_show_empty_message_clears_tiles(self):
+        df = pd.DataFrame({"fov": ["F1"], "label": [10], "x": [1.0], "y": [3.0]})
+        gallery, CGD = self._make_gallery(df)
+        gallery.gallery.tiles = [{"id": "0", "src": "x", "label": "y"}]
+
+        CGD._show_empty_message(gallery, "No cells selected.")
+
+        self.assertEqual(list(gallery.gallery.tiles), [])
+        self.assertEqual(list(gallery.data.displayed_cells), [])
+
+    def test_gallery_click_focuses_cell(self):
+        df = pd.DataFrame(
+            {"fov": ["F1", "F2"], "label": [10, 20], "x": [1.0, 2.0], "y": [3.0, 4.0]}
+        )
+        gallery, CGD = self._make_gallery(df)
+        focus_calls = []
+        gallery.main_viewer.focus_on_cell = (
+            lambda fov, x, y, radius: focus_calls.append((fov, x, y, radius))
+        )
+
+        # Nonce-suffixed payload for tile id "1" (the second row).
+        CGD._on_gallery_clicked(gallery, {"new": "1|0"})
+
+        self.assertEqual(len(focus_calls), 1)
+        fov, x, y, radius = focus_calls[0]
+        self.assertEqual(fov, "F2")
+        self.assertEqual(x, 2.0)
+        self.assertEqual(y, 4.0)
+        self.assertEqual(radius, 25.0)  # _last_crop_width (50) / 2
+
+    def test_gallery_click_ignores_empty_payload(self):
+        df = pd.DataFrame({"fov": ["F1"], "label": [10], "x": [1.0], "y": [3.0]})
+        gallery, CGD = self._make_gallery(df)
+        focus_calls = []
+        gallery.main_viewer.focus_on_cell = lambda *a, **k: focus_calls.append((a, k))
+
+        CGD._on_gallery_clicked(gallery, {"new": ""})
+
+        self.assertEqual(focus_calls, [])
 
 
 if __name__ == "__main__":

@@ -85,7 +85,7 @@ def load_channel_struct_fov(fov_name: str, base_folder: str) -> Dict[str, None] 
 
     tiff_files = _list_tiff_files(channel_folder)
     if not tiff_files:
-        print(f"No TIFF files found in {channel_folder}. Skipping {fov_name}.")
+        logger.warning("No TIFF files found in %s. Skipping %s.", channel_folder, fov_name)
         return None
 
     channels: Dict[str, None] = {}
@@ -180,7 +180,7 @@ def load_one_channel_fov(fov_name, base_folder, channel_max_values, requested_ch
     channel_folder = _ensure_channel_folder(base_folder, fov_name)
     tiff_files = _list_tiff_files(channel_folder)
     if not tiff_files:
-        print(f"No TIFF files found in {channel_folder}. Skipping {fov_name}.")
+        logger.warning("No TIFF files found in %s. Skipping %s.", channel_folder, fov_name)
         return None
 
     imread = _ensure_imread()
@@ -206,7 +206,7 @@ def load_images_for_fov(fov_name, base_folder, channel_max_values, requested_cha
     channel_folder = _ensure_channel_folder(base_folder, fov_name)
     tiff_files = _list_tiff_files(channel_folder)
     if not tiff_files:
-        print(f"No TIFF files found in {channel_folder}. Skipping {fov_name}.")
+        logger.warning("No TIFF files found in %s. Skipping %s.", channel_folder, fov_name)
         return None
 
     imread = _ensure_imread()
@@ -255,8 +255,8 @@ def load_masks_for_fov(fov_name, masks_folder, mask_names_set):
         elif getattr(mask_image, "ndim", 0) == 3 and mask_image.shape[2] == 1:
             mask_image = mask_image[-1, :, -1]
         elif getattr(mask_image, "ndim", 0) != 2:
-            print(
-                f"Warning: Mask '{mask_name}' in FOV '{fov_name}' has unexpected dimensions {mask_image.shape}."
+            logger.warning(
+                "Mask '%s' in FOV '%s' has unexpected dimensions %s.", mask_name, fov_name, mask_image.shape
             )
 
         mask_dtype = getattr(mask_image, "dtype", None)
@@ -267,9 +267,15 @@ def load_masks_for_fov(fov_name, masks_folder, mask_names_set):
                 and np.iinfo(mask_dtype).max == 1
             )
         )
-        mask_image = np.asarray(mask_image)  # materialize once
         if needs_label:
-            mask_image = measure.label(mask_image)
+            # measure.label requires a full numpy array (global connected-components).
+            # Wrap as a dask.delayed so the TIFF read + labeling only happens on
+            # .compute(), keeping the cache footprint near zero between renders.
+            _dask, _da = _ensure_dask()
+            shape = mask_image.shape
+            delayed_labeled = _dask.delayed(measure.label)(mask_image)
+            mask_image = _da.from_delayed(delayed_labeled, shape=shape, dtype=np.int64)
+        mask_image = mask_image.rechunk(_CHUNK_SIZE)
 
         mask_dict[mask_name] = mask_image
         mask_names_set.add(mask_name)
@@ -304,8 +310,8 @@ def load_annotations_for_fov(fov_name, annotations_folder, annotation_names_set)
         elif getattr(array, "ndim", 0) == 3 and array.shape[-1] == 1:
             array = array[..., 0]
         elif getattr(array, "ndim", 0) != 2:
-            print(
-                f"Warning: Annotation '{annotation_name}' in FOV '{fov_name}' has unexpected dimensions {array.shape}."
+            logger.warning(
+                "Annotation '%s' in FOV '%s' has unexpected dimensions %s.", annotation_name, fov_name, array.shape
             )
 
         if not np.issubdtype(getattr(array, "dtype", np.int32), np.integer):
@@ -327,11 +333,16 @@ def _ensure_tifffile():
     return tifffile
 
 
-def extract_ome_channel_names(path: str) -> List[str]:
+def extract_ome_channel_names(path: str, opener=None) -> List[str]:
     tifffile = _ensure_tifffile()
     try:
-        with tifffile.TiffFile(path) as tif:
-            xml_str = tif.ome_metadata
+        if opener is not None:
+            with opener(path) as handle:
+                with tifffile.TiffFile(handle) as tif:
+                    xml_str = tif.ome_metadata
+        else:
+            with tifffile.TiffFile(path) as tif:
+                xml_str = tif.ome_metadata
     except Exception:
         return []
 
@@ -409,10 +420,15 @@ def find_ome_tiff_files(base_folder: str) -> List[str]:
 
 
 class OMEFovWrapper:
-    def __init__(self, path: str, ds_factor: int):
+    def __init__(self, path: str, ds_factor: int, opener=None):
         self.path = path
         self.ds_factor = max(1, int(ds_factor) or 1)
         self.is_ome_tiff = True
+        # ``opener`` yields a seekable file-like object for remote paths (issue
+        # #110 BIA streaming). When set, tifffile reads over that handle instead
+        # of a local path, enabling HTTP byte-range access to the pyramid.
+        self._opener = opener
+        self._remote_handle = None
         self._channel_cache: Dict[Tuple[str, int, int], object] = {}
         self._level_specs: List[Dict[str, object]] = []
         self._level_count = 0
@@ -430,11 +446,17 @@ class OMEFovWrapper:
 
         for attempt in ({}, {"is_ome": False}):
             tif = None
+            handle = None
             try:
-                tif = tifffile.TiffFile(path, **attempt)
+                if self._opener is not None:
+                    handle = self._opener(path)
+                    tif = tifffile.TiffFile(handle, **attempt)
+                else:
+                    tif = tifffile.TiffFile(path, **attempt)
                 series = tif.series[self._series_index]
                 self._tif = tif
                 self._series = series
+                self._remote_handle = handle
                 if attempt:
                     logger.warning(
                         "[OMEFovWrapper] falling back to non-OME series parsing for %s after error: %s",
@@ -449,6 +471,11 @@ class OMEFovWrapper:
                         tif.close()
                     except Exception:
                         pass
+                if handle is not None:
+                    try:
+                        handle.close()
+                    except Exception:
+                        pass
                 # Retry without OME parsing when keyframe metadata is incompatible
                 if "incompatible keyframe" in str(exc):
                     continue
@@ -461,7 +488,7 @@ class OMEFovWrapper:
             raise last_error
         self._init_levels()
 
-        self.channel_names = extract_ome_channel_names(path)
+        self.channel_names = extract_ome_channel_names(path, opener=self._opener)
         n_channels = self._infer_channel_count()
         if not self.channel_names or len(self.channel_names) != n_channels:
             self.channel_names = [f"Channel_{i}" for i in range(n_channels)]
@@ -676,6 +703,12 @@ class OMEFovWrapper:
             self._tif.close()
         except Exception:
             pass
+        if self._remote_handle is not None:
+            try:
+                self._remote_handle.close()
+            except Exception:
+                pass
+            self._remote_handle = None
         self._closed = True
 
     def __del__(self):

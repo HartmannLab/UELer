@@ -107,7 +107,13 @@ class ScatterPlotWidget:
             self._scatter.color(default=_DEFAULT_POINT_COLOR, selected=_DEFAULT_SELECTED_COLOR)
         self._scatter.tooltip(True, properties=tooltip_properties)
         self._jwidget = self._scatter.widget
-        self._jwidget.layout = Layout(width="100%", height=f"{self._height}px")
+        # Do NOT pin the DOM height to the plot height: jscatter draws the axes,
+        # tick labels and axis labels *outside* the plot canvas (its own
+        # ``compose`` reserves ~36px of padding and never pins ``layout.height``;
+        # a fresh widget has ``layout.height = None`` and self-sizes from its
+        # ``height`` trait). Pinning it to the plot height clips both axes — for
+        # single-pair plots as well as the matrix (#113 reply). Width only.
+        self._jwidget.layout = Layout(width="100%")
         self._jwidget.mouse_mode = "panZoom"
 
         self._selection_handler = self._create_selection_handler()

@@ -5,6 +5,7 @@ from .engine import (
     AnnotationRenderSettings,
     ChannelRenderSettings,
     MaskOverlaySnapshot,
+    MaskPainterSnapshot,
     MaskRenderSettings,
     OverlaySnapshot,
     clear_cell_colors,
@@ -14,6 +15,7 @@ from .engine import (
     render_fov_to_array,
     render_roi_to_array,
     set_cell_color,
+    set_cell_colors_bulk,
 )
 
 __all__ = [
@@ -21,6 +23,7 @@ __all__ = [
     "AnnotationRenderSettings",
     "ChannelRenderSettings",
     "MaskOverlaySnapshot",
+    "MaskPainterSnapshot",
     "MaskRenderSettings",
     "OverlaySnapshot",
     "clear_cell_colors",
@@ -30,4 +33,5 @@ __all__ = [
     "render_fov_to_array",
     "render_roi_to_array",
     "set_cell_color",
+    "set_cell_colors_bulk",
 ]

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Callable, Optional, Protocol, TYPE_CHECKING, Union
 
 from ._compat import ensure_aliases_loaded
 
-__all__ = ["run_viewer", "load_cell_table"]
+_logger = logging.getLogger(__name__)
+
+__all__ = ["run_viewer", "run_viewer_bia", "load_cell_table"]
 
 PathLike = Union[str, Path]
 
@@ -145,6 +148,24 @@ def run_viewer(
 		**viewer_kwargs,
 	)
 
+	_finalise_viewer(
+		viewer,
+		auto_display=auto_display,
+		after_plugins=after_plugins,
+		display_callback=display_callback,
+	)
+	return viewer
+
+
+def _finalise_viewer(
+	viewer: "ImageMaskViewer",
+	*,
+	auto_display: bool,
+	after_plugins: bool,
+	display_callback: Optional[Callable[["ImageMaskViewer"], None]],
+) -> None:
+	"""Shared display + post-plugin tail for the viewer entry points."""
+
 	if auto_display:
 		default_display, update_panel = _load_display_helpers()
 		display_fn = display_callback or default_display
@@ -156,24 +177,167 @@ def run_viewer(
 		if callable(post_loader):
 			post_loader()
 
+
+def _bia_workspace(source: str, local_dir: Optional[PathLike]) -> Path:
+	"""Resolve (and create) the local workspace root for a BIA study.
+
+	Holds persistent ``.UELer`` state plus a ``cache/`` subtree of downloaded
+	images. Defaults to ``~/.ueler/bia/<accession-or-slug>/``.
+	"""
+
+	if local_dir is not None:
+		root = Path(local_dir).expanduser()
+	else:
+		token = source.strip()
+		if "://" in token:
+			slug = token.rstrip("/").split("/")[-1] or "study"
+		else:
+			slug = token.upper()
+		slug = "".join(c if (c.isalnum() or c in "-_.") else "_" for c in slug) or "study"
+		root = Path.home() / ".ueler" / "bia" / slug
+	(root / "cache").mkdir(parents=True, exist_ok=True)
+	return root
+
+
+def run_viewer_bia(
+	source: str,
+	*,
+	descriptor: Optional[object] = None,
+	local_dir: Optional[PathLike] = None,
+	max_download_bytes: Optional[int] = None,
+	auto_display: bool = True,
+	ensure_aliases: bool = True,
+	after_plugins: bool = True,
+	viewer_factory: Optional[_ViewerFactory] = None,
+	display_callback: Optional[Callable[["ImageMaskViewer"], None]] = None,
+	data_source_factory: Optional[Callable[..., object]] = None,
+	**viewer_kwargs,
+) -> "ImageMaskViewer":
+	"""Stream-load a BioImage Archive study into the viewer (issue #110).
+
+	Parameters
+	----------
+	source:
+		A BIA accession id (e.g. ``"S-BIAD2557"``) or a direct HTTPS base URL to
+		the study's file tree.
+	descriptor:
+		Optional layout descriptor (a ``dict`` or a path to a JSON file) mapping
+		the study's files onto FOVs / channels / masks. When omitted, a
+		best-effort auto-detection of the folder-per-FOV / OME-TIFF-per-FOV
+		layouts is attempted.
+	local_dir:
+		Override the local workspace root (defaults to
+		``~/.ueler/bia/<accession>/``). Persistent ``.UELer`` state lives under
+		``<workspace>/.UELer`` and downloaded image/mask files under
+		``<workspace>/cache``.
+	max_download_bytes:
+		Ceiling for caching a single non-pyramidal OME-TIFF FOV (default 2 GiB).
+		Opening a larger non-pyramidal remote OME raises rather than silently
+		downloading the whole file; raise this only if you truly intend to.
+	data_source_factory:
+		Optional factory returning the data-source object; primarily for testing.
+		Defaults to :class:`ueler.bia_loader.BIADataSource`.
+
+	Returns
+	-------
+	ueler.viewer.main_viewer.ImageMaskViewer
+	"""
+
+	if ensure_aliases:
+		ensure_aliases_loaded()
+
+	descriptor_obj = _load_descriptor(descriptor)
+	workspace = _bia_workspace(source, local_dir)
+
+	if data_source_factory is None:
+		from .bia_loader import BIADataSource as _BIADataSource
+
+		data_source_factory = _BIADataSource
+
+	data_source = data_source_factory(
+		source,
+		cache_dir=str(workspace / "cache"),
+		descriptor=descriptor_obj,
+		max_download_bytes=max_download_bytes,
+	)
+
+	factory: _ViewerFactory = viewer_factory or _load_viewer_factory()
+	viewer: "ImageMaskViewer" = factory(
+		str(workspace),
+		data_source=data_source,
+		**viewer_kwargs,
+	)
+
+	_finalise_viewer(
+		viewer,
+		auto_display=auto_display,
+		after_plugins=after_plugins,
+		display_callback=display_callback,
+	)
 	return viewer
+
+
+def _load_descriptor(descriptor: Optional[object]) -> Optional[dict]:
+	"""Accept a descriptor as a dict or a path to a JSON file."""
+
+	if descriptor is None or isinstance(descriptor, dict):
+		return descriptor
+	path = Path(str(descriptor)).expanduser()
+	if not path.is_file():
+		raise FileNotFoundError(f"descriptor '{path}' does not exist")
+	import json
+
+	with open(path, "r", encoding="utf-8") as fh:
+		return json.load(fh)
 
 
 def _refresh_viewer_state(viewer: "ImageMaskViewer") -> None:
 	"""Refresh viewer controls after mutating underlying data."""
-
+	_logger.debug("[runner] _refresh_viewer_state: update_marker_set_dropdown")
 	viewer.update_marker_set_dropdown()
+
+	_logger.debug("[runner] _refresh_viewer_state: update_controls")
 	viewer.update_controls(None)
 
+	_logger.debug("[runner] _refresh_viewer_state: on_image_change")
 	try:
 		viewer.on_image_change(None)
 	except AttributeError:
-		if getattr(viewer, "_debug", False):  # pragma: no cover - debug aid only
-			print("[runner] Skipping on_image_change refresh; side plots not fully initialised.")
+		_logger.debug("[runner] Skipping on_image_change refresh; side plots not fully initialised.")
+
+	_logger.debug("[runner] _refresh_viewer_state: on_image_change done")
+
+	# In map mode, run the same activation path used by map-selector changes.
+	# load_cell_table -> on_image_change mutates FOV-derived state even when the
+	# stitched map is the active viewport; re-activating the current map keeps
+	# map canvas and viewport state in sync before the next render.
+	map_mode_active = getattr(viewer, "_map_mode_active", False)
+	if isinstance(map_mode_active, bool) and map_mode_active:
+		active_map_id = getattr(viewer, "_active_map_id", None)
+		if not active_map_id:
+			ui = getattr(viewer, "ui_component", None)
+			selector = getattr(ui, "map_selector", None)
+			active_map_id = getattr(selector, "value", None)
+		activate = getattr(viewer, "_activate_map_mode", None)
+		if active_map_id is not None and callable(activate):
+			_logger.debug("[runner] _refresh_viewer_state: _activate_map_mode(%r)", active_map_id)
+			try:
+				activate(str(active_map_id))
+			except Exception:
+				_logger.debug("[runner] Failed to re-activate map mode during refresh.")
+		refresh_map_controls = getattr(viewer, "_refresh_map_controls", None)
+		if callable(refresh_map_controls):
+			_logger.debug("[runner] _refresh_viewer_state: _refresh_map_controls")
+			refresh_map_controls()
+	_logger.debug("[runner] _refresh_viewer_state: update_display")
 	viewer.update_display(viewer.current_downsample_factor)
+	_logger.debug("[runner] _refresh_viewer_state: update_keys")
 	viewer.update_keys(None)
+	_logger.debug("[runner] _refresh_viewer_state: refresh_bottom_panel")
 	viewer.refresh_bottom_panel()
+	_logger.debug("[runner] _refresh_viewer_state: inform_plugins")
 	viewer.inform_plugins('refresh_roi_table')
+	_logger.debug("[runner] _refresh_viewer_state: DONE")
 
 
 def load_cell_table(

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 import os
 import pickle
 from collections import OrderedDict
+
+_logger = logging.getLogger(__name__)
 
 import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
@@ -129,8 +132,42 @@ class RunFlowsom(PluginBase):
         self.main_viewer.cell_table = df
         self.main_viewer.inform_plugins("on_cell_table_change")
 
-        print(f"FlowSOM clustering completed. The labels are saved in the column {column_name_text}")
+        _logger.info("FlowSOM clustering completed. The labels are saved in the column %s", column_name_text)
     
+    def export_flowsom_params(self) -> dict:
+        """Return a dict of the current FlowSOM UI parameter values."""
+        ui = self.ui_component
+        return {
+            "column_name": getattr(ui.column_name_text, "value", "FlowSOM_cluster"),
+            "channels": list(getattr(ui.channel_selector, "value", [])),
+            "xdim": getattr(ui.xdim_input, "value", 10),
+            "ydim": getattr(ui.ydim_input, "value", 10),
+            "rlen": getattr(ui.rlen_input, "value", 10),
+            "seed": getattr(ui.seed_input, "value", 42),
+            "subset_on": getattr(ui.subset_on_dropdown, "value", ""),
+            "subset": list(getattr(ui.subset_selector, "value", []) or []),
+        }
+
+    def import_flowsom_params(self, params: dict) -> None:
+        """Restore FlowSOM UI widgets from a previously exported params dict."""
+        ui = self.ui_component
+        _widget_map = [
+            ("column_name_text",   "column_name"),
+            ("xdim_input",         "xdim"),
+            ("ydim_input",         "ydim"),
+            ("rlen_input",         "rlen"),
+            ("seed_input",         "seed"),
+            ("subset_on_dropdown", "subset_on"),
+        ]
+        for attr, key in _widget_map:
+            val = params.get(key)
+            widget = getattr(ui, attr, None)
+            if widget is not None and val is not None:
+                try:
+                    widget.value = val
+                except Exception:
+                    pass
+
     def on_subset_on_dropdown_change(self, change):
         selected_clusters = change['new']  # Get the selected clusters
         if selected_clusters:

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from collections import OrderedDict
+
+_logger = logging.getLogger(__name__)
 
 import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
@@ -103,7 +106,7 @@ class goTo(PluginBase):  # NOSONAR - legacy class name kept for backwards compat
         y_vals = df.loc[l_specified_cell, y_key]
 
         if x_vals.empty or y_vals.empty:
-            print("Cell not found.")
+            _logger.warning("Cell not found.")
             return
 
         x = x_vals.iloc[0]

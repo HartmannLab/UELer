@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import logging
 from collections import OrderedDict
 from typing import Iterable, Optional, Sequence, Set, Union
 
@@ -30,10 +31,34 @@ from ueler.viewer.observable import Observable
 from ueler.viewer.plugin.plugin_base import PluginBase
 from ueler.viewer.plugin.scatter_widget import ScatterPlotWidget
 
+_logger = logging.getLogger(__name__)
+
 
 _SELECTION_NOTICE = (
     "<i>No heatmap scatter plots yet. Choose axes, then click <b>Plot</b>.</i>"
 )
+
+
+def _bounded_panel_layout(**overrides) -> Layout:
+    props = {
+        "width": "100%",
+        "max_width": "99%",
+        "min_width": "0",
+        "box_sizing": "border-box",
+    }
+    props.update(overrides)
+    return Layout(**props)
+
+
+def _content_control_layout(**overrides) -> Layout:
+    props = {
+        "width": "calc(100% - 5px)",
+        "max_width": "calc(100% - 5px)",
+        "min_width": "0",
+        "box_sizing": "border-box",
+    }
+    props.update(overrides)
+    return Layout(**props)
 
 
 class ChartDisplay(PluginBase):
@@ -56,20 +81,20 @@ class ChartDisplay(PluginBase):
         self._observers_registered = False
 
         self.ui_component = UiComponent(self.main_viewer)
-        self._hist_output = Output(layout=Layout(width="100%"))
+        self._hist_output = Output(layout=_bounded_panel_layout())
         self._plot_placeholder = HTML(
             value=_SELECTION_NOTICE,
-            layout=Layout(width="100%"),
+            layout=_bounded_panel_layout(),
         )
         self._plot_host = VBox(
-            [self._plot_placeholder], layout=Layout(width="100%", gap="8px")
+            [self._plot_placeholder], layout=_bounded_panel_layout(gap="8px")
         )
 
         self._wide_notice = HTML(
             value=(
                 "<b>Multiple heatmap scatter plots are active.</b> Controls and plots appear in the footer."
             ),
-            layout=Layout(width="100%", padding="8px"),
+            layout=_bounded_panel_layout(padding="8px"),
         )
         self._section_location = "vertical"
 
@@ -101,7 +126,7 @@ class ChartDisplay(PluginBase):
     def _build_layout(self) -> None:
         histogram_controls = HBox(
             [self.ui_component.bin_slider, self.ui_component.above_below_buttons],
-            layout=Layout(gap="12px"),
+            layout=Layout(gap="12px", flex_flow="row wrap", align_items="center"),
         )
 
         scatter_controls = VBox(
@@ -112,17 +137,17 @@ class ChartDisplay(PluginBase):
                         self.ui_component.scatter_set_selector,
                         self.ui_component.remove_scatter_button,
                     ],
-                    layout=Layout(gap="8px", align_items="center"),
+                    layout=Layout(gap="8px", align_items="center", flex_flow="row wrap"),
                 ),
                 HBox(
                     [
                         self.ui_component.clear_scatter_button,
                         self.ui_component.clear_selection_button,
                     ],
-                    layout=Layout(gap="8px"),
+                    layout=Layout(gap="8px", flex_flow="row wrap"),
                 ),
             ],
-            layout=Layout(width="100%", gap="8px"),
+            layout=_bounded_panel_layout(gap="8px"),
         )
 
         link_controls = VBox(
@@ -130,7 +155,7 @@ class ChartDisplay(PluginBase):
                 self.ui_component.mv_linked_checkbox,
                 self.ui_component.cell_gallery_linked_checkbox,
             ],
-            layout=Layout(width="100%", gap="8px"),
+            layout=_bounded_panel_layout(gap="8px"),
         )
 
         self._plot_tabs = Tab(
@@ -148,26 +173,26 @@ class ChartDisplay(PluginBase):
                         self.ui_component.y_axis_selector,
                         self.ui_component.color_selector,
                     ],
-                    layout=Layout(gap="8px", align_items="center"),
+                    layout=Layout(gap="8px", align_items="center", flex_flow="row wrap"),
                 ),
                 self.ui_component.plot_button,
                 self._plot_tabs,
             ],
-            layout=Layout(width="100%", gap="10px"),
+            layout=_bounded_panel_layout(gap="10px"),
         )
 
         self.controls_section = VBox(
             [chart_widgets],
-            layout=Layout(width="100%", gap="12px"),
+            layout=_bounded_panel_layout(gap="12px"),
         )
         self.plot_section = VBox(
             [self._plot_host],
-            layout=Layout(width="100%", flex="1 1 auto"),
+            layout=_bounded_panel_layout(flex="1 1 auto"),
         )
 
         self.ui = VBox(
             [self.controls_section, self.plot_section],
-            layout=Layout(width="100%", max_height="600px", gap="12px"),
+            layout=_bounded_panel_layout(max_height="600px", gap="12px"),
         )
 
     # ------------------------------------------------------------------
@@ -177,12 +202,12 @@ class ChartDisplay(PluginBase):
     def plot_chart(self, _button):
         heatmap_plugin = getattr(self.main_viewer.SidePlots, "heatmap_output", None)
         if heatmap_plugin is None or not hasattr(heatmap_plugin, "heatmap_data"):
-            print("Heatmap data not available. Plot the heatmap first.")
+            _logger.warning("Heatmap data not available. Plot the heatmap first.")
             return
 
         heatmap_df = getattr(heatmap_plugin, "heatmap_data", None)
         if heatmap_df is None or not isinstance(heatmap_df, pd.DataFrame):
-            print("Heatmap data is not a pandas DataFrame.")
+            _logger.warning("Heatmap data is not a pandas DataFrame.")
             return
 
         x_col = self.ui_component.x_axis_selector.value
@@ -190,7 +215,7 @@ class ChartDisplay(PluginBase):
         c_col = self.ui_component.color_selector.value
 
         if x_col == "None" and y_col == "None":
-            print("Please select columns for at least the x axis.")
+            _logger.warning("Please select columns for at least the x axis.")
             return
 
         if y_col == "None":
@@ -202,7 +227,7 @@ class ChartDisplay(PluginBase):
         ]
         missing = [col for col in required_columns if col not in heatmap_df.columns]
         if missing:
-            print(f"Missing columns in heatmap data: {missing}")
+            _logger.warning("Missing columns in heatmap data: %s", missing)
             return
 
         data = heatmap_df.dropna(subset=required_columns)
@@ -233,7 +258,7 @@ class ChartDisplay(PluginBase):
 
     def _render_histogram(self, data: pd.DataFrame, x_col: str) -> None:
         if x_col not in data.columns:
-            print(f"Column '{x_col}' not found in heatmap data.")
+            _logger.warning("Column '%s' not found in heatmap data.", x_col)
             return
         filtered = data.dropna(subset=[x_col])
         if filtered.empty:
@@ -267,6 +292,7 @@ class ChartDisplay(PluginBase):
                 )
                 fig.canvas.draw_idle()
                 print(f"Cutoff set at: {self.cutoff:.3f}")
+                _logger.info("Cutoff set at: %.3f", self.cutoff)
                 self.highlight_cells()
 
             fig.canvas.mpl_connect("button_press_event", onclick)
@@ -313,7 +339,7 @@ class ChartDisplay(PluginBase):
     def highlight_cells(self) -> None:
         x_col = self.ui_component.x_axis_selector.value
         if x_col == "None" or self.cutoff is None:
-            print("X-axis not selected or cutoff unset.")
+            _logger.warning("X-axis not selected or cutoff unset.")
             return
         cell_table = self.main_viewer.cell_table
         select_above = self.ui_component.above_below_buttons.value == "above"
@@ -494,21 +520,21 @@ class UiComponent:
             value="None",
             description="X:",
             style=widget_style,
-            layout=Layout(width="150px"),
+            layout=_content_control_layout(width="auto", flex="1 1 0%"),
         )
         self.y_axis_selector = Dropdown(
             options=dropdown_options,
             value="None",
             description="Y:",
             style=widget_style,
-            layout=Layout(width="150px"),
+            layout=_content_control_layout(width="auto", flex="1 1 0%"),
         )
         self.color_selector = Dropdown(
             options=dropdown_options,
             value="None",
             description="Color:",
             style=widget_style,
-            layout=Layout(width="150px"),
+            layout=_content_control_layout(width="auto", flex="1 1 0%"),
         )
         self.plot_button = Button(
             description="Plot",
@@ -526,13 +552,13 @@ class UiComponent:
             description="Bins:",
             continuous_update=False,
             style={'description_width': 'auto'},
-            layout=Layout(width="250px"),
+            layout=_content_control_layout(width="auto", flex="1 1 0%"),
         )
         self.above_below_buttons = ToggleButtons(
             options=["below", "above"],
             description="Highlight:",
             style={'description_width': 'auto'},
-            layout=Layout(width="250px"),
+            layout=_content_control_layout(width="auto", flex="1 1 0%"),
         )
         self.point_size_slider = FloatSlider(
             value=10.0,
@@ -542,7 +568,7 @@ class UiComponent:
             description="Point Size:",
             continuous_update=False,
             style={'description_width': 'auto'},
-            layout=Layout(width="250px"),
+            layout=_content_control_layout(),
         )
         self.mv_linked_checkbox = Checkbox(
             value=False,
@@ -558,7 +584,7 @@ class UiComponent:
             options=[],
             description="Plots:",
             style={'description_width': 'auto'},
-            layout=Layout(width="250px"),
+            layout=_content_control_layout(width="auto", flex="1 1 0%"),
         )
         self.remove_scatter_button = Button(
             description="Remove",

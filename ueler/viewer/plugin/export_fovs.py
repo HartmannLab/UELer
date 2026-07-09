@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,8 +17,10 @@ import numpy as np
 from IPython import get_ipython
 from IPython.display import display
 from ipywidgets import (
+    Accordion,
     Button,
     Checkbox,
+    ColorPicker,
     Dropdown,
     FloatSlider,
     HBox,
@@ -30,7 +33,6 @@ from ipywidgets import (
     SelectMultiple,
     Tab,
     Text,
-    ToggleButtons,
     VBox,
 )
 from matplotlib import pyplot as plt
@@ -40,12 +42,14 @@ from ueler.rendering import (
     AnnotationRenderSettings,
     ChannelRenderSettings,
     MaskOverlaySnapshot,
+    MaskPainterSnapshot,
     MaskRenderSettings,
     OverlaySnapshot,
     render_crop_to_array,
     render_fov_to_array,
     render_roi_to_array,
 )
+from ueler.viewer.mask_color_overlay import compute_crop_regions, derive_downsampled_region
 from ..scale_bar import (
     ScaleBarSpec,
     add_scale_bar,
@@ -53,9 +57,30 @@ from ..scale_bar import (
     effective_pixel_size_nm,
 )
 from .plugin_base import PluginBase
-from ..layout_utils import column_block_layout, flex_fill_layout
+from ..roi_manager import format_roi_label
+from ..layout_utils import column_block_layout, content_widget_layout, flex_fill_layout
+
+_logger = logging.getLogger(__name__)
 
 PLACEHOLDER_MESSAGE = "Batch export UI is now available."
+
+EXPORT_CONFIG_FILE_SUFFIX = ".export_config.json"
+EXPORT_CONFIG_REGISTRY_FILENAME = "export_configs_index.json"
+EXPORT_CONFIG_VERSION = "1.0.0"
+
+
+def _resolve_config_path(folder: Optional[Path], stored_path: str) -> Path:
+    """Return the absolute path for a registry entry.
+
+    New entries store only a filename; legacy entries may contain an absolute
+    path.  Absolute stored paths are returned as-is for backward compatibility.
+    """
+    p = Path(stored_path)
+    if p.is_absolute():
+        return p
+    if folder is not None:
+        return folder / p
+    return p
 
 
 @dataclass(frozen=True)
@@ -111,6 +136,14 @@ class BatchExportPlugin(PluginBase):
         ] = {}
         self._viewer_pixel_size_nm = float(getattr(self.main_viewer, "get_pixel_size_nm", lambda: 390.0)())
 
+        self._palette_registry_folder: Optional[Path] = None
+        self._palette_registry: Dict[str, Dict[str, str]] = {}
+        self._export_config_folder: Optional[Path] = None
+        self._export_config_registry: Dict[str, Dict[str, str]] = {}
+
+        self._resolve_palette_registry_folder()
+        self._resolve_export_config_folder()
+
         self._build_widgets()
         self._build_layout()
         self._connect_events()
@@ -129,18 +162,9 @@ class BatchExportPlugin(PluginBase):
     # UI construction
     # ------------------------------------------------------------------
     def _build_widgets(self) -> None:
-        full_width = column_block_layout
+        full_width = content_widget_layout
         flex_fill = flex_fill_layout
         style_auto = {"description_width": "auto"}
-
-        self.ui_component.mode_selector = ToggleButtons(
-            options=[(label, key) for key, label in self._MODE_LABELS.items()],
-            value=self.MODE_FULL_FOV,
-            description="Mode:",
-            layout=full_width(),
-            style=style_auto,
-            button_style="",
-        )
 
         self.ui_component.marker_set_dropdown = Dropdown(
             options=[],
@@ -225,6 +249,122 @@ class BatchExportPlugin(PluginBase):
         )
         self.ui_component.overlay_hint = HTML(value="", layout=full_width())
 
+        # Feature 2: masks-only checkbox
+        self.ui_component.masks_only = Checkbox(
+            value=False,
+            description="Masks only (black background)",
+            indent=False,
+            layout=Layout(width="auto"),
+        )
+
+        # Mask layer selector: explicit per-export layer + colour, independent of viewer state
+        self.ui_component.mask_layer_dropdown = Dropdown(
+            options=[],
+            value=None,
+            description="Mask layer:",
+            layout=full_width(),
+            style=style_auto,
+        )
+        self.ui_component.mask_color_picker = ColorPicker(
+            value="#ffffff",
+            description="Mask color:",
+            concise=False,
+            layout=full_width(),
+        )
+        self.ui_component.mask_alpha_slider = FloatSlider(
+            value=1.0,
+            min=0.0,
+            max=1.0,
+            step=0.05,
+            description="Mask opacity:",
+            layout=full_width(),
+            style=style_auto,
+            continuous_update=False,
+            readout_format=".2f",
+        )
+        self.ui_component.mask_layer_box = VBox(
+            [
+                self.ui_component.mask_layer_dropdown,
+                self.ui_component.mask_color_picker,
+                self.ui_component.mask_alpha_slider,
+            ],
+            layout=column_block_layout(gap="4px"),
+        )
+
+        # Feature 1: palette override controls
+        self.ui_component.mask_palette_enabled = Checkbox(
+            value=False,
+            description="Override mask palette",
+            indent=False,
+            layout=Layout(width="auto"),
+        )
+        self.ui_component.mask_palette_dropdown = Dropdown(
+            options=[("Current settings", None)],
+            value=None,
+            description="Palette:",
+            layout=full_width(),
+            style=style_auto,
+            disabled=True,
+        )
+        self.ui_component.mask_palette_box = VBox(
+            [self.ui_component.mask_palette_enabled, self.ui_component.mask_palette_dropdown],
+            layout=column_block_layout(gap="4px"),
+        )
+
+        # Feature 3: export config template accordion
+        self.ui_component.config_name_input = Text(
+            value="",
+            description="Name:",
+            placeholder="my export config",
+            layout=full_width(),
+            style=style_auto,
+        )
+        self.ui_component.config_save_button = Button(
+            description="Save config",
+            icon="save",
+            layout=Layout(width="130px"),
+        )
+        self.ui_component.config_saved_dropdown = Dropdown(
+            options=[("No saved configs", None)],
+            value=None,
+            description="Saved:",
+            layout=full_width(),
+            style=style_auto,
+        )
+        self.ui_component.config_load_button = Button(
+            description="Load config",
+            icon="folder-open",
+            layout=Layout(width="130px"),
+        )
+        self.ui_component.config_delete_button = Button(
+            description="Delete",
+            button_style="danger",
+            layout=Layout(width="90px"),
+        )
+        self.ui_component.config_status = HTML(value="", layout=full_width())
+
+        _config_save_row = HBox(
+            [self.ui_component.config_name_input, self.ui_component.config_save_button],
+            layout=Layout(gap="8px", align_items="center", flex_flow="row nowrap", width="100%"),
+        )
+        _config_load_row = HBox(
+            [
+                self.ui_component.config_saved_dropdown,
+                self.ui_component.config_load_button,
+                self.ui_component.config_delete_button,
+            ],
+            layout=Layout(gap="8px", align_items="center", flex_flow="row wrap", width="100%"),
+        )
+        _config_inner = VBox(
+            [_config_save_row, _config_load_row, self.ui_component.config_status],
+            layout=column_block_layout(gap="6px"),
+        )
+        self.ui_component.config_accordion = Accordion(
+            children=[_config_inner],
+            selected_index=None,
+        )
+        self.ui_component.config_accordion.set_title(0, "Export config templates")
+
         self.ui_component.start_button = Button(
             description="Start",
             icon="play",
@@ -251,6 +391,21 @@ class BatchExportPlugin(PluginBase):
         self.ui_component.output_link = HTML(value="")
         self.ui_component.status_message = HTML(value="")
         self.ui_component.log_output = Output(layout=column_block_layout(border="1px solid #ddd"))
+
+        self.ui_component.separate_channels = Checkbox(
+            value=False,
+            description="Export channels separately",
+            indent=False,
+            layout=Layout(width="auto"),
+        )
+
+        self.ui_component.merge_same_color = Checkbox(
+            value=False,
+            description="Merge same color",
+            indent=False,
+            disabled=True,
+            layout=Layout(width="auto"),
+        )
 
         # Mode specific containers -------------------------------------------------
         self._build_full_fov_widgets(full_width, style_auto)
@@ -351,7 +506,15 @@ class BatchExportPlugin(PluginBase):
 
         filter_row = HBox(
             [self.ui_component.cell_filter, self.ui_component.cell_apply_filter],
-            layout=Layout(gap="10px", align_items="center", width="100%", flex_flow="row nowrap"),
+            layout=Layout(
+                gap="10px",
+                align_items="center",
+                width="100%",
+                max_width="99%",
+                min_width="0",
+                box_sizing="border-box",
+                flex_flow="row nowrap",
+            ),
         )
 
         self.ui_component.single_cell_box = VBox(
@@ -391,17 +554,37 @@ class BatchExportPlugin(PluginBase):
         )
 
     def _build_layout(self) -> None:
-        header = HTML("<strong>Batch export</strong>")
+        header = HTML("<strong>Mode</strong>")
 
         output_row = HBox(
             [self.ui_component.output_path, self.ui_component.browse_button],
-            layout=Layout(gap="10px", align_items="center", width="100%", flex_flow="row nowrap"),
+            layout=Layout(
+                gap="10px",
+                align_items="center",
+                width="100%",
+                max_width="99%",
+                min_width="0",
+                box_sizing="border-box",
+                flex_flow="row nowrap",
+            ),
+        )
+
+        _sep = HTML(
+            "<hr style='border:none; border-top:1px solid #ddd; margin:4px 0;'>",
+            layout=Layout(width="100%"),
+        )
+        _sep2 = HTML(
+            "<hr style='border:none; border-top:1px solid #ddd; margin:4px 0;'>",
+            layout=Layout(width="100%"),
+        )
+        _sep3 = HTML(
+            "<hr style='border:none; border-top:1px solid #ddd; margin:4px 0;'>",
+            layout=Layout(width="100%"),
         )
 
         controls = VBox(
             [
-                header,
-                self.ui_component.mode_selector,
+                self.ui_component.mode_tabs,
                 self.ui_component.marker_set_dropdown,
                 output_row,
                 self.ui_component.file_format_dropdown,
@@ -409,15 +592,28 @@ class BatchExportPlugin(PluginBase):
                     [self.ui_component.downsample_input, self.ui_component.dpi_input],
                     layout=Layout(gap="12px", flex_flow="row wrap"),
                 ),
+                _sep,
                 self.ui_component.include_scale_bar,
                 self.ui_component.scale_bar_ratio,
+                _sep2,
                 HBox(
-                    [self.ui_component.include_annotations, self.ui_component.include_masks],
+                    [
+                        self.ui_component.include_annotations,
+                        self.ui_component.include_masks,
+                        self.ui_component.masks_only,
+                    ],
                     layout=Layout(gap="16px", align_items="center", flex_flow="row wrap"),
                 ),
                 self.ui_component.mask_outline_thickness,
+                self.ui_component.mask_layer_box,
                 self.ui_component.overlay_hint,
-                self.ui_component.mode_tabs,
+                self.ui_component.mask_palette_box,
+                _sep3,
+                HBox(
+                    [self.ui_component.separate_channels, self.ui_component.merge_same_color],
+                    layout=Layout(gap="16px", align_items="center", flex_flow="row wrap"),
+                ),
+                self.ui_component.config_accordion,
                 HBox(
                     [self.ui_component.start_button, self.ui_component.cancel_button],
                     layout=Layout(gap="10px", flex_flow="row wrap"),
@@ -434,7 +630,6 @@ class BatchExportPlugin(PluginBase):
         self.ui = controls
 
     def _connect_events(self) -> None:
-        self.ui_component.mode_selector.observe(self._on_mode_change, names="value")
         self.ui_component.full_fov_use_all.observe(
             lambda change: self._toggle_fov_selector(change.get("new", False)), names="value"
         )
@@ -452,6 +647,37 @@ class BatchExportPlugin(PluginBase):
             self._on_mask_outline_thickness_change,
             names="value",
         )
+        self.ui_component.mask_palette_enabled.observe(
+            lambda change: setattr(
+                self.ui_component.mask_palette_dropdown, "disabled", not change["new"]
+            ),
+            names="value",
+        )
+        self.ui_component.separate_channels.observe(
+            lambda change: setattr(
+                self.ui_component.merge_same_color, "disabled", not change["new"]
+            ),
+            names="value",
+        )
+        self.ui_component.masks_only.observe(
+            lambda _: self._invalidate_overlay_cache(),
+            names="value",
+        )
+        self.ui_component.mask_layer_dropdown.observe(
+            lambda _: self._invalidate_overlay_cache(),
+            names="value",
+        )
+        self.ui_component.mask_color_picker.observe(
+            lambda _: self._invalidate_overlay_cache(),
+            names="value",
+        )
+        self.ui_component.mask_alpha_slider.observe(
+            lambda _: self._invalidate_overlay_cache(),
+            names="value",
+        )
+        self.ui_component.config_save_button.on_click(self._save_export_config)
+        self.ui_component.config_load_button.on_click(self._load_export_config)
+        self.ui_component.config_delete_button.on_click(self._delete_export_config)
 
     # ------------------------------------------------------------------
     # UI refresh helpers
@@ -542,10 +768,7 @@ class BatchExportPlugin(PluginBase):
         for _, row in df.iterrows():
             record = row.to_dict()
             roi_id = str(record.get("roi_id"))
-            fov = str(record.get("fov") or "")
-            map_id = str(record.get("map_id") or "")
-            location = fov if fov else (f"[MAP:{map_id}]" if map_id else "—")
-            label = f"{location} · {record.get('marker_set', '—')} · {roi_id[:8]}"
+            label = format_roi_label(record)
             options.append((label, roi_id))
             self._roi_records[roi_id] = record
 
@@ -554,15 +777,14 @@ class BatchExportPlugin(PluginBase):
         self.ui_component.roi_selection.value = selected
 
     def refresh_overlay_capabilities(self) -> None:
+        self._refresh_palette_dropdown()
+
         include_masks = self.ui_component.include_masks
         include_annotations = self.ui_component.include_annotations
         thickness_widget = self.ui_component.mask_outline_thickness
 
         masks_available = bool(getattr(self.main_viewer, "masks_available", False))
         annotations_available = bool(getattr(self.main_viewer, "annotations_available", False))
-
-        mask_controls = getattr(self.main_viewer.ui_component, "mask_display_controls", {})
-        visible_masks = any(getattr(cb, "value", False) for cb in mask_controls.values()) if masks_available else False
 
         annotation_active = bool(
             annotations_available
@@ -579,7 +801,6 @@ class BatchExportPlugin(PluginBase):
                 include_masks=include_masks,
                 thickness_widget=thickness_widget,
                 masks_available=masks_available,
-                visible_masks=visible_masks,
                 masks_were_disabled=masks_were_disabled,
             )
         )
@@ -599,22 +820,28 @@ class BatchExportPlugin(PluginBase):
         include_masks,
         thickness_widget,
         masks_available: bool,
-        visible_masks: bool,
         masks_were_disabled: bool,
     ) -> list[str]:
         hints: list[str] = []
+        masks_only_widget = getattr(self.ui_component, "masks_only", None)
+        layer_dropdown = getattr(self.ui_component, "mask_layer_dropdown", None)
+        color_picker = getattr(self.ui_component, "mask_color_picker", None)
+        alpha_slider = getattr(self.ui_component, "mask_alpha_slider", None)
+
         if not masks_available:
             include_masks.value = False
             include_masks.disabled = True
             thickness_widget.disabled = True
+            if masks_only_widget is not None:
+                masks_only_widget.disabled = True
+                masks_only_widget.value = False
+            if layer_dropdown is not None:
+                layer_dropdown.disabled = True
+            if color_picker is not None:
+                color_picker.disabled = True
+            if alpha_slider is not None:
+                alpha_slider.disabled = True
             hints.append("Masks unavailable for this dataset.")
-            return hints
-
-        if not visible_masks:
-            include_masks.value = False
-            include_masks.disabled = True
-            thickness_widget.disabled = True
-            hints.append("Enable at least one mask overlay in the viewer to export masks.")
             return hints
 
         include_masks.disabled = False
@@ -625,8 +852,41 @@ class BatchExportPlugin(PluginBase):
             viewer_thickness = max(1, int(getattr(self.main_viewer, "mask_outline_thickness", 1)))
             self._sync_mask_outline_with_viewer(viewer_thickness, thickness_widget)
 
-        thickness_widget.disabled = not include_masks.value
+        masks_on = bool(include_masks.value)
+        thickness_widget.disabled = not masks_on
+        if masks_only_widget is not None:
+            masks_only_widget.disabled = not masks_on
+            if masks_only_widget.disabled:
+                masks_only_widget.value = False
+        if layer_dropdown is not None:
+            layer_dropdown.disabled = not masks_on
+        if color_picker is not None:
+            color_picker.disabled = not masks_on
+        if alpha_slider is not None:
+            alpha_slider.disabled = not masks_on
+
+        self._refresh_mask_layer_dropdown()
+
+        if masks_on and layer_dropdown is not None and not layer_dropdown.options:
+            hints.append("Load a FOV to populate the mask layer list.")
         return hints
+
+    def _refresh_mask_layer_dropdown(self) -> None:
+        dropdown = getattr(self.ui_component, "mask_layer_dropdown", None)
+        if dropdown is None:
+            return
+        mask_names = list(getattr(self.main_viewer, "mask_names", []))
+        if not mask_names:
+            mask_key = str(getattr(self.main_viewer, "mask_key", "") or "")
+            if mask_key:
+                mask_names = [mask_key]
+        options = [(name, name) for name in mask_names]
+        current = dropdown.value
+        dropdown.options = options
+        valid = [v for _, v in options]
+        if current not in valid:
+            mask_key = str(getattr(self.main_viewer, "mask_key", "") or "")
+            dropdown.value = mask_key if mask_key in valid else (valid[0] if valid else None)
 
     def _refresh_annotation_controls(
         self,
@@ -657,6 +917,288 @@ class BatchExportPlugin(PluginBase):
             self.ui_component.overlay_hint.value = f"<span style='color:#666;'>{message}</span>"
         else:
             self.ui_component.overlay_hint.value = ""
+
+    # ------------------------------------------------------------------
+    # Palette registry helpers (Feature 1)
+    # ------------------------------------------------------------------
+    def _resolve_palette_registry_folder(self) -> None:
+        sideplots = getattr(self.main_viewer, "SidePlots", None)
+        painter = getattr(sideplots, "mask_painter_output", None) if sideplots else None
+        folder = getattr(painter, "registry_folder", None) if painter is not None else None
+        if isinstance(folder, Path):
+            self._palette_registry_folder = folder
+            return
+        base = getattr(self.main_viewer, "base_folder", None)
+        if base:
+            self._palette_registry_folder = Path(base).expanduser() / ".UELer"
+
+    def _load_palette_registry(self) -> Dict[str, Dict[str, str]]:
+        folder = self._palette_registry_folder
+        if folder is None or not folder.is_dir():
+            return {}
+        try:
+            from ueler.viewer.palette_store import load_registry as _load_reg
+            from ueler.viewer.plugin.mask_painter import REGISTRY_FILENAME
+            return _load_reg(folder, REGISTRY_FILENAME)
+        except Exception:
+            return {}
+
+    def _refresh_palette_dropdown(self) -> None:
+        self._palette_registry = self._load_palette_registry()
+        names = sorted(self._palette_registry.keys())
+        options = [("Current settings", None)] + [(name, name) for name in names]
+        dropdown = getattr(self.ui_component, "mask_palette_dropdown", None)
+        if dropdown is None:
+            return
+        current = dropdown.value
+        dropdown.options = options
+        valid = [v for _, v in options]
+        if current not in valid:
+            dropdown.value = None
+
+    def _snapshot_from_palette_payload(
+        self,
+        payload: Dict[str, Any],
+        outline_thickness: int,
+        mask_type_color: Optional[str] = None,
+    ) -> MaskPainterSnapshot:
+        from ueler.viewer.plugin.mask_painter import FILL_OPACITY_DEFAULT_PERCENT, _normalise_opacity_percent
+        class_order = [str(c) for c in payload.get("class_order", [])]
+        colors = {str(k): str(v) for k, v in payload.get("colors", {}).items()}
+        default_color = str(payload.get("default_color", "#ffffff") or "#ffffff")
+        modes: Dict[str, str] = payload.get("modes", {})
+        visible: Dict[str, Any] = payload.get("visible", {})
+        opacities: Dict[str, Any] = payload.get("opacities", {})
+        active_classes = tuple(str(c) for c in payload.get("active_classes", class_order))
+        return MaskPainterSnapshot(
+            mask_name=str(getattr(self.main_viewer, "mask_key", "") or ""),
+            identifier=str(payload.get("identifier", "") or ""),
+            active_classes=active_classes,
+            class_colors={cls: colors.get(cls, default_color) for cls in class_order},
+            class_visible={cls: bool(visible.get(cls, True)) for cls in class_order},
+            class_fill={cls: (str(modes.get(cls, "outline")) == "fill") for cls in class_order},
+            class_opacity={
+                cls: _normalise_opacity_percent(opacities.get(cls, FILL_OPACITY_DEFAULT_PERCENT))
+                for cls in class_order
+            },
+            default_color=default_color,
+            global_fill=bool(payload.get("global_fill", False)),
+            global_fill_opacity=_normalise_opacity_percent(
+                payload.get("global_fill_opacity", FILL_OPACITY_DEFAULT_PERCENT)
+            ),
+            show_borders_on_filled=bool(payload.get("show_fill_borders", False)),
+            border_color_mode=str(payload.get("border_color_mode", "mask_type_color") or "mask_type_color"),
+            mask_type_color=mask_type_color if mask_type_color else default_color,
+            outline_thickness=outline_thickness,
+        )
+
+    # ------------------------------------------------------------------
+    # Cache invalidation helper
+    # ------------------------------------------------------------------
+    def _invalidate_overlay_cache(self) -> None:
+        self._overlay_snapshot = None
+        self._overlay_cache.clear()
+
+    # ------------------------------------------------------------------
+    # Export config template helpers (Feature 3)
+    # ------------------------------------------------------------------
+    def _resolve_export_config_folder(self) -> None:
+        base = getattr(self.main_viewer, "base_folder", None)
+        if base:
+            folder = Path(base).expanduser() / ".UELer" / "export_configs"
+            folder.mkdir(parents=True, exist_ok=True)
+            self._export_config_folder = folder
+
+    def _refresh_config_dropdown(self) -> None:
+        folder = self._export_config_folder
+        if folder and folder.is_dir():
+            try:
+                from ueler.viewer.palette_store import load_registry as _load_reg
+                self._export_config_registry = _load_reg(folder, EXPORT_CONFIG_REGISTRY_FILENAME)
+            except Exception:
+                self._export_config_registry = {}
+        names = sorted(self._export_config_registry.keys())
+        options: list[tuple[str, Any]] = (
+            [("No saved configs", None)] + [(n, n) for n in names]
+            if not names
+            else [(n, n) for n in names]
+        )
+        dropdown = getattr(self.ui_component, "config_saved_dropdown", None)
+        if dropdown is None:
+            return
+        dropdown.options = options
+        if names:
+            dropdown.value = names[0]
+        else:
+            dropdown.options = [("No saved configs", None)]
+            dropdown.value = None
+
+    def _collect_export_config(self, name: str) -> Dict[str, Any]:
+        from datetime import datetime, timezone
+        return {
+            "name": name,
+            "version": EXPORT_CONFIG_VERSION,
+            "saved_at": datetime.now(tz=timezone.utc).isoformat(),
+            "file_format": getattr(self.ui_component.file_format_dropdown, "value", "png"),
+            "downsample": int(getattr(self.ui_component.downsample_input, "value", 1) or 1),
+            "dpi": int(getattr(self.ui_component.dpi_input, "value", 300) or 300),
+            "include_scale_bar": bool(getattr(self.ui_component.include_scale_bar, "value", False)),
+            "scale_bar_ratio": float(getattr(self.ui_component.scale_bar_ratio, "value", 10.0)),
+            "include_annotations": bool(getattr(self.ui_component.include_annotations, "value", True)),
+            "include_masks": bool(getattr(self.ui_component.include_masks, "value", True)),
+            "masks_only": bool(getattr(self.ui_component.masks_only, "value", False)),
+            "mask_outline_thickness": int(getattr(self.ui_component.mask_outline_thickness, "value", 1)),
+            "mask_palette_enabled": bool(getattr(self.ui_component.mask_palette_enabled, "value", False)),
+            "mask_palette_name": getattr(self.ui_component.mask_palette_dropdown, "value", None),
+            "mask_layer": getattr(self.ui_component.mask_layer_dropdown, "value", None),
+            "mask_color": getattr(self.ui_component.mask_color_picker, "value", "#ffffff"),
+            "mask_alpha": float(getattr(self.ui_component.mask_alpha_slider, "value", 1.0)),
+            "separate_channels": bool(getattr(self.ui_component.separate_channels, "value", False)),
+            "merge_same_color": bool(getattr(self.ui_component.merge_same_color, "value", False)),
+            "marker_set": getattr(self.ui_component.marker_set_dropdown, "value", None),
+            "output_path": self._relativize_output_path(
+                getattr(self.ui_component.output_path, "value", "")
+            ),
+        }
+
+    def _apply_export_config(self, payload: Dict[str, Any]) -> None:
+        if "output_path" in payload:
+            payload = dict(payload)
+            payload["output_path"] = self._expand_output_path(payload["output_path"])
+
+        def _set(widget_name: str, key: str, coerce=lambda x: x) -> None:
+            widget = getattr(self.ui_component, widget_name, None)
+            if widget is not None and key in payload:
+                try:
+                    widget.value = coerce(payload[key])
+                except Exception:
+                    pass
+
+        _set("output_path", "output_path")
+        _set("file_format_dropdown", "file_format")
+        _set("downsample_input", "downsample", int)
+        _set("dpi_input", "dpi", int)
+        _set("include_scale_bar", "include_scale_bar", bool)
+        _set("scale_bar_ratio", "scale_bar_ratio", float)
+        _set("include_masks", "include_masks", bool)
+        _set("include_annotations", "include_annotations", bool)
+        _set("masks_only", "masks_only", bool)
+        _set("mask_outline_thickness", "mask_outline_thickness", int)
+        _set("mask_palette_enabled", "mask_palette_enabled", bool)
+
+        palette_name = payload.get("mask_palette_name")
+        dd = getattr(self.ui_component, "mask_palette_dropdown", None)
+        if dd is not None:
+            valid = [v for _, v in dd.options]
+            if palette_name in valid:
+                dd.value = palette_name
+
+        layer_name = payload.get("mask_layer")
+        layer_dd = getattr(self.ui_component, "mask_layer_dropdown", None)
+        if layer_dd is not None and layer_name is not None:
+            valid_layers = [v for _, v in layer_dd.options]
+            if layer_name in valid_layers:
+                layer_dd.value = layer_name
+        _set("mask_color_picker", "mask_color")
+        _set("mask_alpha_slider", "mask_alpha", float)
+        _set("separate_channels", "separate_channels", bool)
+        _set("merge_same_color", "merge_same_color", bool)
+
+        marker = payload.get("marker_set")
+        mdd = getattr(self.ui_component, "marker_set_dropdown", None)
+        if mdd is not None:
+            valid_m = [v for _, v in mdd.options]
+            if marker in valid_m:
+                mdd.value = marker
+
+    def _save_export_config(self, _button=None) -> None:
+        name = getattr(self.ui_component.config_name_input, "value", "").strip()
+        status_widget = getattr(self.ui_component, "config_status", None)
+
+        def _set_status(msg: str) -> None:
+            if status_widget is not None:
+                status_widget.value = msg
+
+        if not name:
+            _set_status("<span style='color:red'>Provide a name.</span>")
+            return
+        folder = self._export_config_folder
+        if folder is None:
+            _set_status("<span style='color:red'>Config folder unavailable.</span>")
+            return
+        try:
+            from ueler.viewer.palette_store import (
+                load_registry as _load_reg,
+                save_registry as _save_reg,
+                slugify_name,
+                write_palette_file,
+            )
+            payload = self._collect_export_config(name)
+            slug = slugify_name(name, default_slug="export-config")
+            filename = f"{slug}{EXPORT_CONFIG_FILE_SUFFIX}"
+            path = folder / filename
+            write_palette_file(path, payload)
+            registry = _load_reg(folder, EXPORT_CONFIG_REGISTRY_FILENAME)
+            registry[name] = {"path": filename, "saved_at": str(payload["saved_at"])}
+            _save_reg(folder, EXPORT_CONFIG_REGISTRY_FILENAME, registry)
+            self._export_config_registry = registry
+            self._refresh_config_dropdown()
+            _set_status(f"<span style='color:green'>Saved '{name}'.</span>")
+        except Exception as exc:
+            _set_status(f"<span style='color:red'>Save failed: {exc}</span>")
+
+    def _load_export_config(self, _button=None) -> None:
+        status_widget = getattr(self.ui_component, "config_status", None)
+
+        def _set_status(msg: str) -> None:
+            if status_widget is not None:
+                status_widget.value = msg
+
+        name = getattr(self.ui_component.config_saved_dropdown, "value", None)
+        if not name:
+            _set_status("<span style='color:orange'>Select a config.</span>")
+            return
+        record = self._export_config_registry.get(name)
+        if not record:
+            _set_status("<span style='color:red'>Config not found.</span>")
+            return
+        try:
+            from ueler.viewer.palette_store import read_palette_file
+            payload = read_palette_file(_resolve_config_path(self._export_config_folder, record["path"]))
+            self._apply_export_config(payload)
+            _set_status(f"<span style='color:green'>Loaded '{name}'.</span>")
+        except Exception as exc:
+            _set_status(f"<span style='color:red'>Load failed: {exc}</span>")
+
+    def _delete_export_config(self, _button=None) -> None:
+        status_widget = getattr(self.ui_component, "config_status", None)
+
+        def _set_status(msg: str) -> None:
+            if status_widget is not None:
+                status_widget.value = msg
+
+        name = getattr(self.ui_component.config_saved_dropdown, "value", None)
+        if not name:
+            return
+        record = self._export_config_registry.get(name)
+        folder = self._export_config_folder
+        if record and folder:
+            try:
+                from ueler.viewer.palette_store import (
+                    load_registry as _load_reg,
+                    save_registry as _save_reg,
+                )
+                path = _resolve_config_path(folder, record["path"])
+                if path.exists():
+                    path.unlink()
+                registry = _load_reg(folder, EXPORT_CONFIG_REGISTRY_FILENAME)
+                registry.pop(name, None)
+                _save_reg(folder, EXPORT_CONFIG_REGISTRY_FILENAME, registry)
+                self._export_config_registry = registry
+                self._refresh_config_dropdown()
+                _set_status(f"<span style='color:green'>Deleted '{name}'.</span>")
+            except Exception as exc:
+                _set_status(f"<span style='color:red'>Delete failed: {exc}</span>")
 
     def _refresh_mode_availability(self) -> None:
         """Show/hide the Single Cells tab based on whether a cell table is loaded."""
@@ -714,13 +1256,6 @@ class BatchExportPlugin(PluginBase):
     # ------------------------------------------------------------------
     # Trait / event handlers
     # ------------------------------------------------------------------
-    def _on_mode_change(self, change) -> None:
-        new_mode = change.get("new")
-        if new_mode not in self._MODE_LABELS:
-            return
-        index = list(self._MODE_LABELS).index(new_mode)
-        self.ui_component.mode_tabs.selected_index = index
-
     def _on_mask_outline_thickness_change(self, change) -> None:
         if self._suspend_outline_widget_callback:
             return
@@ -739,8 +1274,7 @@ class BatchExportPlugin(PluginBase):
 
         self._mask_outline_thickness = thickness
         self._mask_outline_overridden = thickness != self._viewer_outline_thickness
-        self._overlay_snapshot = None
-        self._overlay_cache.clear()
+        self._invalidate_overlay_cache()
 
     def _toggle_fov_selector(self, use_all: bool) -> None:
         self.ui_component.full_fov_selector.disabled = use_all
@@ -786,6 +1320,8 @@ class BatchExportPlugin(PluginBase):
         self.refresh_roi_options()
         self.refresh_overlay_capabilities()
         self._refresh_mode_availability()
+        self._refresh_config_dropdown()
+        self._refresh_palette_dropdown()
 
     def on_viewer_mask_outline_change(self, thickness: int) -> None:
         try:
@@ -801,8 +1337,7 @@ class BatchExportPlugin(PluginBase):
             if self._mask_outline_thickness != viewer_thickness:
                 self._mask_outline_thickness = viewer_thickness
             self._set_mask_outline_slider_value(viewer_thickness)
-            self._overlay_snapshot = None
-            self._overlay_cache.clear()
+            self._invalidate_overlay_cache()
 
     def on_viewer_pixel_size_change(self, pixel_size_nm: float) -> None:
         try:
@@ -820,7 +1355,8 @@ class BatchExportPlugin(PluginBase):
 
         try:
             marker_profile = self._resolve_marker_profile()
-            mode = self.ui_component.mode_selector.value
+            _mode_order = [self.MODE_FULL_FOV, self.MODE_SINGLE_CELLS, self.MODE_ROIS]
+            mode = _mode_order[self.ui_component.mode_tabs.selected_index or 0]
             output_dir = self._normalise_output_dir(self.ui_component.output_path.value)
             file_format = self.ui_component.file_format_dropdown.value
             downsample = max(1, int(self.ui_component.downsample_input.value or 1))
@@ -841,9 +1377,19 @@ class BatchExportPlugin(PluginBase):
                 self._mask_outline_thickness = thickness
             self._mask_outline_overridden = thickness != self._viewer_outline_thickness
 
+            palette_name: Optional[str] = (
+                self.ui_component.mask_palette_dropdown.value
+                if getattr(self.ui_component.mask_palette_enabled, "value", False)
+                else None
+            )
             overlay_snapshot = self._capture_overlay_snapshot(
                 include_masks=include_masks,
                 include_annotations=include_annotations,
+                palette_name=palette_name,
+            )
+            separate_channels = bool(getattr(self.ui_component.separate_channels, "value", False))
+            merge_same_color = separate_channels and bool(
+                getattr(self.ui_component.merge_same_color, "value", False)
             )
 
             job = self._build_job(
@@ -859,6 +1405,8 @@ class BatchExportPlugin(PluginBase):
                 include_annotations=include_annotations,
                 include_masks=include_masks,
                 overlay_snapshot=overlay_snapshot,
+                separate_channels=separate_channels,
+                merge_same_color=merge_same_color,
             )
         except Exception as exc:
             self._notify(f"Unable to start export: {exc}", level="error")
@@ -925,12 +1473,13 @@ class BatchExportPlugin(PluginBase):
         *,
         include_masks: bool,
         include_annotations: bool,
+        palette_name: Optional[str] = None,
     ) -> OverlaySnapshot:
         snapshot = self.main_viewer.capture_overlay_snapshot(
             include_masks=include_masks,
             include_annotations=include_annotations,
         )
-        if include_masks and snapshot.masks:
+        if include_masks and (snapshot.masks or getattr(snapshot, "mask_painter", None) is not None):
             adjusted_masks: list[MaskOverlaySnapshot] = []
             for mask_snapshot in snapshot.masks:
                 adjusted_masks.append(
@@ -945,9 +1494,77 @@ class BatchExportPlugin(PluginBase):
             snapshot = OverlaySnapshot(
                 include_annotations=snapshot.include_annotations,
                 include_masks=snapshot.include_masks,
+                skip_image_layer=getattr(snapshot, "skip_image_layer", False),
                 annotation=snapshot.annotation,
                 masks=tuple(adjusted_masks),
+                mask_painter=(
+                    replace(snapshot.mask_painter, outline_thickness=self._mask_outline_thickness)
+                    if getattr(snapshot, "mask_painter", None) is not None
+                    else None
+                ),
             )
+
+        # When no palette override is requested, use the export-local layer/colour
+        # selection — fully independent of the viewer's live overlay controls.
+        if include_masks and palette_name is None:
+            layer_dd = getattr(self.ui_component, "mask_layer_dropdown", None)
+            mask_layer = str(layer_dd.value or "") if (layer_dd is not None and layer_dd.value) else ""
+            if not mask_layer:
+                mask_layer = str(getattr(self.main_viewer, "mask_key", "") or "")
+            if mask_layer:
+                cp = getattr(self.ui_component, "mask_color_picker", None)
+                color_hex = str(cp.value or "#ffffff") if cp is not None else "#ffffff"
+                alpha_w = getattr(self.ui_component, "mask_alpha_slider", None)
+                mask_alpha = float(alpha_w.value) if alpha_w is not None else 1.0
+                export_mask = MaskOverlaySnapshot(
+                    name=mask_layer,
+                    color=to_rgb(color_hex),
+                    alpha=mask_alpha,
+                    mode="outline",
+                    outline_thickness=self._mask_outline_thickness,
+                )
+                snapshot = replace(snapshot, masks=(export_mask,), mask_painter=None)
+            else:
+                snapshot = replace(snapshot, masks=(), mask_painter=None)
+
+        # Feature 2: override skip_image_layer from the export-local masks_only widget
+        masks_only = bool(
+            include_masks
+            and getattr(self.ui_component, "masks_only", None) is not None
+            and self.ui_component.masks_only.value
+        )
+        if masks_only != getattr(snapshot, "skip_image_layer", False):
+            snapshot = replace(snapshot, skip_image_layer=masks_only)
+
+        # Feature 1: override mask_painter with a saved palette if requested
+        if include_masks and palette_name is not None and palette_name in self._palette_registry:
+            record = self._palette_registry[palette_name]
+            try:
+                from ueler.viewer.palette_store import read_palette_file
+                from ueler.viewer.plugin.mask_painter import _resolve_mask_type_color
+                payload = read_palette_file(Path(record["path"]))
+                # Prefer the live painter snapshot's mask_type_color (Mask Painter active).
+                # When mask_painter is None (plugin disabled or no identifier selected),
+                # read directly from the left-panel mask color controls so border colors
+                # are never overwritten by the palette's default_color fallback.
+                live_mask_type_color = (
+                    snapshot.mask_painter.mask_type_color
+                    if getattr(snapshot, "mask_painter", None) is not None
+                    and snapshot.mask_painter.mask_type_color
+                    else None
+                )
+                if not live_mask_type_color:
+                    live_mask_type_color = _resolve_mask_type_color(
+                        self.main_viewer,
+                        getattr(self.main_viewer, "mask_key", None),
+                    ) or None
+                overridden_painter = self._snapshot_from_palette_payload(
+                    payload, self._mask_outline_thickness, live_mask_type_color
+                )
+                snapshot = replace(snapshot, mask_painter=overridden_painter)
+            except Exception as exc:
+                self._notify(f"Could not load palette '{palette_name}': {exc}", level="warning")
+
         self._overlay_snapshot = snapshot
         self._overlay_cache.clear()
         return snapshot
@@ -1009,6 +1626,8 @@ class BatchExportPlugin(PluginBase):
         include_annotations: bool,
         include_masks: bool,
         overlay_snapshot: OverlaySnapshot,
+        separate_channels: bool = False,
+        merge_same_color: bool = False,
     ):
         overrides = {
             "downsample_factor": downsample,
@@ -1040,6 +1659,8 @@ class BatchExportPlugin(PluginBase):
             scale_ratio=scale_ratio,
             pixel_size_nm=pixel_size_nm,
             overlay_snapshot=overlay_snapshot,
+            separate_channels=separate_channels,
+            merge_same_color=merge_same_color,
         )
 
         from ueler.export.job import Job  # Local import to avoid circular dependency at module import time
@@ -1061,6 +1682,84 @@ class BatchExportPlugin(PluginBase):
     # ------------------------------------------------------------------
     # Job item builders per mode
     # ------------------------------------------------------------------
+    def _build_channel_items(
+        self,
+        *,
+        base_item_id: str,
+        base_output_path: str,
+        file_format: str,
+        marker_profile: "_MarkerProfile",
+        make_worker_fn,
+        base_metadata: dict,
+    ) -> list:
+        from ueler.export.job import JobItem
+
+        items = []
+        for channel in marker_profile.selected_channels:
+            stem, _ = os.path.splitext(base_output_path)
+            ch_path = f"{stem}_{self._safe_filename(channel)}.{file_format}"
+            ch_settings = {channel: marker_profile.channel_settings[channel]}
+            ch_profile = _MarkerProfile(
+                name=f"{marker_profile.name}_{channel}",
+                selected_channels=(channel,),
+                channel_settings=ch_settings,
+            )
+            items.append(
+                JobItem(
+                    item_id=f"{base_item_id}__{channel}",
+                    execute=make_worker_fn(ch_profile, ch_path),
+                    output_path=ch_path,
+                    metadata={**base_metadata, "channel": channel},
+                )
+            )
+        return items
+
+    def _build_grouped_channel_items(
+        self,
+        *,
+        base_item_id: str,
+        base_output_path: str,
+        file_format: str,
+        marker_profile: "_MarkerProfile",
+        make_worker_fn,
+        base_metadata: dict,
+    ) -> list:
+        from ueler.export.job import JobItem
+
+        color_groups: dict = {}
+        for ch in marker_profile.selected_channels:
+            key = marker_profile.channel_settings[ch].color
+            color_groups.setdefault(key, []).append(ch)
+
+        stem, _ = os.path.splitext(base_output_path)
+        items = []
+        for channels in color_groups.values():
+            if len(channels) == 1:
+                ch = channels[0]
+                ch_path = f"{stem}_{self._safe_filename(ch)}.{file_format}"
+                item_id_suffix = ch
+                metadata_extra: dict = {"channel": ch}
+            else:
+                safe_names = [self._safe_filename(c) for c in channels]
+                ch_path = f"{stem}_merged_{'_'.join(safe_names)}.{file_format}"
+                item_id_suffix = "merged_" + "_".join(channels)
+                metadata_extra = {"channels": list(channels)}
+            ch_settings = {c: marker_profile.channel_settings[c] for c in channels}
+            ch_profile = _MarkerProfile(
+                name=f"{marker_profile.name}_{'_'.join(channels)}",
+                selected_channels=tuple(channels),
+                channel_settings=ch_settings,
+            )
+            items.append(
+                JobItem(
+                    item_id=f"{base_item_id}__{item_id_suffix}",
+                    execute=make_worker_fn(ch_profile, ch_path),
+                    output_path=ch_path,
+                    metadata={**base_metadata, **metadata_extra},
+                )
+            )
+        return items
+
     def _build_full_fov_items(
         self,
         *,
@@ -1073,6 +1772,8 @@ class BatchExportPlugin(PluginBase):
         scale_ratio: float,
         pixel_size_nm: float,
         overlay_snapshot: OverlaySnapshot,
+        separate_channels: bool = False,
+        merge_same_color: bool = False,
     ):
         from ueler.export.job import JobItem
 
@@ -1088,34 +1789,60 @@ class BatchExportPlugin(PluginBase):
 
             output_path = os.path.join(output_dir, f"{self._safe_filename(fov)}.{file_format}")
 
-            worker = partial(
-                self._export_fov_worker,
-                fov_name=fov,
-                marker_profile=marker_profile,
-                downsample=downsample,
-                file_format=file_format,
-                output_path=output_path,
-                dpi=dpi,
-                include_scale_bar=include_scale_bar,
-                scale_ratio=scale_ratio,
-                pixel_size_nm=pixel_size_nm,
-                overlay_snapshot=overlay_snapshot,
-            )
-
             metadata = {
                 "fov": fov,
                 "mode": self.MODE_FULL_FOV,
                 "marker_set": marker_profile.name,
             }
 
-            items.append(
-                JobItem(
-                    item_id=fov,
-                    execute=worker,
-                    output_path=output_path,
-                    metadata=metadata,
+            if separate_channels:
+                def _make_fov_worker(ch_profile, ch_path, _fov=fov):
+                    return partial(
+                        self._export_fov_worker,
+                        fov_name=_fov,
+                        marker_profile=ch_profile,
+                        downsample=downsample,
+                        file_format=file_format,
+                        output_path=ch_path,
+                        dpi=dpi,
+                        include_scale_bar=include_scale_bar,
+                        scale_ratio=scale_ratio,
+                        pixel_size_nm=pixel_size_nm,
+                        overlay_snapshot=overlay_snapshot,
+                    )
+                builder_fn = self._build_grouped_channel_items if merge_same_color else self._build_channel_items
+                items.extend(
+                    builder_fn(
+                        base_item_id=fov,
+                        base_output_path=output_path,
+                        file_format=file_format,
+                        marker_profile=marker_profile,
+                        make_worker_fn=_make_fov_worker,
+                        base_metadata=metadata,
+                    )
                 )
-            )
+            else:
+                worker = partial(
+                    self._export_fov_worker,
+                    fov_name=fov,
+                    marker_profile=marker_profile,
+                    downsample=downsample,
+                    file_format=file_format,
+                    output_path=output_path,
+                    dpi=dpi,
+                    include_scale_bar=include_scale_bar,
+                    scale_ratio=scale_ratio,
+                    pixel_size_nm=pixel_size_nm,
+                    overlay_snapshot=overlay_snapshot,
+                )
+                items.append(
+                    JobItem(
+                        item_id=fov,
+                        execute=worker,
+                        output_path=output_path,
+                        metadata=metadata,
+                    )
+                )
 
         return items
 
@@ -1131,6 +1858,8 @@ class BatchExportPlugin(PluginBase):
         scale_ratio: float,
         pixel_size_nm: float,
         overlay_snapshot: OverlaySnapshot,
+        separate_channels: bool = False,
+        merge_same_color: bool = False,
     ):
         from ueler.export.job import JobItem
 
@@ -1162,21 +1891,6 @@ class BatchExportPlugin(PluginBase):
                 f"{self._safe_filename(str(fov))}_cell_{label_str}.{file_format}",
             )
 
-            worker = partial(
-                self._export_cell_worker,
-                record=record,
-                marker_profile=marker_profile,
-                crop_size=crop_size,
-                downsample=downsample,
-                file_format=file_format,
-                output_path=output_path,
-                dpi=dpi,
-                include_scale_bar=include_scale_bar,
-                scale_ratio=scale_ratio,
-                pixel_size_nm=pixel_size_nm,
-                overlay_snapshot=overlay_snapshot,
-            )
-
             metadata = {
                 "fov": fov,
                 "cell_label": label,
@@ -1185,16 +1899,63 @@ class BatchExportPlugin(PluginBase):
             }
 
             item_id = f"{fov}::cell::{label_str}"
-            items.append(
-                JobItem(
-                    item_id=item_id,
-                    execute=worker,
-                    output_path=output_path,
-                    metadata=metadata,
+
+            if separate_channels:
+                def _make_cell_worker(ch_profile, ch_path, _rec=record):
+                    return partial(
+                        self._export_cell_worker,
+                        record=_rec,
+                        marker_profile=ch_profile,
+                        crop_size=crop_size,
+                        downsample=downsample,
+                        file_format=file_format,
+                        output_path=ch_path,
+                        dpi=dpi,
+                        include_scale_bar=include_scale_bar,
+                        scale_ratio=scale_ratio,
+                        pixel_size_nm=pixel_size_nm,
+                        overlay_snapshot=overlay_snapshot,
+                    )
+                builder_fn = self._build_grouped_channel_items if merge_same_color else self._build_channel_items
+                items.extend(
+                    builder_fn(
+                        base_item_id=item_id,
+                        base_output_path=output_path,
+                        file_format=file_format,
+                        marker_profile=marker_profile,
+                        make_worker_fn=_make_cell_worker,
+                        base_metadata=metadata,
+                    )
                 )
-            )
+            else:
+                worker = partial(
+                    self._export_cell_worker,
+                    record=record,
+                    marker_profile=marker_profile,
+                    crop_size=crop_size,
+                    downsample=downsample,
+                    file_format=file_format,
+                    output_path=output_path,
+                    dpi=dpi,
+                    include_scale_bar=include_scale_bar,
+                    scale_ratio=scale_ratio,
+                    pixel_size_nm=pixel_size_nm,
+                    overlay_snapshot=overlay_snapshot,
+                )
+                items.append(
+                    JobItem(
+                        item_id=item_id,
+                        execute=worker,
+                        output_path=output_path,
+                        metadata=metadata,
+                    )
+                )
 
         return items
+
+    def _roi_file_stem(self, record: dict, roi_id: str) -> str:
+        name = str(record.get("name") or "").strip()
+        return self._safe_filename(name) if name else self._safe_filename(roi_id[:12])
 
     def _build_roi_items(
         self,
@@ -1208,6 +1969,8 @@ class BatchExportPlugin(PluginBase):
         scale_ratio: float,
         pixel_size_nm: float,
         overlay_snapshot: OverlaySnapshot,
+        separate_channels: bool = False,
+        merge_same_color: bool = False,
     ):
         from ueler.export.job import JobItem
 
@@ -1231,19 +1994,7 @@ class BatchExportPlugin(PluginBase):
                 # Map-mode ROI — render via the stitched VirtualMapLayer.
                 output_path = os.path.join(
                     output_dir,
-                    f"map_{self._safe_filename(map_id)}_roi_{self._safe_filename(roi_id[:12])}.{file_format}",
-                )
-                worker = partial(
-                    self._export_map_roi_worker,
-                    roi=record,
-                    marker_profile=marker_profile,
-                    downsample=downsample,
-                    file_format=file_format,
-                    output_path=output_path,
-                    dpi=dpi,
-                    include_scale_bar=include_scale_bar,
-                    scale_ratio=scale_ratio,
-                    overlay_snapshot=overlay_snapshot,
+                    f"map_{self._safe_filename(map_id)}_roi_{self._roi_file_stem(record, roi_id)}.{file_format}",
                 )
                 metadata = {
                     "map_id": map_id,
@@ -1251,34 +2002,58 @@ class BatchExportPlugin(PluginBase):
                     "mode": self.MODE_ROIS,
                     "marker_set": marker_profile.name,
                 }
-                items.append(
-                    JobItem(
-                        item_id=f"roi::{roi_id}",
-                        execute=worker,
-                        output_path=output_path,
-                        metadata=metadata,
+                if separate_channels:
+                    def _make_map_worker(ch_profile, ch_path, _rec=record):
+                        return partial(
+                            self._export_map_roi_worker,
+                            roi=_rec,
+                            marker_profile=ch_profile,
+                            downsample=downsample,
+                            file_format=file_format,
+                            output_path=ch_path,
+                            dpi=dpi,
+                            include_scale_bar=include_scale_bar,
+                            scale_ratio=scale_ratio,
+                            overlay_snapshot=overlay_snapshot,
+                        )
+                    builder_fn = self._build_grouped_channel_items if merge_same_color else self._build_channel_items
+                    items.extend(
+                        builder_fn(
+                            base_item_id=f"roi::{roi_id}",
+                            base_output_path=output_path,
+                            file_format=file_format,
+                            marker_profile=marker_profile,
+                            make_worker_fn=_make_map_worker,
+                            base_metadata=metadata,
+                        )
                     )
-                )
+                else:
+                    worker = partial(
+                        self._export_map_roi_worker,
+                        roi=record,
+                        marker_profile=marker_profile,
+                        downsample=downsample,
+                        file_format=file_format,
+                        output_path=output_path,
+                        dpi=dpi,
+                        include_scale_bar=include_scale_bar,
+                        scale_ratio=scale_ratio,
+                        overlay_snapshot=overlay_snapshot,
+                    )
+                    items.append(
+                        JobItem(
+                            item_id=f"roi::{roi_id}",
+                            execute=worker,
+                            output_path=output_path,
+                            metadata=metadata,
+                        )
+                    )
                 continue
 
             # Single-FOV ROI — original path.
             output_path = os.path.join(
                 output_dir,
-                f"{self._safe_filename(str(fov))}_roi_{self._safe_filename(roi_id[:12])}.{file_format}",
-            )
-
-            worker = partial(
-                self._export_roi_worker,
-                roi=record,
-                marker_profile=marker_profile,
-                downsample=downsample,
-                file_format=file_format,
-                output_path=output_path,
-                dpi=dpi,
-                include_scale_bar=include_scale_bar,
-                scale_ratio=scale_ratio,
-                pixel_size_nm=pixel_size_nm,
-                overlay_snapshot=overlay_snapshot,
+                f"{self._safe_filename(str(fov))}_roi_{self._roi_file_stem(record, roi_id)}.{file_format}",
             )
 
             metadata = {
@@ -1288,14 +2063,54 @@ class BatchExportPlugin(PluginBase):
                 "marker_set": marker_profile.name,
             }
 
-            items.append(
-                JobItem(
-                    item_id=f"roi::{roi_id}",
-                    execute=worker,
-                    output_path=output_path,
-                    metadata=metadata,
+            if separate_channels:
+                def _make_roi_worker(ch_profile, ch_path, _rec=record):
+                    return partial(
+                        self._export_roi_worker,
+                        roi=_rec,
+                        marker_profile=ch_profile,
+                        downsample=downsample,
+                        file_format=file_format,
+                        output_path=ch_path,
+                        dpi=dpi,
+                        include_scale_bar=include_scale_bar,
+                        scale_ratio=scale_ratio,
+                        pixel_size_nm=pixel_size_nm,
+                        overlay_snapshot=overlay_snapshot,
+                    )
+                builder_fn = self._build_grouped_channel_items if merge_same_color else self._build_channel_items
+                items.extend(
+                    builder_fn(
+                        base_item_id=f"roi::{roi_id}",
+                        base_output_path=output_path,
+                        file_format=file_format,
+                        marker_profile=marker_profile,
+                        make_worker_fn=_make_roi_worker,
+                        base_metadata=metadata,
+                    )
                 )
-            )
+            else:
+                worker = partial(
+                    self._export_roi_worker,
+                    roi=record,
+                    marker_profile=marker_profile,
+                    downsample=downsample,
+                    file_format=file_format,
+                    output_path=output_path,
+                    dpi=dpi,
+                    include_scale_bar=include_scale_bar,
+                    scale_ratio=scale_ratio,
+                    pixel_size_nm=pixel_size_nm,
+                    overlay_snapshot=overlay_snapshot,
+                )
+                items.append(
+                    JobItem(
+                        item_id=f"roi::{roi_id}",
+                        execute=worker,
+                        output_path=output_path,
+                        metadata=metadata,
+                    )
+                )
 
         return items
 
@@ -1331,6 +2146,13 @@ class BatchExportPlugin(PluginBase):
             downsample_factor=downsample,
             annotation=annotation_settings,
             masks=mask_settings,
+            skip_image_layer=bool(getattr(overlay_snapshot, "skip_image_layer", False)),
+        )
+        array = self.main_viewer.apply_overlay_snapshot_to_array(
+            array,
+            fov_name=fov_name,
+            downsample_factor=downsample,
+            snapshot=overlay_snapshot,
         )
         image, spec = self._finalise_array(
             array,
@@ -1383,7 +2205,23 @@ class BatchExportPlugin(PluginBase):
             downsample_factor=downsample,
             annotation=annotation_settings,
             masks=mask_settings,
+            skip_image_layer=bool(getattr(overlay_snapshot, "skip_image_layer", False)),
         )
+        bounds = None
+        for candidate in channel_arrays.values():
+            shape = getattr(candidate, "shape", None)
+            if shape and len(shape) >= 2:
+                bounds = (0, int(shape[1]), 0, int(shape[0]))
+                break
+        if bounds is not None:
+            _, region_ds = compute_crop_regions(center_xy, crop_size, bounds, downsample)
+            array = self.main_viewer.apply_overlay_snapshot_to_array(
+                array,
+                fov_name=fov_name,
+                downsample_factor=downsample,
+                snapshot=overlay_snapshot,
+                region_ds=region_ds,
+            )
         image, spec = self._finalise_array(
             array,
             include_scale_bar=include_scale_bar,
@@ -1407,6 +2245,9 @@ class BatchExportPlugin(PluginBase):
         downsample_factor: int,
         channels: tuple,
         channel_settings: Mapping[str, Any],
+        *,
+        skip_image_layer: bool = False,
+        snapshot: Optional[OverlaySnapshot] = None,
     ) -> np.ndarray:
         """Render a rectangular region of the stitched map using explicit channel settings.
 
@@ -1414,6 +2255,9 @@ class BatchExportPlugin(PluginBase):
         UI widgets, this method calls ``render_fov_to_array`` directly with the supplied
         ``channel_settings``.  This is required for batch export so that the marker profile's
         settings are used instead of whatever the user currently has on screen.
+
+        When ``snapshot`` contains simple mask outlines (``snapshot.masks``), they are rendered
+        per-tile via ``render_fov_to_array`` — the same approach as single-FOV exports.
         """
         visible_tiles = layer._collect_visible_tiles(xmin_um, xmax_um, ymin_um, ymax_um)
         canvas = layer._allocate_canvas(xmin_um, xmax_um, ymin_um, ymax_um, downsample_factor)
@@ -1431,7 +2275,39 @@ class BatchExportPlugin(PluginBase):
             viewer.load_fov(tile.name, channels)
             fov_arrays = viewer.image_cache.get(tile.name)
             if not fov_arrays:
-                continue
+                import time
+                time.sleep(0.05)
+                viewer.load_fov(tile.name, channels)
+                fov_arrays = viewer.image_cache.get(tile.name)
+            if not fov_arrays:
+                raise RuntimeError(
+                    f"Map export: tile '{tile.name}' could not be loaded after retry. "
+                    "Export aborted to prevent writing a partial image."
+                )
+
+            # Build per-tile mask settings from the export-local snapshot so that simple
+            # mask outlines are rendered at the same time as the channel composite.
+            tile_masks: tuple = ()
+            if snapshot is not None and snapshot.include_masks and snapshot.masks:
+                tile_mask_list = []
+                for m in snapshot.masks:
+                    raw_mask = viewer._get_mask_array(tile.name, m.name)
+                    if raw_mask is None:
+                        continue
+                    mask_ds = raw_mask[::downsample_factor, ::downsample_factor]
+                    try:
+                        mask_ds = mask_ds.compute()
+                    except AttributeError:
+                        mask_ds = np.asarray(mask_ds)
+                    tile_mask_list.append(MaskRenderSettings(
+                        array=mask_ds,
+                        color=m.color,
+                        alpha=m.alpha,
+                        mode=m.mode,
+                        outline_thickness=m.outline_thickness,
+                        downsample_factor=downsample_factor,
+                    ))
+                tile_masks = tuple(tile_mask_list)
 
             tile_image = render_fov_to_array(
                 tile.name,
@@ -1440,6 +2316,8 @@ class BatchExportPlugin(PluginBase):
                 channel_settings,
                 downsample_factor=downsample_factor,
                 region_xy=region_xy,
+                skip_image_layer=skip_image_layer,
+                masks=tile_masks if tile_masks else None,
                 # Do NOT pass region_ds here: it is in absolute downsampled coordinates
                 # (non-zero origin), but render_fov_to_array uses it to set the canvas
                 # shape.  Let render_fov_to_array derive region_ds from region_xy so
@@ -1527,10 +2405,23 @@ class BatchExportPlugin(PluginBase):
             ds,
             channels,
             marker_profile.channel_settings,
+            skip_image_layer=bool(getattr(overlay_snapshot, "skip_image_layer", False)),
+            snapshot=overlay_snapshot,
         )
 
         if image is None or not image.size:
             raise ValueError("Map region render returned an empty array.")
+
+        image = self.main_viewer.apply_overlay_snapshot_to_map_array(
+            image,
+            layer=layer,
+            xmin_um=xmin_um,
+            xmax_um=xmax_um,
+            ymin_um=ymin_um,
+            ymax_um=ymax_um,
+            downsample_factor=ds,
+            snapshot=overlay_snapshot,
+        )
 
         # pixel_size_nm for the scale bar: base pixel is base_px_um µm, scaled by ds.
         pixel_size_nm = base_px_um * 1000.0 * ds
@@ -1579,7 +2470,22 @@ class BatchExportPlugin(PluginBase):
             downsample_factor=downsample,
             annotation=annotation_settings,
             masks=mask_settings,
+            skip_image_layer=bool(getattr(overlay_snapshot, "skip_image_layer", False)),
         )
+        region_xy = (
+            int(float(roi.get("x_min") or 0.0)),
+            int(float(roi.get("x_max") or 0.0)),
+            int(float(roi.get("y_min") or 0.0)),
+            int(float(roi.get("y_max") or 0.0)),
+        )
+        if region_xy[1] > region_xy[0] and region_xy[3] > region_xy[2]:
+            array = self.main_viewer.apply_overlay_snapshot_to_array(
+                array,
+                fov_name=fov_name,
+                downsample_factor=downsample,
+                snapshot=overlay_snapshot,
+                region_ds=derive_downsampled_region(region_xy, downsample),
+            )
         image, spec = self._finalise_array(
             array,
             include_scale_bar=include_scale_bar,
@@ -1679,6 +2585,32 @@ class BatchExportPlugin(PluginBase):
             path = os.path.join(self.main_viewer.base_folder, path)
         os.makedirs(path, exist_ok=True)
         return path
+
+    def _relativize_output_path(self, path: str) -> str:
+        """Convert output_path to relative form if it is under base_folder.
+
+        Paths outside base_folder are left unchanged so they remain usable
+        after a project move even if they happen to be on a fixed mount.
+        """
+        base = getattr(self.main_viewer, "base_folder", None)
+        if not base or not path:
+            return path
+        try:
+            return str(Path(path).relative_to(base))
+        except ValueError:
+            return path
+
+    def _expand_output_path(self, stored: str) -> str:
+        """Expand a stored output_path back to absolute using base_folder.
+
+        Absolute paths (legacy or outside base_folder) are returned unchanged.
+        """
+        if not stored or os.path.isabs(stored):
+            return stored
+        base = getattr(self.main_viewer, "base_folder", None)
+        if base:
+            return os.path.join(base, stored)
+        return stored
 
     def _finalise_array(
         self,
@@ -1910,11 +2842,11 @@ class BatchExportPlugin(PluginBase):
     def _log(self, message: str) -> None:
         with self.ui_component.log_output:
             print(message)
+        _logger.info(message)
 
     def _set_running_state(self, running: bool) -> None:
         self.ui_component.start_button.disabled = running
         self.ui_component.cancel_button.disabled = not running
-        self.ui_component.mode_selector.disabled = running
         self.ui_component.marker_set_dropdown.disabled = running
         self.ui_component.output_path.disabled = running
         self.ui_component.file_format_dropdown.disabled = running

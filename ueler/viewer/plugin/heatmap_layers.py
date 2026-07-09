@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import html
+import logging
 import os
 import pickle
 import inspect
 import sys
-from typing import Iterable, List, Sequence, Set
+from typing import Any, Iterable, List, Sequence, Set
+
+_logger = logging.getLogger(__name__)
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -25,7 +28,7 @@ except Exception:  # pragma: no cover - optional in non-notebook contexts
         return None
 
 from ueler.viewer.decorators import update_status_bar
-from ipywidgets import HBox, HTML, Layout, Tab, VBox
+from ipywidgets import HBox, HTML, Layout, Output, Tab, VBox
 
 
 NO_CLUSTER_SELECTED_MSG = "No cluster selected."
@@ -179,7 +182,7 @@ class DataLayer:
         if not self.ui_component.lock_cutoff_button.value:
             self.ui_component.lock_cutoff_button.value = True
         else:
-            print(f"{reason}. Use 'Unlock once' before editing the dendrogram.")
+            _logger.warning("%s. Use 'Unlock once' before editing the dendrogram.", reason)
 
     def _reset_selection_cache(self):
         self._last_scatter_selection = None
@@ -457,7 +460,7 @@ class DataLayer:
         data_file = os.path.join(base_folder, "heatmap_data.pkl")
         with open(data_file, "wb") as handle:
             pickle.dump(self.data, handle)
-        print(f"Data autosaved to {data_file}")
+        _logger.info("Data autosaved to %s", data_file)
 
     def prepare_heatmap_data(self):
         df = self.main_viewer.cell_table
@@ -467,8 +470,8 @@ class DataLayer:
         marker_columns = list(self.ui_component.channel_selector.value)
         channel = marker_columns + [cluster_column]
 
-        print(f"Preparing heatmap data for channels: {channel}")
-        print(f"Using cluster: {[cluster_column]}")
+        _logger.debug("Preparing heatmap data for channels: %s", channel)
+        _logger.debug("Using cluster: %s", [cluster_column])
 
         subset = list(self.ui_component.subset_selector.value)
         if subset:
@@ -480,7 +483,7 @@ class DataLayer:
         except Exception:
             cluster_count = len(pd.unique(cluster_values))
         if cluster_count > 300:
-            print("The number of classes is too large to display. Please select a smaller number of classes.")
+            _logger.warning("The number of classes is too large to display. Please select a smaller number of classes.")
             return
 
         df_grouped = df.groupby(cluster_column)[marker_columns].median()
@@ -526,9 +529,9 @@ class DataLayer:
 
         if column_name in self.main_viewer.cell_table.columns:
             if not overwrite:
-                print("If you intend to overwrite the existing column, please check the 'Overwrite' checkbox.")
+                _logger.warning("If you intend to overwrite the existing column, please check the 'Overwrite' checkbox.")
                 return
-            print("Overwriting the existing column.")
+            _logger.info("Overwriting the existing column.")
             self.main_viewer.cell_table.drop(column_name, axis=1, inplace=True)
             if f"{column_name}_revised" in self.main_viewer.cell_table.columns:
                 self.main_viewer.cell_table.drop(f"{column_name}_revised", axis=1, inplace=True)
@@ -579,11 +582,11 @@ class DataLayer:
             ].map(self._meta_cluster_display_name)
 
         cluster_columns = self.main_viewer.cell_table.select_dtypes(include=['int', 'int64', 'object']).columns.tolist()
-        print(cluster_columns)
+        _logger.debug("Cluster-capable columns: %s", cluster_columns)
 
         self.main_viewer.inform_plugins('on_cell_table_change')
 
-        print(f"Cluster labels saved to column '{column_name}' in the cell table.")
+        _logger.info("Cluster labels saved to column '%s' in the cell table.", column_name)
         self.display_row_colors_as_patches()
 
     def on_cell_table_change(self):
@@ -595,6 +598,168 @@ class DataLayer:
         old_subset = self.ui_component.subset_on_dropdown.value
         self.ui_component.subset_on_dropdown.options = cluster_columns
         self.ui_component.subset_on_dropdown.value = old_subset
+
+    # ------------------------------------------------------------------
+    # Checkpoint export / import
+    # ------------------------------------------------------------------
+
+    def export_heatmap_state(self, *, include_raw_medians: bool = True) -> "Any":
+        """Capture current heatmap state as an AnnData object.
+
+        The returned object is ready to be passed to ``CheckpointStore.write_checkpoint``.
+        ``uns["checkpoint"]`` is intentionally left empty here — the store fills it in.
+        """
+        import anndata
+
+        data = getattr(self, "heatmap_data", None)
+        if data is None or not hasattr(data, "columns"):
+            raise RuntimeError("No heatmap data available to export. Run the heatmap first.")
+
+        _meta_cols = {"meta_cluster", "meta_cluster_revised"}
+        marker_cols = [c for c in data.columns if c not in _meta_cols]
+        if not marker_cols:
+            raise RuntimeError("No marker columns found in heatmap data.")
+
+        X = data[marker_cols].values.astype("float32")
+        obs = {}
+        if "meta_cluster" in data.columns:
+            obs["meta_cluster"] = [
+                int(v) if not (isinstance(v, float) and v != v) else -1
+                for v in data["meta_cluster"]
+            ]
+        if "meta_cluster_revised" in data.columns:
+            obs["meta_cluster_revised"] = [
+                int(v) if not (isinstance(v, float) and v != v) else -1
+                for v in data["meta_cluster_revised"]
+            ]
+
+        adata = anndata.AnnData(
+            X=X,
+            obs=pd.DataFrame(obs, index=[str(idx) for idx in data.index]),
+            var=pd.DataFrame(index=marker_cols),
+        )
+
+        # Palette — convert int keys to str for JSON-safe serialisation
+        mc_colors = getattr(self.data, "meta_cluster_colors", {}) or {}
+        mc_names = getattr(self.data, "meta_cluster_names", {}) or {}
+        adata.uns["palette"] = {
+            "colors": {str(k): v for k, v in mc_colors.items()},
+            "names": {str(k): v for k, v in mc_names.items()},
+            "next_id": int(getattr(self.data, "next_meta_cluster_id", 0) or 0),
+        }
+
+        # UI widget values
+        ui = self.ui_component
+        adata.uns["ui"] = {
+            "selected_channels": list(getattr(ui.channel_selector, "value", [])),
+            "cluster_method": getattr(ui.cluster_method_dropdown, "value", "ward"),
+            "distance_metric": getattr(ui.distance_metric_dropdown, "value", "euclidean"),
+            "zscore_across_markers": bool(getattr(ui.zscore_across_markers_checkbox, "value", False)),
+            "horizontal_layout": bool(getattr(ui.horizontal_layout_checkbox, "value", False)),
+            "high_level_cluster_column": getattr(ui.high_level_cluster_dropdown, "value", ""),
+            "subset_on": getattr(ui.subset_on_dropdown, "value", ""),
+            "subset_values": list(getattr(ui.subset_selector, "value", []) or []),
+        }
+
+        # Dendrogram
+        raw_dend = getattr(self, "dendrogram", None)
+        if raw_dend is not None:
+            adata.uns["row_linkage"] = raw_dend.tolist()
+
+        # Dendrogram cutoff
+        cut = getattr(self.data, "dendrogram_cut", None)
+        if cut is not None:
+            adata.uns["dendrogram_cut"] = float(cut)
+
+        return adata
+
+    def import_heatmap_state(self, adata: "Any") -> None:
+        """Restore heatmap state from a previously exported AnnData checkpoint.
+
+        Reconstructs ``heatmap_data``, ``dendrogram``, meta-cluster registry, and
+        UI widget values, then re-renders the heatmap from the saved state.
+        """
+        # 1. Reconstruct heatmap_data DataFrame
+        marker_cols = list(adata.var_names)
+        obs_index = list(adata.obs_names)
+        df = pd.DataFrame(adata.X, index=obs_index, columns=marker_cols)
+        for col in ("meta_cluster", "meta_cluster_revised"):
+            if col in adata.obs.columns:
+                df[col] = adata.obs[col].values
+        self.heatmap_data = df
+
+        # 2. Restore dendrogram
+        raw_link = adata.uns.get("row_linkage")
+        if raw_link is not None:
+            self.dendrogram = np.array(raw_link)
+        else:
+            self.dendrogram = None
+
+        # 3. Restore cutoff
+        cut = adata.uns.get("dendrogram_cut")
+        if cut is not None:
+            self.data.dendrogram_cut = float(cut)
+
+        # 4. Cache revised assignments so _restore_cluster_assignments can reapply
+        if "meta_cluster_revised" in df.columns:
+            self._cluster_assignment_cache = {
+                idx: int(v) for idx, v in df["meta_cluster_revised"].dropna().items()
+            }
+        else:
+            self._cluster_assignment_cache = {}
+
+        # 5. Restore UI widget values (guarded — widgets may be stubs in test env)
+        ui_state = adata.uns.get("ui", {})
+        _widget_map = [
+            ("cluster_method_dropdown",        "cluster_method"),
+            ("distance_metric_dropdown",       "distance_metric"),
+            ("zscore_across_markers_checkbox", "zscore_across_markers"),
+            ("horizontal_layout_checkbox",     "horizontal_layout"),
+        ]
+        for attr, key in _widget_map:
+            widget = getattr(self.ui_component, attr, None)
+            val = ui_state.get(key)
+            if widget is not None and val is not None:
+                try:
+                    widget.value = val
+                except Exception:
+                    pass
+        # channel_selector — restore marker list
+        ch_widget = getattr(self.ui_component, "channel_selector", None)
+        saved_channels = ui_state.get("selected_channels")
+        if ch_widget is not None and saved_channels is not None:
+            try:
+                ch_widget.value = tuple(saved_channels)
+            except Exception:
+                pass
+
+        # 6. Update orientation state from the loaded data
+        self._update_orientation_state()
+
+        # 7. Re-render the heatmap from the saved state
+        if self.dendrogram is not None and getattr(self.data, "dendrogram_cut", None) is not None:
+            self._refresh_plot()
+
+        # 8. Re-apply saved palette on top of whatever generate_heatmap set
+        pal = adata.uns.get("palette", {})
+        saved_colors = {int(k): v for k, v in pal.get("colors", {}).items()}
+        saved_names = {int(k): v for k, v in pal.get("names", {}).items()}
+        next_id = int(pal.get("next_id", 0))
+        if saved_colors:
+            self.data.meta_cluster_colors.update(saved_colors)
+        if saved_names:
+            self.data.meta_cluster_names.update(saved_names)
+        if next_id:
+            self.data.next_meta_cluster_id = max(
+                int(getattr(self.data, "next_meta_cluster_id", 0) or 0), next_id
+            )
+        self._refresh_meta_cluster_controls()
+
+        # Re-render color patches with the correct saved palette
+        try:
+            self.display_row_colors_as_patches()
+        except Exception:
+            pass
 
     def _map_indices_to_cluster_positions(self, selection_indices: Sequence[int] | Set[int]):
         cluster_index = self._cluster_index_labels()
@@ -719,8 +884,15 @@ class InteractionLayer:
         self.on_mode_toggle(mode)
         self._reset_selection_cache()
         self._sync_panel_location()
-        if hasattr(self.main_viewer, 'refresh_bottom_panel'):
-            self.main_viewer.refresh_bottom_panel()
+        # Suppress the cached-pane refresh's render (request_cached_wide_panel_refresh
+        # early-returns while this flag is set) so refresh_bottom_panel only re-homes the
+        # footer pane; the single explicit plot_heatmap() below does the one render.
+        self._plot_refresh_inflight = True
+        try:
+            if hasattr(self.main_viewer, 'refresh_bottom_panel'):
+                self.main_viewer.refresh_bottom_panel()
+        finally:
+            self._plot_refresh_inflight = False
         self.plot_heatmap()
 
     def after_all_plugins_loaded(self):
@@ -752,21 +924,21 @@ class InteractionLayer:
 
                 self.highlight_a_heatmap_grid(row_ind, col_ind)
                 self.heatmap_current_selection = (row_ind, col_ind)
-                print(f"Clicked cluster: {cluster_label}")
+                _logger.debug("Clicked cluster: %s", cluster_label)
                 cell_count = self.main_viewer.cell_table[
                     self.main_viewer.cell_table[self.ui_component.high_level_cluster_dropdown.value] == cluster_label
                 ].shape[0]
-                print(f"cell number: {cell_count}")
+                _logger.debug("cell number: %s", cell_count)
                 self.update_linked()
 
             elif dend_axis is not None and event.inaxes == dend_axis:
                 if self.ui_component.lock_cutoff_button.value:
-                    print("Cutoff is locked. Please unlock to apply new cutoff.")
+                    _logger.warning("Cutoff is locked. Please unlock to apply new cutoff.")
                     return
                 value = self._dendrogram_coord_from_event(event)
                 if value is not None:
                     self.data.dendrogram_cut = value
-                    print(f"New dendrogram cutoff: {value}")
+                    _logger.debug("New dendrogram cutoff: %s", value)
                     self._draw_cutoff_line(dend_axis)
                     self.apply_new_cutoff()
                     self._engage_cutoff_lock("Cutoff locked after dendrogram update")
@@ -776,13 +948,13 @@ class InteractionLayer:
                 selected_idx = self._cluster_index_from_coord(coord)
                 cluster_count, _ = self._cluster_and_marker_counts()
                 if selected_idx is None or selected_idx < 0 or selected_idx >= cluster_count:
-                    print("Clicked outside the color bar.")
+                    _logger.debug("Clicked outside the color bar.")
                     return
 
                 if event.button == MouseButton.RIGHT:
                     self.current_selection = []
                     self.data.current_clusters["index"].value = []
-                    print("Cleared selection.")
+                    _logger.debug("Cleared selection.")
                 else:
                     if event.key == 'shift' and self.data.current_clusters["index"].value:
                         start = min(self.data.current_clusters["index"].value[-1], selected_idx)
@@ -804,7 +976,7 @@ class InteractionLayer:
                     if cluster_labels:
                         meta_cluster_id = self.heatmap_data.loc[cluster_labels, 'meta_cluster']
                         values = meta_cluster_id.values if hasattr(meta_cluster_id, 'values') else meta_cluster_id
-                        print(f"Meta cluster IDs: {list(values)}")
+                        _logger.debug("Meta cluster IDs: %s", list(values))
                     self.highlight_row_colors(self.current_selection)
 
         return on_click
@@ -859,7 +1031,7 @@ class InteractionLayer:
 
         if self.ui_component.chart_checkbox.value:
             if self.main_viewer.SidePlots.chart_output.ui_component.y_axis_selector.value == "None":
-                print("The response of a histogram is not implemented yet.")
+                _logger.debug("The response of a histogram is not implemented yet.")
             else:
                 self.color_points_by_meta_cluster()
                 self.highlight_scatter_plot()
@@ -891,7 +1063,7 @@ class InteractionLayer:
 
         chart_display = getattr(self.main_viewer.SidePlots, "chart_output", None)
         if chart_display is None:
-            print("Chart plugin not available for coloring.")
+            _logger.warning("Chart plugin not available for coloring.")
             return
         meta_colors = getattr(self.data, "meta_cluster_colors", {}) or {}
         cluster_colors = getattr(self.data, "cluster_colors", {}) or {}
@@ -905,7 +1077,7 @@ class InteractionLayer:
             color_map_source = {}
             color_series = merged_table[used_cluster]
         if not color_map_source:
-            print("Cluster color palette not available.")
+            _logger.warning("Cluster color palette not available.")
             return
         normalized_map = {}
         for key, value in color_map_source.items():
@@ -920,7 +1092,7 @@ class InteractionLayer:
     def highlight_scatter_plot(self):
         cluster_label = self._current_cluster_label()
         if cluster_label is None:
-            print(NO_CLUSTER_SELECTED_MSG)
+            _logger.warning(NO_CLUSTER_SELECTED_MSG)
             return
 
         high_level_cluster = self.ui_component.high_level_cluster_dropdown.value
@@ -936,13 +1108,13 @@ class InteractionLayer:
                 cell_table[high_level_cluster] == cluster_label
             ].index.tolist()
 
-        print(f"Selected indices: {row_indices}")
+        _logger.debug("Selected indices: %s", row_indices)
         self.main_viewer.SidePlots.chart_output.color_points(row_indices)
 
     def display_cells(self):
         cluster_label = self._current_cluster_label()
         if cluster_label is None:
-            print(NO_CLUSTER_SELECTED_MSG)
+            _logger.warning(NO_CLUSTER_SELECTED_MSG)
             return
 
         high_level_cluster = self.ui_component.high_level_cluster_dropdown.value
@@ -963,7 +1135,7 @@ class InteractionLayer:
     def highlight_cells(self):
         cluster_label = self._current_cluster_label()
         if cluster_label is None:
-            print(NO_CLUSTER_SELECTED_MSG)
+            _logger.warning(NO_CLUSTER_SELECTED_MSG)
             return
 
         high_level_cluster = self.ui_component.high_level_cluster_dropdown.value
@@ -974,18 +1146,18 @@ class InteractionLayer:
         mask_label = sub_table.loc[sub_table[high_level_cluster] == cluster_label, label_key].tolist()
 
         self.main_viewer.image_display.set_mask_ids(mask_name=self.main_viewer.mask_key, mask_ids=mask_label)
-        print(f"{mask_label} in the main viewer.")
-        print(f"Highlighted cells from cluster {cluster_label} of {high_level_cluster} in the main viewer.")
+        _logger.debug("%s in the main viewer.", mask_label)
+        _logger.info("Highlighted cells from cluster %s of %s in the main viewer.", cluster_label, high_level_cluster)
 
     def trace_cluster(self, *args):
         selections = self.main_viewer.image_display.selected_masks_label
         if not selections:
-            print("Please select a cell in the main viewer.")
+            _logger.warning("Please select a cell in the main viewer.")
             return
         selection = next(iter(selections))
         cell_id = getattr(selection, "mask_id", None)
         if cell_id is None:
-            print("Could not determine selected cell identifier.")
+            _logger.warning("Could not determine selected cell identifier.")
             return
         fov = getattr(selection, "fov", None) or self.main_viewer.ui_component.image_selector.value
         cluster_column = self.ui_component.high_level_cluster_dropdown.value
@@ -995,28 +1167,28 @@ class InteractionLayer:
             (self.main_viewer.cell_table[label_key] == cell_id) & (self.main_viewer.cell_table[fov_key] == fov),
             cluster_column
         ].values[0]
-        print(f"Cluster of the selected cell: {cluster}")
+        _logger.debug("Cluster of the selected cell: %s", cluster)
 
         if cluster_column != self.heatmap_data.index.name:
-            print("Cluster column not found in the heatmap data.")
+            _logger.warning("Cluster column not found in the heatmap data.")
             return
 
         cluster_index = self._cluster_index_labels()
         order_positions = list(self._cluster_order_positions())
         if cluster_index is None or not order_positions:
-            print("Heatmap ordering not available.")
+            _logger.warning("Heatmap ordering not available.")
             return
 
         try:
             base_position = cluster_index.get_loc(cluster)
         except KeyError:
-            print("Cluster not found in the heatmap data.")
+            _logger.warning("Cluster not found in the heatmap data.")
             return
 
         try:
             selection_index = order_positions.index(base_position)
         except ValueError:
-            print("Cluster position not found in current ordering.")
+            _logger.warning("Cluster position not found in current ordering.")
             return
 
         if self.adapter.is_wide():
@@ -1028,7 +1200,7 @@ class InteractionLayer:
 
         self.heatmap_current_selection = (row_ind, col_ind)
         self.highlight_a_heatmap_grid(row_ind, col_ind)
-        print(f"Found cluster at heatmap index: {selection_index}")
+        _logger.debug("Found cluster at heatmap index: %s", selection_index)
 
         self.highlight_cells()
 
@@ -1056,7 +1228,7 @@ class InteractionLayer:
         self._last_highlighted_clusters = normalized_tuple
 
     def on_selected_indices_change(self, selected_indices):
-        print("Selected indices have changed.")
+        _logger.debug("Selected indices have changed.")
 
         if selected_indices is None:
             selected_items = []
@@ -1081,8 +1253,8 @@ class InteractionLayer:
             if selection_set:
                 try:
                     self.plot_heatmap()
-                except Exception as exc:
-                    print(f"Error while plotting heatmap: {exc}")
+                except Exception:
+                    _logger.error("Error while plotting heatmap", exc_info=True)
             return
 
         if not selection_set:
@@ -1095,8 +1267,8 @@ class InteractionLayer:
             self._last_scatter_selection = normalized_selection
             try:
                 self.plot_heatmap()
-            except Exception as exc:
-                print(f"Error while plotting heatmap: {exc}")
+            except Exception:
+                _logger.error("Error while plotting heatmap", exc_info=True)
             return
 
         self._apply_cluster_highlights(positions)
@@ -1127,15 +1299,15 @@ class InteractionLayer:
         new_cluster_id = self.ui_component.cluster_id_dropdown.value
         selected_indices = list(self.data.current_clusters["index"].value or [])
         if new_cluster_id is None:
-            print("Please select a meta-cluster.")
+            _logger.warning("Please select a meta-cluster.")
             return
         if not selected_indices:
-            print("No clusters selected to update.")
+            _logger.warning("No clusters selected to update.")
             return
 
         sorted_positions = self._cluster_order_positions()
         if not sorted_positions:
-            print("No cluster ordering available.")
+            _logger.warning("No cluster ordering available.")
             return
 
         self._ensure_meta_cluster_revised_column()
@@ -1144,7 +1316,7 @@ class InteractionLayer:
 
         cluster_index = self._cluster_index_labels()
         if cluster_index is None:
-            print("Cluster index not available.")
+            _logger.warning("Cluster index not available.")
             return
 
         selection_positions = np.array(sorted_positions)[np.array(selected_indices)]
@@ -1158,23 +1330,23 @@ class InteractionLayer:
             self.update_text_labels()
 
         self._engage_cutoff_lock("Cutoff locked after meta-cluster reassignment")
-        print(f"Assigned selected clusters to {self._meta_cluster_display_name(new_cluster_id)} ({new_cluster_id}).")
+        _logger.info("Assigned selected clusters to %s (%s).", self._meta_cluster_display_name(new_cluster_id), new_cluster_id)
 
     def rename_meta_cluster(self, *args):
         selected_id = self.ui_component.rename_cluster_dropdown.value
         new_name = (self.ui_component.rename_cluster_name.value or "").strip()
         if selected_id is None:
-            print("Please select a meta-cluster to rename.")
+            _logger.warning("Please select a meta-cluster to rename.")
             return
         if not new_name:
-            print("Please enter a non-empty name.")
+            _logger.warning("Please enter a non-empty name.")
             return
 
         self.data.meta_cluster_names[selected_id] = new_name
         self._refresh_meta_cluster_controls()
         self.ui_component.rename_cluster_dropdown.value = selected_id
         self.ui_component.cluster_id_dropdown.value = selected_id
-        print(f"Renamed meta-cluster {selected_id} to '{new_name}'.")
+        _logger.info("Renamed meta-cluster %s to '%s'.", selected_id, new_name)
 
     def add_meta_cluster(self, *args):
         new_id = self._next_available_meta_cluster_id()
@@ -1188,15 +1360,15 @@ class InteractionLayer:
         self._refresh_meta_cluster_controls()
         self.ui_component.rename_cluster_dropdown.value = new_id
         self.ui_component.cluster_id_dropdown.value = new_id
-        print(f"Added meta-cluster {new_id} ({new_name}).")
+        _logger.info("Added meta-cluster %s (%s).", new_id, new_name)
 
     def remove_meta_cluster(self, *args):
         selected_id = self.ui_component.rename_cluster_dropdown.value
         if selected_id is None:
-            print("Please select a meta-cluster to remove.")
+            _logger.warning("Please select a meta-cluster to remove.")
             return
         if selected_id == UNASSIGNED_META_CLUSTER_ID:
-            print("The unassigned meta-cluster cannot be removed.")
+            _logger.warning("The unassigned meta-cluster cannot be removed.")
             return
 
         if hasattr(self, 'heatmap_data') and self.heatmap_data is not None:
@@ -1226,9 +1398,9 @@ class InteractionLayer:
             self.update_text_labels()
 
         self._engage_cutoff_lock("Cutoff locked after meta-cluster removal")
-        print(
-            f"Removed meta-cluster {selected_id}. Existing assignments were moved to "
-            f"{UNASSIGNED_META_CLUSTER_NAME} ({UNASSIGNED_META_CLUSTER_ID})."
+        _logger.info(
+            "Removed meta-cluster %s. Existing assignments were moved to %s (%s).",
+            selected_id, UNASSIGNED_META_CLUSTER_NAME, UNASSIGNED_META_CLUSTER_ID,
         )
 
 
@@ -1319,17 +1491,23 @@ class DisplayLayer:
             titles=('Setup', 'Assign', 'Rename', 'Trace', 'Linked plugins', 'Save')
         )
 
-        self.controls_section = VBox([self.controls_tab], layout=Layout(width='100%', gap='8px'))
-        self.plot_section = VBox([self.plot_output], layout=Layout(width='100%', flex='1 1 auto'))
+        self.controls_section = VBox(
+            [self.controls_tab],
+            layout=Layout(width='100%', max_width='99%', min_width='0', box_sizing='border-box', gap='8px'),
+        )
+        self.plot_section = VBox(
+            [self.plot_output],
+            layout=Layout(width='100%', max_width='99%', min_width='0', box_sizing='border-box', flex='1 1 auto'),
+        )
 
         self.ui = VBox(
             [self.controls_section, self.plot_section],
-            layout=Layout(width='100%', max_height='800px', gap='12px')
+            layout=Layout(width='100%', max_width='99%', min_width='0', box_sizing='border-box', max_height='800px', gap='12px')
         )
 
         self._wide_notice = HTML(
             value="<b>Horizontal layout enabled.</b> Controls and plots live in the footer tabs.",
-            layout=Layout(width='100%', padding='8px')
+            layout=Layout(width='100%', max_width='99%', min_width='0', box_sizing='border-box', padding='8px')
         )
         self._section_location = 'vertical'
         self._ensure_plot_canvas_attached()
@@ -1369,49 +1547,35 @@ class DisplayLayer:
         return None
 
     def request_cached_wide_panel_refresh(self):
-        viewer = getattr(self, 'main_viewer', None)
-        debug_enabled = getattr(viewer, '_debug', False)
         if not getattr(self, 'initialized', False):
-            if debug_enabled:
-                print('[heatmap] skip cached refresh: plugin not initialised')
+            _logger.debug('[heatmap] skip cached refresh: plugin not initialised')
             return
         if not self.adapter.is_wide():
-            if debug_enabled:
-                print('[heatmap] skip cached refresh: not in wide layout')
+            _logger.debug('[heatmap] skip cached refresh: not in wide layout')
             return
         if getattr(self, '_plot_refresh_inflight', False):
-            if debug_enabled:
-                print('[heatmap] skip cached refresh: refresh already running')
+            _logger.debug('[heatmap] skip cached refresh: refresh already running')
             return
-        if debug_enabled:
-            print('[heatmap] refreshing cached wide pane')
+        _logger.debug('[heatmap] refreshing cached wide pane')
         self._plot_refresh_inflight = True
         try:
             self._ensure_plot_canvas_attached()
             self.plot_heatmap()
-            if debug_enabled:
-                print('[heatmap] wide pane refresh complete')
+            _logger.debug('[heatmap] wide pane refresh complete')
         finally:
             self._plot_refresh_inflight = False
 
     def plot_heatmap(self, *args):
-        viewer = getattr(self, 'main_viewer', None)
-        debug_enabled = getattr(viewer, '_debug', False)
         self._cache_cluster_assignments()
         self._reset_selection_cache()
+        _logger.debug("[heatmap] plot_heatmap: starting data preparation")
         self.prepare_heatmap_data()
+        _logger.debug("[heatmap] plot_heatmap: generating dendrogram")
         self.dendrogram = self.generate_dendrogram()
-        self.restore_vertical_canvas()
-
-        with self.plot_output:
-            self.plot_output.clear_output(wait=True)
-            self.generate_heatmap()
-
-        if self.adapter.is_wide() and not self._plot_output_has_widget_view():
-            self.restore_footer_canvas()
-        if debug_enabled:
-            mode = 'wide' if self.adapter.is_wide() else 'vertical'
-            print(f'[heatmap] plot refreshed in {mode} mode')
+        _logger.debug("[heatmap] plot_heatmap: dendrogram=%s", "ok" if self.dendrogram is not None else "None")
+        self._refresh_plot()
+        mode = 'wide' if self.adapter.is_wide() else 'vertical'
+        _logger.debug('[heatmap] plot refreshed in %s mode', mode)
 
     def load_heatmap(self, heatmap_df, cutoff, *args):
         self._reset_selection_cache()
@@ -1425,15 +1589,12 @@ class DisplayLayer:
         heatmap_df.set_index(heatmap_df.columns[0], inplace=True)
         self.heatmap_data = heatmap_df
         self._update_orientation_state()
-        self.restore_vertical_canvas()
 
-        with self.plot_output:
-            self.plot_output.clear_output(wait=True)
-            self.generate_heatmap()
+        self._refresh_plot()
 
         self.data.dendrogram_cut = cutoff
 
-        print(f"New dendrogram cutoff: {cutoff}")
+        _logger.info("New dendrogram cutoff: %s", cutoff)
         if getattr(self, 'current_vline', None):
             self.current_vline.remove()
         self.current_vline = self.data.g.ax_row_dendrogram.axvline(
@@ -1447,21 +1608,130 @@ class DisplayLayer:
         self.update_text_labels()
 
     def _ensure_plot_canvas_attached(self):
+        """Make the current ``plot_output`` the sole child of ``plot_section``.
+
+        Reassigning ``.children`` is what forces the frontend to (re)instantiate the
+        Output view — the same mechanism the Chart plugin's histogram relies on.
+        """
         if getattr(self, '_restoring_plot_section', False):
             return
         plot_section = getattr(self, 'plot_section', None)
         plot_output = getattr(self, 'plot_output', None)
         if plot_section is None or plot_output is None:
             return
-        children = tuple(plot_section.children)
-        if any(child is plot_output for child in children):
+        self._restoring_plot_section = True
+        try:
+            plot_section.children = (plot_output,)
+        finally:
+            self._restoring_plot_section = False
+
+    def _refresh_plot(self, restore_size=None):
+        """Render the heatmap into a fresh Output and swap it into ``plot_section``.
+
+        Mirrors the Chart plugin's reliable interactive histogram idiom
+        (``chart.py:_render_histogram``): the figure is **built outside** any Output
+        display context (here, with ``plt.ioff()`` so the ipympl backend does not
+        auto-emit the clustermap canvas), then the interactive canvas is **emitted exactly
+        once** via ``display(fig.canvas)`` inside a brand-new ``Output``, which is then
+        swapped into ``plot_section.children`` to force the frontend to repaint.
+
+        Building the clustermap *inside* the Output (the previous behavior) made ipympl
+        emit the canvas on creation and again on ``plt.show()`` — a duplicate/blank canvas.
+        That was the heatmap-specific interaction with ipympl behind issue #108.
+
+        ``restore_size`` (a ``(width, height)`` in inches from ``_capture_heatmap_scale``)
+        is applied as the clustermap ``figsize`` so a tree-cut update keeps the size the
+        user set with the ipympl resize triangle (issue #109). It is ``None`` for a fresh
+        Plot / load, which use the adapter's default figure size.
+        """
+        self.restore_vertical_canvas()
+        new_out = Output(layout=Layout(width='100%'))
+
+        # Build the figure OUTSIDE the Output context with interactive auto-display off.
+        was_interactive = plt.isinteractive()
+        plt.ioff()
+        try:
+            self.generate_heatmap(figsize_override=restore_size)
+        finally:
+            if was_interactive:
+                plt.ion()
+
+        g = getattr(self.data, 'g', None)
+        fig = getattr(g, 'fig', None) if g is not None else None
+
+        self.plot_output = new_out
+        if fig is not None:
+            canvas = getattr(fig, 'canvas', None)
+            with new_out:
+                display_target = canvas if canvas is not None else fig
+                display(display_target)
+        self._swap_plot_output_in_section(new_out)
+        self._present_footer_canvas_if_wide(fig)
+
+    def _capture_heatmap_scale(self):
+        """Return the current figure size ``(width, height)`` in inches, or ``None``.
+
+        Used to remember the "scale" the user set by dragging the ipympl resize handle (the
+        triangle at the bottom-right corner) before a tree-cut rebuild (issue #109).
+        ``Canvas.handle_resize`` writes the manual resize back via ``fig.set_size_inches``,
+        so ``fig.get_size_inches()`` reflects it.
+        """
+        g = getattr(self.data, 'g', None)
+        fig = getattr(g, 'fig', None) if g is not None else None
+        if fig is None:
+            return None
+        try:
+            w, h = fig.get_size_inches()
+            return (float(w), float(h))
+        except Exception:
+            return None
+
+    def _present_footer_canvas_if_wide(self, fig):
+        """Force the (reparented) ipympl canvas to repaint once the footer is visible.
+
+        In wide mode ``plot_section`` lives inside the footer tab, which is unhidden in the
+        same synchronous handler as this render — so the canvas is drawn before the
+        frontend has laid the footer out and stays blank until a later resize. A synchronous
+        ``draw()`` is the immediate backstop (same pattern as the main image canvas in
+        ``main_viewer``); a single-shot timer then issues ``draw_idle()`` after the frontend
+        has processed the layout (same deferred-timer primitive as ``image_display``).
+        """
+        if fig is None or not self.adapter.is_wide():
+            return
+        canvas = getattr(fig, 'canvas', None)
+        if canvas is None:
+            return
+        if hasattr(canvas, 'draw'):
+            try:
+                canvas.draw()
+            except Exception:
+                pass
+        new_timer = getattr(canvas, 'new_timer', None)
+        if not callable(new_timer):
+            return
+        try:
+            timer = new_timer(interval=150)
+            timer.single_shot = True
+            timer.add_callback(self._deferred_footer_draw, canvas)
+            timer.start()
+        except Exception:
+            pass
+
+    def _deferred_footer_draw(self, canvas):
+        draw_idle = getattr(canvas, 'draw_idle', None)
+        if callable(draw_idle):
+            try:
+                draw_idle()
+            except Exception:
+                pass
+
+    def _swap_plot_output_in_section(self, new_out):
+        plot_section = getattr(self, 'plot_section', None)
+        if plot_section is None:
             return
         self._restoring_plot_section = True
         try:
-            if children:
-                plot_section.children = children + (plot_output,)
-            else:
-                plot_section.children = (plot_output,)
+            plot_section.children = (new_out,)
         finally:
             self._restoring_plot_section = False
 
@@ -1475,34 +1745,6 @@ class DisplayLayer:
             return
         self._ensure_plot_canvas_attached()
 
-        redraw_method = getattr(self, "redraw_cached_footer_canvas", None)
-        if callable(redraw_method):
-            try:
-                if redraw_method():
-                    return
-            except Exception:
-                pass
-
-        g = getattr(self.data, 'g', None)
-        fig = getattr(g, 'fig', None) if g is not None else None
-        canvas = getattr(fig, 'canvas', None) if fig is not None else None
-        if canvas is not None and hasattr(canvas, 'draw_idle'):
-            try:
-                canvas.draw_idle()
-            except Exception:
-                pass
-
-    def _plot_output_has_widget_view(self):
-        plot_output = getattr(self, 'plot_output', None)
-        outputs = getattr(plot_output, 'outputs', ()) if plot_output is not None else ()
-        for output in outputs or ():
-            if not isinstance(output, dict):
-                continue
-            data = output.get('data')
-            if isinstance(data, dict) and 'application/vnd.jupyter.widget-view+json' in data:
-                return True
-        return False
-
     def _heatmap_colormap_settings(self):
         zscore_toggle = bool(
             getattr(self.ui_component, 'zscore_across_markers_checkbox', None)
@@ -1512,54 +1754,24 @@ class DisplayLayer:
             return {"cmap": "bwr", "center": 0}
         return {"cmap": "Reds", "center": None}
 
-    def redraw_cached_footer_canvas(self):
-        artifacts = getattr(self, '_cached_footer_artifacts', None)
-        if not artifacts:
-            return False
-
-        fig = artifacts.get('fig') if isinstance(artifacts, dict) else None
-        canvas = artifacts.get('canvas') if isinstance(artifacts, dict) else None
-
-        if canvas is not None and hasattr(canvas, 'draw_idle'):
-            try:
-                canvas.draw_idle()
-            except Exception:
-                pass
-
-        if self._plot_output_has_widget_view():
-            return True
-
-        with self.plot_output:
-            self.plot_output.clear_output(wait=True)
-            display_func = display
-            shim_module = sys.modules.get('viewer.plugin.heatmap_layers')
-            if shim_module is not None:
-                display_func = getattr(shim_module, 'display', display)
-
-            # Prefer replaying the ipympl canvas widget to preserve interactivity.
-            if canvas is not None and hasattr(canvas, 'model_id'):
-                display_func(canvas)
-            elif fig is not None:
-                display_func(fig)
-
-        return True
-
     @update_status_bar
-    def generate_heatmap(self):
+    def generate_heatmap(self, figsize_override=None):
+        _logger.debug("[heatmap] generate_heatmap: entry")
         markers = list(self.ui_component.channel_selector.value)
         if not markers:
-            print("No markers selected for display.")
+            _logger.debug("[heatmap] generate_heatmap: early return — no markers selected")
             return
 
         self._update_orientation_state()
         heatmap_view = self.orientation_state.get("view")
         if heatmap_view is None or heatmap_view.empty:
-            print("Heatmap view is empty.")
+            _logger.debug("[heatmap] generate_heatmap: early return — heatmap view is None or empty")
             return
 
         cutoff = self.data.dendrogram_cut
+        _logger.debug("[heatmap] generate_heatmap: dendrogram=%s, cutoff=%s", self.dendrogram is not None, cutoff)
         if self.dendrogram is None:
-            print("Dendrogram not available for plotting.")
+            _logger.debug("[heatmap] generate_heatmap: early return — dendrogram not available")
             return
         meta_cluster_labels = cut_tree(self.dendrogram, height=cutoff).flatten()
 
@@ -1568,7 +1780,7 @@ class DisplayLayer:
 
         base_index = self.orientation_state.get("cluster_index")
         if base_index is None:
-            print("Cluster index not available.")
+            _logger.debug("[heatmap] generate_heatmap: early return — cluster_index is None")
             return
         self.heatmap_data = self.heatmap_data.reindex(base_index)
         self.heatmap_data['meta_cluster'] = meta_cluster_labels
@@ -1591,10 +1803,10 @@ class DisplayLayer:
         requested_markers = [m for m in markers if m in marker_axis_labels]
         missing_markers = [m for m in markers if m not in marker_axis_labels]
         if missing_markers:
-            print(f"Warning: markers not found in heatmap data and will be skipped: {missing_markers}")
+            _logger.debug("[heatmap] generate_heatmap: markers not in data (skipped): %s", missing_markers)
 
         if not requested_markers:
-            print("No requested markers are available in the heatmap data.")
+            _logger.debug("[heatmap] generate_heatmap: early return — no requested markers available in heatmap data")
             return
 
         plot_data = self.adapter.slice_for_markers(heatmap_view, requested_markers)
@@ -1615,15 +1827,43 @@ class DisplayLayer:
             **self._heatmap_colormap_settings(),
         )
 
-        g = sns.clustermap(**clustermap_kwargs)
+        # Preserve a user-set figure size (ipympl resize triangle) across a tree-cut
+        # rebuild by building the clustermap at that size, so tight_layout is correct too
+        # (issue #109). Only the cutoff path passes this; a fresh Plot uses the default.
+        if figsize_override is not None:
+            clustermap_kwargs['figsize'] = tuple(figsize_override)
+
+        # Close the previous figure before building a new one so repeated Plot clicks and
+        # cutoff drags don't leak figures (each sns.clustermap opens a new one).
+        previous_g = getattr(self.data, 'g', None)
+        previous_fig = getattr(previous_g, 'fig', None) if previous_g is not None else None
+        if previous_fig is not None:
+            try:
+                plt.close(previous_fig)
+            except Exception:
+                pass
+
+        _logger.debug("[heatmap] generate_heatmap: calling sns.clustermap (shape=%s)", plot_data.shape)
+        try:
+            g = sns.clustermap(**clustermap_kwargs)
+        except Exception:
+            _logger.debug("[heatmap] generate_heatmap: sns.clustermap FAILED", exc_info=True)
+            return
 
         self.data.g = g
+        _logger.debug("[heatmap] generate_heatmap: clustermap ok, setting up layout")
 
         if hasattr(g, 'cax') and g.cax is not None:
             g.cax.set_visible(False)
             g.cax.remove()
 
-        self._setup_layout(g, cluster, subset_on)
+        try:
+            self._setup_layout(g, cluster, subset_on)
+        except Exception:
+            _logger.debug("[heatmap] generate_heatmap: _setup_layout FAILED", exc_info=True)
+            return
+
+        _logger.debug("[heatmap] generate_heatmap: render complete")
 
     def _setup_layout(self, g, cluster, subset_on):
         cluster_index = self.orientation_state.get("cluster_index")
@@ -1691,29 +1931,13 @@ class DisplayLayer:
         )
 
         plt.tight_layout()
-        plt.show()
-
-        self._cached_footer_artifacts = {
-            'fig': g.fig,
-            'canvas': getattr(g.fig, 'canvas', None),
-            'axes': {
-                'heatmap': getattr(g, 'ax_heatmap', None),
-                'row_colors': getattr(g, 'ax_row_colors', None),
-                'row_dendrogram': getattr(g, 'ax_row_dendrogram', None),
-                'col_dendrogram': getattr(g, 'ax_col_dendrogram', None),
-            },
-        }
-
-        if self.adapter.is_wide() and not self._plot_output_has_widget_view():
-            canvas = self._cached_footer_artifacts.get('canvas')
-            display_func = display
-            shim_module = sys.modules.get('viewer.plugin.heatmap_layers')
-            if shim_module is not None:
-                display_func = getattr(shim_module, 'display', display)
-            if canvas is not None and hasattr(canvas, 'model_id'):
-                display_func(canvas)
-            else:
-                display_func(g.fig)
+        # NOTE: do NOT emit the figure here. Building/laying out the clustermap happens
+        # while ``_refresh_plot`` has ``plt.ioff()`` active and runs outside any Output
+        # display context, so ipympl does not auto-emit the canvas. ``_refresh_plot`` then
+        # emits the interactive canvas exactly once via ``display(fig.canvas)``. Emitting
+        # here (the old ``plt.show()``) produced a duplicate/blank ipympl canvas — the
+        # heatmap-specific difference from the Chart histogram (which builds outside its
+        # Output and emits once). See issue #108.
 
         self.display_row_colors_as_patches()
 
@@ -1850,8 +2074,8 @@ class DisplayLayer:
         self.data.g.fig.canvas.draw_idle()
 
     def apply_new_cutoff(self, *args):
-        with self.plot_output:
-            self.plot_output.clear_output(wait=True)
-            self.generate_heatmap()
-        if self.adapter.is_wide() and not self._plot_output_has_widget_view():
-            self.restore_footer_canvas()
+        # Remember the user-set figure size (ipympl resize triangle) across the tree-cut
+        # rebuild (issue #109). Capture from the OLD figure before _refresh_plot rebuilds it
+        # (generate_heatmap reassigns self.data.g and closes the old figure).
+        saved_size = self._capture_heatmap_scale()
+        self._refresh_plot(restore_size=saved_size)

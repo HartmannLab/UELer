@@ -3,6 +3,7 @@
 This index maps all existing dev notes to the new topic-oriented summaries. The topic files are concise syntheses; the original notes remain the source of truth for detailed context. Issue-tracking notes were consolidated into the topic summaries and removed from the repository.
 
 ## Topic summaries
+- [dev_note/topic_plugin_development.md](dev_note/topic_plugin_development.md)
 - [dev_note/topic_packaging_and_project.md](dev_note/topic_packaging_and_project.md)
 - [dev_note/topic_viewer_runtime_ui.md](dev_note/topic_viewer_runtime_ui.md)
 - [dev_note/topic_map_mode_spatial.md](dev_note/topic_map_mode_spatial.md)
