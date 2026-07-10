@@ -1,57 +1,75 @@
 # Map Mode
 
-Map mode stitches multiple FOVs into a single spatial overview, allowing you to navigate the full tissue section as one continuous canvas.
+Map mode stitches multiple FOVs into a single spatial overview, letting you navigate a full tissue
+section as one continuous canvas. It works on images alone (no cell table required).
+
+!!! note "Opt-in feature"
+    Map mode is off by default. It only appears when **both** conditions are met:
+
+    1. The `ENABLE_MAP_MODE` environment variable is set to a truthy value (`1`, `true`, `yes`,
+       `on`) before launching the viewer, and
+    2. At least one map descriptor is found under `<base_folder>/.UELer/maps/` (UELer scans that
+       folder for `*.json` descriptors).
+
+    When either is missing, the map controls stay hidden.
 
 ---
 
 ## What Is Map Mode?
 
-In standard view, UELer loads one FOV at a time. In **map mode**, all FOVs are stitched together using a spatial layout descriptor. This lets you:
+In standard view, UELer loads one FOV at a time. In map mode, FOVs are stitched together using a
+spatial layout descriptor. This lets you:
 
 - See the spatial relationship between FOVs at a glance.
-- Pan and zoom across the entire tissue without switching FOVs manually.
-- Capture and export ROIs that span multiple FOVs.
+- Pan and zoom across the whole tissue without switching FOVs manually.
+- Capture and export ROIs that span the stitched map.
 
 ---
 
 ## Enabling Map Mode
 
-Map mode requires a **map descriptor** file that defines the physical positions and sizes of each FOV. To activate it:
+1. Launch the viewer with `ENABLE_MAP_MODE=1` set in the environment, with map descriptor JSON files
+   present under `<base_folder>/.UELer/maps/`.
+2. In the left panel, tick the **Map mode** checkbox.
+3. Choose a map from the **Select map:** dropdown (options are labelled with the map id and its tile
+   count).
 
-1. In the notebook, pass the path to your map descriptor when creating the viewer.
-2. Click the **Map mode** toggle in the viewer controls.
-
-Once activated, the image canvas switches to the stitched composite view and the FOV selector is disabled (navigation happens by panning).
+Once active, the canvas switches to the stitched composite and the **Select Image:** FOV selector is
+disabled — you navigate by panning. The channel grid view is also disabled while map mode is on.
 
 ---
 
 ## Navigating in Map Mode
 
-- **Pan** — Click and drag the canvas to move around the stitched map.
-- **Zoom** — Scroll to zoom in or out.
-- **Tile rendering** — Only the tiles visible in the current viewport are loaded; the viewer caps the number of tiles rendered per frame to maintain responsiveness.
-
-!!! note "Large datasets"
-    For maps with many FOVs (> 80 tiles in view), only the nearest tiles to the viewport center are rendered. Adjust the `map_render_tile_limit` setting in the viewer if needed.
+- **Pan** — click and drag the canvas.
+- **Zoom** — scroll to zoom in and out.
+- **Tile rendering** — only tiles near the viewport are drawn. Already-cached tiles always render;
+  when too many *uncached* tiles would be needed at once, the viewer keeps the ones nearest the
+  viewport center to stay responsive (the budget scales with the downsample factor).
 
 ---
 
 ## Capturing ROIs in Map Mode
 
-You can capture ROIs in map mode just like in standard mode. The ROI Manager stores the stitched-map coordinates alongside a `[MAP:<id>]` label so you can distinguish map-mode ROIs from single-FOV ROIs.
-
-ROI thumbnails in map mode are rendered from the stitched tile layer.
+Capture ROIs exactly as in standard mode (see [Regions of Interest](roi-manager.md)). Map-mode ROIs
+are stored with an empty `fov` and a populated `map_id`, and display a `[MAP:<id>]` location label so
+you can tell them apart from single-FOV ROIs. The FOV-scope filters in the ROI manager are disabled
+while map mode is active.
 
 ---
 
 ## Exporting ROIs in Map Mode
 
-Batch export fully supports map-mode ROIs. When a ROI has `fov=""` and a non-empty `map_id`, the batch exporter renders the stitched region using the `VirtualMapLayer` and saves it with the filename prefix `map_<id>_roi_<roi_id>.<format>`.
+[Batch Export](export.md) fully supports map-mode ROIs. A map ROI (empty `fov`, non-empty `map_id`)
+is rendered from the stitched map layer and saved with the filename pattern:
 
-See the [Batch Export](export.md) tutorial for more details.
+```
+map_<map_id>_roi_<name-or-id>.<format>
+```
 
 ---
 
 ## Deactivating Map Mode
 
-Click the **Map mode** toggle again to return to single-FOV mode. The FOV selector and all per-FOV plugin behaviors are restored automatically.
+Untick the **Map mode** checkbox to return to single-FOV mode. The FOV selector and per-FOV behaviors
+are restored automatically.

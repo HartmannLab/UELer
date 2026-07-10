@@ -62,10 +62,16 @@ nav:
   - Get Started: getting-started.md
   - Tutorials:
       - Overview: tutorials/index.md
-      - Basic Usage: tutorials/basic-usage.md
-      - User Interface: tutorials/user-interface.md
-      - Map Mode: tutorials/map-mode.md
-      - Batch Export: tutorials/export.md
+      - Essentials:
+          - Basic Usage: tutorials/basic-usage.md
+          - User Interface: tutorials/user-interface.md
+          - Regions of Interest: tutorials/roi-manager.md
+          - Map Mode: tutorials/map-mode.md
+          - Batch Export: tutorials/export.md
+      - Single-Cell Analysis:
+          - Working with a Cell Table: tutorials/cell-table.md
+          - Scatter & Histogram: tutorials/scatter-histogram.md
+          - Clustering & Annotation: tutorials/clustering-annotation.md
   - FAQ: faq.md
   - Developer Notes:
       - Overview: develop-notes/index.md

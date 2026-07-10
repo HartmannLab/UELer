@@ -1,6 +1,7 @@
 # User Interface
 
-The UELer UI is divided into four main regions.
+This page is a reference map of the UELer interface — the four main regions and the controls in each.
+For a hands-on first run, see [Basic Usage](basic-usage.md).
 
 ![GUI preview](../GUI_preview.png)
 
@@ -10,77 +11,94 @@ The UELer UI is divided into four main regions.
 
 | Region | Location | Contents |
 |---|---|---|
-| **Left panel** | Left column | Channel, Annotation, and Mask accordion controls |
-| **Main viewer** | Center | Image display, overlay controls, FOV navigation |
-| **Right panel** | Right column | Plugin tools (Mask Painter, ROI Manager, statistics) |
-| **Footer** (optional) | Bottom | Wide plugin tabs, e.g., horizontal heatmap or gallery |
+| **Left panel** | Left column | FOV selector, channel / mask / annotation controls, marker sets, advanced settings |
+| **Main viewer** | Center | Image canvas, lasso toggle, zoom/pan, scale bar |
+| **Right panel** | Right column | Plugin tools (accordion) |
+| **Footer** (optional) | Bottom | Wide plugin tabs (e.g. heatmap, multi-scatter) |
 
-Wide plugins toggle the footer automatically when activated.
+Some plugins move themselves into the footer automatically when they need the extra width.
 
 ---
 
 ## Left Panel
 
-### Channel Controls
+### Top controls
 
-- **Cache Size** — Number of FOVs kept in memory simultaneously.
-- **Select Image** — Choose the active FOV.
-- **Channel Selection** — Multi-select list of available channels. Hold **Shift** to select a range.
-- **Marker Set** — Load a pre-defined combination of channels, colors, and contrast ranges.
-- **Channel grid view** — Renders each visible channel as a separate labelled subplot for side-by-side comparison.
+- **Select Image:** — choose the active FOV.
+- **Cache Size:** — number of FOVs kept in memory at once (default 100).
 
-### Annotation Controls
+### Channels
 
-Visible when `annotations_folder` contains valid rasters (`<fov>_<annotation>.tif`).
+- **Channels:** — a tag input for the visible channels (add/remove one chip at a time; no
+  Shift/Ctrl range select).
+- Per-channel **color** dropdown, visibility checkbox, and **Min** / **Max** contrast sliders.
+- **Show channel legend** — display a color key for the visible channels.
+- **Channel grid view** — render each visible channel as its own labelled pane in a synchronized grid.
+- **Mask &lt;name&gt;** dropdowns + enable checkboxes, and **Mask outline px:** — control segmentation
+  mask overlays. (For per-class fill/outline, opacity, and saved palettes, use the **Mask painter**
+  plugin below.)
 
-- **Overlay toggle** — Enable/disable the annotation overlay.
-- **Display mode** — Choose between mask outlines, annotation fills, or a combined view.
-- **Opacity** — Adjust fill transparency.
-- **Edit palette** — Customize per-class colors and display labels.
+### Marker Sets
 
-### Mask Controls
+Save and restore named channel/color/contrast combinations: **Marker Set:** dropdown, **Set Name:**
+input, and **Load / Save / Update / Delete Marker Set** buttons (deletion is gated by a **Confirm
+Deletion** checkbox).
 
-Visible when `masks_folder` is configured.
+### Pixel Annotations
 
-- **Mask overlay** — Enable/disable segmentation mask display.
-- **Color set** — Load or save `.maskcolors.json` preset files.
-- **Edit palette** — Edit per-class colors for the segmentation mask.
+Visible when `annotations_folder` contains valid rasters:
+
+- **Show annotation** — toggle the annotation overlay.
+- **Annotation:** — choose which annotation to display.
+- **Fill alpha:** — overlay transparency.
+- **Legend labels:** — show class IDs or text labels.
+- **Edit palette…** — customize per-class colors (with save/load of `.pixelannotations.json` sets).
+
+### Advanced Settings
+
+Data-mapping keys (**X key:**, **Y key:**, **Label key:**, **Mask key:**, **Fov key:**), the
+**Pixel Size (nm):** input that drives the [scale bar](#main-viewer), and a **Downsample** toggle.
 
 ---
 
 ## Main Viewer
 
-- **Image canvas** — Displays the composited multi-channel image with any active overlays.
-- **Navigation arrows** — Move to the previous or next FOV.
-- **Zoom and pan** — Use scroll and drag gestures to navigate the image.
-- **Overlay controls** — Toggle masks and annotation overlays without leaving the viewer.
-- **Scale bar** — Automatically computed from pixel size metadata when available.
+- **Image canvas** — the composited multi-channel image with any active overlays.
+- **Lasso Select** (top of the viewer) — a one-shot toggle: draw a freehand lasso to select the cells
+  whose mask centroids fall inside it. The toggle resets itself after each lasso. (Selection drives
+  the linked plots and gallery — see [Working with a Cell Table](cell-table.md).)
+- **Zoom and pan** — scroll to zoom, drag to pan.
+- **Scale bar** — computed from the **Pixel Size (nm):** value when available (there is no separate
+  on/off toggle; set the pixel size to 0 to omit it).
+- **No image (masks only)** — hide the channel image to inspect overlays on a blank background.
 
 ---
 
 ## Right Panel (Plugins)
 
-### Mask Painter
+Plugins appear as an accordion. **Which plugins load depends on whether a cell table is present:**
 
-Focuses on specific mask classes, lets you reassign colors, and jump between cell identifiers without leaving the plugin.
+- **Without a cell table**, only these two load — both work on images alone:
+    - **ROI manager** — capture, tag, and browse regions of interest. See [Regions of Interest](roi-manager.md).
+    - **Batch export** — export FOVs, ROIs, and single-cell crops. See [Batch Export](export.md).
+- **With a cell table loaded**, the analytical plugins also appear:
+    - **Scatter plot** and **Histogram** — linked distribution plots. See [Scatter & Histogram](scatter-histogram.md).
+    - **Gallery** — thumbnails of the currently selected cells.
+    - **Heatmap**, **FlowSOM**, **Cell Annotation** — clustering and annotation. See [Clustering & Annotation](clustering-annotation.md).
+    - **Mask painter** — per-class mask colors, fill/outline modes, opacity, and saved palettes.
+    - **Go to** — jump and zoom to a specific cell.
+    - **Cell Table Editor** — write a value onto the selected cells.
+    - **Cell tooltip label** — choose which cell-table columns appear in the hover tooltip.
 
-### ROI Manager
-
-- **Capture** — Save the current viewport as a named ROI.
-- **Center** — Jump back to a previously captured ROI.
-- **Tag** — Assign custom tags to ROIs using a combo-box that retains entries across sessions.
-- **Export** — ROIs are stored in `<base_folder>/.UELer/roi_manager.csv`.
-
-### Statistics / Chart Plugin
-
-When a cell table is loaded, the chart plugin links the scatter plot selection to the image and cell gallery. Cells selected in the chart are highlighted in the viewer and shown in the gallery.
+!!! note "Panel order"
+    The right-panel accordion order is not curated — locate a plugin by its name rather than its
+    position.
 
 ---
 
 ## Footer (Wide Plugins)
 
-Some plugins support a **wide layout** that expands into a horizontal footer panel. This keeps the main viewer visible alongside the extended plugin. Enable it via the **Horizontal layout** toggle in the plugin.
+Some plugins expand into a horizontal footer panel so the main viewer stays visible alongside them:
 
-Examples:
-- **Heatmap** — Cell-by-marker heatmap with FlowSOM clustering.
-- **Cell Gallery** — Cropped single-cell thumbnails.
+- **Heatmap** — enable **Horizontal layout** in the plugin to move it to the footer.
+- **Scatter plot** — moves to the footer automatically when more than one scatter is active.
