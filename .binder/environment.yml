@@ -1,0 +1,16 @@
+# Binder build environment for UELer.
+#
+# Kept intentionally minimal: this only provisions Python + a couple of binary
+# system libraries. All UELer runtime dependencies are installed from
+# pyproject.toml by `.binder/postBuild` (`pip install .`), so pyproject stays the
+# single source of truth and the Binder env never drifts from the package.
+#
+# NOTE: verify this builds on mybinder.org before retiring the `binder-app`
+# branch, then point the Binder badge at `main` + `script/run_ueler_binder.ipynb`.
+name: ueler-binder
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - hdf5
