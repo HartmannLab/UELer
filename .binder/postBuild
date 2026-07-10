@@ -1,0 +1,12 @@
+#!/bin/bash
+# repo2docker runs this from the repository root after building the conda env.
+# Install UELer together with every runtime dependency declared in
+# pyproject.toml ([project.dependencies]). This is what makes `import ueler`
+# and `run_viewer_bia(...)` work on Binder — the conda environment.yml alone
+# does not install the package's dependencies.
+#
+# The optional `[ark]` extra (ark-analysis) is intentionally omitted: it is not
+# imported by the viewer, and pulling it makes the Binder build far heavier.
+set -euo pipefail
+
+pip install .
