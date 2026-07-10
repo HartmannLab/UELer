@@ -27,7 +27,7 @@ dependencies = [
     "bqplot",
     "seaborn",
     "seaborn-image",
-    "opencv-python",
+    "opencv-python-headless",
     "watchfiles",
     "jupyter-scatter",
     "ipywidgets>=8.1",
