@@ -60,7 +60,7 @@ with no argument → adapter-default size.
 ## Tests
 
 ```bash
-/omics/groups/OE0622/internal/shared_envs/ark-analysis-dask_yw/bin/python \
+python \
   -m unittest tests.test_issue109_heatmap_zoom tests.test_issue108_heatmap_refresh
 ```
 

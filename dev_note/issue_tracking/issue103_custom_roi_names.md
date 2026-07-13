@@ -53,7 +53,7 @@ Added a user-editable `name` field to the ROI data model. When set, the name:
 ## Tests
 
 ```bash
-/omics/groups/OE0622/internal/shared_envs/ark-analysis-dask_yw/bin/python -m unittest tests.test_export_fovs_batch tests.test_roi_manager_tags
+python -m unittest tests.test_export_fovs_batch tests.test_roi_manager_tags
 ```
 
 - ✅ All 6 new tests pass
@@ -94,7 +94,7 @@ Added a "Merge same color" checkbox (disabled unless `separate_channels` is chec
 
 ### Tests
 ```bash
-/omics/groups/OE0622/internal/shared_envs/ark-analysis-dask_yw/bin/python -m unittest tests.test_export_fovs_batch tests.test_roi_manager_tags
+python -m unittest tests.test_export_fovs_batch tests.test_roi_manager_tags
 ```
 - ✅ All 3 new tests pass
 - ✅ All other existing tests pass (2 pre-existing unrelated failures excluded)

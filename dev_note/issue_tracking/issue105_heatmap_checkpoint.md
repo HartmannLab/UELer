@@ -63,7 +63,7 @@ adata.uns["flowsom"]               # {column_name, channels, xdim, ydim, rlen, s
 ## Tests
 
 ```bash
-/omics/groups/OE0622/internal/shared_envs/ark-analysis-dask_yw/bin/python \
+python \
   -m unittest tests.test_checkpoint_store tests.test_cell_annotation -v
 ```
 
@@ -96,7 +96,7 @@ Two interacting problems:
 ### Tests
 
 ```bash
-/omics/groups/OE0622/internal/shared_envs/ark-analysis-dask_yw/bin/python \
+python \
   -m unittest tests.test_checkpoint_store tests.test_cell_annotation -v
 ```
 
@@ -127,7 +127,7 @@ Two interacting problems:
 ### Tests
 
 ```bash
-/omics/groups/OE0622/internal/shared_envs/ark-analysis-dask_yw/bin/python \
+python \
   -m unittest tests.test_checkpoint_store tests.test_cell_annotation -v
 ```
 
@@ -186,7 +186,7 @@ panel. `logging.basicConfig(...)` is no longer required.
 ### Tests
 
 ```bash
-/omics/groups/OE0622/internal/shared_envs/ark-analysis-dask_yw/bin/python \
+python \
   -m unittest tests.test_checkpoint_store tests.test_cell_annotation -v
 ```
 
@@ -233,7 +233,7 @@ that renders records into an `ipywidgets.Output` docked at the bottom of the UI.
 ### Tests
 
 ```bash
-/omics/groups/OE0622/internal/shared_envs/ark-analysis-dask_yw/bin/python \
+python \
   -m unittest tests.test_log_console tests.test_checkpoint_store tests.test_cell_annotation -v
 ```
 

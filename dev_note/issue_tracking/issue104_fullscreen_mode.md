@@ -64,7 +64,7 @@ A `Bool` traitlet (`is_fullscreen`) syncs state between Python and the browser b
 ## Tests
 
 ```bash
-/omics/groups/OE0622/internal/shared_envs/ark-analysis-dask_yw/bin/python -m unittest tests.test_fullscreen_widget -v
+python -m unittest tests.test_fullscreen_widget -v
 ```
 
 - ✅ All 13 tests passed (initial implementation)
