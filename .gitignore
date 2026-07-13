@@ -40,3 +40,5 @@ site/
 
 CLAUDE.md
 .claude/
+graphify-out/
+*.png
