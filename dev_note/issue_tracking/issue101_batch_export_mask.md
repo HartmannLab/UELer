@@ -67,7 +67,7 @@ When `Include Mask` is on but no mask content was captured (painter disabled, no
 ## Tests
 
 ```bash
-/omics/groups/OE0622/internal/shared_envs/ark-analysis-dask_yw/bin/python -m unittest tests.test_export_fovs_batch
+python -m unittest tests.test_export_fovs_batch
 ```
 
 New/updated tests:
@@ -110,7 +110,7 @@ Added an explicit **mask layer dropdown** and **color picker** directly inside t
 ### Tests
 
 ```bash
-/omics/groups/OE0622/internal/shared_envs/ark-analysis-dask_yw/bin/python -m unittest tests.test_export_fovs_batch
+python -m unittest tests.test_export_fovs_batch
 ```
 
 Result: 66 tests — 65 passed, 1 pre-existing unrelated failure (`test_export_fovs_batch_writes_file`).

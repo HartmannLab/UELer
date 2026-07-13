@@ -102,7 +102,7 @@ added.
 ## Tests
 
 ```bash
-/omics/groups/OE0622/internal/shared_envs/ark-analysis-dask_yw/bin/python \
+python \
   -m unittest tests.test_issue108_heatmap_refresh tests.test_chart_footer_behavior \
               tests.test_checkpoint_store tests.test_cell_annotation tests.test_log_console
 ```

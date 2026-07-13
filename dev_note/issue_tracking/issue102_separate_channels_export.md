@@ -49,7 +49,7 @@ Added an "Export channels separately" checkbox to the shared controls of the bat
 ## Tests
 
 ```bash
-/omics/groups/OE0622/internal/shared_envs/ark-analysis-dask_yw/bin/python -m unittest tests.test_export_fovs_batch
+python -m unittest tests.test_export_fovs_batch
 ```
 
 - ✅ All new tests pass (`TestSeparateChannelsBuilders` — 4 tests)
