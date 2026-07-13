@@ -1,6 +1,6 @@
 # Default developer targets for the UELer packaging skeleton
 
-.PHONY: help venv install test-fast test-integration clean
+.PHONY: help venv install test-fast test-integration scan scan-package scan-project clean
 
 VENV ?= .venv
 BIN_DIR := $(if $(filter Windows_NT,$(OS)),Scripts,bin)
@@ -13,6 +13,9 @@ help:
 	@echo "  make install           # install UELer in editable mode"
 	@echo "  make test-fast         # run fast stubbed unit tests"
 	@echo "  make test-integration  # placeholder for integration suite"
+	@echo "  make scan              # scan pkg + project for local/machine info"
+	@echo "  make scan-package      # scan the ueler package only (what ships)"
+	@echo "  make scan-project      # scan the whole repository"
 	@echo "  make clean             # remove the virtual environment"
 
 venv:
@@ -28,6 +31,15 @@ test-fast: venv
 test-integration: venv
 	@echo "Running integration test placeholder..."
 	UELER_TEST_MODE=integration $(PYTHON) -m unittest discover tests
+
+scan:
+	python tools/scan_local_info.py --scope both
+
+scan-package:
+	python tools/scan_local_info.py --scope package
+
+scan-project:
+	python tools/scan_local_info.py --scope project
 
 clean:
 	rm -rf $(VENV)
