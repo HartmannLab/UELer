@@ -25,7 +25,7 @@ and its selection logic remains callable.
 from __future__ import annotations
 
 import logging
-from typing import Optional, Sequence, Set, Union
+from typing import Iterable, Optional, Sequence, Set, Union
 
 import numpy as np
 import pandas as pd
@@ -548,6 +548,26 @@ class HistogramDisplay(PluginBase):
         self.selected_indices.value = set()
         if self.ui_component.mv_linked_checkbox.value:
             _chart_common.sync_mask_highlights_from_selection(self.main_viewer, set())
+        self._refresh_overlays()
+
+    def show_external_selection(self, row_indices: Iterable[Union[int, str]]) -> None:
+        """Overlay an externally-supplied selection as the "Selected" distribution.
+
+        Entry point for *other* plugins (e.g. the heatmap "Histogram" link) to
+        push a set of cell-table row indices into this plugin. The selection is
+        published on ``selected_indices`` (so cell-gallery forwarding still works
+        when linked) and drawn on every plotted histogram via the same overlay
+        machinery that brush selections use. Indices that fall outside the
+        currently plotted data are ignored by ``_refresh_overlays``, so the
+        overlay reflects whatever channels/subset the histogram is showing.
+        """
+        # A programmatic push is never a single-point viewer focus.
+        self.single_point_click_state = 0
+        self.selected_indices.value = _chart_common.normalize_indices(row_indices)
+        if self.ui_component.mv_linked_checkbox.value:
+            _chart_common.sync_mask_highlights_from_selection(
+                self.main_viewer, self.selected_indices.value
+            )
         self._refresh_overlays()
 
     # ------------------------------------------------------------------

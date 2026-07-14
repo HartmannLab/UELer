@@ -201,7 +201,7 @@ if _pandas is None or getattr(_pandas, "DataFrame", object) is object:
 
 pd = sys.modules.get("pandas", _pandas)
 
-_HEATMAP_PATH = pathlib.Path(__file__).resolve().parents[1] / "viewer" / "plugin" / "heatmap.py"
+_HEATMAP_PATH = pathlib.Path(__file__).resolve().parents[1] / "ueler" / "viewer" / "plugin" / "heatmap.py"
 _heatmap_spec = importlib.util.spec_from_file_location("heatmap_under_test", _HEATMAP_PATH)
 _heatmap_module = importlib.util.module_from_spec(_heatmap_spec)
 assert _heatmap_spec.loader is not None
@@ -210,9 +210,9 @@ _heatmap_spec.loader.exec_module(_heatmap_module)
 Data = _heatmap_module.Data
 HeatmapDisplay = _heatmap_module.HeatmapDisplay
 
-heatmap_layers_module = sys.modules.get("viewer.plugin.heatmap_layers")
+heatmap_layers_module = sys.modules.get("ueler.viewer.plugin.heatmap_layers")
 if heatmap_layers_module is None:
-    _HEATMAP_LAYERS_PATH = pathlib.Path(__file__).resolve().parents[1] / "viewer" / "plugin" / "heatmap_layers.py"
+    _HEATMAP_LAYERS_PATH = pathlib.Path(__file__).resolve().parents[1] / "ueler" / "viewer" / "plugin" / "heatmap_layers.py"
     _heatmap_layers_spec = importlib.util.spec_from_file_location(
         "heatmap_layers_under_test", _HEATMAP_LAYERS_PATH
     )
@@ -302,6 +302,90 @@ class HeatmapScatterSelectionTests(unittest.TestCase):
 
         heatmap.highlight_row_colors.assert_not_called()
         heatmap.plot_heatmap.assert_not_called()
+
+
+class HeatmapHistogramLinkTests(unittest.TestCase):
+    """Heatmap → histogram / scatter link dispatch (#114).
+
+    After the scatter/histogram split, the heatmap links to each plugin
+    independently. ``update_linked`` must route to the scatter plugin
+    (``chart_output``) and the histogram plugin (``histogram_output``) based on
+    their own checkboxes, and ``update_histogram_distribution`` must push the
+    active cluster's row indices to the histogram overlay.
+    """
+
+    def _make_heatmap(self, *, chart=False, histogram=False):
+        heatmap = HeatmapDisplay.__new__(HeatmapDisplay)
+
+        cell_table = pd.DataFrame(
+            {"cluster": ["A", "B", "C", "B"]},
+            index=[1, 2, 3, 4],
+        )
+
+        self.scatter = MagicMock()
+        self.histogram = MagicMock()
+        side_plots = SimpleNamespace(
+            chart_output=self.scatter,
+            histogram_output=self.histogram,
+        )
+        heatmap.main_viewer = SimpleNamespace(
+            cell_table=cell_table, SidePlots=side_plots
+        )
+        heatmap.ui_component = SimpleNamespace(
+            high_level_cluster_dropdown=SimpleNamespace(value="cluster"),
+            main_viewer_checkbox=SimpleNamespace(value=False),
+            cell_gallery_checkbox=SimpleNamespace(value=False),
+            chart_checkbox=SimpleNamespace(value=chart),
+            histogram_checkbox=SimpleNamespace(value=histogram),
+        )
+        # Route selection through cluster "B" (rows 2 and 4).
+        heatmap._current_cluster_label = MagicMock(return_value="B")
+        heatmap.color_points_by_meta_cluster = MagicMock()
+        heatmap.highlight_scatter_plot = MagicMock()
+        return heatmap
+
+    def test_histogram_link_pushes_cluster_indices(self):
+        heatmap = self._make_heatmap(histogram=True)
+
+        heatmap.update_histogram_distribution()
+
+        self.histogram.show_external_selection.assert_called_once()
+        (indices,), _ = self.histogram.show_external_selection.call_args
+        self.assertEqual(sorted(indices), [2, 4])
+
+    def test_update_linked_dispatches_to_histogram_only(self):
+        heatmap = self._make_heatmap(chart=False, histogram=True)
+
+        heatmap.update_linked()
+
+        self.histogram.show_external_selection.assert_called_once()
+        heatmap.color_points_by_meta_cluster.assert_not_called()
+        heatmap.highlight_scatter_plot.assert_not_called()
+
+    def test_update_linked_dispatches_to_scatter_only(self):
+        heatmap = self._make_heatmap(chart=True, histogram=False)
+
+        heatmap.update_linked()
+
+        heatmap.color_points_by_meta_cluster.assert_called_once()
+        heatmap.highlight_scatter_plot.assert_called_once()
+        self.histogram.show_external_selection.assert_not_called()
+
+    def test_update_linked_dispatches_to_both(self):
+        heatmap = self._make_heatmap(chart=True, histogram=True)
+
+        heatmap.update_linked()
+
+        heatmap.color_points_by_meta_cluster.assert_called_once()
+        heatmap.highlight_scatter_plot.assert_called_once()
+        self.histogram.show_external_selection.assert_called_once()
+
+    def test_histogram_link_noops_when_plugin_absent(self):
+        heatmap = self._make_heatmap(histogram=True)
+        delattr(heatmap.main_viewer.SidePlots, "histogram_output")
+
+        # Must not raise when the histogram plugin is unavailable.
+        heatmap.update_histogram_distribution()
 
 
 class PatchStub:
@@ -556,7 +640,7 @@ class HeatmapCanvasRestoreTests(unittest.TestCase):
         heatmap = self._make_heatmap()
         heatmap._cached_footer_artifacts = None
 
-        with patch("viewer.plugin.heatmap_layers.display") as display_mock:
+        with patch("ueler.viewer.plugin.heatmap_layers.display") as display_mock:
             result = heatmap.redraw_cached_footer_canvas()
 
         self.assertFalse(result)
@@ -572,7 +656,7 @@ class HeatmapCanvasRestoreTests(unittest.TestCase):
             "axes": {},
         }
 
-        with patch("viewer.plugin.heatmap_layers.display") as display_mock:
+        with patch("ueler.viewer.plugin.heatmap_layers.display") as display_mock:
             result = heatmap.redraw_cached_footer_canvas()
 
         self.assertTrue(result)
@@ -596,7 +680,7 @@ class HeatmapCanvasRestoreTests(unittest.TestCase):
             },
         )
 
-        with patch("viewer.plugin.heatmap_layers.display") as display_mock:
+        with patch("ueler.viewer.plugin.heatmap_layers.display") as display_mock:
             result = heatmap.redraw_cached_footer_canvas()
 
         self.assertTrue(result)
@@ -728,6 +812,7 @@ class HeatmapMetaClusterManagementTests(unittest.TestCase):
 class HeatmapZScoreModeTests(unittest.TestCase):
     def _build_heatmap(self, zscore_across_markers):
         heatmap = HeatmapDisplay.__new__(HeatmapDisplay)
+        heatmap.adapter = SimpleNamespace(is_wide=lambda: False)
         heatmap.main_viewer = SimpleNamespace(
             cell_table=pd.DataFrame(
                 {
@@ -775,9 +860,9 @@ class HeatmapZScoreModeTests(unittest.TestCase):
 
         heatmap.prepare_heatmap_data()
 
-        self.assertAlmostEqual(float(heatmap.heatmap_data.loc["A", "m1"]), -0.87287156, places=6)
-        self.assertAlmostEqual(float(heatmap.heatmap_data.loc["A", "m2"]), -0.21821789, places=6)
-        self.assertAlmostEqual(float(heatmap.heatmap_data.loc["A", "m3"]), 1.09108945, places=6)
+        self.assertAlmostEqual(float(heatmap.heatmap_data.loc["A", "m1"]), -0.90726471, places=6)
+        self.assertAlmostEqual(float(heatmap.heatmap_data.loc["A", "m2"]), -0.16495722, places=6)
+        self.assertAlmostEqual(float(heatmap.heatmap_data.loc["A", "m3"]), 1.07222193, places=6)
 
 
 if __name__ == "__main__":

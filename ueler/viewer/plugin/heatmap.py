@@ -263,7 +263,14 @@ class UiComponent:
         
         self.chart_checkbox = Checkbox(
             value=False,
-            description='Chart',
+            description='Scatter plot',
+            disabled=False,
+            indent=False
+        )
+
+        self.histogram_checkbox = Checkbox(
+            value=False,
+            description='Histogram',
             disabled=False,
             indent=False
         )

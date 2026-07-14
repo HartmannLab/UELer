@@ -1029,12 +1029,16 @@ class InteractionLayer:
         if self.ui_component.cell_gallery_checkbox.value:
             self.display_cells()
 
+        # Scatter plot and histogram are now separate plugins (see #112), so the
+        # heatmap links to each independently. The scatter link colours + selects
+        # the active cluster's points; the histogram link overlays the cluster's
+        # distribution. Both are guarded by their own checkbox (#114).
         if self.ui_component.chart_checkbox.value:
-            if self.main_viewer.SidePlots.chart_output.ui_component.y_axis_selector.value == "None":
-                _logger.debug("The response of a histogram is not implemented yet.")
-            else:
-                self.color_points_by_meta_cluster()
-                self.highlight_scatter_plot()
+            self.color_points_by_meta_cluster()
+            self.highlight_scatter_plot()
+
+        if self.ui_component.histogram_checkbox.value:
+            self.update_histogram_distribution()
 
     def color_points_by_meta_cluster(self):
         heatmap_data = self.heatmap_data.copy()
@@ -1110,6 +1114,34 @@ class InteractionLayer:
 
         _logger.debug("Selected indices: %s", row_indices)
         self.main_viewer.SidePlots.chart_output.color_points(row_indices)
+
+    def update_histogram_distribution(self):
+        """Overlay the active cluster's cells as a distribution in the histogram plugin.
+
+        Implements the previously-missing histogram response for the heatmap link
+        (#114). The selected cluster's row indices are pushed to the standalone
+        histogram plugin, which draws them as the "Selected" overlay on every
+        plotted channel. The histogram's own subset/FOV settings decide which of
+        those cells are actually shown, so we forward the full cluster here.
+        """
+        cluster_label = self._current_cluster_label()
+        if cluster_label is None:
+            _logger.warning(NO_CLUSTER_SELECTED_MSG)
+            return
+
+        histogram = getattr(self.main_viewer.SidePlots, "histogram_output", None)
+        if histogram is None:
+            _logger.warning("Histogram plugin not available.")
+            return
+
+        high_level_cluster = self.ui_component.high_level_cluster_dropdown.value
+        cell_table = self.main_viewer.cell_table
+        row_indices = cell_table.loc[
+            cell_table[high_level_cluster] == cluster_label
+        ].index.tolist()
+
+        _logger.debug("Histogram selection indices: %s", row_indices)
+        histogram.show_external_selection(row_indices)
 
     def display_cells(self):
         cluster_label = self._current_cluster_label()
@@ -1471,7 +1503,7 @@ class DisplayLayer:
 
         link = VBox([
             HBox([self.ui_component.main_viewer_checkbox]),
-            HBox([self.ui_component.chart_checkbox]),
+            HBox([self.ui_component.chart_checkbox, self.ui_component.histogram_checkbox]),
             HBox([self.ui_component.cell_gallery_checkbox, self.ui_component.current_fov_checkbox]),
         ])
 

@@ -295,6 +295,34 @@ class TestHistogramBrushLinking(unittest.TestCase):
         self.hist.clear_selection()
         self.assertEqual(self.hist.selected_indices.value, set())
 
+    def test_show_external_selection_publishes_indices(self):
+        """A linked plugin (e.g. heatmap #114) can push a selection in."""
+        self.hist.show_external_selection([2, 4])
+        self.assertEqual(set(self.hist.selected_indices.value), {2, 4})
+
+    def test_show_external_selection_forwards_to_gallery_when_linked(self):
+        self.hist.ui_component.cell_gallery_linked_checkbox.value = True
+        self.hist.show_external_selection([1, 2, 3])
+        self.assertIsNotNone(self.gallery.received)
+        self.assertEqual(set(self.gallery.received), {1, 2, 3})
+
+    def test_show_external_selection_highlights_viewer_when_mv_linked(self):
+        self.hist.ui_component.mv_linked_checkbox.value = True
+        # Rows 1 and 2 are both in fov1, with labels 2 and 3.
+        self.hist.show_external_selection([1, 2])
+        self.assertIn(2, self.viewer.image_display.last_mask_ids)
+        self.assertIn(3, self.viewer.image_display.last_mask_ids)
+
+    @unittest.skipUnless(_bokeh_available(), "bokeh not available")
+    def test_show_external_selection_drives_overlay(self):
+        """The pushed selection is drawn as the 'Selected' overlay distribution."""
+        layout, sources, spans = self.hist._build_figures()
+        self.hist._sources, self.hist._spans = sources, spans
+        # Two valid row indices → two overlaid cells across the bins.
+        self.hist.show_external_selection([2, 4])
+        total = sum(sources["intensity"]["selected"].data["top"])
+        self.assertEqual(total, 2)
+
     def test_bin_counts_matches_numpy_histogram(self):
         from ueler.viewer.plugin.histogram import bin_counts
 
