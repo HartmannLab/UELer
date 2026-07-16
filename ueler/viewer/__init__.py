@@ -25,9 +25,19 @@ __all__ = [
 
 
 def __getattr__(name: str) -> Any:
-	"""Delegate attribute lookups to the legacy viewer package."""
+	"""Delegate attribute lookups to the legacy viewer package.
 
-	legacy = _import_module("viewer")
+	Must raise ``AttributeError`` (never ``ModuleNotFoundError``) when the legacy
+	``viewer`` package is absent: ``from ueler.viewer import <submodule>`` probes
+	the package with ``hasattr`` before importing the submodule, and ``hasattr``
+	only swallows ``AttributeError`` — a leaked ``ModuleNotFoundError`` aborts the
+	whole ``from`` import even though the submodule exists under ``ueler.viewer``.
+	"""
+
+	try:
+		legacy = _import_module("viewer")
+	except ModuleNotFoundError:
+		raise AttributeError(f"module 'ueler.viewer' has no attribute '{name}'")
 	if hasattr(legacy, name):
 		return getattr(legacy, name)
 	raise AttributeError(f"module 'ueler.viewer' has no attribute '{name}'")

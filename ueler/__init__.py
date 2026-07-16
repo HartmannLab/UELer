@@ -39,12 +39,22 @@ def ensure_compat_aliases() -> None:
 
 
 def __getattr__(name: str) -> Any:
-	"""Dynamically resolve compatibility attributes."""
+	"""Dynamically resolve compatibility attributes.
+
+	Must raise ``AttributeError`` (never ``ModuleNotFoundError``) when the legacy
+	``viewer`` package is absent: ``import ueler.<submodule>`` resolves the parent
+	via ``getattr(ueler, '<submodule>')`` when the submodule isn't bound as an
+	attribute, and a leaked ``ModuleNotFoundError`` there aborts otherwise-valid
+	submodule imports.
+	"""
 
 	if name == "viewer":
 		return _import_module("ueler.viewer")
 
-	legacy = _import_module("viewer")
+	try:
+		legacy = _import_module("viewer")
+	except ModuleNotFoundError:
+		raise AttributeError(f"module 'ueler' has no attribute '{name}'")
 	if hasattr(legacy, name):
 		return getattr(legacy, name)
 	raise AttributeError(f"module 'ueler' has no attribute '{name}'")
