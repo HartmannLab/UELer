@@ -171,6 +171,88 @@ def _resolve_outline_dilation(thickness: int, downsample_factor: int) -> int:
     return max(0, effective - 1)
 
 
+def _region_colored_ids(region_array: np.ndarray, registry: Mapping[int, str], exclude_ids: set) -> list:
+    """Distinct, non-excluded mask ids in the region that have a registry color."""
+    colored = []
+    for raw in np.unique(region_array):
+        if not raw:
+            continue
+        try:
+            mask_id = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if mask_id in exclude_ids:
+            continue
+        if registry.get(mask_id):
+            colored.append(mask_id)
+    return colored
+
+
+def _can_vectorize_fill(
+    colored_ids: list,
+    mode_map: Mapping[int, str],
+    opacity_map: Mapping[int, float],
+    fill_alpha: float,
+    show_borders_on_filled: bool,
+) -> bool:
+    """Fast-path guard: every colored cell is opaque-ish fill with no border.
+
+    This is the common continuous-coloring case (all cells filled, uniform-ish
+    opacity, no outlines). Anything needing outlines/borders/zero-alpha fallback
+    falls back to the per-cell loop so categorical behavior is untouched.
+    """
+    if show_borders_on_filled:
+        return False
+    for mask_id in colored_ids:
+        if mode_map.get(mask_id) != "fill":
+            return False
+        try:
+            alpha = float(opacity_map.get(mask_id, fill_alpha))
+        except (TypeError, ValueError):
+            alpha = fill_alpha
+        if alpha <= 0.0:
+            return False
+    return True
+
+
+def _apply_region_colors_fill_vectorized(
+    canvas: np.ndarray,
+    region_array: np.ndarray,
+    registry: Mapping[int, str],
+    colored_ids: list,
+    opacity_map: Mapping[int, float],
+    fill_alpha: float,
+) -> None:
+    """Vectorized fill recolor via a per-id lookup table (O(pixels), not O(cells×pixels))."""
+    region_idx = region_array if np.issubdtype(region_array.dtype, np.integer) else region_array.astype(np.intp)
+    max_id = int(region_idx.max())
+    color_lut = np.zeros((max_id + 1, 3), dtype=np.float32)
+    alpha_lut = np.zeros((max_id + 1,), dtype=np.float32)
+    active = np.zeros((max_id + 1,), dtype=bool)
+    for mask_id in colored_ids:
+        if mask_id > max_id:
+            continue
+        rgb = _to_rgb_safe(registry.get(mask_id))
+        if rgb is None:
+            continue
+        try:
+            alpha = float(opacity_map.get(mask_id, fill_alpha))
+        except (TypeError, ValueError):
+            alpha = fill_alpha
+        alpha = max(0.0, min(1.0, alpha))
+        color_lut[mask_id] = rgb
+        alpha_lut[mask_id] = alpha
+        active[mask_id] = True
+
+    fill_mask = active[region_idx]
+    if not fill_mask.any():
+        return
+    rgb_px = color_lut[region_idx]
+    alpha_px = alpha_lut[region_idx][..., None]
+    blended = (1.0 - alpha_px) * canvas + alpha_px * rgb_px
+    canvas[fill_mask] = blended[fill_mask].astype(canvas.dtype, copy=False)
+
+
 def _apply_region_colors(
     canvas: np.ndarray,
     region_array: np.ndarray,
@@ -184,6 +266,17 @@ def _apply_region_colors(
     show_borders_on_filled: bool,
 ) -> None:
     if region_array.size == 0:
+        return
+
+    # Fast vectorized path for the common all-fill, no-border case (continuous
+    # coloring). Falls back to the per-cell loop for outlines/borders/mixed modes.
+    colored_ids = _region_colored_ids(region_array, registry, exclude_ids)
+    if not colored_ids:
+        return
+    if _can_vectorize_fill(colored_ids, mode_map, opacity_map, fill_alpha, show_borders_on_filled):
+        _apply_region_colors_fill_vectorized(
+            canvas, region_array, registry, colored_ids, opacity_map, fill_alpha
+        )
         return
 
     pending_edges: list[tuple[np.ndarray, np.ndarray]] = []

@@ -97,3 +97,74 @@ settings restore.
 - Negative values + arcsinh → fine; range computed in transformed space; cofactor bounded > 0.
 - Large cell counts → vectorized compute + single bulk write; render cost equals the existing many-class cost.
 - Old ROI/palette payloads without `color_mode` → default to `categorical` (unchanged behavior).
+
+---
+
+## Follow-up: reply 1 — continuous coloring is very slow + no busy indicator
+
+### Problem
+Pressing **Apply** in continuous mode took >2 minutes even when the current FOV had only ~150 cells; zoom/pan was
+also slow; and the busy indicator never turned on (the developer noted the slow work happened *before* the busy
+state was set — a strong clue that the cost was in the synchronous Apply handler, ahead of `update_display`).
+
+### Root cause
+1. **Redundant global registration (dominant cost).** `_apply_continuous_colors_to_masks` registered a color for
+   **every cell in every FOV** (`groupby(fov)` + per-FOV `compute_continuous_colors` + `set_cell_colors_bulk`) on
+   Apply, synchronously before `update_display`. A trace showed this registry is unnecessary: the live display and
+   map overlay (`get_effective_state_maps_for_fov`), and the cell gallery / batch export / ROI thumbnails
+   (`resolve_mask_painter_snapshot_for_fov`) all resolve continuous colors **on demand** via
+   `build_painter_state_maps_for_fov`.
+2. **Per-cell `to_hex`.** `compute_continuous_colors` converted colors with a per-cell matplotlib `to_hex` call.
+3. **Full-column percentile + widget writes on the render hot path.** `_build_continuous_spec` recomputed the
+   global range over the whole column *and* wrote the vmin/vmax ipywidgets (comm round-trips) on every state-map
+   build — i.e. on every render/zoom.
+4. **Busy state never set** by the Mask Painter.
+
+### Fix
+1. **Dropped the global registration.** `_apply_continuous_colors_to_masks` now only `clear_cell_colors()` (so
+   stale categorical colors can't bleed through the gallery's per-cell fallback), invalidates the state-maps cache,
+   redraws the colorbar, notifies the gallery, and refreshes the current FOV. Apply is now O(current FOV).
+2. **Vectorized `compute_continuous_colors`** — sample the colormap for finite cells and build hex strings
+   vectorized (no per-cell `to_hex`).
+3. **Cached the auto-range** in `self._continuous_range_cache` keyed by `(column, arcsinh, cofactor)`;
+   `_build_continuous_spec` reads the cache and writes no widgets. The range is recomputed and the fields updated
+   only in the param-change handlers / recompute button (`_refresh_auto_range_fields`). Cache cleared on
+   `on_cell_table_change`.
+4. **Busy indicator** — decorated `apply_colors_to_masks` with `@update_status_bar`.
+
+### Files changed
+- `ueler/viewer/plugin/mask_painter.py` — all four fixes.
+- `tests/test_mask_painter_continuous.py` — replaced the old "registers globally" test with: no global-registry
+  writes on apply, on-demand color resolution, auto-range caching off the hot path, and busy-state toggling.
+
+### Validation
+`python -m unittest tests.test_mask_painter_continuous` — 19 tests pass. Full suite failure/error set identical to
+the `develop` baseline (no new failures). Manual: Apply now renders in well under a second, zoom/pan is smooth, the
+busy gif shows during Apply, and the gradient still appears in the cell gallery, batch export, and saved ROIs.
+
+### Follow-up: reply 1 (part 2) — still slow + colorbar crash
+
+After removing the global registration, Apply was faster but **still slow**, and rendering could raise a
+`RecursionError` from `_render_colorbar`. Two further root causes:
+
+1. **Colorbar created a live matplotlib figure.** `_render_colorbar` used `plt.subplots()`, which under the
+   notebook's `%matplotlib widget` (ipympl) backend builds an interactive canvas **widget** — slow, and it crashed
+   with `RecursionError: maximum recursion depth exceeded` during `Canvas`/`Layout` construction. **Fix:** render
+   with a detached Agg `Figure` + `FigureCanvasAgg`, `savefig` to PNG bytes, and show a static `IPython.display.Image`
+   in the `colorbar_output` — no interactive canvas, backend-independent.
+
+2. **Mask recolor was O(cells × pixels).** Painter colors are painted by
+   `mask_color_overlay._apply_region_colors`, which looped over every distinct cell doing a full-region
+   `region_array == id` scan (and a per-cell `find_boundaries`). For continuous coloring every cell is colored, so
+   this dominated. Unlike the annotation overlay, which already uses the fast vectorized LUT
+   (`engine._apply_annotation_overlay`: `colormap[label_image]`). **Fix:** added a vectorized **fill fast path** —
+   when all colored cells are `fill` mode with alpha > 0 and no borders (the default continuous case), build a
+   per-id RGB+alpha lookup table and blend the whole region in one gather (`lut[region_array]`), O(pixels). The
+   per-cell loop is retained as a fallback for outlines/borders/mixed modes, so categorical behavior (and its tests)
+   is unchanged.
+
+**Files changed:** `ueler/viewer/plugin/mask_painter.py` (`_render_colorbar`), `ueler/viewer/mask_color_overlay.py`
+(`_apply_region_colors` fast-path guard + `_apply_region_colors_fill_vectorized`).
+**Tests:** `tests/test_mask_color_overlay.py` — added vectorized-fill correctness (distinct colors, no
+cross-contamination; background/unregistered ids untouched). Full suite failure/error set identical to the
+`develop` baseline.

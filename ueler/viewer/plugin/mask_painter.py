@@ -39,6 +39,7 @@ except Exception:  # pragma: no cover - executed when ipyfilechooser is absent
 
 FileChooser = getattr(_FileChooserModule, "FileChooser", None)
 
+from ueler.viewer.decorators import update_status_bar
 from ueler.viewer.plugin.plugin_base import PluginBase
 from ueler.viewer.plugin.mask_class_list_widget import MaskClassListWidget
 from ueler.viewer.color_palettes import DEFAULT_COLOR, colors_match, normalize_hex_color
@@ -251,7 +252,7 @@ def compute_continuous_colors(
     the dict) so those cells fall through to the base mask, mirroring how
     hidden/inactive cells behave in the categorical path.
     """
-    from matplotlib.colors import Normalize, to_hex
+    from matplotlib.colors import Normalize
 
     arr = np.asarray(values, dtype=float)
     ids = np.asarray(mask_ids)
@@ -264,17 +265,21 @@ def compute_continuous_colors(
     hi = float(vmax)
     if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
         hi = lo + 1.0
-    norm = Normalize(vmin=lo, vmax=hi, clip=True)
-    cmap = _get_colormap(colormap)
 
     finite_mask = np.isfinite(arr)
     if not finite_mask.any():
         return {}
-    rgba = cmap(norm(arr))
-    result: Dict[int, str] = {}
-    for idx in np.nonzero(finite_mask)[0]:
-        result[int(ids[idx])] = to_hex(rgba[idx])
-    return result
+
+    norm = Normalize(vmin=lo, vmax=hi, clip=True)
+    cmap = _get_colormap(colormap)
+    # Sample the colormap only for finite cells, then build hex strings
+    # vectorized (avoids a per-cell matplotlib ``to_hex`` call, which is the
+    # dominant cost for large FOVs / map mode).
+    rgba = cmap(norm(arr[finite_mask]))
+    rgb = (np.clip(rgba[:, :3], 0.0, 1.0) * 255).round().astype(int)
+    hexes = ["#{:02x}{:02x}{:02x}".format(r, g, b) for r, g, b in rgb]
+    finite_ids = ids[finite_mask]
+    return {int(mid): hx for mid, hx in zip(finite_ids, hexes)}
 
 
 def build_painter_state_maps_for_fov(
@@ -459,6 +464,9 @@ class MaskPainterDisplay(PluginBase):
         self._last_applied_classes: Optional[set] = None
         self._last_applied_class_colors: dict[str, str] = {}
         self._state_maps_cache: Dict[str, tuple] = {}  # fov -> (color_map, border_map, mode_map, opacity_map)
+        # Cached continuous auto-range: ((column, arcsinh, cofactor), (vmin, vmax)).
+        # Keeps the full-column percentile off the render hot path (issue #115 reply).
+        self._continuous_range_cache: Optional[Tuple[tuple, Tuple[float, float]]] = None
 
         storage_folder = self._determine_storage_folder()
         if storage_folder is None:
@@ -1462,7 +1470,14 @@ class MaskPainterDisplay(PluginBase):
         return self._build_continuous_spec()
 
     def _build_continuous_spec(self) -> Optional[Dict[str, object]]:
-        """Read the continuous widgets into a spec dict with a resolved global range."""
+        """Read the continuous widgets into a spec dict with a resolved global range.
+
+        This is on the render hot path (called for every
+        ``build_painter_state_maps_for_fov``), so it must be cheap: the auto range
+        is read from ``_continuous_range_cache`` (computed once per
+        column/arcsinh/cofactor by the param-change handlers) and no ipywidget
+        values are written here.
+        """
         column = self.ui_component.continuous_column_dropdown.value
         if not column or self.main_viewer.cell_table is None:
             return None
@@ -1470,10 +1485,10 @@ class MaskPainterDisplay(PluginBase):
             return None
         arcsinh = bool(self.ui_component.arcsinh_checkbox.value)
         cofactor = _safe_float(self.ui_component.arcsinh_cofactor_input.value, 5.0)
-        vmin, vmax = self._resolve_active_range(column, arcsinh, cofactor)
+        vmin, vmax = self._current_range(column, arcsinh, cofactor)
         return {
             "column": str(column),
-            "colormap": str(self.ui_component.colormap_dropdown.value),
+            "colormap": str(self.ui_component.colormap_dropdown.value or "viridis"),
             "vmin": float(vmin),
             "vmax": float(vmax),
             "arcsinh": arcsinh,
@@ -1482,18 +1497,50 @@ class MaskPainterDisplay(PluginBase):
             "fill": bool(self.ui_component.continuous_fill_checkbox.value),
         }
 
-    def _resolve_active_range(self, column, arcsinh: bool, cofactor: float) -> Tuple[float, float]:
-        """Resolve the (vmin, vmax) range, auto-computing globally when auto range is on."""
-        if self.ui_component.auto_range_checkbox.value:
-            values = self.main_viewer.cell_table[column].to_numpy()
-            vmin, vmax = resolve_continuous_range(values, arcsinh=arcsinh, cofactor=cofactor)
-            # Reflect the resolved numbers in the (disabled) fields without re-triggering.
-            self._set_range_fields(vmin, vmax)
-            return vmin, vmax
-        return (
-            _safe_float(self.ui_component.vmin_input.value, 0.0),
-            _safe_float(self.ui_component.vmax_input.value, 1.0),
-        )
+    def _compute_auto_range(self, column, arcsinh: bool, cofactor: float) -> Tuple[float, float]:
+        values = self.main_viewer.cell_table[column].to_numpy()
+        return resolve_continuous_range(values, arcsinh=arcsinh, cofactor=cofactor)
+
+    def _current_range(self, column, arcsinh: bool, cofactor: float) -> Tuple[float, float]:
+        """Return the active (vmin, vmax) without touching widgets.
+
+        Manual mode reads the vmin/vmax fields directly. Auto mode returns the
+        cached global percentile range, computing it only on a cache miss (key =
+        column + arcsinh + cofactor); the cache is refreshed by the param-change
+        handlers and cleared on cell-table reload.
+        """
+        if not self.ui_component.auto_range_checkbox.value:
+            return (
+                _safe_float(self.ui_component.vmin_input.value, 0.0),
+                _safe_float(self.ui_component.vmax_input.value, 1.0),
+            )
+        key = (str(column), bool(arcsinh), float(cofactor))
+        cached = self._continuous_range_cache
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        rng = self._compute_auto_range(column, arcsinh, cofactor)
+        self._continuous_range_cache = (key, rng)
+        return rng
+
+    def _refresh_auto_range_fields(self) -> None:
+        """Recompute the global auto-range and reflect it in the vmin/vmax fields.
+
+        Called only from user-facing handlers (column/arcsinh/cofactor/auto changes,
+        recompute button) — never on the render hot path.
+        """
+        column = self.ui_component.continuous_column_dropdown.value
+        if (
+            not column
+            or self.main_viewer.cell_table is None
+            or column not in self.main_viewer.cell_table.columns
+            or not self.ui_component.auto_range_checkbox.value
+        ):
+            return
+        arcsinh = bool(self.ui_component.arcsinh_checkbox.value)
+        cofactor = _safe_float(self.ui_component.arcsinh_cofactor_input.value, 5.0)
+        rng = self._compute_auto_range(column, arcsinh, cofactor)
+        self._continuous_range_cache = ((str(column), arcsinh, float(cofactor)), rng)
+        self._set_range_fields(*rng)
 
     def _set_range_fields(self, vmin: float, vmax: float) -> None:
         for widget, value in ((self.ui_component.vmin_input, vmin), (self.ui_component.vmax_input, vmax)):
@@ -1519,6 +1566,7 @@ class MaskPainterDisplay(PluginBase):
         self._refresh_save_button_state()
         self._invalidate_state_maps_cache()
         if continuous:
+            self._refresh_auto_range_fields()
             self._render_colorbar()
         if self.ui_component.enabled_checkbox.value:
             update_display = getattr(self.main_viewer, "update_display", None)
@@ -1528,21 +1576,15 @@ class MaskPainterDisplay(PluginBase):
 
     def _on_continuous_column_change(self, _change):
         self._refresh_save_button_state()
-        if self.ui_component.auto_range_checkbox.value:
-            # New column → recompute the global range from its values.
-            self._recompute_continuous_range(None)
-        else:
-            self._refresh_continuous_display()
+        # New column → recompute the global auto-range (no-op in manual mode).
+        self._refresh_auto_range_fields()
+        self._refresh_continuous_display()
 
     def _on_continuous_param_change(self, _change):
         if self._syncing:
             return
-        # arcsinh / colormap changes affect the transformed range too when auto is on.
-        if self.ui_component.auto_range_checkbox.value:
-            spec = self._build_continuous_spec()  # side effect: refreshes range fields
-            if spec is None:
-                self._render_colorbar()
-                return
+        # arcsinh / cofactor changes affect the transformed range when auto is on.
+        self._refresh_auto_range_fields()
         self._refresh_continuous_display()
 
     def _on_auto_range_toggle(self, change):
@@ -1550,9 +1592,8 @@ class MaskPainterDisplay(PluginBase):
         self.ui_component.vmin_input.disabled = auto
         self.ui_component.vmax_input.disabled = auto
         if auto:
-            self._recompute_continuous_range(None)
-        else:
-            self._refresh_continuous_display()
+            self._refresh_auto_range_fields()
+        self._refresh_continuous_display()
 
     def _on_continuous_range_edit(self, _change):
         if self._syncing or self.ui_component.auto_range_checkbox.value:
@@ -1564,42 +1605,65 @@ class MaskPainterDisplay(PluginBase):
         if not column or self.main_viewer.cell_table is None or column not in self.main_viewer.cell_table.columns:
             self._log("Select a continuous value column first.", error=True, clear=True)
             return
-        arcsinh = bool(self.ui_component.arcsinh_checkbox.value)
-        cofactor = float(self.ui_component.arcsinh_cofactor_input.value)
-        vmin, vmax = resolve_continuous_range(
-            self.main_viewer.cell_table[column].to_numpy(), arcsinh=arcsinh, cofactor=cofactor
-        )
-        self._set_range_fields(vmin, vmax)
+        self._refresh_auto_range_fields()
         self._refresh_continuous_display()
 
     def _render_colorbar(self) -> None:
-        """Draw a horizontal colorbar legend into the continuous output widget."""
+        """Draw a horizontal colorbar legend as a static PNG in the output widget.
+
+        Rendered with a detached Agg ``Figure`` (not ``pyplot``) so it never
+        creates an interactive/``ipympl`` canvas widget — doing so crashed under
+        the notebook's ``%matplotlib widget`` backend (issue #115 reply) and was
+        needlessly slow. The result is a plain PNG shown via ``IPython.display``.
+        """
         column = self.ui_component.continuous_column_dropdown.value
         if not column:
             return
         try:
-            import matplotlib.pyplot as plt
+            import io
+            from matplotlib.figure import Figure
+            from matplotlib.backends.backend_agg import FigureCanvasAgg
             from matplotlib import cm
             from matplotlib.colors import Normalize
-        except Exception:  # pragma: no cover - matplotlib always present here
+            from IPython.display import Image as _IPyImage, display as _display
+        except Exception:  # pragma: no cover - matplotlib/IPython always present here
             return
         arcsinh = bool(self.ui_component.arcsinh_checkbox.value)
         vmin = _safe_float(self.ui_component.vmin_input.value, 0.0)
         vmax = _safe_float(self.ui_component.vmax_input.value, 1.0)
         if vmax <= vmin:
             vmax = vmin + 1.0
+        try:
+            fig = Figure(figsize=(4, 0.5))
+            FigureCanvasAgg(fig)
+            ax = fig.add_axes([0.04, 0.5, 0.92, 0.3])
+            mappable = cm.ScalarMappable(norm=Normalize(vmin=vmin, vmax=vmax), cmap=self.ui_component.colormap_dropdown.value or "viridis")
+            fig.colorbar(mappable, cax=ax, orientation="horizontal")
+            label = f"arcsinh({column} / {_safe_float(self.ui_component.arcsinh_cofactor_input.value, 5.0):g})" if arcsinh else str(column)
+            ax.set_title(label, fontsize=7)
+            buf = io.BytesIO()
+            fig.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+        except Exception:  # pragma: no cover - defensive; colorbar is non-critical
+            return
+        png = buf.getvalue()
         with self.ui_component.colorbar_output:
             self.ui_component.colorbar_output.clear_output(wait=True)
-            fig, ax = plt.subplots(figsize=(4, 0.5))
-            mappable = cm.ScalarMappable(norm=Normalize(vmin=vmin, vmax=vmax), cmap=self.ui_component.colormap_dropdown.value)
-            fig.colorbar(mappable, cax=ax, orientation="horizontal")
-            label = f"arcsinh({column} / {self.ui_component.arcsinh_cofactor_input.value:g})" if arcsinh else str(column)
-            ax.set_title(label, fontsize=7)
-            plt.show()
-            plt.close(fig)
+            _display(_IPyImage(data=png))
 
     def _apply_continuous_colors_to_masks(self, *, notify_cell_gallery: bool = True, register_globally: bool = True):
-        """Apply continuous (gradient) colors to masks. Mirrors the categorical apply tail."""
+        """Apply continuous (gradient) colors to masks.
+
+        Continuous colors are computed **on demand per FOV** by
+        ``build_painter_state_maps_for_fov`` for every consumer (the live
+        single-FOV display and map overlay via ``get_effective_state_maps_for_fov``;
+        the cell gallery, batch export, and ROI thumbnails via
+        ``resolve_mask_painter_snapshot_for_fov``). So there is no need to
+        pre-register a color for every cell in every FOV — doing so was the cause
+        of the multi-minute stall on Apply (issue #115 reply). We only clear any
+        stale registry colors, invalidate the per-FOV state-maps cache, and refresh
+        the current FOV. The ``register_globally`` argument is retained for
+        signature parity with the categorical path but is intentionally unused here.
+        """
         if self.main_viewer.cell_table is None:
             self._log("Cell table is not available.", error=True, clear=True)
             return
@@ -1614,33 +1678,11 @@ class MaskPainterDisplay(PluginBase):
             self._log(f"Column '{column}' has no finite values to color.", error=True, clear=True)
             return
 
-        mode = "fill" if spec["fill"] else "outline"
-        alpha = _opacity_percent_to_alpha(spec["opacity"], spec["opacity"]) if mode == "fill" else 0.0
-
-        if register_globally:
-            fov_key = self.main_viewer.fov_key
-            label_key = self.main_viewer.label_key
-            entries: Dict[str, Dict[int, str]] = {}
-            for fov, group in cell_table.groupby(fov_key):
-                colors = compute_continuous_colors(
-                    group[column].to_numpy(),
-                    group[label_key].to_numpy(),
-                    colormap=spec["colormap"],
-                    vmin=spec["vmin"],
-                    vmax=spec["vmax"],
-                    arcsinh=spec["arcsinh"],
-                    cofactor=spec["cofactor"],
-                )
-                if not colors:
-                    continue
-                entries[str(fov)] = colors
-                mode_target = self._cell_mode_cache.setdefault(str(fov), {})
-                opacity_target = self._cell_opacity_cache.setdefault(str(fov), {})
-                for mid in colors:
-                    mode_target[mid] = mode
-                    opacity_target[mid] = alpha
-            if entries:
-                set_cell_colors_bulk(entries)
+        # Clear any per-cell colors left over from a previous categorical apply so
+        # they cannot bleed through the cell gallery's per-cell registry fallback
+        # for cells the continuous map omits (e.g. NaN-valued cells).
+        clear_cell_colors()
+        self._invalidate_state_maps_cache()
 
         self._log("Masks updated with continuous colors.")
         self._render_colorbar()
@@ -1654,6 +1696,7 @@ class MaskPainterDisplay(PluginBase):
             if callable(update_display):
                 update_display(current_ds)
 
+    @update_status_bar
     def apply_colors_to_masks(self, _, *, notify_cell_gallery: bool = True, register_globally: bool = True):
         """Apply colors to masks.
 
@@ -1965,6 +2008,9 @@ class MaskPainterDisplay(PluginBase):
         self._initialise_identifier_options()
         self._initialise_continuous_options()
         self._active_classes = []
+        # A new cell table may reuse a column name with different data → drop the
+        # cached continuous auto-range so it is recomputed on next use.
+        self._continuous_range_cache = None
         # Clear tracking state when cell table changes
         self._last_applied_fov = None
         self._last_applied_identifier = None

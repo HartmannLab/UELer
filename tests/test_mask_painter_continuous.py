@@ -223,21 +223,80 @@ class TestPainterContinuousMode(unittest.TestCase):
         self.assertEqual(painter.ui_component.categorical_layout.layout.display, "block")
         self.assertEqual(painter.ui_component.continuous_layout.layout.display, "none")
 
-    def test_apply_continuous_registers_colors_globally(self):
+    def _setup_continuous(self, painter, colormap="viridis", vmin=0.0, vmax=10.0):
+        painter.ui_component.color_mode_toggle.value = "continuous"
+        painter.ui_component.continuous_column_dropdown.value = "CD3"
+        painter.ui_component.colormap_dropdown.value = colormap
+        painter.ui_component.auto_range_checkbox.value = False
+        painter.ui_component.vmin_input.value = vmin
+        painter.ui_component.vmax_input.value = vmax
+
+    def test_apply_continuous_does_not_populate_global_registry(self):
+        """Issue #115 reply: continuous apply must not register every cell in every
+        FOV (that was the multi-minute stall). Colors are resolved on demand."""
+        import ueler.viewer.plugin.mask_painter as mp
+        from unittest.mock import patch
+
+        painter = self._make_painter()
+        self._setup_continuous(painter)
+
+        with patch.object(mp, "set_cell_colors_bulk") as bulk:
+            painter.apply_colors_to_masks(None, notify_cell_gallery=False, register_globally=True)
+            bulk.assert_not_called()
+
+        # Registry is not populated for any FOV (unregistered cells → falsy).
+        self.assertFalse(get_cell_color("FOV_001", 1))
+        self.assertFalse(get_cell_color("FOV_002", 3))
+
+    def test_continuous_colors_resolve_on_demand(self):
+        """Per-FOV colors come from the effective-state-maps path, not the registry."""
+        painter = self._make_painter()
+        self._setup_continuous(painter)
+        painter.apply_colors_to_masks(None, notify_cell_gallery=False, register_globally=True)
+
+        color_map, _, mode_map, _ = painter.get_effective_state_maps_for_fov("FOV_002")
+        # FOV_002 label 3 has CD3 == 10.0 → top of viridis; label 4 == 2.5 → 0.25.
+        self.assertEqual(color_map[3], _cmap_hex("viridis", 1.0))
+        self.assertEqual(color_map[4], _cmap_hex("viridis", 0.25))
+        self.assertTrue(all(m == "fill" for m in mode_map.values()))
+
+    def test_auto_range_cached_off_hot_path(self):
+        """resolve_continuous_range runs once per (column, arcsinh, cofactor); the
+        render hot path (_build_continuous_spec) reuses the cache and writes no widgets."""
+        import ueler.viewer.plugin.mask_painter as mp
+        from unittest.mock import patch
+
         painter = self._make_painter()
         painter.ui_component.color_mode_toggle.value = "continuous"
         painter.ui_component.continuous_column_dropdown.value = "CD3"
-        painter.ui_component.colormap_dropdown.value = "viridis"
-        painter.ui_component.auto_range_checkbox.value = False
-        painter.ui_component.vmin_input.value = 0.0
-        painter.ui_component.vmax_input.value = 10.0
+        painter.ui_component.auto_range_checkbox.value = True
 
-        painter.apply_colors_to_masks(None, notify_cell_gallery=False, register_globally=True)
+        with patch.object(mp, "resolve_continuous_range", wraps=mp.resolve_continuous_range) as rng:
+            painter._refresh_auto_range_fields()  # handler → computes + caches once
+            self.assertEqual(rng.call_count, 1)
+            # Repeated hot-path spec builds must not recompute the range.
+            painter._build_continuous_spec()
+            painter._build_continuous_spec()
+            self.assertEqual(rng.call_count, 1)
 
-        # FOV_002 label 3 has CD3 == 10.0 → top of viridis.
-        self.assertEqual(get_cell_color("FOV_002", 3), _cmap_hex("viridis", 1.0))
-        # FOV_001 label 1 has CD3 == 0.0 → bottom of viridis.
-        self.assertEqual(get_cell_color("FOV_001", 1), _cmap_hex("viridis", 0.0))
+        # _build_continuous_spec must not mutate the vmin/vmax widgets.
+        painter.ui_component.vmin_input.value = 123.0
+        painter._build_continuous_spec()
+        self.assertEqual(painter.ui_component.vmin_input.value, 123.0)
+
+    def test_apply_sets_busy_state(self):
+        """apply_colors_to_masks toggles the status bar to processing then ready."""
+        import ueler.viewer.decorators as dec
+        from unittest.mock import patch
+
+        painter = self._make_painter()
+        self._setup_continuous(painter)
+
+        calls = []
+        with patch.object(dec, "_set_status_bar", side_effect=lambda v, state, **k: calls.append(state)):
+            painter.apply_colors_to_masks(None, notify_cell_gallery=False)
+        self.assertEqual(calls[0], "processing")
+        self.assertEqual(calls[-1], "ready")
 
     def test_palette_payload_roundtrip(self):
         painter = self._make_painter()

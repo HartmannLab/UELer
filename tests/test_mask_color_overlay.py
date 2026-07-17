@@ -161,6 +161,49 @@ class OverlayFillRenderingTests(unittest.TestCase):
         self.assertAlmostEqual(float(result[1, 1, 1]), 0.0, places=4)
         self.assertAlmostEqual(float(result[1, 1, 2]), 0.0, places=4)
 
+    def test_vectorized_fill_distinct_colors_no_cross_contamination(self):
+        """The all-fill fast path (continuous coloring) colors each cell exactly
+        with its own color at alpha 1.0, with no bleed between neighbors."""
+        image = np.zeros((2, 4, 3), dtype=np.float32)
+        region = np.array(
+            [
+                [1, 1, 2, 2],
+                [1, 1, 2, 2],
+            ],
+            dtype=np.int32,
+        )
+        result = apply_registry_colors(
+            image,
+            fov="FOV_001",
+            mask_regions={"cell": region},
+            outline_thickness=1,
+            downsample_factor=1,
+            color_map={1: "#FF0000", 2: "#00FF00"},
+            mode_map={1: "fill", 2: "fill"},
+            opacity_map={1: 1.0, 2: 1.0},
+        )
+        # Cell 1 → pure red, cell 2 → pure green.
+        self.assertTrue(np.allclose(result[:, :2], np.array([1.0, 0.0, 0.0])))
+        self.assertTrue(np.allclose(result[:, 2:], np.array([0.0, 1.0, 0.0])))
+
+    def test_vectorized_fill_leaves_background_untouched(self):
+        """Background (id 0) and unregistered ids keep the base image."""
+        image = np.full((2, 3, 3), 0.2, dtype=np.float32)
+        region = np.array([[0, 1, 9], [0, 1, 9]], dtype=np.int32)
+        result = apply_registry_colors(
+            image,
+            fov="FOV_001",
+            mask_regions={"cell": region},
+            outline_thickness=1,
+            downsample_factor=1,
+            color_map={1: "#FF0000"},  # id 9 has no color
+            mode_map={1: "fill"},
+            opacity_map={1: 1.0},
+        )
+        self.assertTrue(np.allclose(result[:, 0], 0.2))  # background
+        self.assertTrue(np.allclose(result[:, 2], 0.2))  # unregistered id 9
+        self.assertTrue(np.allclose(result[:, 1], np.array([1.0, 0.0, 0.0])))
+
     def test_zero_fill_opacity_falls_back_to_outline_only(self):
         image = np.zeros((5, 5, 3), dtype=np.float32)
         region = np.array(
