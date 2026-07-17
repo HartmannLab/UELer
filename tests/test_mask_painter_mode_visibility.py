@@ -957,7 +957,9 @@ class TestMaskPainterOnlySpecified(unittest.TestCase):
         from ueler.viewer.plugin.mask_painter import MaskPainterDisplay
 
         painter = MaskPainterDisplay(self.viewer, width=400, height=300)
-        global_fill_row = painter.ui_component.colors_layout.children[1]
+        # Continuous coloring (issue #115) wraps the categorical controls in a
+        # dedicated sub-layout; the global-fill row is its second child.
+        global_fill_row = painter.ui_component.categorical_layout.children[1]
 
         self.assertEqual(painter.ui_component.global_fill_opacity_input.layout.width, "95px")
         self.assertEqual(len(global_fill_row.children), 4)

@@ -4267,6 +4267,19 @@ class ImageMaskViewer:
 
         from ueler.viewer.plugin.mask_painter import build_painter_state_maps_for_fov
 
+        continuous = None
+        if str(getattr(snapshot, "color_mode", "categorical")) == "continuous":
+            continuous = {
+                "column": getattr(snapshot, "continuous_column", ""),
+                "colormap": getattr(snapshot, "colormap", "viridis"),
+                "vmin": getattr(snapshot, "vmin", 0.0),
+                "vmax": getattr(snapshot, "vmax", 1.0),
+                "arcsinh": getattr(snapshot, "arcsinh", False),
+                "cofactor": getattr(snapshot, "arcsinh_cofactor", 5.0),
+                "opacity": getattr(snapshot, "continuous_opacity", 100),
+                "fill": getattr(snapshot, "continuous_fill", True),
+            }
+
         color_map, border_color_map, mode_map, opacity_map = build_painter_state_maps_for_fov(
             cell_table=self.cell_table,
             fov_key=self.fov_key,
@@ -4283,6 +4296,7 @@ class ImageMaskViewer:
             global_fill_opacity=snapshot.global_fill_opacity,
             border_color_mode=getattr(snapshot, "border_color_mode", "mask_type_color"),
             mask_type_color=getattr(snapshot, "mask_type_color", snapshot.default_color),
+            continuous=continuous,
         )
         return color_map, border_color_map, mode_map, opacity_map, bool(snapshot.show_borders_on_filled)
 

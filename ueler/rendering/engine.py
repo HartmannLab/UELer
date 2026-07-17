@@ -126,6 +126,17 @@ class MaskPainterSnapshot:
     border_color_mode: str = "mask_type_color"
     mask_type_color: str = "#FFFFFF"
     outline_thickness: int = 1
+    # Continuous (gradient) coloring — issue #115. Defaults keep existing
+    # categorical construction sites valid.
+    color_mode: str = "categorical"
+    continuous_column: str = ""
+    colormap: str = "viridis"
+    vmin: float = 0.0
+    vmax: float = 1.0
+    arcsinh: bool = False
+    arcsinh_cofactor: float = 5.0
+    continuous_opacity: int = 100
+    continuous_fill: bool = True
 
 
 @dataclass(frozen=True)

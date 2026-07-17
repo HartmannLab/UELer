@@ -1274,6 +1274,15 @@ class ROIManagerPlugin(PluginBase):
                 border_color_mode=str(data.get("border_color_mode") or "mask_type_color"),
                 mask_type_color=str(data.get("mask_type_color") or "#FFFFFF"),
                 outline_thickness=int(data.get("outline_thickness", getattr(self.main_viewer, "mask_outline_thickness", 1)) or 1),
+                color_mode=str(data.get("color_mode") or "categorical"),
+                continuous_column=str(data.get("continuous_column") or ""),
+                colormap=str(data.get("colormap") or "viridis"),
+                vmin=float(data.get("vmin", 0.0) or 0.0),
+                vmax=float(data.get("vmax", 1.0) if data.get("vmax") is not None else 1.0),
+                arcsinh=bool(data.get("arcsinh", False)),
+                arcsinh_cofactor=float(data.get("arcsinh_cofactor", 5.0) or 5.0),
+                continuous_opacity=int(data.get("continuous_opacity", 100) or 100),
+                continuous_fill=bool(data.get("continuous_fill", True)),
             )
         except Exception:  # pragma: no cover - invalid payload content
             return None

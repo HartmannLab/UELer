@@ -12,18 +12,22 @@ from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 import numpy as np
 from ipywidgets import (
     Accordion,
+    BoundedFloatText,
     BoundedIntText,
     Button,
     Checkbox,
     ColorPicker,
     Dropdown,
+    FloatText,
     HTML,
     HBox,
     Label,
     Layout,
+    Output,
     Tab,
     TagsInput,
     Text,
+    ToggleButtons,
     VBox,
 )
 
@@ -52,7 +56,7 @@ from ueler.rendering import MaskPainterSnapshot, set_cell_color, get_cell_color,
 _logger = logging.getLogger(__name__)
 COLOR_SET_FILE_SUFFIX = ".maskcolors.json"
 REGISTRY_FILENAME = "mask_color_sets_index.json"
-COLOR_SET_VERSION = "1.1.0"
+COLOR_SET_VERSION = "1.2.0"
 FILL_OPACITY_DEFAULT_PERCENT = 35
 BORDER_COLOR_MODE_MASK_TYPE = "mask_type_color"
 BORDER_COLOR_MODE_SAME_AS_FILL = "same_as_fill"
@@ -68,6 +72,13 @@ def _normalise_opacity_percent(value: object, default: int = FILL_OPACITY_DEFAUL
 
 def _opacity_percent_to_alpha(value: object, default: int = FILL_OPACITY_DEFAULT_PERCENT) -> float:
     return _normalise_opacity_percent(value, default) / 100.0
+
+
+def _safe_float(value: object, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
 
 
 def _resolve_mask_type_color(main_viewer, mask_name: Optional[str], fallback: str = DEFAULT_COLOR) -> str:
@@ -163,6 +174,109 @@ def split_default_classes(
     return non_default, defaulted
 
 
+CONTINUOUS_COLORMAPS: Tuple[str, ...] = (
+    "viridis",
+    "plasma",
+    "inferno",
+    "magma",
+    "cividis",
+    "coolwarm",
+    "RdBu_r",
+    "turbo",
+    "Greys",
+    "hot",
+)
+
+
+def _get_colormap(name: str):
+    """Return a matplotlib colormap by name, compatible across versions."""
+    try:  # matplotlib >= 3.5
+        import matplotlib
+        return matplotlib.colormaps[name]
+    except Exception:  # pragma: no cover - fallback for older matplotlib
+        from matplotlib import cm
+        return cm.get_cmap(name)
+
+
+def _arcsinh_transform(values: np.ndarray, cofactor: float) -> np.ndarray:
+    """Apply an arcsinh(value / cofactor) transform, guarding the cofactor."""
+    factor = float(cofactor)
+    if not np.isfinite(factor) or factor <= 0:
+        factor = 1.0
+    return np.arcsinh(values / factor)
+
+
+def resolve_continuous_range(
+    values,
+    arcsinh: bool = False,
+    cofactor: float = 5.0,
+    lo_pct: float = 1.0,
+    hi_pct: float = 99.0,
+) -> Tuple[float, float]:
+    """Resolve a (vmin, vmax) range for continuous coloring.
+
+    The range is computed in the (optionally arcsinh-transformed) value space
+    using percentiles. Intended to be computed once over the *whole* column so
+    a given value maps to the same color in every FOV. Handles the all-NaN and
+    constant-column edge cases without raising.
+    """
+    arr = np.asarray(values, dtype=float)
+    if arcsinh:
+        arr = _arcsinh_transform(arr, cofactor)
+    finite = arr[np.isfinite(arr)]
+    if finite.size == 0:
+        return 0.0, 1.0
+    vmin = float(np.nanpercentile(finite, lo_pct))
+    vmax = float(np.nanpercentile(finite, hi_pct))
+    if not np.isfinite(vmin) or not np.isfinite(vmax) or vmax <= vmin:
+        # Constant or degenerate column: widen so Normalize has non-zero width.
+        base = vmin if np.isfinite(vmin) else 0.0
+        return base, base + 1.0
+    return vmin, vmax
+
+
+def compute_continuous_colors(
+    values,
+    mask_ids,
+    *,
+    colormap: str,
+    vmin: float,
+    vmax: float,
+    arcsinh: bool = False,
+    cofactor: float = 5.0,
+) -> Dict[int, str]:
+    """Map continuous values to per-cell hex colors via a matplotlib colormap.
+
+    Returns ``{mask_id: hex}``. NaN/non-finite values are skipped (omitted from
+    the dict) so those cells fall through to the base mask, mirroring how
+    hidden/inactive cells behave in the categorical path.
+    """
+    from matplotlib.colors import Normalize, to_hex
+
+    arr = np.asarray(values, dtype=float)
+    ids = np.asarray(mask_ids)
+    if arr.size == 0:
+        return {}
+    if arcsinh:
+        arr = _arcsinh_transform(arr, cofactor)
+
+    lo = float(vmin)
+    hi = float(vmax)
+    if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+        hi = lo + 1.0
+    norm = Normalize(vmin=lo, vmax=hi, clip=True)
+    cmap = _get_colormap(colormap)
+
+    finite_mask = np.isfinite(arr)
+    if not finite_mask.any():
+        return {}
+    rgba = cmap(norm(arr))
+    result: Dict[int, str] = {}
+    for idx in np.nonzero(finite_mask)[0]:
+        result[int(ids[idx])] = to_hex(rgba[idx])
+    return result
+
+
 def build_painter_state_maps_for_fov(
     *,
     cell_table,
@@ -180,8 +294,41 @@ def build_painter_state_maps_for_fov(
     global_fill_opacity: int,
     border_color_mode: str = BORDER_COLOR_MODE_MASK_TYPE,
     mask_type_color: str = DEFAULT_COLOR,
+    continuous: Optional[Mapping[str, object]] = None,
 ) -> Tuple[Dict[int, str], Dict[int, str], Dict[int, str], Dict[int, float]]:
-    """Resolve effective painter color/mode/opacity maps for one FOV."""
+    """Resolve effective painter color/mode/opacity maps for one FOV.
+
+    When ``continuous`` is provided it takes precedence over the categorical
+    branch: cells are colored by mapping a numeric column through a colormap
+    using the pre-resolved global ``vmin``/``vmax`` carried in the spec.
+    """
+    if continuous is not None:
+        column = continuous.get("column")
+        if cell_table is None or not fov or not column or column not in cell_table.columns:
+            return {}, {}, {}, {}
+        rows = cell_table.loc[cell_table[fov_key] == fov, [label_key, column]]
+        if rows.empty:
+            return {}, {}, {}, {}
+        color_map = compute_continuous_colors(
+            rows[column].to_numpy(),
+            rows[label_key].to_numpy(),
+            colormap=str(continuous.get("colormap", "viridis")),
+            vmin=float(continuous.get("vmin", 0.0)),
+            vmax=float(continuous.get("vmax", 1.0)),
+            arcsinh=bool(continuous.get("arcsinh", False)),
+            cofactor=float(continuous.get("cofactor", 5.0)),
+        )
+        mode = "fill" if bool(continuous.get("fill", True)) else "outline"
+        mode_map = {mid: mode for mid in color_map}
+        if mode == "fill":
+            alpha = _opacity_percent_to_alpha(
+                continuous.get("opacity", 100), _normalise_opacity_percent(continuous.get("opacity", 100))
+            )
+            opacity_map = {mid: alpha for mid in color_map}
+        else:
+            opacity_map = {}
+        return color_map, {}, mode_map, opacity_map
+
     if cell_table is None or not fov or not identifier or identifier not in cell_table.columns:
         return {}, {}, {}, {}
 
@@ -328,6 +475,7 @@ class MaskPainterDisplay(PluginBase):
         self._migrate_legacy_palettes(self.registry_folder)
 
         self._initialise_identifier_options()
+        self._initialise_continuous_options()
 
         self.ui_component.update_button.on_click(self.apply_colors_to_masks)
         self.ui_component.identifier_dropdown.observe(self.on_identifier_change, names="value")
@@ -350,6 +498,19 @@ class MaskPainterDisplay(PluginBase):
         self.ui_component.show_fill_borders_checkbox.observe(self._on_fill_border_toggle, names="value")
         self.ui_component.border_color_mode_dropdown.observe(self._on_fill_border_toggle, names="value")
 
+        # Wire continuous-coloring controls (issue #115)
+        self.ui_component.color_mode_toggle.observe(self._on_color_mode_change, names="value")
+        self.ui_component.continuous_column_dropdown.observe(self._on_continuous_column_change, names="value")
+        self.ui_component.colormap_dropdown.observe(self._on_continuous_param_change, names="value")
+        self.ui_component.arcsinh_checkbox.observe(self._on_continuous_param_change, names="value")
+        self.ui_component.arcsinh_cofactor_input.observe(self._on_continuous_param_change, names="value")
+        self.ui_component.continuous_opacity_input.observe(self._on_continuous_param_change, names="value")
+        self.ui_component.continuous_fill_checkbox.observe(self._on_continuous_param_change, names="value")
+        self.ui_component.auto_range_checkbox.observe(self._on_auto_range_toggle, names="value")
+        self.ui_component.vmin_input.observe(self._on_continuous_range_edit, names="value")
+        self.ui_component.vmax_input.observe(self._on_continuous_range_edit, names="value")
+        self.ui_component.autorange_button.on_click(self._recompute_continuous_range)
+
         # Wire anywidget class-list traitlet changes → Python state
         _w = self.ui_component.class_list_widget
         _w.observe(self._pull_from_widget, names=["class_order", "class_colors", "class_visible", "class_fill", "class_opacity"])
@@ -367,6 +528,16 @@ class MaskPainterDisplay(PluginBase):
             identifier_options = cell_table.select_dtypes(include=["int", "int64", "object", "bool"]).columns.tolist()
 
         self.ui_component.identifier_dropdown.options = list(identifier_options)
+
+    def _initialise_continuous_options(self) -> None:
+        """Populate the continuous-value dropdown with the float columns."""
+        continuous_options: Iterable[str] = []
+        if self.main_viewer.cell_table is not None:
+            cell_table = self.main_viewer.cell_table
+            continuous_options = cell_table.select_dtypes(
+                include=["float", "float32", "float64"]
+            ).columns.tolist()
+        self.ui_component.continuous_column_dropdown.options = list(continuous_options)
 
     # ------------------------------------------------------------------
     # Identifier and class handling
@@ -592,6 +763,18 @@ class MaskPainterDisplay(PluginBase):
             "global_fill_opacity": _normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
             "show_fill_borders": bool(self.ui_component.show_fill_borders_checkbox.value),
             "border_color_mode": self.get_border_color_mode(),
+            "color_mode": str(self.ui_component.color_mode_toggle.value or "categorical"),
+            "continuous": {
+                "column": str(self.ui_component.continuous_column_dropdown.value or ""),
+                "colormap": str(self.ui_component.colormap_dropdown.value or "viridis"),
+                "vmin": _safe_float(self.ui_component.vmin_input.value, 0.0),
+                "vmax": _safe_float(self.ui_component.vmax_input.value, 1.0),
+                "arcsinh": bool(self.ui_component.arcsinh_checkbox.value),
+                "cofactor": _safe_float(self.ui_component.arcsinh_cofactor_input.value, 5.0),
+                "auto_range": bool(self.ui_component.auto_range_checkbox.value),
+                "opacity": _normalise_opacity_percent(self.ui_component.continuous_opacity_input.value),
+                "fill": bool(self.ui_component.continuous_fill_checkbox.value),
+            },
             "saved_at": timestamp,
         }
 
@@ -614,6 +797,7 @@ class MaskPainterDisplay(PluginBase):
             global_fill_opacity=_normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
             border_color_mode=self.get_border_color_mode(),
             mask_type_color=self.get_mask_type_color(),
+            continuous=self._active_continuous_spec(),
         )
         return color_map
 
@@ -636,6 +820,7 @@ class MaskPainterDisplay(PluginBase):
             global_fill_opacity=_normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
             border_color_mode=self.get_border_color_mode(),
             mask_type_color=self.get_mask_type_color(),
+            continuous=self._active_continuous_spec(),
         )
         return border_map
 
@@ -658,6 +843,7 @@ class MaskPainterDisplay(PluginBase):
             global_fill_opacity=_normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
             border_color_mode=self.get_border_color_mode(),
             mask_type_color=self.get_mask_type_color(),
+            continuous=self._active_continuous_spec(),
         )
         return mode_map
 
@@ -680,6 +866,7 @@ class MaskPainterDisplay(PluginBase):
             global_fill_opacity=_normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
             border_color_mode=self.get_border_color_mode(),
             mask_type_color=self.get_mask_type_color(),
+            continuous=self._active_continuous_spec(),
         )
         return opacity_map
 
@@ -715,6 +902,7 @@ class MaskPainterDisplay(PluginBase):
             global_fill_opacity=_normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
             border_color_mode=self.get_border_color_mode(),
             mask_type_color=self.get_mask_type_color(),
+            continuous=self._active_continuous_spec(),
         )
         self._state_maps_cache[str(current_fov) if current_fov else ""] = result
         return result
@@ -739,15 +927,29 @@ class MaskPainterDisplay(PluginBase):
         )
 
     def capture_snapshot(self) -> Optional[MaskPainterSnapshot]:
+        color_mode = self.ui_component.color_mode_toggle.value
         identifier = self.ui_component.identifier_dropdown.value
-        if not identifier or not self.class_color_controls:
+        continuous_column = self.ui_component.continuous_column_dropdown.value
+        # Continuous mode has no per-class controls; guard on the value column instead.
+        if color_mode == "continuous":
+            if not continuous_column:
+                return None
+        elif not identifier or not self.class_color_controls:
             return None
 
         mask_type_color = self.get_mask_type_color()
+        arcsinh = bool(self.ui_component.arcsinh_checkbox.value)
+        cofactor = _safe_float(self.ui_component.arcsinh_cofactor_input.value, 5.0)
+        vmin = _safe_float(self.ui_component.vmin_input.value, 0.0)
+        vmax = _safe_float(self.ui_component.vmax_input.value, 1.0)
+        if color_mode == "continuous" and continuous_column:
+            spec = self._build_continuous_spec()
+            if spec is not None:
+                vmin, vmax = float(spec["vmin"]), float(spec["vmax"])
 
         return MaskPainterSnapshot(
             mask_name=str(getattr(self.main_viewer, "mask_key", "") or ""),
-            identifier=str(identifier),
+            identifier=str(identifier or ""),
             active_classes=tuple(str(cls) for cls in self._get_active_classes()),
             class_colors={cls: getattr(widget, "value", self.default_color) or self.default_color for cls, widget in self.class_color_controls.items()},
             class_visible={cls: bool(getattr(widget, "value", True)) for cls, widget in self.class_visible_controls.items()},
@@ -760,11 +962,23 @@ class MaskPainterDisplay(PluginBase):
             border_color_mode=self.get_border_color_mode(),
             mask_type_color=mask_type_color,
             outline_thickness=int(getattr(self.main_viewer, "mask_outline_thickness", 1)),
+            color_mode=str(color_mode),
+            continuous_column=str(continuous_column or ""),
+            colormap=str(self.ui_component.colormap_dropdown.value or "viridis"),
+            vmin=vmin,
+            vmax=vmax,
+            arcsinh=arcsinh,
+            arcsinh_cofactor=cofactor,
+            continuous_opacity=_normalise_opacity_percent(self.ui_component.continuous_opacity_input.value),
+            continuous_fill=bool(self.ui_component.continuous_fill_checkbox.value),
         )
 
     def apply_snapshot(self, snapshot: Optional[MaskPainterSnapshot]) -> bool:
         if snapshot is None:
             return False
+
+        if str(getattr(snapshot, "color_mode", "categorical")) == "continuous":
+            return self._apply_continuous_snapshot(snapshot)
 
         identifier = str(getattr(snapshot, "identifier", "") or "")
         if not identifier:
@@ -845,6 +1059,42 @@ class MaskPainterDisplay(PluginBase):
         self.apply_colors_to_masks(None)
         return True
 
+    def _apply_continuous_snapshot(self, snapshot: MaskPainterSnapshot) -> bool:
+        """Restore continuous-mode widgets from a snapshot and re-apply colors."""
+        column = str(getattr(snapshot, "continuous_column", "") or "")
+        if not column:
+            return False
+        options = tuple(getattr(self.ui_component.continuous_column_dropdown, "options", ()) or ())
+        if column not in options:
+            return False
+
+        self._syncing = True
+        try:
+            self.ui_component.color_mode_toggle.value = "continuous"
+            self.ui_component.continuous_column_dropdown.value = column
+            colormap = str(getattr(snapshot, "colormap", "viridis") or "viridis")
+            if colormap in tuple(self.ui_component.colormap_dropdown.options or ()):
+                self.ui_component.colormap_dropdown.value = colormap
+            self.ui_component.arcsinh_checkbox.value = bool(getattr(snapshot, "arcsinh", False))
+            self.ui_component.arcsinh_cofactor_input.value = float(getattr(snapshot, "arcsinh_cofactor", 5.0))
+            # Snapshot carries a concrete resolved range → pin it via manual mode.
+            self.ui_component.auto_range_checkbox.value = False
+            self.ui_component.vmin_input.disabled = False
+            self.ui_component.vmax_input.disabled = False
+            self._set_range_fields(float(getattr(snapshot, "vmin", 0.0)), float(getattr(snapshot, "vmax", 1.0)))
+            self.ui_component.continuous_opacity_input.value = _normalise_opacity_percent(
+                getattr(snapshot, "continuous_opacity", 100)
+            )
+            self.ui_component.continuous_fill_checkbox.value = bool(getattr(snapshot, "continuous_fill", True))
+        finally:
+            self._syncing = False
+
+        self.ui_component.categorical_layout.layout.display = "none"
+        self.ui_component.continuous_layout.layout.display = "block"
+        self._invalidate_state_maps_cache()
+        self.apply_colors_to_masks(None)
+        return True
+
     # ------------------------------------------------------------------
     # Persistence helpers
     # ------------------------------------------------------------------
@@ -854,7 +1104,10 @@ class MaskPainterDisplay(PluginBase):
             name = self.ui_component.set_name_input.value.strip()
             if not name:
                 raise ColorSetError("Please provide a name for the color set.")
-            if not self.class_color_controls:
+            if self.ui_component.color_mode_toggle.value == "continuous":
+                if not self.ui_component.continuous_column_dropdown.value:
+                    raise ColorSetError("Select a continuous value column before saving colors.")
+            elif not self.class_color_controls:
                 raise ColorSetError("Select an identifier before saving colors.")
 
             timestamp = datetime.utcnow().isoformat() + "Z"
@@ -900,7 +1153,10 @@ class MaskPainterDisplay(PluginBase):
             folder = Path(record.get("folder", self.registry_folder))
             path = Path(record["path"])
 
-            if not self.class_color_controls:
+            if self.ui_component.color_mode_toggle.value == "continuous":
+                if not self.ui_component.continuous_column_dropdown.value:
+                    raise ColorSetError("Select a continuous value column before overwriting a color set.")
+            elif not self.class_color_controls:
                 raise ColorSetError("Select an identifier before overwriting a color set.")
 
             timestamp = datetime.utcnow().isoformat() + "Z"
@@ -1028,6 +1284,11 @@ class MaskPainterDisplay(PluginBase):
         if not path.exists():
             raise ColorSetError(f"Color set file '{path}' was not found.")
         payload = read_color_set_file(path)
+
+        if str(payload.get("color_mode") or "categorical") == "continuous":
+            self._apply_continuous_payload(payload, path)
+            return
+
         color_map = payload.get("colors", {})
         default_color = payload.get("default_color", self.default_color)
         saved_identifier = (payload.get("identifier") or "").strip()
@@ -1117,6 +1378,45 @@ class MaskPainterDisplay(PluginBase):
         if self.ui_component.enabled_checkbox.value:
             self.apply_colors_to_masks(None)
 
+    def _apply_continuous_payload(self, payload: Mapping[str, object], path: Path) -> None:
+        """Restore a saved continuous-coloring palette."""
+        cont = dict(payload.get("continuous") or {})
+        column = str(cont.get("column") or "")
+        self._syncing = True
+        try:
+            self.ui_component.color_mode_toggle.value = "continuous"
+            options = tuple(self.ui_component.continuous_column_dropdown.options or ())
+            if column and column in options:
+                self.ui_component.continuous_column_dropdown.value = column
+            elif column:
+                self._log(
+                    f"Continuous column '{column}' from palette is not in the current dataset.",
+                    error=True,
+                )
+            colormap = str(cont.get("colormap") or "viridis")
+            if colormap in tuple(self.ui_component.colormap_dropdown.options or ()):
+                self.ui_component.colormap_dropdown.value = colormap
+            self.ui_component.arcsinh_checkbox.value = bool(cont.get("arcsinh", False))
+            self.ui_component.arcsinh_cofactor_input.value = float(cont.get("cofactor", 5.0) or 5.0)
+            auto_range = bool(cont.get("auto_range", True))
+            self.ui_component.auto_range_checkbox.value = auto_range
+            self.ui_component.vmin_input.disabled = auto_range
+            self.ui_component.vmax_input.disabled = auto_range
+            if not auto_range:
+                self._set_range_fields(float(cont.get("vmin", 0.0) or 0.0), float(cont.get("vmax", 1.0)))
+            self.ui_component.continuous_opacity_input.value = _normalise_opacity_percent(cont.get("opacity", 100))
+            self.ui_component.continuous_fill_checkbox.value = bool(cont.get("fill", True))
+        finally:
+            self._syncing = False
+
+        self.ui_component.categorical_layout.layout.display = "none"
+        self.ui_component.continuous_layout.layout.display = "block"
+        self._invalidate_state_maps_cache()
+        self._render_colorbar()
+        self._log(f"Loaded continuous color set '{payload.get('name', path.stem)}' from {path}.", clear=True)
+        if self.ui_component.enabled_checkbox.value:
+            self.apply_colors_to_masks(None)
+
     def _ensure_identifier_available(self, identifier: str) -> None:
         if not identifier:
             return
@@ -1152,9 +1452,211 @@ class MaskPainterDisplay(PluginBase):
     # ------------------------------------------------------------------
     # Viewer integration
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Continuous coloring (issue #115)
+    # ------------------------------------------------------------------
+    def _active_continuous_spec(self) -> Optional[Dict[str, object]]:
+        """Return the continuous spec when the painter is in continuous mode, else None."""
+        if self.ui_component.color_mode_toggle.value != "continuous":
+            return None
+        return self._build_continuous_spec()
+
+    def _build_continuous_spec(self) -> Optional[Dict[str, object]]:
+        """Read the continuous widgets into a spec dict with a resolved global range."""
+        column = self.ui_component.continuous_column_dropdown.value
+        if not column or self.main_viewer.cell_table is None:
+            return None
+        if column not in self.main_viewer.cell_table.columns:
+            return None
+        arcsinh = bool(self.ui_component.arcsinh_checkbox.value)
+        cofactor = _safe_float(self.ui_component.arcsinh_cofactor_input.value, 5.0)
+        vmin, vmax = self._resolve_active_range(column, arcsinh, cofactor)
+        return {
+            "column": str(column),
+            "colormap": str(self.ui_component.colormap_dropdown.value),
+            "vmin": float(vmin),
+            "vmax": float(vmax),
+            "arcsinh": arcsinh,
+            "cofactor": cofactor,
+            "opacity": _normalise_opacity_percent(self.ui_component.continuous_opacity_input.value),
+            "fill": bool(self.ui_component.continuous_fill_checkbox.value),
+        }
+
+    def _resolve_active_range(self, column, arcsinh: bool, cofactor: float) -> Tuple[float, float]:
+        """Resolve the (vmin, vmax) range, auto-computing globally when auto range is on."""
+        if self.ui_component.auto_range_checkbox.value:
+            values = self.main_viewer.cell_table[column].to_numpy()
+            vmin, vmax = resolve_continuous_range(values, arcsinh=arcsinh, cofactor=cofactor)
+            # Reflect the resolved numbers in the (disabled) fields without re-triggering.
+            self._set_range_fields(vmin, vmax)
+            return vmin, vmax
+        return (
+            _safe_float(self.ui_component.vmin_input.value, 0.0),
+            _safe_float(self.ui_component.vmax_input.value, 1.0),
+        )
+
+    def _set_range_fields(self, vmin: float, vmax: float) -> None:
+        for widget, value in ((self.ui_component.vmin_input, vmin), (self.ui_component.vmax_input, vmax)):
+            widget.unobserve(self._on_continuous_range_edit, names="value")
+            try:
+                widget.value = float(value)
+            finally:
+                widget.observe(self._on_continuous_range_edit, names="value")
+
+    def _refresh_continuous_display(self) -> None:
+        """Recompute continuous colors for the current FOV and refresh the viewer."""
+        self._invalidate_state_maps_cache()
+        self._render_colorbar()
+        if not self.ui_component.enabled_checkbox.value:
+            return
+        map_mode = self.main_viewer.get_active_fov() is None
+        self.apply_colors_to_masks(None, notify_cell_gallery=False, register_globally=map_mode)
+
+    def _on_color_mode_change(self, change):
+        continuous = change.get("new") == "continuous"
+        self.ui_component.categorical_layout.layout.display = "none" if continuous else "block"
+        self.ui_component.continuous_layout.layout.display = "block" if continuous else "none"
+        self._refresh_save_button_state()
+        self._invalidate_state_maps_cache()
+        if continuous:
+            self._render_colorbar()
+        if self.ui_component.enabled_checkbox.value:
+            update_display = getattr(self.main_viewer, "update_display", None)
+            current_ds = getattr(self.main_viewer, "current_downsample_factor", 1)
+            if callable(update_display):
+                update_display(current_ds)
+
+    def _on_continuous_column_change(self, _change):
+        self._refresh_save_button_state()
+        if self.ui_component.auto_range_checkbox.value:
+            # New column → recompute the global range from its values.
+            self._recompute_continuous_range(None)
+        else:
+            self._refresh_continuous_display()
+
+    def _on_continuous_param_change(self, _change):
+        if self._syncing:
+            return
+        # arcsinh / colormap changes affect the transformed range too when auto is on.
+        if self.ui_component.auto_range_checkbox.value:
+            spec = self._build_continuous_spec()  # side effect: refreshes range fields
+            if spec is None:
+                self._render_colorbar()
+                return
+        self._refresh_continuous_display()
+
+    def _on_auto_range_toggle(self, change):
+        auto = bool(change.get("new", True))
+        self.ui_component.vmin_input.disabled = auto
+        self.ui_component.vmax_input.disabled = auto
+        if auto:
+            self._recompute_continuous_range(None)
+        else:
+            self._refresh_continuous_display()
+
+    def _on_continuous_range_edit(self, _change):
+        if self._syncing or self.ui_component.auto_range_checkbox.value:
+            return
+        self._refresh_continuous_display()
+
+    def _recompute_continuous_range(self, _):
+        column = self.ui_component.continuous_column_dropdown.value
+        if not column or self.main_viewer.cell_table is None or column not in self.main_viewer.cell_table.columns:
+            self._log("Select a continuous value column first.", error=True, clear=True)
+            return
+        arcsinh = bool(self.ui_component.arcsinh_checkbox.value)
+        cofactor = float(self.ui_component.arcsinh_cofactor_input.value)
+        vmin, vmax = resolve_continuous_range(
+            self.main_viewer.cell_table[column].to_numpy(), arcsinh=arcsinh, cofactor=cofactor
+        )
+        self._set_range_fields(vmin, vmax)
+        self._refresh_continuous_display()
+
+    def _render_colorbar(self) -> None:
+        """Draw a horizontal colorbar legend into the continuous output widget."""
+        column = self.ui_component.continuous_column_dropdown.value
+        if not column:
+            return
+        try:
+            import matplotlib.pyplot as plt
+            from matplotlib import cm
+            from matplotlib.colors import Normalize
+        except Exception:  # pragma: no cover - matplotlib always present here
+            return
+        arcsinh = bool(self.ui_component.arcsinh_checkbox.value)
+        vmin = _safe_float(self.ui_component.vmin_input.value, 0.0)
+        vmax = _safe_float(self.ui_component.vmax_input.value, 1.0)
+        if vmax <= vmin:
+            vmax = vmin + 1.0
+        with self.ui_component.colorbar_output:
+            self.ui_component.colorbar_output.clear_output(wait=True)
+            fig, ax = plt.subplots(figsize=(4, 0.5))
+            mappable = cm.ScalarMappable(norm=Normalize(vmin=vmin, vmax=vmax), cmap=self.ui_component.colormap_dropdown.value)
+            fig.colorbar(mappable, cax=ax, orientation="horizontal")
+            label = f"arcsinh({column} / {self.ui_component.arcsinh_cofactor_input.value:g})" if arcsinh else str(column)
+            ax.set_title(label, fontsize=7)
+            plt.show()
+            plt.close(fig)
+
+    def _apply_continuous_colors_to_masks(self, *, notify_cell_gallery: bool = True, register_globally: bool = True):
+        """Apply continuous (gradient) colors to masks. Mirrors the categorical apply tail."""
+        if self.main_viewer.cell_table is None:
+            self._log("Cell table is not available.", error=True, clear=True)
+            return
+        spec = self._build_continuous_spec()
+        if spec is None:
+            self._log("Select a continuous value column to color.", error=True, clear=True)
+            return
+
+        cell_table = self.main_viewer.cell_table
+        column = spec["column"]
+        if not cell_table[column].notna().any():
+            self._log(f"Column '{column}' has no finite values to color.", error=True, clear=True)
+            return
+
+        mode = "fill" if spec["fill"] else "outline"
+        alpha = _opacity_percent_to_alpha(spec["opacity"], spec["opacity"]) if mode == "fill" else 0.0
+
+        if register_globally:
+            fov_key = self.main_viewer.fov_key
+            label_key = self.main_viewer.label_key
+            entries: Dict[str, Dict[int, str]] = {}
+            for fov, group in cell_table.groupby(fov_key):
+                colors = compute_continuous_colors(
+                    group[column].to_numpy(),
+                    group[label_key].to_numpy(),
+                    colormap=spec["colormap"],
+                    vmin=spec["vmin"],
+                    vmax=spec["vmax"],
+                    arcsinh=spec["arcsinh"],
+                    cofactor=spec["cofactor"],
+                )
+                if not colors:
+                    continue
+                entries[str(fov)] = colors
+                mode_target = self._cell_mode_cache.setdefault(str(fov), {})
+                opacity_target = self._cell_opacity_cache.setdefault(str(fov), {})
+                for mid in colors:
+                    mode_target[mid] = mode
+                    opacity_target[mid] = alpha
+            if entries:
+                set_cell_colors_bulk(entries)
+
+        self._log("Masks updated with continuous colors.")
+        self._render_colorbar()
+
+        if notify_cell_gallery:
+            self._notify_cell_gallery_update()
+
+        if self.ui_component.enabled_checkbox.value:
+            update_display = getattr(self.main_viewer, "update_display", None)
+            current_ds = getattr(self.main_viewer, "current_downsample_factor", 1)
+            if callable(update_display):
+                update_display(current_ds)
+
     def apply_colors_to_masks(self, _, *, notify_cell_gallery: bool = True, register_globally: bool = True):
         """Apply colors to masks.
-        
+
         Parameters
         ----------
         notify_cell_gallery : bool
@@ -1164,6 +1666,14 @@ class MaskPainterDisplay(PluginBase):
             Set to False when called automatically on display updates.
         """
         self._invalidate_state_maps_cache()
+
+        if self.ui_component.color_mode_toggle.value == "continuous":
+            self._apply_continuous_colors_to_masks(
+                notify_cell_gallery=notify_cell_gallery,
+                register_globally=register_globally,
+            )
+            return
+
         identifier = self.ui_component.identifier_dropdown.value
         if not identifier:
             self._log("No identifier selected.", error=True, clear=True)
@@ -1453,6 +1963,7 @@ class MaskPainterDisplay(PluginBase):
 
     def on_cell_table_change(self):
         self._initialise_identifier_options()
+        self._initialise_continuous_options()
         self._active_classes = []
         # Clear tracking state when cell table changes
         self._last_applied_fov = None
@@ -1586,11 +2097,14 @@ class MaskPainterDisplay(PluginBase):
         self.ui_component.toggle_manual_folder_box(False)
 
     def _refresh_save_button_state(self, _=None) -> None:
-        """Enable Save set button only when both a name and an identifier are set."""
+        """Enable Save set button only when a name and a value source are set."""
         name_val = getattr(self.ui_component.set_name_input, "value", None) or ""
         has_name = bool(str(name_val).strip())
-        has_identifier = bool(getattr(self.ui_component.identifier_dropdown, "value", None))
-        self.ui_component.save_button.disabled = not (has_name and has_identifier)
+        if getattr(self.ui_component.color_mode_toggle, "value", "categorical") == "continuous":
+            has_source = bool(getattr(self.ui_component.continuous_column_dropdown, "value", None))
+        else:
+            has_source = bool(getattr(self.ui_component.identifier_dropdown, "value", None))
+        self.ui_component.save_button.disabled = not (has_name and has_source)
 
     def _push_to_widget(self, _=None) -> None:
         """Push the current Python-side state (colors, visibility, order) to the anywidget."""
@@ -1900,7 +2414,15 @@ class UiComponent:
             tooltip="Show only classes whose color differs from the default color",
         )
 
-        self.colors_layout = VBox([
+        # --- Coloring mode: categorical (default) vs continuous (issue #115) ---
+        self.color_mode_toggle = ToggleButtons(
+            options=[("Categorical", "categorical"), ("Continuous", "continuous")],
+            value="categorical",
+            tooltip="Color masks by discrete classes or by a continuous variable",
+        )
+
+        # Categorical controls (existing UI), grouped so it can be hidden as a unit.
+        self.categorical_layout = VBox([
             HBox([self.default_color_picker, self.only_specified_checkbox]),
             HBox(
                 [
@@ -1914,6 +2436,53 @@ class UiComponent:
             HBox([self.border_color_mode_dropdown]),
             HTML("<hr style='margin:4px 0'>"),
             self.class_list_widget,
+        ])
+
+        # Continuous controls (issue #115).
+        self.continuous_column_dropdown = Dropdown(description="Value:", layout=Layout(width="auto"))
+        self.colormap_dropdown = Dropdown(
+            description="Colormap:",
+            options=list(CONTINUOUS_COLORMAPS),
+            value="viridis",
+            layout=Layout(width="auto"),
+        )
+        self.arcsinh_checkbox = Checkbox(
+            value=False, description="arcsinh transform", indent=False, layout=Layout(width="auto"),
+        )
+        self.arcsinh_cofactor_input = BoundedFloatText(
+            value=5.0, min=1e-6, max=1e6, step=1.0, description="cofactor:", layout=Layout(width="160px"),
+        )
+        self.auto_range_checkbox = Checkbox(
+            value=True, description="Auto range (1–99 pct)", indent=False, layout=Layout(width="auto"),
+        )
+        self.vmin_input = FloatText(description="vmin:", disabled=True, layout=Layout(width="150px"))
+        self.vmax_input = FloatText(description="vmax:", disabled=True, layout=Layout(width="150px"))
+        self.autorange_button = Button(description="Recompute range", icon="refresh")
+        self.continuous_opacity_input = BoundedIntText(
+            description="Opacity (%):", value=100, min=0, max=100, step=1, layout=Layout(width="130px"),
+        )
+        self.continuous_fill_checkbox = Checkbox(
+            value=True, description="Fill (unchecked = outline)", indent=False, layout=Layout(width="auto"),
+        )
+        self.colorbar_output = Output(layout=Layout(height="70px"))
+
+        self.continuous_layout = VBox(
+            [
+                self.continuous_column_dropdown,
+                self.colormap_dropdown,
+                HBox([self.arcsinh_checkbox, self.arcsinh_cofactor_input], layout=Layout(align_items="center")),
+                HBox([self.auto_range_checkbox, self.autorange_button], layout=Layout(align_items="center")),
+                HBox([self.vmin_input, self.vmax_input]),
+                HBox([self.continuous_fill_checkbox, self.continuous_opacity_input], layout=Layout(align_items="center")),
+                self.colorbar_output,
+            ],
+            layout=Layout(display="none"),
+        )
+
+        self.colors_layout = VBox([
+            HBox([self.color_mode_toggle]),
+            self.categorical_layout,
+            self.continuous_layout,
         ])
 
         self.set_name_input = Text(description="Name:", placeholder="My palette")

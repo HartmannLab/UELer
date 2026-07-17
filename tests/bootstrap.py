@@ -716,6 +716,7 @@ def _build_ipywidgets_stub():
     # Map all widget types we rely on to the base ``Widget`` implementation.
     for name in [
         "Widget",
+        "BoundedFloatText",
         "BoundedIntText",
         "Button",
         "Box",
@@ -724,6 +725,7 @@ def _build_ipywidgets_stub():
         "Combobox",
         "Dropdown",
         "FloatSlider",
+        "FloatText",
         "GridBox",
         "HBox",
         "HTML",
