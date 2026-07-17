@@ -457,11 +457,16 @@ class MaskPainterDisplay(PluginBase):
         self._last_applied_class_modes: Dict[str, str] = {}
         self._last_applied_class_opacities: Dict[str, float] = {}
         self._syncing: bool = False  # guard against anywidget ↔ ipywidget sync loops
+        self._applying: bool = False  # re-entrancy guard: True while apply_colors_to_masks runs
         
         # Track last applied state to avoid unnecessary re-application
         self._last_applied_fov: Optional[str] = None
         self._last_applied_identifier: Optional[str] = None
         self._last_applied_classes: Optional[set] = None
+        # Continuous-mode equivalent of the (fov, identifier, classes) tracking above:
+        # the signature of the last continuous apply, so on_mv_update_display can
+        # short-circuit instead of re-entering apply → update_display (issue #115 reply 2).
+        self._last_applied_continuous: Optional[tuple] = None
         self._last_applied_class_colors: dict[str, str] = {}
         self._state_maps_cache: Dict[str, tuple] = {}  # fov -> (color_map, border_map, mode_map, opacity_map)
         # Cached continuous auto-range: ((column, arcsinh, cofactor), (vmin, vmax)).
@@ -1497,6 +1502,26 @@ class MaskPainterDisplay(PluginBase):
             "fill": bool(self.ui_component.continuous_fill_checkbox.value),
         }
 
+    @staticmethod
+    def _continuous_signature(spec: Optional[Mapping[str, object]]) -> Optional[tuple]:
+        """Hashable signature of a continuous spec for change detection.
+
+        Used by ``on_mv_update_display`` to decide whether a re-apply is needed;
+        two specs with the same values must produce the same signature.
+        """
+        if spec is None:
+            return None
+        return (
+            str(spec.get("column", "")),
+            str(spec.get("colormap", "")),
+            float(spec.get("vmin", 0.0)),
+            float(spec.get("vmax", 1.0)),
+            bool(spec.get("arcsinh", False)),
+            float(spec.get("cofactor", 5.0)),
+            int(spec.get("opacity", 100)),
+            bool(spec.get("fill", True)),
+        )
+
     def _compute_auto_range(self, column, arcsinh: bool, cofactor: float) -> Tuple[float, float]:
         values = self.main_viewer.cell_table[column].to_numpy()
         return resolve_continuous_range(values, arcsinh=arcsinh, cofactor=cofactor)
@@ -1553,13 +1578,20 @@ class MaskPainterDisplay(PluginBase):
     def _refresh_continuous_display(self) -> None:
         """Recompute continuous colors for the current FOV and refresh the viewer."""
         self._invalidate_state_maps_cache()
-        self._render_colorbar()
         if not self.ui_component.enabled_checkbox.value:
+            # Not painting: just refresh the colorbar legend to reflect the change.
+            self._render_colorbar()
             return
+        # apply_colors_to_masks renders the colorbar itself, so don't render it here
+        # too (that double render was the visible "UI refreshed twice" — #115 reply 2).
         map_mode = self.main_viewer.get_active_fov() is None
         self.apply_colors_to_masks(None, notify_cell_gallery=False, register_globally=map_mode)
 
     def _on_color_mode_change(self, change):
+        # Restore paths (snapshot / palette load) set the mode + layout + one explicit
+        # apply themselves under _syncing; skip here to avoid extra refreshes (#115 reply 2).
+        if self._syncing:
+            return
         continuous = change.get("new") == "continuous"
         self.ui_component.categorical_layout.layout.display = "none" if continuous else "block"
         self.ui_component.continuous_layout.layout.display = "block" if continuous else "none"
@@ -1575,6 +1607,8 @@ class MaskPainterDisplay(PluginBase):
                 update_display(current_ds)
 
     def _on_continuous_column_change(self, _change):
+        if self._syncing:
+            return
         self._refresh_save_button_state()
         # New column → recompute the global auto-range (no-op in manual mode).
         self._refresh_auto_range_fields()
@@ -1588,6 +1622,8 @@ class MaskPainterDisplay(PluginBase):
         self._refresh_continuous_display()
 
     def _on_auto_range_toggle(self, change):
+        if self._syncing:
+            return
         auto = bool(change.get("new", True))
         self.ui_component.vmin_input.disabled = auto
         self.ui_component.vmax_input.disabled = auto
@@ -1687,6 +1723,12 @@ class MaskPainterDisplay(PluginBase):
         self._log("Masks updated with continuous colors.")
         self._render_colorbar()
 
+        # Record the applied continuous state so the follow-up on_mv_update_display
+        # (fired by update_display → inform_plugins) sees no change and stops instead
+        # of re-entering apply → update_display in a cascade (issue #115 reply 2).
+        self._last_applied_fov = self.main_viewer.get_active_fov()
+        self._last_applied_continuous = self._continuous_signature(spec)
+
         if notify_cell_gallery:
             self._notify_cell_gallery_update()
 
@@ -1694,7 +1736,13 @@ class MaskPainterDisplay(PluginBase):
             update_display = getattr(self.main_viewer, "update_display", None)
             current_ds = getattr(self.main_viewer, "current_downsample_factor", 1)
             if callable(update_display):
-                update_display(current_ds)
+                # Guard the re-entrant hook: update_display fans out to
+                # on_mv_update_display, which must not re-apply while we render.
+                self._applying = True
+                try:
+                    update_display(current_ds)
+                finally:
+                    self._applying = False
 
     @update_status_bar
     def apply_colors_to_masks(self, _, *, notify_cell_gallery: bool = True, register_globally: bool = True):
@@ -1872,6 +1920,7 @@ class MaskPainterDisplay(PluginBase):
         self._last_applied_fov = current_fov
         self._last_applied_identifier = identifier
         self._last_applied_classes = set(visible_classes)
+        self._last_applied_continuous = None
 
         if notify_cell_gallery:
             self._notify_cell_gallery_update()
@@ -1880,7 +1929,12 @@ class MaskPainterDisplay(PluginBase):
             update_display = getattr(self.main_viewer, "update_display", None)
             current_ds = getattr(self.main_viewer, "current_downsample_factor", 1)
             if callable(update_display):
-                update_display(current_ds)
+                # Guard the re-entrant hook (see continuous branch above).
+                self._applying = True
+                try:
+                    update_display(current_ds)
+                finally:
+                    self._applying = False
 
     def _on_visibility_or_mode_change(self, _change):
         """Called when any per-class visibility, mode, or opacity control changes.
@@ -1987,18 +2041,24 @@ class MaskPainterDisplay(PluginBase):
         self._last_applied_fov = None
         self._last_applied_identifier = None
         self._last_applied_classes = None
+        self._last_applied_continuous = None
         self._last_applied_class_colors.clear()
         self._last_applied_class_modes.clear()
         self._last_applied_class_opacities.clear()
 
         if change.get("new"):
+            # apply_colors_to_masks already refreshes the viewer once when enabled,
+            # so no extra update_display here (that second full render, multiplied by
+            # the on_mv_update_display cascade, was the slow enable — issue #115 reply 2).
             map_mode = self.main_viewer.get_active_fov() is None
             self.apply_colors_to_masks(
                 None,
                 notify_cell_gallery=False,
                 register_globally=map_mode,
             )
+            return
 
+        # On disable, nothing applies colors, so refresh once to clear the overlay.
         update_display = getattr(self.main_viewer, "update_display", None)
         current_ds = getattr(self.main_viewer, "current_downsample_factor", 1)
         if callable(update_display):
@@ -2015,6 +2075,7 @@ class MaskPainterDisplay(PluginBase):
         self._last_applied_fov = None
         self._last_applied_identifier = None
         self._last_applied_classes = None
+        self._last_applied_continuous = None
         self._last_applied_class_colors = {}
         self._last_applied_class_modes = {}
         self._last_applied_class_opacities = {}
@@ -2024,31 +2085,45 @@ class MaskPainterDisplay(PluginBase):
 
     def on_mv_update_display(self):
         """Handle main viewer display updates.
-        
+
         Only re-apply colors if:
         1. Mask painter is enabled
         2. AND one of the following has changed:
            - Current FOV
-           - Selected identifier
-           - Set of visible classes
-           
+           - Selected identifier / visible classes (categorical mode)
+           - The continuous spec (continuous mode)
+
         Note: This only applies colors to the current FOV for display purposes.
         Global registration (for gallery) is skipped to avoid performance issues.
         """
         if not self.ui_component.enabled_checkbox.value:
             return
-        
+        # Re-entrancy guard: update_display fires this hook via inform_plugins, so
+        # skip while our own apply is running to avoid an apply → update_display →
+        # on_mv_update_display → apply cascade (issue #115 reply 2).
+        if self._applying:
+            return
+
         current_fov = self.main_viewer.get_active_fov()
-        current_identifier = self.ui_component.identifier_dropdown.value
-        current_classes = set(self._get_visible_classes()) if current_identifier else set()
-        
-        # Check if state has actually changed
-        state_changed = (
-            self._last_applied_fov != current_fov
-            or self._last_applied_identifier != current_identifier
-            or self._last_applied_classes != current_classes
-        )
-        
+
+        if self.ui_component.color_mode_toggle.value == "continuous":
+            # In continuous mode the categorical (identifier/classes) tracking is
+            # meaningless; compare the continuous spec signature instead so the
+            # follow-up hook after a continuous apply is a no-op.
+            current_continuous = self._continuous_signature(self._build_continuous_spec())
+            state_changed = (
+                self._last_applied_fov != current_fov
+                or self._last_applied_continuous != current_continuous
+            )
+        else:
+            current_identifier = self.ui_component.identifier_dropdown.value
+            current_classes = set(self._get_visible_classes()) if current_identifier else set()
+            state_changed = (
+                self._last_applied_fov != current_fov
+                or self._last_applied_identifier != current_identifier
+                or self._last_applied_classes != current_classes
+            )
+
         if state_changed:
             # In map mode (current_fov is None), register globally so the
             # _apply_map_painter_overlay method can read from the registry.

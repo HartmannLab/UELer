@@ -168,3 +168,57 @@ After removing the global registration, Apply was faster but **still slow**, and
 **Tests:** `tests/test_mask_color_overlay.py` — added vectorized-fill correctness (distinct colors, no
 cross-contamination; background/unregistered ids untouched). Full suite failure/error set identical to the
 `develop` baseline.
+
+## Follow-up: reply 2 — still slow; the plugin UI refreshes multiple times per action
+
+### Problem
+After the reply-1 fixes the busy indicator worked, but continuous Apply still took ~1m30s on a ~150-cell
+FOV, and the developer observed the plugin UI refreshing several times per action. The reported triggers were
+**checking the Enable checkbox** and **changing the colormap while Enable is on**. A single continuous render is
+by now cheap and cached (`get_effective_state_maps_for_fov` per-FOV cache; vectorized continuous branch of
+`build_painter_state_maps_for_fov`; vectorized fill fast path in `apply_registry_colors`), so the cost was the
+**number** of refreshes, not the per-render work.
+
+### Root cause
+1. **Dead `on_mv_update_display` guard in continuous mode (primary).** `update_display` ends with
+   `inform_plugins('on_mv_update_display')`; the painter's `on_mv_update_display` re-applies colors whenever its
+   `state_changed` check (comparing `_last_applied_fov` / `_last_applied_identifier` / `_last_applied_classes`)
+   is true. Those fields are written **only in the categorical branch** of `apply_colors_to_masks`;
+   `_apply_continuous_colors_to_masks` never set them. So in continuous mode `state_changed` was always true
+   (worse right after **Enable**, which resets the fields to `None`) → the hook re-entered
+   `apply_colors_to_masks` → `update_display` → the hook again — a re-entrant cascade, with no re-entrancy guard
+   on `update_display`. Categorical coloring was immune because its apply sets the tracking fields.
+2. **`_on_enabled_toggle` rendered twice.** It called `apply_colors_to_masks` (which itself refreshes when
+   enabled) and then called `update_display` again.
+3. **Double colorbar render.** `_refresh_continuous_display` rendered the colorbar and then called
+   `apply_colors_to_masks`, which rendered it again (the visible "UI refreshed twice" on a colormap change).
+4. **Inconsistent `_syncing` guard.** Only `_on_continuous_param_change` / `_on_continuous_range_edit` checked
+   `self._syncing`; `_on_color_mode_change`, `_on_continuous_column_change`, `_on_auto_range_toggle` did not, so
+   the restore / Apply-set / snapshot paths (which write widgets under `_syncing`) fanned out extra refreshes.
+
+### Fix
+1. Continuous apply records `_last_applied_fov` + a new `_last_applied_continuous` spec signature
+   (`_continuous_signature`: column, colormap, vmin, vmax, arcsinh, cofactor, opacity, fill); `on_mv_update_display`
+   compares that signature in continuous mode, so the follow-up hook is a no-op when nothing changed.
+2. Added an `_applying` boolean re-entrancy guard set around the `update_display` calls inside
+   `apply_colors_to_masks`; `on_mv_update_display` returns early while it is set.
+3. `_on_enabled_toggle` no longer double-renders on enable (returns after the apply, which already refreshed);
+   the disable path still refreshes once to clear the overlay.
+4. `_refresh_continuous_display` renders the colorbar only when it will not apply (apply renders it otherwise).
+5. Added `if self._syncing: return` to `_on_color_mode_change`, `_on_continuous_column_change`,
+   `_on_auto_range_toggle`; the restore paths already set the layout `.display` and run one explicit apply.
+
+### Files changed
+- `ueler/viewer/plugin/mask_painter.py` — `_applying` + `_last_applied_continuous` state; `_continuous_signature`;
+  the continuous branch of `apply_colors_to_masks` / `_apply_continuous_colors_to_masks`; `on_mv_update_display`
+  (continuous signature check + re-entrancy guard); `_on_enabled_toggle`; `_refresh_continuous_display`; the three
+  `_syncing` guards; `on_cell_table_change` reset.
+- `tests/test_mask_painter_continuous.py` — reply-2 regressions (see below).
+
+### Validation
+`python -m unittest tests.test_mask_painter_continuous` — 24 tests pass (+5). New tests: enable renders once with
+no cascade (wires `update_display`→`on_mv_update_display` like the real fan-out), `on_mv_update_display` no-op after
+a continuous apply, colormap change renders colorbar + viewer once each, `_syncing` suppresses the three
+observers, interactive param change still refreshes once. Full suite failure/error set identical to the `develop`
+baseline. Manual: enabling continuous coloring and changing the colormap each render once (no flicker), and Apply
+on a 150-cell FOV is sub-second.

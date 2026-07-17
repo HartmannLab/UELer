@@ -330,6 +330,101 @@ class TestPainterContinuousMode(unittest.TestCase):
         self.assertEqual(painter.ui_component.continuous_opacity_input.value, 75)
         self.assertFalse(painter.ui_component.continuous_fill_checkbox.value)
 
+    # ------------------------------------------------------------------
+    # Issue #115 reply 2: continuous coloring still slow — repeated refreshes
+    # ------------------------------------------------------------------
+    def test_enable_continuous_triggers_single_render_no_cascade(self):
+        """Enabling in continuous mode must render exactly once.
+
+        Previously the viewer refresh fired ``on_mv_update_display``, whose
+        ``state_changed`` guard was dead in continuous mode (the tracking fields
+        were only set in the categorical branch), so it re-entered
+        ``apply_colors_to_masks`` → ``update_display`` in a cascade.
+        """
+        painter = self._make_painter()
+        self._setup_continuous(painter)
+        painter.ui_component.enabled_checkbox.value = True
+
+        calls = {"n": 0}
+
+        def fake_update(ds=1):
+            calls["n"] += 1
+            # Simulate main_viewer.update_display → inform_plugins fan-out.
+            painter.on_mv_update_display()
+
+        self.viewer.update_display = fake_update
+        painter._on_enabled_toggle({"new": True})
+        self.assertEqual(calls["n"], 1)
+
+    def test_on_mv_update_display_noop_after_continuous_apply(self):
+        """After a continuous apply, a later display fan-out must not re-apply."""
+        painter = self._make_painter()
+        self._setup_continuous(painter)
+        painter.ui_component.enabled_checkbox.value = True
+
+        calls = {"n": 0}
+        self.viewer.update_display = lambda ds=1: calls.__setitem__("n", calls["n"] + 1)
+
+        painter.apply_colors_to_masks(None, notify_cell_gallery=False)
+        self.assertEqual(calls["n"], 1)  # the apply refreshed once
+        # A subsequent fan-out with unchanged state is a no-op (no re-apply).
+        painter.on_mv_update_display()
+        self.assertEqual(calls["n"], 1)
+
+    def test_colormap_change_renders_colorbar_and_viewer_once(self):
+        """A colormap change while enabled redraws the colorbar and viewer once each.
+
+        The double colorbar render (refresh helper + apply) was the visible
+        "plugin UI refreshed multiple times" on a colormap change.
+        """
+        from unittest.mock import patch
+
+        painter = self._make_painter()
+        self._setup_continuous(painter)  # manual range → auto-range refresh is a no-op
+        painter.ui_component.enabled_checkbox.value = True
+
+        calls = {"n": 0}
+        self.viewer.update_display = lambda ds=1: calls.__setitem__("n", calls["n"] + 1)
+
+        with patch.object(painter, "_render_colorbar") as colorbar:
+            painter.ui_component.colormap_dropdown.value = "magma"
+            painter._on_continuous_param_change({"new": "magma"})
+
+        self.assertEqual(colorbar.call_count, 1)
+        self.assertEqual(calls["n"], 1)
+
+    def test_syncing_suppresses_unguarded_continuous_observers(self):
+        """Restore paths set _syncing; the mode/column/auto-range observers must
+        not fire their own refresh while it is set."""
+        painter = self._make_painter()
+        self._setup_continuous(painter)
+        painter.ui_component.enabled_checkbox.value = True
+
+        calls = {"n": 0}
+        self.viewer.update_display = lambda ds=1: calls.__setitem__("n", calls["n"] + 1)
+
+        painter._syncing = True
+        try:
+            painter._on_color_mode_change({"new": "continuous"})
+            painter._on_continuous_column_change({"new": "CD3"})
+            painter._on_auto_range_toggle({"new": True})
+        finally:
+            painter._syncing = False
+
+        self.assertEqual(calls["n"], 0)
+
+    def test_interactive_param_change_still_refreshes_once(self):
+        """With _syncing off, an interactive param change refreshes exactly once."""
+        painter = self._make_painter()
+        self._setup_continuous(painter)
+        painter.ui_component.enabled_checkbox.value = True
+
+        calls = {"n": 0}
+        self.viewer.update_display = lambda ds=1: calls.__setitem__("n", calls["n"] + 1)
+
+        painter._on_continuous_param_change({"new": "magma"})
+        self.assertEqual(calls["n"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
