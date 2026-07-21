@@ -327,7 +327,9 @@ class MapModeActivationTests(unittest.TestCase):
         self.assertTrue(self.viewer._map_mode_active)
         self.assertEqual(self.viewer._map_canvas_size, (2_048, 4_096))
         self.assertEqual(self.viewer._map_pixel_size_nm, 500.0)
-        self.assertEqual(self.viewer.current_downsample_factor, 8)
+        # Issue #116: max_dimension raised to 2048, so a 4096 px longest edge
+        # snaps to factor 2 (4096 / 2 = 2048) instead of the old factor 8.
+        self.assertEqual(self.viewer.current_downsample_factor, 2)
         self.assertTrue(self.viewer.ui_component.image_selector.disabled)
         self.assertFalse(self.viewer.ui_component.map_selector.disabled)
         self.assertEqual(self.viewer.ui_component.map_selector.value, "slide-1")

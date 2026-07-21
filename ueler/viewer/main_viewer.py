@@ -21,7 +21,7 @@ from ipywidgets import IntText, Output, Dropdown, FloatSlider, Checkbox, Button,
 from IPython.display import display
 import pandas as pd
 # Import modules
-from ueler.constants import PREDEFINED_COLORS, DOWNSAMPLE_FACTORS, UICOMPNENTS_SKIP
+from ueler.constants import PREDEFINED_COLORS, DOWNSAMPLE_FACTORS, DOWNSAMPLE_MAX_DIMENSION, UICOMPNENTS_SKIP
 from ueler.data_loader import (
     load_annotations_for_fov,
     load_channel_struct_fov,
@@ -475,7 +475,7 @@ class ImageMaskViewer:
         initial_factor = select_downsample_factor(
             self.width,
             self.height,
-            max_dimension=512,
+            max_dimension=DOWNSAMPLE_MAX_DIMENSION,
             allowed_factors=self.downsample_factors,
         )
         self.on_downsample_factor_changed(initial_factor)

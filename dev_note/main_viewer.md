@@ -3,7 +3,7 @@
 ## Overview
 
 ## FOV downsampling
-The main viewer auto-selects a downsample factor so large FOVs stay responsive while preserving overlays. Allowed factors are the powers of two in `constants.DOWNSAMPLE_FACTORS`; when a FOV loads the viewer samples its dimensions, calls `image_utils.calculate_downsample_factor`, and snaps the result to the nearest permitted value so the longest edge rendered in the notebook remains ≤512 px.
+The main viewer auto-selects a downsample factor so large FOVs stay responsive while preserving overlays. Allowed factors are the powers of two in `constants.DOWNSAMPLE_FACTORS`; when a FOV loads the viewer samples its dimensions, calls `image_utils.calculate_downsample_factor`, and snaps the result to the nearest permitted value so the longest edge rendered in the notebook remains ≤`constants.DOWNSAMPLE_MAX_DIMENSION`, i.e. 2048 px.
 
 While you pan or zoom, `ImageDisplay.on_draw` recomputes the factor from the current viewport. The `Advanced Settings → Downsample` checkbox toggles this behaviour: when enabled, the factor scales with zoom; when disabled, the viewer sticks to native resolution (`factor = 1`).
 

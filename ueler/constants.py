@@ -18,4 +18,9 @@ PREDEFINED_COLORS = {
 
 DOWNSAMPLE_FACTORS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
 
+# Longest-edge pixel budget: frames whose largest dimension is <= this value
+# render at full resolution; larger frames are downsampled by the smallest
+# power-of-two factor that fits within it. (Issue #116)
+DOWNSAMPLE_MAX_DIMENSION = 2048
+
 UICOMPNENTS_SKIP = ["marker_set_dropdown", "status_bar"]

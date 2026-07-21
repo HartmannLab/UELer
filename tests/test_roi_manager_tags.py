@@ -627,6 +627,27 @@ class ROIManagerTagsTests(unittest.TestCase):
         # Small images stay at the minimum allowed factor.
         self.assertEqual(select_downsample_factor(50, 50, max_dimension=512, allowed_factors=allowed), 1)
 
+    def test_default_downsample_threshold_is_2048(self):
+        """Issue #116: frames up to 2048 px on the longest edge stay full-res."""
+        from ueler import constants
+        from ueler.constants import DOWNSAMPLE_FACTORS
+        from ueler.image_utils import calculate_downsample_factor
+
+        self.assertEqual(constants.DOWNSAMPLE_MAX_DIMENSION, 2048)
+
+        # No downsampling at exactly the threshold; first step only above it.
+        self.assertEqual(calculate_downsample_factor(2048, 2048), 1)
+        self.assertEqual(calculate_downsample_factor(2049, 1000), 2)
+        self.assertEqual(calculate_downsample_factor(4096, 4096), 2)
+
+        # select_downsample_factor honours the same default via allowed factors.
+        self.assertEqual(
+            select_downsample_factor(2048, 1000, allowed_factors=DOWNSAMPLE_FACTORS), 1
+        )
+        self.assertEqual(
+            select_downsample_factor(4096, 4096, allowed_factors=DOWNSAMPLE_FACTORS), 2
+        )
+
 
 class ROIManagerMapModeTests(unittest.TestCase):
     """Tests for ROI Manager map-mode lifecycle hooks and FOV attribution."""
