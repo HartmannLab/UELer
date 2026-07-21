@@ -7,6 +7,8 @@ The main viewer auto-selects a downsample factor so large FOVs stay responsive w
 
 While you pan or zoom, `ImageDisplay.on_draw` recomputes the factor from the current viewport. The `Advanced Settings → Downsample` checkbox toggles this behaviour: when enabled, the factor scales with zoom; when disabled, the viewer sticks to native resolution (`factor = 1`).
 
+The **initial** factor honours the same checkbox (reply to #116). The size-based `select_downsample_factor` call runs during `__init__` *before* the widgets exist, so after `load_widget_states` restores the saved Downsample preference the viewer reconciles the initial factor: when Downsample is off it starts at native resolution (`factor = 1`), otherwise it uses the size-based factor — matching the `on_draw` path so initiation and zoom agree. The threshold is sourced from `constants.DOWNSAMPLE_MAX_DIMENSION` explicitly at every call site (`main_viewer`, `ImageDisplay.on_draw`, `channel_grid_view`) so the init and zoom thresholds cannot diverge.
+
 Each FOV caches downsampled masks and annotations the first time it loads by slicing the rasters with `array[::factor, ::factor]`. `render_image` reuses those cached arrays and only materialises the visible window, so overlays, plugins, and batch exports share the same subsampled data without additional recomputation.
 
 `get_axis_limits_with_padding` keeps the Matplotlib viewport aligned to factor-sized strides, and the scale bar adjusts via `effective_pixel_size_nm(pixel_size_nm, factor)` so physical measurements remain correct regardless of zoom level. Together this pipeline keeps navigation smooth and measurements trustworthy even on very large scenes.

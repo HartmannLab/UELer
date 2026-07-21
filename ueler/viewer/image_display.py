@@ -13,6 +13,7 @@ except Exception:  # pragma: no cover - handled in update_channel_legend
     VPacker = None
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
 from matplotlib.colors import to_rgb
+from ueler.constants import DOWNSAMPLE_MAX_DIMENSION
 from ueler.image_utils import (
     calculate_downsample_factor,
     generate_edges,
@@ -264,7 +265,10 @@ class ImageDisplay:
             range_width_y = self.ax.get_ylim()[1] - self.ax.get_ylim()[0]
 
             new_downsample_factor = calculate_downsample_factor(
-                np.abs(range_width_x), np.abs(range_width_y), not self.main_viewer.ui_component.enable_downsample_checkbox.value
+                np.abs(range_width_x),
+                np.abs(range_width_y),
+                not self.main_viewer.ui_component.enable_downsample_checkbox.value,
+                max_dimension=DOWNSAMPLE_MAX_DIMENSION,
             )
         else:
             new_downsample_factor = 8

@@ -577,11 +577,31 @@ class ImageMaskViewer:
             self.load_widget_states(os.path.join(self.base_folder, ".UELer", 'widget_states.json'))
         finally:
             self._suspend_display_updates = False
+        # Reconcile the initial downsample factor now that the saved
+        # "Downsample" preference has been restored.  select_downsample_factor
+        # runs at init before create_widgets, so it cannot see the checkbox and
+        # always downsamples by image size; without this the viewer downsamples
+        # on load even when Downsample is off (reply to #116).  When Downsample
+        # is on the reconciled value matches the size-based factor; when off the
+        # viewer starts at native resolution, matching the zoom (on_draw) path.
+        enable_ds = getattr(self.ui_component, "enable_downsample_checkbox", None)
+        if enable_ds is not None and not getattr(enable_ds, "value", True):
+            reconciled_factor = 1
+        else:
+            reconciled_factor = select_downsample_factor(
+                self.width,
+                self.height,
+                max_dimension=DOWNSAMPLE_MAX_DIMENSION,
+                allowed_factors=self.downsample_factors,
+            )
+        self.on_downsample_factor_changed(reconciled_factor)
         # One render after widget-state restoration so the display reflects
         # the restored channel/contrast/FOV selections (fixes #84).
         self.update_display(self.current_downsample_factor)
         if self._debug:
-            logger.debug("[INIT DEBUG] load_widget_states done")
+            logger.debug(
+                f"[INIT DEBUG] load_widget_states done; reconciled downsample factor={self.current_downsample_factor}"
+            )
 
         # Setup attribute observers
         if self._debug:

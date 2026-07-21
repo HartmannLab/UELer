@@ -204,6 +204,19 @@ class GridChannelDisplayTests(unittest.TestCase):
         grid._on_draw(None)
         self.assertEqual(len(self.viewer._update_grid_calls), initial_calls)
 
+    def test_on_draw_uses_2048_downsample_threshold(self):
+        # Issue #116: the grid zoom handler must source the threshold from
+        # DOWNSAMPLE_MAX_DIMENSION (2048), not the old 512 default.  A ~3000 px
+        # visible range downsamples by 2 under the 2048 threshold; under 512 it
+        # would be 8.
+        grid = GridChannelDisplay(self.viewer, ["A"], self.xlim, self.ylim)
+        grid._prev_cx = None
+        grid._prev_cy = None
+        grid.axes[0].set_xlim((0.0, 3000.0))
+        grid.axes[0].set_ylim((3000.0, 0.0))
+        grid._on_draw(None)
+        self.assertEqual(self.viewer.current_downsample_factor, 2)
+
 
 # ---------------------------------------------------------------------------
 # on_grid_view_toggle integration (uses a heavier mock viewer)
