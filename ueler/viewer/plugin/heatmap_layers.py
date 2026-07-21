@@ -28,6 +28,7 @@ except Exception:  # pragma: no cover - optional in non-notebook contexts
         return None
 
 from ueler.viewer.decorators import update_status_bar
+from ueler.viewer.plugin import _chart_common
 from ipywidgets import HBox, HTML, Layout, Output, Tab, VBox
 
 
@@ -897,11 +898,24 @@ class InteractionLayer:
 
     def after_all_plugins_loaded(self):
         super().after_all_plugins_loaded()
+        # Marker sets are restored from widget_states.json after plugin __init__;
+        # repopulate the marker-set dropdown so they show up (issue #117).
+        self.on_marker_sets_changed()
         self._sync_panel_location()
         if hasattr(self.main_viewer, 'refresh_bottom_panel'):
             self.main_viewer.refresh_bottom_panel()
         self.main_viewer.SidePlots.chart_output.selected_indices.add_observer(
             self.on_selected_indices_change
+        )
+
+    def on_marker_sets_changed(self):
+        """Keep the marker-set dropdown in sync with the left panel (issue #117).
+
+        Broadcast by ``main_viewer.inform_plugins('on_marker_sets_changed')`` and
+        mirrors the scatter/histogram plugins so the heatmap picks up saved sets.
+        """
+        _chart_common.refresh_marker_set_options(
+            self.ui_component.channel_selector_bundle, self.main_viewer
         )
 
     def _make_click_handler(self, g):
@@ -1463,26 +1477,30 @@ class DisplayLayer:
         )
 
     def initiate_ui(self):
+        # Channel/marker picker lives ABOVE the tabs (mirrors the Scatter plot and
+        # Histogram plugins). The Setup tab then holds only the grouping/subset and
+        # clustering settings, so the subset selector can span the full width and the
+        # option checkboxes drop to their own line (issue #117 follow-up).
+        self._channel_controls = VBox(
+            [self.ui_component.channel_selector_bundle.box],
+            layout=Layout(width='100%', max_width='99%', min_width='0',
+                          box_sizing='border-box', overflow='hidden'),
+        )
+
         setup = VBox([
-            HBox([
-                VBox([
-                    self.ui_component.channel_selector_text,
-                    self.ui_component.channel_selector,
-                    self.ui_component.high_level_cluster_dropdown
-                    ], layout=Layout(width='50%', overflow='hidden')),
-                VBox([
-                    self.ui_component.subset_on_dropdown,
-                    self.ui_component.subset_selector
-                    ], layout=Layout(width='50%', overflow='hidden')),
-                ]),
+            self.ui_component.high_level_cluster_dropdown,
+            self.ui_component.subset_on_dropdown,
+            self.ui_component.subset_selector,
             HBox([
                 self.ui_component.cluster_method_dropdown,
                 self.ui_component.distance_metric_dropdown,
+            ], layout=Layout(gap='8px')),
+            HBox([
                 self.ui_component.horizontal_layout_checkbox,
                 self.ui_component.zscore_across_markers_checkbox,
             ], layout=Layout(gap='8px')),
             HBox([self.ui_component.plot_button])
-        ])
+        ], layout=Layout(width='100%', gap='6px'))
 
         edit = VBox([
             HBox([
@@ -1524,7 +1542,7 @@ class DisplayLayer:
         )
 
         self.controls_section = VBox(
-            [self.controls_tab],
+            [self._channel_controls, self.controls_tab],
             layout=Layout(width='100%', max_width='99%', min_width='0', box_sizing='border-box', gap='8px'),
         )
         self.plot_section = VBox(

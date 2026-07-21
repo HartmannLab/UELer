@@ -10,6 +10,7 @@ from ueler.viewer.observable import Observable
 from ueler.viewer.plugin.plugin_base import PluginBase
 from ueler.viewer.plugin.heatmap_adapter import HeatmapModeAdapter
 from ueler.viewer.plugin.heatmap_layers import DataLayer, InteractionLayer, DisplayLayer
+from ueler.viewer.plugin import _chart_common
 
 _logger = logging.getLogger(__name__)
 
@@ -33,6 +34,14 @@ class HeatmapDisplay(DataLayer, InteractionLayer, DisplayLayer, PluginBase):
         self.data.current_clusters["index"].add_observer(self.update_ui_components)
         self.ui_component.lock_cutoff_button.observe(self._on_lock_cutoff_change, names='value')
         self.ui_component.lock_override_button.on_click(self._request_lock_override)
+        # Load the channels of the selected marker set into this plugin's picker
+        # (local only — does not repaint the main image viewer). Mirrors the
+        # scatter/histogram plugins (issue #117).
+        self.ui_component.channel_selector_bundle.load_button.on_click(
+            lambda _btn: _chart_common.apply_marker_set_to_selector(
+                self.ui_component.channel_selector_bundle, self.main_viewer
+            )
+        )
         self.plot_output = Output()
 
         self.orientation_state = {
@@ -96,18 +105,15 @@ class HeatmapDisplay(DataLayer, InteractionLayer, DisplayLayer, PluginBase):
 
 class UiComponent:
     def __init__(self, parent):
-        self.channel_selector_text = HTML(
-            value='Channels:',
+        # Shared channel picker (issue #117): reuse the same bundle as the scatter
+        # and histogram plugins so the marker-selection UI/UX is identical — a
+        # TagsInput plus a "Marker set:" dropdown + "Load set" button. Aliasing
+        # ``channel_selector`` to ``bundle.tags`` keeps every existing
+        # ``ui_component.channel_selector.value`` access working unchanged.
+        self.channel_selector_bundle = _chart_common.build_channel_selector(
+            parent.main_viewer
         )
-
-        self.channel_selector = TagsInput(
-            value = parent.main_viewer.cell_table.columns[0],
-            allowed_tags=parent.main_viewer.cell_table.columns.tolist(),  # This will be updated later
-            description='Channels:',
-            allow_duplicates=False,
-            style={'description_width': 'auto'},
-            layout=Layout(width='100%')
-        )
+        self.channel_selector = self.channel_selector_bundle.tags
         cluster_columns = parent.main_viewer.cell_table.select_dtypes(include=['int', 'int64', 'object']).columns.tolist()
         self.high_level_cluster_dropdown = Dropdown(
             options=cluster_columns,
