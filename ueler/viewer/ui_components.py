@@ -137,10 +137,16 @@ def build_wide_plugin_pane(control=None, content=None):
     if content is None:
         return VBox(children=(control,), layout=_bounded_panel_layout(overflow_y='auto'))
 
+    # Stack the controls on top of the plot content (#118). The plot content
+    # spans the full width below so wide/multi-pair plots (e.g. the scatter
+    # matrix) are not squeezed into the space left over next to a fixed-width
+    # control column, which cropped data points. The control box itself keeps
+    # its ~6in width and is left-aligned within a full-width parent row.
     control_box = VBox(children=(control,), layout=Layout(width='6in', flex='0 0 6in', overflow_y='auto', gap='8px'))
-    content_box = VBox(children=(content,), layout=Layout(flex='1 1 auto', min_width='0', overflow='auto', min_height='360px'))
-    return HBox(
-        children=(control_box, content_box),
+    control_row = HBox(children=(control_box,), layout=Layout(width='100%', justify_content='flex-start'))
+    content_box = VBox(children=(content,), layout=Layout(width='100%', flex='1 1 auto', min_width='0', overflow='auto', min_height='360px'))
+    return VBox(
+        children=(control_row, content_box),
         layout=_bounded_panel_layout(gap='12px', align_items='stretch'),
     )
 

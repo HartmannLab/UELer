@@ -1328,6 +1328,7 @@ def _build_jscatter_stub() -> types.ModuleType:
             self.mouse_mode = None
             self._observers = {}
             self.buttons = ()
+            self.children = ()
 
         def observe(self, callback, names=None):
             names = tuple(names or ())
@@ -1355,6 +1356,20 @@ def _build_jscatter_stub() -> types.ModuleType:
 
         def axes(self, *args, **kwargs):  # pragma: no cover - simple stub
             return None
+
+        def x(self, x=None, scale=None, **kwargs):
+            if x is not None:
+                self._x = x
+            if scale is not None:
+                self._x_scale = scale
+            return self
+
+        def y(self, y=None, scale=None, **kwargs):
+            if y is not None:
+                self._y = y
+            if scale is not None:
+                self._y_scale = scale
+            return self
 
         def height(self, value=None):
             if value is not None:
@@ -1394,7 +1409,12 @@ def _build_jscatter_stub() -> types.ModuleType:
 
         def show(self, buttons=None):
             self.widget.buttons = tuple(buttons or ())
-            return self.widget
+            # Mirror real jscatter's ``show()``, which returns a *container*
+            # widget wrapping the canvas (``VBox([HBox([buttons, plot])])``) —
+            # so callers can tell a plot cell (has children) from a blank cell.
+            wrapper = _WidgetStub()
+            wrapper.children = (self.widget,)
+            return wrapper
 
         def selection(self, values=_SELECTION_SENTINEL):
             if values is _SELECTION_SENTINEL:

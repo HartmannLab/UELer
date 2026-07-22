@@ -26,6 +26,24 @@ _DEFAULT_SELECTED_COLOR = (1, 0, 0, 1)
 _DEFAULT_POINT_COLOR = (0.2, 0.4, 0.8, 0.85)
 
 
+def _padded_domain(values, fraction: float = 0.05) -> Tuple[float, float]:
+    """Return a ``(lo, hi)`` axis domain padded by ``fraction`` of the data range.
+
+    jscatter otherwise frames the view on the raw data min/max, so points at the
+    extremes are drawn on the very canvas edge and their marker radius spills past
+    it (cropping, #118). Padding the domain keeps every point inside the view.
+    Falls back to a small symmetric pad for empty / all-equal / non-finite data.
+    """
+    arr = np.asarray(values, dtype="float64")
+    arr = arr[np.isfinite(arr)]
+    if arr.size == 0:
+        return (-1.0, 1.0)
+    lo, hi = float(arr.min()), float(arr.max())
+    span = hi - lo
+    pad = span * fraction if span > 0 else max(abs(hi) * fraction, 1.0)
+    return (lo - pad, hi + pad)
+
+
 def _normalize_indices(values: Iterable[Union[int, str, np.integer]]) -> Set[Union[int, str]]:
     """Convert incoming selection ids to hashable scalars."""
     normalized: Set[Union[int, str]] = set()
@@ -99,6 +117,10 @@ class ScatterPlotWidget:
             data_use_index=True,
         )
         self._scatter.axes(axes=True, grid=True, labels=[x, y])
+        # Pad the x/y domains so edge points are never clipped (#118). Passing
+        # only ``scale`` keeps the ``x``/``y`` columns set above.
+        self._scatter.x(scale=_padded_domain(self._data[x]))
+        self._scatter.y(scale=_padded_domain(self._data[y]))
         self._scatter.height(self._height)
         self._scatter.size(default=point_size)
         if color and color in self._data.columns:

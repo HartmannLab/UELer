@@ -652,20 +652,29 @@ class MultiPairScatterTests(unittest.TestCase):
         # A plot cell wraps a scatter widget; a blank (lower-triangle) cell is empty.
         return len(getattr(cell, "children", ())) > 0
 
+    @staticmethod
+    def _grid_rows(grid, cols):
+        # The GridBox holds a flat, row-major list of cells; chunk it into rows.
+        cells = list(grid.children)
+        return [cells[i:i + cols] for i in range(0, len(cells), cols)]
+
     def test_plot_all_pairs_renders_triangular_rows(self):
         chart = self._make_chart(["a", "b", "c"])
         chart.ui_component.multipair_channels.value = ("a", "b", "c")
         chart.plot_all_pairs(None)
 
         grid = chart._plot_host.children[0]
-        rows = grid.children
-        # N-1 == 2 rows for 3 channels, each with N-1 == 2 cells.
+        # The matrix is a CSS-grid GridBox (#118): cells are a flat, row-major
+        # list placed into N-1 == 2 equal `1fr` columns.
+        cols = grid.layout.grid_template_columns.split()
+        self.assertEqual(len(cols), 2)
+        rows = self._grid_rows(grid, cols=2)
+        # 2 rows for 3 channels, each with N-1 == 2 cells.
         self.assertEqual(len(rows), 2)
-        self.assertTrue(all(len(row.children) == 2 for row in rows))
         # Row 0 (channel a): both cells are plots (a,b) and (a,c).
-        self.assertEqual([self._is_plot_cell(c) for c in rows[0].children], [True, True])
+        self.assertEqual([self._is_plot_cell(c) for c in rows[0]], [True, True])
         # Row 1 (channel b): a leading blank, then the (b,c) plot.
-        self.assertEqual([self._is_plot_cell(c) for c in rows[1].children], [False, True])
+        self.assertEqual([self._is_plot_cell(c) for c in rows[1]], [False, True])
 
     def test_single_pair_after_matrix_goes_to_new_row(self):
         chart = self._make_chart(["a", "b", "c", "d"])
@@ -679,10 +688,10 @@ class MultiPairScatterTests(unittest.TestCase):
         chart.plot_chart(None)
 
         grid = chart._plot_host.children[0]
-        rows = grid.children
+        rows = self._grid_rows(grid, cols=2)
         # Matrix keeps its 2 rows; the extra single-pair view lands on a 3rd row.
         self.assertEqual(len(rows), 3)
-        self.assertTrue(self._is_plot_cell(rows[2].children[0]))
+        self.assertTrue(self._is_plot_cell(rows[2][0]))
 
     def test_removing_matrix_view_falls_back_to_compose(self):
         chart = self._make_chart(["a", "b", "c"])

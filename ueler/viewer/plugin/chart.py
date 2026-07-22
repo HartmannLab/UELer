@@ -19,6 +19,7 @@ Button = getattr(_ipywidgets, "Button")
 Checkbox = getattr(_ipywidgets, "Checkbox")
 Dropdown = getattr(_ipywidgets, "Dropdown")
 FloatSlider = getattr(_ipywidgets, "FloatSlider", getattr(_ipywidgets, "Widget"))
+GridBox = getattr(_ipywidgets, "GridBox", getattr(_ipywidgets, "Box"))
 HBox = getattr(_ipywidgets, "HBox")
 HTML = getattr(_ipywidgets, "HTML")
 Layout = getattr(_ipywidgets, "Layout")
@@ -40,6 +41,17 @@ from .scatter_widget import ScatterPlotWidget
 _SELECTION_NOTICE = (
     "<i>No scatter plots generated yet. Choose axes, then click <b>Plot</b>.</i>"
 )
+
+# jscatter draws the scatter canvas at its ``height`` trait (see
+# ``scatter_widget``) and reserves ~36px *outside* the canvas for the x-axis
+# ticks + label (``jscatter.compose`` uses AXES_PADDING_Y=20 + AXES_LABEL_SIZE=16).
+# The pairwise matrix therefore uses fixed-height CSS-grid rows tall enough for
+# canvas + axes so nothing clips, matching how ``jscatter.compose`` lays out a
+# grid. Fixed rows + ``1fr`` columns also give each cell a *definite* size, so
+# jscatter measures the correct width on first layout and fills the cell (#118).
+_SCATTER_CANVAS_HEIGHT_PX = 320
+_SCATTER_AXES_RESERVE_PX = 36
+_SCATTER_ROW_HEIGHT_PX = _SCATTER_CANVAS_HEIGHT_PX + _SCATTER_AXES_RESERVE_PX
 
 
 class ChartDisplay(PluginBase):
@@ -489,12 +501,16 @@ class ChartDisplay(PluginBase):
     def _triangular_grid(self):
         """Lay the pairwise scatters out as an upper-triangular matrix (#113).
 
-        Built as a ``VBox`` of ``HBox`` rows (plain flexbox) rather than a
-        CSS-grid ``GridBox``: every row has exactly ``N-1`` equal-flex cells so
-        the columns line up, blank cells fill the lower triangle, and each cell
-        lets its scatter self-size (no fixed height, so axes are never clipped).
+        Built as a CSS-grid ``GridBox`` — the same layout ``jscatter.compose``
+        uses — rather than nested flexbox: ``N-1`` equal ``1fr`` columns and
+        fixed-height rows give every cell a *definite* size, so each jscatter
+        canvas measures the correct width on first layout and fills its cell
+        instead of leaving blank space / a mis-scaled second axis grid (#118).
+        Cells are laid out row-major: row ``i`` has ``i`` leading blanks (lower
+        triangle) then the plots for ``(i, j)``, ``j > i``; the CSS grid places
+        them left→right, top→bottom.
 
-        Returns the ``VBox`` when a full pairwise matrix for
+        Returns the ``GridBox`` when a full pairwise matrix for
         ``self._multipair_channels_last`` is present — with any extra
         (single-pair) views appended as new rows below it — or ``None`` when
         there is no active matrix to anchor the layout (callers then fall back
@@ -517,13 +533,12 @@ class ChartDisplay(PluginBase):
             for sid, view in self._scatter_views.items()
         }
 
-        rows = []
+        cells = []
         # Matrix rows: row i has i leading blanks, then plots for (i, j), j>i.
         for i in range(n - 1):
-            cells = [self._blank_cell() for _ in range(i)]
+            cells.extend(self._blank_cell() for _ in range(i))
             for j in range(i + 1, n):
                 cells.append(self._plot_cell(view_by_pair[(channels[i], channels[j])]))
-            rows.append(self._grid_row(cells))
 
         # Extra views (e.g. single-pair plots added after the matrix): append as
         # new full rows below, flowing left→right, padded with blanks to N-1.
@@ -534,29 +549,29 @@ class ChartDisplay(PluginBase):
         ]
         for start in range(0, len(extras), cols):
             chunk = extras[start:start + cols]
-            cells = [self._plot_cell(view) for view in chunk]
+            cells.extend(self._plot_cell(view) for view in chunk)
             cells.extend(self._blank_cell() for _ in range(cols - len(chunk)))
-            rows.append(self._grid_row(cells))
 
-        return VBox(children=rows, layout=Layout(width="100%", gap="8px"))
+        return GridBox(
+            children=cells,
+            layout=Layout(
+                width="100%",
+                grid_template_columns=" ".join(["1fr"] * cols),
+                grid_auto_rows=f"{_SCATTER_ROW_HEIGHT_PX}px",
+                grid_gap="8px",
+            ),
+        )
 
     @staticmethod
-    def _plot_cell(view) -> "Box":
-        return Box(
-            children=[view.widget()],
-            layout=Layout(flex="1 1 0%", min_width="0"),
-        )
+    def _plot_cell(view):
+        # Return the scatter widget directly as a grid item; CSS grid stretches
+        # it to fill the ``1fr`` cell, so jscatter (width='auto') gets the full
+        # cell width.
+        return view.widget()
 
     @staticmethod
     def _blank_cell() -> "Box":
-        return Box(children=[], layout=Layout(flex="1 1 0%", min_width="0"))
-
-    @staticmethod
-    def _grid_row(cells) -> "HBox":
-        return HBox(
-            children=cells,
-            layout=Layout(width="100%", gap="4px", align_items="stretch"),
-        )
+        return Box(children=[], layout=Layout())
 
     def _render_scatter_matplotlib(
         self, data: pd.DataFrame, x_col: str, y_col: str, c_col: Optional[str]
