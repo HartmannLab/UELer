@@ -94,6 +94,26 @@ correctly on the first render. The matrix `GridBox` columns are content-sized (`
 outside-the-canvas y-axis is not clipped. Single-pair plots keep `'auto'` (always-visible side
 panel, where measurement is reliable).
 
+### 5. Reply 2 (final) — render like `jscatter.compose`; supersedes the explicit-width + right-gutter attempts (`ueler/viewer/plugin/chart.py`)
+
+The explicit-width fix (part 2 above) corrected the scaling but **clipped the y-axis label**, and
+neither an outer right-gutter `Box` nor "reset view" revealed it. **DOM inspection of the live
+widget was decisive:** the label *is* rendered (`<text class="y-axis-label">CD45</text>`), but with
+`width(360)` jscatter sized its `<svg>` to exactly plot+ticks (432px) and drew the label at the
+SVG's right edge, where **jscatter's own `overflow:hidden` on the `<svg>` and its widget `<div>`
+(width 401) clip it** — before the label reaches any element UELer controls. So no outer padding
+could ever help. The single-pair plots render correctly because they go through `jscatter.compose`,
+which keeps `width='auto'` so jscatter sizes the SVG to fill the cell and lays the label out inside.
+
+**Final fix:** render the matrix the same way `compose` does — equal **`1fr`** columns with plots
+left at **`width='auto'`** (removed the explicit `width(360)` and the right-gutter `Box`). The `1fr`
+columns give `width='auto'` a *definite* cell to measure (the original mis-scaled render came from
+the old flexbox cells collapsing, not from auto-width), and the construction-time padded axis domain
+(§2) keeps the framing correct on the first render — so this does **not** reopen the scaling issue
+(the still-correct single-pair/compose plots use exactly this). Rows stay a fixed height so the
+x-axis does not clip. `ScatterPlotWidget.set_canvas_width` is retained (matrix and single-pair both
+call it with `"auto"`).
+
 ## Tests
 
 - `tests/test_scatter_axis_padding.py` (new) — unit tests for `_padded_domain`: normal range
