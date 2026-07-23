@@ -35,6 +35,7 @@ theme:
     - content.tabs.link
   icon:
     repo: fontawesome/brands/github
+  logo: img/UELer_icon_gw.png
 
 plugins:
   - search
