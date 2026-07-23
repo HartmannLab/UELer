@@ -76,13 +76,23 @@ NDC, a 5% margin inside the default `[-1, 1]` view) and the axis scale domain is
 first render. **This was necessary but not sufficient** — the plots still opened with the
 right-hand y-axis ticks/labels hidden until "reset view".
 
-**Fix (part 2 — reset the view once the frontend mounts):** jscatter fits the camera and lays
-out the axes on the *frontend*, and that layout did not happen on first mount. `ScatterPlotWidget`
-now observes the widget's read-only **`dom_element_id`** trait — which the frontend writes once
-it has mounted the widget in the DOM (the standard anywidget "frontend ready" signal) — and calls
-`widget.reset_view()` when it fires, reproducing the "reset view" click programmatically so every
-plot opens correctly framed. The observer is torn down in `dispose()`. This is exactly the
-developer's suggestion: call the reset-view callback once the plot is rendered.
+**Fix (part 2 — explicit pixel width; supersedes a reset-view attempt):** the matrix plots still
+opened with the canvas too narrow and the right-hand y-axis ticks/labels hidden, fixed only by a
+manual **reset view**. An earlier attempt auto-triggered `reset_view()` when the frontend writes
+the read-only `dom_element_id` trait; **this did not work in practice** (verified live in VS Code,
+editable install) — that trait is not a reliable mount signal / fires before layout — so it was
+removed. Root cause: jscatter's default `width='auto'` binds the plot to its container via a
+frontend `ResizeObserver`, which mis-measured the initially-hidden footer grid cell, so the canvas
+rendered narrow and the y-axis (drawn *outside* the plot canvas) had no room; "reset view" only
+helped because it re-measures once the cell is finally laid out.
+
+The deterministic fix: give each matrix plot an **explicit pixel width** (`Scatter.width(360)` via
+`ScatterPlotWidget.set_canvas_width`) so jscatter never has to measure the container and renders
+correctly on the first render. The matrix `GridBox` columns are content-sized (`auto`,
+`justify_content: start`) to hug the fixed-width plots. The DOM `layout.width` is deliberately
+**not** pinned to the plot width (mirroring the height note) so the widget self-sizes wider and the
+outside-the-canvas y-axis is not clipped. Single-pair plots keep `'auto'` (always-visible side
+panel, where measurement is reliable).
 
 ## Tests
 
@@ -101,8 +111,10 @@ developer's suggestion: call the reset-view callback once the plot is rendered.
   `1fr` column count, instead of the old nested `VBox`/`HBox` rows.
 - `tests/bootstrap.py` — the jscatter `Scatter` stub `__init__` now accepts `x_scale` /
   `y_scale` kwargs (construction-time scale).
-- `tests/test_scatter_widget_dependencies.py` — new `ScatterWidgetResetViewTests`:
-  `reset_view()` fires when the `dom_element_id` "frontend ready" trait is written.
+- `tests/test_scatter_widget_dependencies.py` — `ScatterWidgetCanvasWidthTests`: an explicit
+  width sets the jscatter `width` trait and leaves the DOM width unpinned; `'auto'` restores
+  container binding. (The earlier `dom_element_id`/reset-view observer and its test were removed.)
+- `tests/bootstrap.py` — the jscatter `Scatter` stub gained a `width()` method.
 
 Full suite: failure/error set identical to the `develop` baseline (31 pre-existing, no new
 failures/errors).

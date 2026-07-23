@@ -45,13 +45,22 @@ _SELECTION_NOTICE = (
 # jscatter draws the scatter canvas at its ``height`` trait (see
 # ``scatter_widget``) and reserves ~36px *outside* the canvas for the x-axis
 # ticks + label (``jscatter.compose`` uses AXES_PADDING_Y=20 + AXES_LABEL_SIZE=16).
-# The pairwise matrix therefore uses fixed-height CSS-grid rows tall enough for
-# canvas + axes so nothing clips, matching how ``jscatter.compose`` lays out a
-# grid. Fixed rows + ``1fr`` columns also give each cell a *definite* size, so
-# jscatter measures the correct width on first layout and fills the cell (#118).
+# The pairwise matrix uses fixed-height CSS-grid rows tall enough for canvas +
+# axes so nothing clips, matching how ``jscatter.compose`` lays out a grid.
+#
+# Each matrix plot is also given an *explicit* pixel width (#118): jscatter's
+# default ``width='auto'`` binds to the container via a frontend ResizeObserver
+# that mis-measured the (initially hidden) footer grid cell — the canvas rendered
+# too narrow, leaving a blank strip and hiding the right-hand y-axis until the
+# user clicked "reset view". A fixed width removes that measurement so every plot
+# renders correctly framed on the first render. Columns are content-sized
+# (``auto``) to hug the fixed-width plots; the matrix left-aligns in the footer.
 _SCATTER_CANVAS_HEIGHT_PX = 320
 _SCATTER_AXES_RESERVE_PX = 36
 _SCATTER_ROW_HEIGHT_PX = _SCATTER_CANVAS_HEIGHT_PX + _SCATTER_AXES_RESERVE_PX
+# Canvas width of each plot in the multi-pair matrix (px). The full cell is a bit
+# wider (toolbar buttons on the left + the right-hand y-axis reserve).
+_SCATTER_MATRIX_CANVAS_WIDTH_PX = 360
 
 
 class ChartDisplay(PluginBase):
@@ -479,6 +488,9 @@ class ChartDisplay(PluginBase):
             return
         if len(self._scatter_views) == 1:
             view = next(iter(self._scatter_views.values()))
+            # Single plot lives in the always-visible side panel, where the
+            # container width is reliable — bind to it (#118).
+            view.set_canvas_width("auto")
             self._plot_host.children = [view.widget()]
             return
         grid = self._triangular_grid()
@@ -502,13 +514,14 @@ class ChartDisplay(PluginBase):
         """Lay the pairwise scatters out as an upper-triangular matrix (#113).
 
         Built as a CSS-grid ``GridBox`` — the same layout ``jscatter.compose``
-        uses — rather than nested flexbox: ``N-1`` equal ``1fr`` columns and
-        fixed-height rows give every cell a *definite* size, so each jscatter
-        canvas measures the correct width on first layout and fills its cell
-        instead of leaving blank space / a mis-scaled second axis grid (#118).
-        Cells are laid out row-major: row ``i`` has ``i`` leading blanks (lower
+        uses — rather than nested flexbox. Each plot is given an *explicit* pixel
+        width (see ``_plot_cell``), so ``N-1`` content-sized (``auto``) columns
+        hug the fixed-width plots and jscatter never has to measure the container
+        (which mis-rendered the canvas / hid the right-hand y-axis, #118). Cells
+        are laid out row-major: row ``i`` has ``i`` leading blanks (lower
         triangle) then the plots for ``(i, j)``, ``j > i``; the CSS grid places
-        them left→right, top→bottom.
+        them left→right, top→bottom (column widths are anchored by row 0, which
+        has a plot in every column).
 
         Returns the ``GridBox`` when a full pairwise matrix for
         ``self._multipair_channels_last`` is present — with any extra
@@ -556,17 +569,19 @@ class ChartDisplay(PluginBase):
             children=cells,
             layout=Layout(
                 width="100%",
-                grid_template_columns=" ".join(["1fr"] * cols),
+                grid_template_columns=" ".join(["auto"] * cols),
                 grid_auto_rows=f"{_SCATTER_ROW_HEIGHT_PX}px",
                 grid_gap="8px",
+                justify_content="initial",
             ),
         )
 
     @staticmethod
     def _plot_cell(view):
-        # Return the scatter widget directly as a grid item; CSS grid stretches
-        # it to fill the ``1fr`` cell, so jscatter (width='auto') gets the full
-        # cell width.
+        # Give the plot an explicit pixel width so jscatter does not rely on the
+        # frontend measuring the (initially hidden) grid cell — the failure mode
+        # that left the canvas narrow and the right-hand y-axis hidden (#118).
+        view.set_canvas_width(_SCATTER_MATRIX_CANVAS_WIDTH_PX)
         return view.widget()
 
     @staticmethod

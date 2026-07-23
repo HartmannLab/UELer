@@ -1373,6 +1373,11 @@ def _build_jscatter_stub() -> types.ModuleType:
                 self._y_scale = scale
             return self
 
+        def width(self, value=None):
+            if value is not None:
+                self._width = value
+            return getattr(self, "_width", "auto")
+
         def height(self, value=None):
             if value is not None:
                 self._height = value
