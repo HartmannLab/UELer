@@ -29,7 +29,7 @@ __all__ = [
 	"ensure_compat_aliases",
 ]
 
-__version__ = "0.4.1"
+__version__ = "0.4.2"
 
 
 def ensure_compat_aliases() -> None:

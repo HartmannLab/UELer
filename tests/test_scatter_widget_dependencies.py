@@ -61,5 +61,24 @@ class ScatterWidgetColoringTests(unittest.TestCase):
         self.assertEqual(scatter._color_map[2], (0.0, 0.0, 1.0, 1.0))
 
 
+class ScatterWidgetResetViewTests(unittest.TestCase):
+    def test_reset_view_fires_when_frontend_ready(self):
+        # jscatter lays out the axes / fits the camera on the frontend; the
+        # widget must call reset_view() once the frontend mounts (signalled by
+        # the read-only dom_element_id trait) so the plot opens correctly framed
+        # without a manual "reset view" click (#118 reply).
+        from ueler.viewer.plugin.scatter_widget import ScatterPlotWidget
+
+        frame = pd.DataFrame({"x": [1, 2, 3], "y": [4, 5, 6]}, index=[10, 20, 30])
+        widget = ScatterPlotWidget("test", frame, "x", "y")
+
+        calls = []
+        widget._jwidget.reset_view = lambda *a, **k: calls.append((a, k))
+        # Simulate the frontend writing dom_element_id on mount.
+        widget._reset_handler({"name": "dom_element_id", "new": "scatter-dom-1"})
+
+        self.assertEqual(len(calls), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

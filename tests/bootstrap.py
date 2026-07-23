@@ -1341,11 +1341,13 @@ def _build_jscatter_stub() -> types.ModuleType:
     _SELECTION_SENTINEL = object()
 
     class Scatter:
-        def __init__(self, *, x, y, data, data_use_index=False):  # noqa: D401 - match real signature
+        def __init__(self, *, x, y, data, data_use_index=False, x_scale=None, y_scale=None):  # noqa: D401 - match real signature
             self._x = x
             self._y = y
             self._data = data
             self._data_use_index = data_use_index
+            self._x_scale = x_scale
+            self._y_scale = y_scale
             self._selection = []
             self._height = 0
             self._size = None

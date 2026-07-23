@@ -115,12 +115,15 @@ class ScatterPlotWidget:
             y=y,
             data=self._data,
             data_use_index=True,
+            # Pad the x/y domains at construction so edge points are never
+            # clipped (#118) and the axis scale domain is set before the first
+            # render. (The camera still needs a reset once the frontend mounts —
+            # see ``_reset_view_when_ready`` below — because jscatter fits the
+            # view and lays out the axes on the frontend, #118 reply.)
+            x_scale=_padded_domain(self._data[x]),
+            y_scale=_padded_domain(self._data[y]),
         )
         self._scatter.axes(axes=True, grid=True, labels=[x, y])
-        # Pad the x/y domains so edge points are never clipped (#118). Passing
-        # only ``scale`` keeps the ``x``/``y`` columns set above.
-        self._scatter.x(scale=_padded_domain(self._data[x]))
-        self._scatter.y(scale=_padded_domain(self._data[y]))
         self._scatter.height(self._height)
         self._scatter.size(default=point_size)
         if color and color in self._data.columns:
@@ -142,6 +145,16 @@ class ScatterPlotWidget:
         self._hover_handler = self._create_hover_handler()
         self._jwidget.observe(self._selection_handler, names="selection")
         self._jwidget.observe(self._hover_handler, names="hovering")
+
+        # jscatter fits the camera and lays out the axes on the *frontend*. On
+        # first mount the view opened mis-framed — the right-hand y-axis ticks
+        # and labels were hidden until the user clicked "reset view" (#118 reply).
+        # ``dom_element_id`` is a read-only trait the frontend writes once it has
+        # mounted the widget in the DOM, so it is a reliable "frontend ready"
+        # signal: reset the view then to reproduce the reset-view click
+        # programmatically, so every plot opens correctly framed.
+        self._reset_handler = self._create_reset_handler()
+        self._jwidget.observe(self._reset_handler, names="dom_element_id")
 
         self.state = ScatterViewState(
             identifier=identifier,
@@ -186,6 +199,17 @@ class ScatterPlotWidget:
                         hovered = None
             for callback in self._hover_callbacks:
                 callback(hovered)
+
+        return _handler
+
+    def _create_reset_handler(self):
+        def _handler(_change):
+            reset_view = getattr(self._jwidget, "reset_view", None)
+            if callable(reset_view):
+                try:
+                    reset_view()
+                except Exception:  # pragma: no cover - defensive; frontend race
+                    pass
 
         return _handler
 
@@ -291,6 +315,7 @@ class ScatterPlotWidget:
     def dispose(self) -> None:
         self._jwidget.unobserve(self._selection_handler, names="selection")
         self._jwidget.unobserve(self._hover_handler, names="hovering")
+        self._jwidget.unobserve(self._reset_handler, names="dom_element_id")
         self._selection_callbacks.clear()
         self._hover_callbacks.clear()
 

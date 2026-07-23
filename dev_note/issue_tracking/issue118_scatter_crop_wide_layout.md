@@ -59,6 +59,31 @@ aligned grid). Row height = canvas height (320px) + jscatter's ~36px axis reserv
 widget placed directly as a grid item (CSS grid stretches it); blank lower-triangle cells are
 empty `Box`es. Cells are emitted row-major and auto-placed by the grid.
 
+### 4. Reply — initial view mis-scaled until "reset view" (`ueler/viewer/plugin/scatter_widget.py`)
+
+With cropping fixed, the developer reported the plots rendered with an **inconsistent initial
+scale**: the x-axis extent differed between plots and the right-hand y-axis ticks/labels were
+hidden, and clicking jscatter's **reset view** button corrected it. **Root cause:** the padded
+scale was applied *after* construction (`scatter.x(scale=…)` / `scatter.y(scale=…)`). jscatter
+re-normalizes the points when the scale changes but does **not** re-fit the camera, so the view
+stayed at the camera computed for the *un*-padded normalization — mis-framed and inconsistent
+per plot — until "reset view" re-fit it.
+
+**Fix (part 1 — axis domain before render):** pass the padded domains to the
+**`Scatter(...)` constructor** (`x_scale=` / `y_scale=`) instead of a post-construction
+`.x(scale=…)` call, so the points are normalized to the padded range once (verified: ±0.909 in
+NDC, a 5% margin inside the default `[-1, 1]` view) and the axis scale domain is set before the
+first render. **This was necessary but not sufficient** — the plots still opened with the
+right-hand y-axis ticks/labels hidden until "reset view".
+
+**Fix (part 2 — reset the view once the frontend mounts):** jscatter fits the camera and lays
+out the axes on the *frontend*, and that layout did not happen on first mount. `ScatterPlotWidget`
+now observes the widget's read-only **`dom_element_id`** trait — which the frontend writes once
+it has mounted the widget in the DOM (the standard anywidget "frontend ready" signal) — and calls
+`widget.reset_view()` when it fires, reproducing the "reset view" click programmatically so every
+plot opens correctly framed. The observer is torn down in `dispose()`. This is exactly the
+developer's suggestion: call the reset-view callback once the plot is rendered.
+
 ## Tests
 
 - `tests/test_scatter_axis_padding.py` (new) — unit tests for `_padded_domain`: normal range
@@ -74,6 +99,10 @@ empty `Box`es. Cells are emitted row-major and auto-placed by the grid.
 - `tests/test_chart_footer_behavior.py` — the triangular-matrix tests now read the flat,
   row-major `GridBox` children (chunked into rows via a `_grid_rows` helper) and assert the
   `1fr` column count, instead of the old nested `VBox`/`HBox` rows.
+- `tests/bootstrap.py` — the jscatter `Scatter` stub `__init__` now accepts `x_scale` /
+  `y_scale` kwargs (construction-time scale).
+- `tests/test_scatter_widget_dependencies.py` — new `ScatterWidgetResetViewTests`:
+  `reset_view()` fires when the `dom_element_id` "frontend ready" trait is written.
 
 Full suite: failure/error set identical to the `develop` baseline (31 pre-existing, no new
 failures/errors).
