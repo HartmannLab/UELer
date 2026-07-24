@@ -90,13 +90,9 @@ class ChartDisplay(PluginBase):
             children=[self._plot_placeholder], layout=Layout(width="100%", gap="8px")
         )
 
-        self._wide_notice = HTML(
-            value=(
-                "<b>Multiple scatter plots are active.</b> Controls and plots appear in the footer."
-            ),
-            layout=Layout(width="100%", padding="8px"),
-        )
-        self._section_location = "vertical"
+        # The scatter plugin lives permanently in the wide-footer panel (#121);
+        # it is not shown in the side accordion.
+        self.footer_only = True
 
         self.single_point_click_state = 0
         backend_env = os.environ.get("UELER_SCATTER_BACKEND")
@@ -283,7 +279,6 @@ class ChartDisplay(PluginBase):
 
         self._add_scatter_view(data, x_col, y_col, c_col)
         self._render_scatter_area()
-        self._sync_panel_location()
 
     @update_status_bar
     def plot_all_pairs(self, _button):
@@ -320,7 +315,6 @@ class ChartDisplay(PluginBase):
         if last_id is not None:
             self._update_scatter_controls(selected_id=last_id)
         self._render_scatter_area()
-        self._sync_panel_location()
 
     def _add_scatter_view(
         self, data: pd.DataFrame, x_col: str, y_col: str, c_col: str
@@ -483,8 +477,8 @@ class ChartDisplay(PluginBase):
             return
         if len(self._scatter_views) == 1:
             view = next(iter(self._scatter_views.values()))
-            # Single plot lives in the always-visible side panel, where the
-            # container width is reliable — bind to it (#118).
+            # Single plot lives in the always-visible footer panel (#121), where
+            # the container width is reliable — bind to it (#118).
             view.set_canvas_width("auto")
             self._plot_host.children = [view.widget()]
             return
@@ -640,7 +634,6 @@ class ChartDisplay(PluginBase):
         scatter.dispose()
         self._update_scatter_controls()
         self._render_scatter_area()
-        self._sync_panel_location()
 
     def _clear_all_scatter_views(self, _button) -> None:
         for scatter in self._scatter_views.values():
@@ -650,7 +643,6 @@ class ChartDisplay(PluginBase):
         self._multipair_channels_last = []
         self._update_scatter_controls()
         self._render_scatter_area()
-        self._sync_panel_location()
         self.selected_indices.value = set()
 
     def _on_scatter_selector_change(self, change) -> None:
@@ -660,47 +652,15 @@ class ChartDisplay(PluginBase):
     # ------------------------------------------------------------------
     # Layout helpers
     # ------------------------------------------------------------------
-    def _has_multiple_scatter(self) -> bool:
-        return len(self._scatter_views) > 1
-
-    def _place_sections_vertical(self) -> None:
-        if self._section_location == "vertical":
-            return
-        self.ui.children = [self.controls_section, self.plot_section]
-        self._section_location = "vertical"
-
-    def _place_sections_horizontal(self) -> None:
-        if self._section_location == "horizontal":
-            return
-        self.ui.children = [self._wide_notice]
-        self._section_location = "horizontal"
-
-    def _sync_panel_location(self) -> bool:
-        _logger.debug("[chart] sync panel location: %s", self._section_location)
-        previous_location = self._section_location
-        if self._has_multiple_scatter():
-            self._place_sections_horizontal()
-        else:
-            self._place_sections_vertical()
-        layout_changed = previous_location != self._section_location
-        if (
-            layout_changed
-            and hasattr(self.main_viewer, "refresh_bottom_panel")
-        ):
-            _logger.debug("[chart] refreshing bottom panel due to layout change")
-            self.main_viewer.refresh_bottom_panel()
-        return layout_changed
-
     def wide_panel_layout(self):
-        if self._has_multiple_scatter():
-            self._place_sections_horizontal()
-            return {
-                "title": self.displayed_name,
-                "control": self.controls_section,
-                "content": self.plot_section,
-            }
-        self._place_sections_vertical()
-        return None
+        # The scatter plugin is permanently allocated to the wide-footer panel
+        # (#121): always expose its controls + plots there, regardless of how
+        # many scatters are active.
+        return {
+            "title": self.displayed_name,
+            "control": self.controls_section,
+            "content": self.plot_section,
+        }
 
     def on_marker_sets_changed(self):
         """Keep the marker-set dropdown in sync with the left panel (#113)."""
@@ -712,11 +672,8 @@ class ChartDisplay(PluginBase):
         super().after_all_plugins_loaded()
         # Marker sets are restored from widget_states.json after plugin __init__.
         self.on_marker_sets_changed()
-        layout_changed = self._sync_panel_location()
-        if (
-            not layout_changed
-            and hasattr(self.main_viewer, "refresh_bottom_panel")
-        ):
+        # Populate the footer panel on load (#121).
+        if hasattr(self.main_viewer, "refresh_bottom_panel"):
             self.main_viewer.refresh_bottom_panel()
 
     # ------------------------------------------------------------------

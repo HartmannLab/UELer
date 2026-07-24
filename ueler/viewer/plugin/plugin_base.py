@@ -20,6 +20,9 @@ class PluginBase:
         self.SidePlots_id = ""  # NOSONAR - legacy public attribute name
         self.displayed_name = ""
         self.initialized = False
+        # Footer-only plugins (see #121) live exclusively in the wide-footer
+        # panel and are skipped when the SidePlots accordion is assembled.
+        self.footer_only = False
         # Common plugin behavior
 
     def initiate_ui(self):

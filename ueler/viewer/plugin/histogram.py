@@ -141,6 +141,9 @@ class HistogramDisplay(PluginBase):
         super().__init__(main_viewer, width, height)
         self.SidePlots_id = "histogram_output"
         self.displayed_name = "Histogram"
+        # Permanently allocated to the wide-footer panel (#121); not shown in the
+        # side accordion.
+        self.footer_only = True
         self.main_viewer = main_viewer
         self.width = width
         self.height = height
@@ -205,11 +208,23 @@ class HistogramDisplay(PluginBase):
             self.ui_component.channel_selector_bundle, self.main_viewer
         )
 
+    def wide_panel_layout(self):
+        # Permanently allocated to the wide-footer panel (#121): expose the
+        # controls + plots there instead of the side accordion.
+        return {
+            "title": self.displayed_name,
+            "control": self.controls_section,
+            "content": self.plot_section,
+        }
+
     def after_all_plugins_loaded(self):
         super().after_all_plugins_loaded()
         # Marker sets are restored from widget_states.json after plugin __init__,
         # so populate the dropdown once everything is loaded.
         self.on_marker_sets_changed()
+        # Populate the footer panel on load (#121).
+        if hasattr(self.main_viewer, "refresh_bottom_panel"):
+            self.main_viewer.refresh_bottom_panel()
 
     def _build_layout(self) -> None:
         plot_controls = VBox(

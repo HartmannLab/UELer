@@ -564,5 +564,23 @@ class TestHistogramRendering(unittest.TestCase):
         self.assertIsNone(self.hist._bokeh_model.layout.height)
 
 
+class TestHistogramFooterLayout(unittest.TestCase):
+    """The histogram is permanently allocated to the wide-footer panel (#121)."""
+
+    def setUp(self):
+        self.viewer = _make_viewer(_two_fov_table())
+        self.hist = _make_histogram(self.viewer)
+
+    def test_histogram_is_footer_only(self):
+        self.assertTrue(self.hist.footer_only)
+
+    def test_wide_panel_layout_exposes_controls_and_plots(self):
+        layout = self.hist.wide_panel_layout()
+        self.assertIsNotNone(layout)
+        self.assertEqual(layout["title"], self.hist.displayed_name)
+        self.assertIs(layout["control"], self.hist.controls_section)
+        self.assertIs(layout["content"], self.hist.plot_section)
+
+
 if __name__ == "__main__":
     unittest.main()

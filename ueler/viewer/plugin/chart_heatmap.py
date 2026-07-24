@@ -90,13 +90,9 @@ class ChartDisplay(PluginBase):
             [self._plot_placeholder], layout=_bounded_panel_layout(gap="8px")
         )
 
-        self._wide_notice = HTML(
-            value=(
-                "<b>Multiple heatmap scatter plots are active.</b> Controls and plots appear in the footer."
-            ),
-            layout=_bounded_panel_layout(padding="8px"),
-        )
-        self._section_location = "vertical"
+        # This plugin lives permanently in the wide-footer panel (#121); it is
+        # not shown in the side accordion.
+        self.footer_only = True
 
         self._wire_events()
         self._build_layout()
@@ -252,7 +248,6 @@ class ChartDisplay(PluginBase):
         self._scatter_views[scatter_id] = scatter
         self._update_scatter_controls(selected_id=scatter_id)
         self._render_scatter_area()
-        self._sync_panel_location()
         if hasattr(self.main_viewer, "refresh_bottom_panel"):
             self.main_viewer.refresh_bottom_panel()
 
@@ -420,7 +415,6 @@ class ChartDisplay(PluginBase):
         scatter.dispose()
         self._update_scatter_controls()
         self._render_scatter_area()
-        self._sync_panel_location()
         if hasattr(self.main_viewer, "refresh_bottom_panel"):
             self.main_viewer.refresh_bottom_panel()
 
@@ -430,7 +424,6 @@ class ChartDisplay(PluginBase):
         self._scatter_views.clear()
         self._update_scatter_controls()
         self._render_scatter_area()
-        self._sync_panel_location()
         if hasattr(self.main_viewer, "refresh_bottom_panel"):
             self.main_viewer.refresh_bottom_panel()
         self.selected_indices.value = set()
@@ -442,41 +435,18 @@ class ChartDisplay(PluginBase):
     # ------------------------------------------------------------------
     # Layout helpers
     # ------------------------------------------------------------------
-    def _has_multiple_scatter(self) -> bool:
-        return len(self._scatter_views) > 1
-
-    def _place_sections_vertical(self) -> None:
-        if self._section_location == "vertical":
-            return
-        self.ui.children = [self.controls_section, self.plot_section]
-        self._section_location = "vertical"
-
-    def _place_sections_horizontal(self) -> None:
-        if self._section_location == "horizontal":
-            return
-        self.ui.children = [self._wide_notice]
-        self._section_location = "horizontal"
-
-    def _sync_panel_location(self) -> None:
-        if self._has_multiple_scatter():
-            self._place_sections_horizontal()
-        else:
-            self._place_sections_vertical()
-
     def wide_panel_layout(self):
-        if self._has_multiple_scatter():
-            self._place_sections_horizontal()
-            return {
-                "title": self.displayed_name,
-                "control": self.controls_section,
-                "content": self.plot_section,
-            }
-        self._place_sections_vertical()
-        return None
+        # Permanently allocated to the wide-footer panel (#121): always expose
+        # the controls + plots there, regardless of how many scatters are active.
+        return {
+            "title": self.displayed_name,
+            "control": self.controls_section,
+            "content": self.plot_section,
+        }
 
     def after_all_plugins_loaded(self):
         super().after_all_plugins_loaded()
-        self._sync_panel_location()
+        # Populate the footer panel on load (#121).
         if hasattr(self.main_viewer, "refresh_bottom_panel"):
             self.main_viewer.refresh_bottom_panel()
 

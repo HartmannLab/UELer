@@ -158,6 +158,13 @@ def wide_panel_cache_token(self):
     return (self.some_state_flag,)
 ```
 
+**Footer-only plugins (#121).** Set `self.footer_only = True` in `__init__` to keep the
+plugin **out of** the side accordion entirely — it then renders exclusively in the wide
+footer. `display_ui()` skips footer-only plugins when building the accordion, but they
+remain on `viewer.SidePlots` so `collect_wide_plugin_entries()` still places them in the
+footer via `wide_panel_layout()`. The Scatter plot, Chart (heatmap), and Histogram plugins
+use this. (The base default is `footer_only = False` — accordion plus optional footer.)
+
 ### Widget state persistence
 
 Call `self.setup_widget_observers()` in `__init__` **after** creating all

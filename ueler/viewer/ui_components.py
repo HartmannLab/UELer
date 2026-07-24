@@ -328,6 +328,10 @@ def display_ui(viewer):
     accordion_children = []
     for attr_name in dir(viewer.SidePlots):
         attr = getattr(viewer.SidePlots, attr_name)
+        # Footer-only plugins (#121) render exclusively in the wide-footer panel,
+        # so they are not added to the side accordion.
+        if getattr(attr, 'footer_only', False):
+            continue
         if hasattr(attr, 'ui') and hasattr(attr, 'displayed_name'):
             accordion_children.append(
                 Accordion(

@@ -514,47 +514,33 @@ class ChartDisplayFooterTests(unittest.TestCase):
 
         self.assertEqual(gallery.received, multi)
 
-    def test_footer_layout_toggles_with_scatter_count(self):
-        # Initial state: vertical layout retained
-        self.assertEqual(self.chart._section_location, "vertical")
-        self.assertEqual(
-            list(self.chart.ui.children),
-            [self.chart.controls_section, self.chart.plot_section],
-        )
-        self.assertEqual(self.viewer.refresh_calls, 0)
+    def test_scatter_plugin_is_permanently_wide_footer(self):
+        # The scatter plugin lives permanently in the wide footer (#121): it is
+        # flagged footer-only and always exposes a footer layout regardless of
+        # how many scatters are active.
+        self.assertTrue(self.chart.footer_only)
 
-        # One scatter: stays vertical, no footer refresh
+        def _assert_footer_layout():
+            layout = self.chart.wide_panel_layout()
+            self.assertIsNotNone(layout)
+            self.assertEqual(layout["title"], self.chart.displayed_name)
+            self.assertIs(layout["control"], self.chart.controls_section)
+            self.assertIs(layout["content"], self.chart.plot_section)
+
+        # Zero scatters: still footer.
+        _assert_footer_layout()
+
+        # One scatter: still footer (previously fell back to the side panel).
         self.chart._scatter_views["s1"] = _DummyScatter("s1")
-        self.chart._sync_panel_location()
-        self.assertEqual(self.chart._section_location, "vertical")
-        self.assertEqual(self.viewer.refresh_calls, 0)
+        _assert_footer_layout()
 
-        # Two scatters: switch to footer with refresh
+        # Two scatters: still footer.
         self.chart._scatter_views["s2"] = _DummyScatter("s2")
-        self.chart._sync_panel_location()
-        self.assertEqual(self.chart._section_location, "horizontal")
-        self.assertEqual(self.viewer.refresh_calls, 1)
-        self.assertEqual(list(self.chart.ui.children), [self.chart._wide_notice])
-        layout = self.chart.wide_panel_layout()
-        self.assertIsNotNone(layout)
-        self.assertIs(layout["control"], self.chart.controls_section)
-        self.assertIs(layout["content"], self.chart.plot_section)
+        _assert_footer_layout()
 
-        # Subsequent sync does not double refresh when already horizontal
-        self.chart._sync_panel_location()
-        self.assertEqual(self.viewer.refresh_calls, 1)
-
-        # Drop back to a single scatter: returns to vertical and refreshes
+        # Back to one scatter: still footer (no return to the side panel).
         self.chart._scatter_views.pop("s2")
-        self.chart._sync_panel_location()
-        self.assertEqual(self.chart._section_location, "vertical")
-        self.assertEqual(self.viewer.refresh_calls, 2)
-        self.assertEqual(
-            list(self.chart.ui.children),
-            [self.chart.controls_section, self.chart.plot_section],
-        )
-        layout = self.chart.wide_panel_layout()
-        self.assertIsNone(layout)
+        _assert_footer_layout()
 
     def test_compose_disables_selection_sync(self):
         scatter_one = _ComposeStubScatter("s1")
@@ -716,28 +702,32 @@ class HeatmapFooterPersistenceTests(unittest.TestCase):
         viewer.refresh_calls = 0
         heatmap.restore_footer_canvas_calls = 0
 
+        # The chart is permanently a footer entry (#121), so both the heatmap and
+        # the chart occupy footer tabs from the first refresh.
         viewer.refresh_bottom_panel()
         self.assertIs(viewer.BottomPlots.heatmap_output, heatmap)
         self.assertIn(heatmap.plot_output, getattr(heatmap.plot_section, "children", ()))
         self.assertGreaterEqual(heatmap.restore_footer_canvas_calls, 1)
-        self.assertEqual(len(viewer.wide_plugin_tab.children), 1)
+        self.assertEqual(len(viewer.wide_plugin_tab.children), 2)
 
+        # Adding scatters keeps both tabs and preserves the heatmap pane.
         chart._scatter_views["s1"] = _DummyScatter("s1")
         chart._scatter_views["s2"] = _DummyScatter("s2")
-        chart._sync_panel_location()
+        viewer.refresh_bottom_panel()
 
         self.assertIs(viewer.BottomPlots.heatmap_output, heatmap)
         self.assertIn(heatmap.plot_output, getattr(heatmap.plot_section, "children", ()))
         self.assertGreaterEqual(heatmap.restore_footer_canvas_calls, 2)
         self.assertEqual(len(viewer.wide_plugin_tab.children), 2)
 
+        # Removing a scatter still keeps both tabs — the chart never leaves the footer.
         chart._scatter_views.pop("s2")
-        chart._sync_panel_location()
+        viewer.refresh_bottom_panel()
 
         self.assertIs(viewer.BottomPlots.heatmap_output, heatmap)
         self.assertIn(heatmap.plot_output, getattr(heatmap.plot_section, "children", ()))
         self.assertGreaterEqual(heatmap.restore_footer_canvas_calls, 3)
-        self.assertEqual(len(viewer.wide_plugin_tab.children), 1)
+        self.assertEqual(len(viewer.wide_plugin_tab.children), 2)
 
 
 if __name__ == "__main__":  # pragma: no cover
