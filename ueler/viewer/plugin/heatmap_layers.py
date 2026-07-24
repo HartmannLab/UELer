@@ -656,7 +656,6 @@ class DataLayer:
             "cluster_method": getattr(ui.cluster_method_dropdown, "value", "ward"),
             "distance_metric": getattr(ui.distance_metric_dropdown, "value", "euclidean"),
             "zscore_across_markers": bool(getattr(ui.zscore_across_markers_checkbox, "value", False)),
-            "horizontal_layout": bool(getattr(ui.horizontal_layout_checkbox, "value", False)),
             "high_level_cluster_column": getattr(ui.high_level_cluster_dropdown, "value", ""),
             "subset_on": getattr(ui.subset_on_dropdown, "value", ""),
             "subset_values": list(getattr(ui.subset_selector, "value", []) or []),
@@ -715,7 +714,6 @@ class DataLayer:
             ("cluster_method_dropdown",        "cluster_method"),
             ("distance_metric_dropdown",       "distance_metric"),
             ("zscore_across_markers_checkbox", "zscore_across_markers"),
-            ("horizontal_layout_checkbox",     "horizontal_layout"),
         ]
         for attr, key in _widget_map:
             widget = getattr(self.ui_component, attr, None)
@@ -873,35 +871,13 @@ class InteractionLayer:
             return None
         return int(np.ceil(coord) - 1)
 
-    def on_mode_toggle(self, mode):
-        if mode not in {"wide", "vertical"}:
-            return
-        self.adapter.mode = mode
-
-    def on_orientation_toggle(self, change):
-        if not self.initialized:
-            return
-        mode = "wide" if change.get('new') else "vertical"
-        self.on_mode_toggle(mode)
-        self._reset_selection_cache()
-        self._sync_panel_location()
-        # Suppress the cached-pane refresh's render (request_cached_wide_panel_refresh
-        # early-returns while this flag is set) so refresh_bottom_panel only re-homes the
-        # footer pane; the single explicit plot_heatmap() below does the one render.
-        self._plot_refresh_inflight = True
-        try:
-            if hasattr(self.main_viewer, 'refresh_bottom_panel'):
-                self.main_viewer.refresh_bottom_panel()
-        finally:
-            self._plot_refresh_inflight = False
-        self.plot_heatmap()
-
     def after_all_plugins_loaded(self):
         super().after_all_plugins_loaded()
         # Marker sets are restored from widget_states.json after plugin __init__;
         # repopulate the marker-set dropdown so they show up (issue #117).
         self.on_marker_sets_changed()
-        self._sync_panel_location()
+        # Permanently allocated to the wide-footer panel (#121 reply): populate the
+        # footer on load.
         if hasattr(self.main_viewer, 'refresh_bottom_panel'):
             self.main_viewer.refresh_bottom_panel()
         self.main_viewer.SidePlots.chart_output.selected_indices.add_observer(
@@ -1496,7 +1472,6 @@ class DisplayLayer:
                 self.ui_component.distance_metric_dropdown,
             ], layout=Layout(gap='8px')),
             HBox([
-                self.ui_component.horizontal_layout_checkbox,
                 self.ui_component.zscore_across_markers_checkbox,
             ], layout=Layout(gap='8px')),
             HBox([self.ui_component.plot_button])
@@ -1550,51 +1525,26 @@ class DisplayLayer:
             layout=Layout(width='100%', max_width='99%', min_width='0', box_sizing='border-box', flex='1 1 auto'),
         )
 
+        # Built for reference/parity with the other plugins, but never displayed:
+        # the heatmap is footer-only (#121 reply), so its controls + plots are
+        # rendered by the wide-footer panel, not the side accordion.
         self.ui = VBox(
             [self.controls_section, self.plot_section],
             layout=Layout(width='100%', max_width='99%', min_width='0', box_sizing='border-box', max_height='800px', gap='12px')
         )
 
-        self._wide_notice = HTML(
-            value="<b>Horizontal layout enabled.</b> Controls and plots live in the footer tabs.",
-            layout=Layout(width='100%', max_width='99%', min_width='0', box_sizing='border-box', padding='8px')
-        )
-        self._section_location = 'vertical'
         self._ensure_plot_canvas_attached()
-
-    def _place_sections_vertical(self):
-        already_vertical = getattr(self, '_section_location', 'vertical') == 'vertical'
-        if not already_vertical:
-            self.ui.children = [self.controls_section, self.plot_section]
-            self.ui.layout.display = ''
-            self._section_location = 'vertical'
-        self._ensure_plot_canvas_attached()
-
-    def _place_sections_horizontal(self):
-        if getattr(self, '_section_location', 'vertical') == 'horizontal':
-            return
-        self.ui.children = [self._wide_notice]
-        self.ui.layout.display = ''
-        self._section_location = 'horizontal'
-        self._ensure_plot_canvas_attached()
-
-    def _sync_panel_location(self):
-        if self.adapter.is_wide():
-            self._place_sections_horizontal()
-        else:
-            self._place_sections_vertical()
 
     def wide_panel_layout(self):
-        if self.adapter.is_wide():
-            self._place_sections_horizontal()
-            self._ensure_plot_canvas_attached()
-            return {
-                "title": self.displayed_name,
-                "control": self.controls_section,
-                "content": self.plot_section
-            }
-        self._place_sections_vertical()
-        return None
+        # Permanently allocated to the wide-footer panel (#121 reply): always
+        # expose the controls + plots there. The heatmap always runs in the wide
+        # (horizontal) orientation, so there is no side/vertical variant.
+        self._ensure_plot_canvas_attached()
+        return {
+            "title": self.displayed_name,
+            "control": self.controls_section,
+            "content": self.plot_section
+        }
 
     def request_cached_wide_panel_refresh(self):
         if not getattr(self, 'initialized', False):

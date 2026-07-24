@@ -564,22 +564,23 @@ class TestHistogramRendering(unittest.TestCase):
         self.assertIsNone(self.hist._bokeh_model.layout.height)
 
 
-class TestHistogramFooterLayout(unittest.TestCase):
-    """The histogram is permanently allocated to the wide-footer panel (#121)."""
+class TestHistogramSideOnly(unittest.TestCase):
+    """The histogram lives in the side accordion, not the wide footer (#121 reply).
+
+    The first pass at #121 briefly moved the histogram into the footer; the reply
+    corrected that — the histogram belongs in the side panel and the heatmap is the
+    plugin that gets the permanent wide-footer allocation instead.
+    """
 
     def setUp(self):
         self.viewer = _make_viewer(_two_fov_table())
         self.hist = _make_histogram(self.viewer)
 
-    def test_histogram_is_footer_only(self):
-        self.assertTrue(self.hist.footer_only)
+    def test_histogram_is_not_footer_only(self):
+        self.assertFalse(self.hist.footer_only)
 
-    def test_wide_panel_layout_exposes_controls_and_plots(self):
-        layout = self.hist.wide_panel_layout()
-        self.assertIsNotNone(layout)
-        self.assertEqual(layout["title"], self.hist.displayed_name)
-        self.assertIs(layout["control"], self.hist.controls_section)
-        self.assertIs(layout["content"], self.hist.plot_section)
+    def test_wide_panel_layout_is_none(self):
+        self.assertIsNone(self.hist.wide_panel_layout())
 
 
 if __name__ == "__main__":

@@ -137,7 +137,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### **UELer v0.4.2 Summary**
-- The **Scatter plot**, **Chart (heatmap)**, and **Histogram** plugins now live permanently in the wide footer panel below the image (#121): they no longer jump between the side panel and the footer as you add plots, so the layout stays consistent and the plots always have the full viewer width to work with.
+- The **Scatter plot**, **Chart (heatmap)**, and **Heatmap** plugins now live permanently in the wide footer panel below the image (#121): they no longer jump between the side panel and the footer, so the layout stays consistent and the plots always have the full viewer width to work with. The Heatmap in particular now always renders in its wide (horizontal) orientation and its `Horizontal layout` checkbox is gone. The **Histogram** remains in the side panel.
 - Fixed scatter plots cropping points and rendering with hidden axes when plotting many pairs (#118): plotting several channels at once used to clip data points near the edges and render each plot too narrow — leaving a blank strip with the right-side y-axis ticks/labels hidden until you clicked "reset view". Now, when multiple scatter plots are shown in the footer, the **controls sit on top and the plots span the viewer width**, the pairwise matrix is laid out on an even grid where **each plot renders exactly like a single-pair plot** (equal-width columns, so axes, ticks, and axis labels all render correctly), and every scatter reserves a small margin around the data — so points near the edges are no longer cut off and no "reset view" click is needed.
 
 _Earlier changes (v0.4.1 and before) are in the [update log](/doc/log.md)._

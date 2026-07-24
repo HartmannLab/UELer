@@ -19,11 +19,16 @@ class HeatmapDisplay(DataLayer, InteractionLayer, DisplayLayer, PluginBase):
         super().__init__(main_viewer, width, height)
         self.SidePlots_id = "heatmap_output"
         self.displayed_name = "Heatmap"
+        # Permanently allocated to the wide-footer panel (#121 reply): the heatmap
+        # always lives in the footer and always renders in the wide (horizontal)
+        # orientation, so it is skipped in the side accordion and the old
+        # footer/side + orientation toggle is gone.
+        self.footer_only = True
         self.main_viewer = main_viewer
         self.width = width
         self.height = height
 
-        self.adapter = HeatmapModeAdapter(mode="vertical")
+        self.adapter = HeatmapModeAdapter(mode="wide")
 
         self.ui_component = UiComponent(self)
         self.data = Data()
@@ -64,8 +69,6 @@ class HeatmapDisplay(DataLayer, InteractionLayer, DisplayLayer, PluginBase):
         self.update_ui_components(self.data.current_clusters["index"].value)
         self._reset_selection_cache()
         self.initialized = True
-        # Ensure layout reflects the starting orientation before observers fire.
-        self._sync_panel_location()
 
     def _on_lock_cutoff_change(self, change):
         if self._suppress_lock_observer:
@@ -146,13 +149,6 @@ class UiComponent:
             value='euclidean',
             description='Metric:',
         )
-        self.horizontal_layout_checkbox = Checkbox(
-            value=False,
-            description='Horizontal layout',
-            disabled=False,
-            indent=False
-        )
-        self.horizontal_layout_checkbox.observe(parent.on_orientation_toggle, names='value')
         self.zscore_across_markers_checkbox = Checkbox(
             value=False,
             description='Z-score across markers',

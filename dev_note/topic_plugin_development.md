@@ -162,8 +162,10 @@ def wide_panel_cache_token(self):
 plugin **out of** the side accordion entirely — it then renders exclusively in the wide
 footer. `display_ui()` skips footer-only plugins when building the accordion, but they
 remain on `viewer.SidePlots` so `collect_wide_plugin_entries()` still places them in the
-footer via `wide_panel_layout()`. The Scatter plot, Chart (heatmap), and Histogram plugins
-use this. (The base default is `footer_only = False` — accordion plus optional footer.)
+footer via `wide_panel_layout()`. The Scatter plot, Chart (heatmap), and Heatmap plugins
+use this (the Histogram stays in the side accordion — see the #121 reply). Note the Heatmap
+also pins its adapter to `mode="wide"`, so it always renders horizontally in the footer.
+(The base default is `footer_only = False` — accordion plus optional footer.)
 
 ### Widget state persistence
 

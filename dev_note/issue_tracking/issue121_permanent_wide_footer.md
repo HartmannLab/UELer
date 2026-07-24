@@ -1,4 +1,12 @@
-# Issue #121 — Allocate the Scatter plot, Chart (heatmap), and Histogram plugins to the wide-footer layout permanently
+# Issue #121 — Allocate plugins to the wide-footer layout permanently
+
+> **Reply correction (current state):** the developer clarified that moving the
+> **Histogram** into the footer was a mistake — the **Heatmap** should be the
+> permanent wide-footer plugin instead. The permanently-footer set is now
+> **Scatter plot + Chart (heatmap) + Heatmap**; the **Histogram** is back in the
+> side accordion. See [Reply correction](#reply-correction-histogram-out-heatmap-in)
+> at the bottom for the delta. The sections below describe the original (first-pass)
+> implementation, kept for history.
 
 ## Problem
 
@@ -86,3 +94,51 @@ Full-suite failure/error set is identical to the `develop` baseline (31 pre-exis
 failures/errors, no new ones). Live rendering to be confirmed in the notebook — in particular
 that a **single** scatter renders in the footer without edge cropping / a mis-scaled axis (the
 #118 concern; the footer is visible from load, so `width='auto'` should measure correctly).
+
+---
+
+## Reply correction: Histogram out, Heatmap in
+
+The developer's reply to #121 reversed part of the first pass:
+
+> It was my mistake to allocate the histogram plugin to the wide-footer layout permanently.
+> Rather the heatmap plugin should be allocated to the wide-footer layout permanently. Please
+> move the histogram plugin back to the side and allocate the heatmap plugin to the wide-footer
+> layout permanently.
+
+### Decisions (confirmed with the developer)
+1. **Which "heatmap":** the real **"Heatmap"** plugin (`heatmap.py` / `heatmap_layers.py`),
+   *and* keep **"Chart (heatmap)"** (`chart_heatmap.py`) footer-only as-is (answer: "Both
+   heatmap plugins" / "Keep it footer-only").
+2. **Heatmap mode:** force **wide/horizontal always** and **remove** the `Horizontal layout`
+   checkbox (rather than keeping placement-only and a live orientation toggle). This matches
+   #121's "reduce UI complexity" goal and avoids a tall vertical heatmap wasting a wide footer.
+
+### Delta from the first pass
+- **Histogram** (`histogram.py`) — reverted to side-only: removed `footer_only = True`, the
+  `wide_panel_layout()`, and the `refresh_bottom_panel()` call in `after_all_plugins_loaded()`.
+  It now falls back to `PluginBase.wide_panel_layout()` (returns `None`).
+- **Heatmap** (`heatmap.py`) — `__init__` sets `footer_only = True` and builds the adapter with
+  `mode="wide"` (was `"vertical"`); removed the init-time `_sync_panel_location()` prime and the
+  `Horizontal layout` checkbox from `UiComponent`.
+- **Heatmap layers** (`heatmap_layers.py`) — `wide_panel_layout()` always returns the footer
+  `{title, control, content}` dict (no `is_wide()` gate). Removed `on_orientation_toggle`,
+  `on_mode_toggle`, `_sync_panel_location`, `_place_sections_vertical/horizontal`,
+  `_wide_notice`, `_section_location`; dropped `horizontal_layout` from the AnnData checkpoint
+  export/import. `after_all_plugins_loaded()` still calls `refresh_bottom_panel()` (no more
+  `_sync_panel_location()`). The orientation-aware rendering/selection branches (`adapter.is_wide()`)
+  are kept — the plugin just never leaves wide mode.
+- **Scatter plot** and **Chart (heatmap)** — unchanged (still footer-only).
+
+### Tests (reply)
+- `tests/test_heatmap_footer.py` — **new**: the real `HeatmapDisplay` is `footer_only`, its
+  adapter `is_wide()` is always true, `wide_panel_layout()` always returns the footer dict, and
+  `UiComponent` has no `horizontal_layout_checkbox`.
+- `tests/test_histogram_plugin.py` — `TestHistogramFooterLayout` → `TestHistogramSideOnly`
+  (histogram is *not* footer-only; `wide_panel_layout()` is `None`).
+- Existing heatmap suites (`test_issue108/109`, `test_heatmap_selection`,
+  `test_heatmap_marker_selection`, `test_heatmap_adapter`, `test_gallery_heatmap_integration`)
+  still pass — the retained `is_wide()` branches keep exercising the orientation logic.
+- 121 targeted tests pass; full-suite failure/error set identical to the `develop` baseline
+  (31 pre-existing, no new failures). Live rendering (heatmap in the footer, always horizontal)
+  to be confirmed in the notebook.
