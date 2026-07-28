@@ -1662,11 +1662,34 @@ class DisplayLayer:
         self.plot_output = new_out
         if fig is not None:
             canvas = getattr(fig, 'canvas', None)
+            self._apply_canvas_width(canvas, restore_size)
             with new_out:
                 display_target = canvas if canvas is not None else fig
                 display(display_target)
         self._swap_plot_output_in_section(new_out)
         self._present_footer_canvas_if_wide(fig)
+
+    def _apply_canvas_width(self, canvas, restore_size):
+        """Size the heatmap canvas to the footer width (#121 reply 2).
+
+        A **fresh** render (``restore_size is None``) makes the ipympl canvas fill the
+        footer by setting its widget ``layout.width = '100%'``; ipympl's frontend then
+        fits the figure to the full plugin width instead of the small default figsize
+        (``HeatmapModeAdapter._wide_fig_width`` caps at ~5.4in for a 6in plugin width,
+        which looked tiny in the wide footer). When a user-set size is being **restored**
+        (the #109 resize-remember path, ``restore_size`` is not None), the canvas keeps
+        its explicit figure size (``layout.width = 'auto'``) so the remembered scale is
+        not stretched back to 100%.
+        """
+        if canvas is None:
+            return
+        layout = getattr(canvas, 'layout', None)
+        if layout is None:
+            return
+        try:
+            layout.width = '100%' if restore_size is None else 'auto'
+        except Exception:  # pragma: no cover - defensive guard for stub canvases
+            pass
 
     def _capture_heatmap_scale(self):
         """Return the current figure size ``(width, height)`` in inches, or ``None``.

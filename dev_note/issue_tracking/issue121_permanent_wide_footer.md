@@ -142,3 +142,45 @@ The developer's reply to #121 reversed part of the first pass:
 - 121 targeted tests pass; full-suite failure/error set identical to the `develop` baseline
   (31 pre-existing, no new failures). Live rendering (heatmap in the footer, always horizontal)
   to be confirmed in the notebook.
+
+---
+
+## Reply 2: Heatmap should fill 100% of the footer width on load
+
+> The heatmap plugin is now permanently allocated to the wide-footer layout, but the initial
+> width of the heatmap is not set to 100% of the plugin width, making it really small. The new
+> size should be remembered after the user resizes it, but the initial size should be set to
+> 100% of the plugin width.
+
+### Root cause
+In wide mode the clustermap figure width is `HeatmapModeAdapter._wide_fig_width` =
+`min(num_clusters × 0.3in, plugin_width × 0.9)`. Plugins are built as `plugin_candidate(self, 6, 3)`
+(width = 6in), so the wide figure caps at ~5.4in (~540px) — far narrower than the footer, and
+often less with few clusters. The figure is an **ipympl** canvas whose pixel size comes from
+`figsize × dpi`; nothing stretched it to the container. The footer's real pixel width is a
+frontend measurement Python can't compute, so a fixed inch-based figsize can never be "100% of
+the plugin width".
+
+### Fix
+Use the idiomatic ipympl **responsive** approach. `DisplayLayer._refresh_plot` now calls a new
+`_apply_canvas_width(canvas, restore_size)`:
+- **Fresh render** (`restore_size is None`, a Plot/load): set the ipympl canvas
+  `layout.width = '100%'`. ipympl's frontend `ResizeObserver` then fits the figure to the full
+  footer width.
+- **Restored size** (`restore_size` is not None — the #109 resize-remember path that rebuilds at
+  the captured `fig.get_size_inches()`): set `layout.width = 'auto'` so the remembered figure size
+  is honored and not stretched back to 100%.
+
+`_refresh_plot` is called without a size on fresh Plot/load (`plot_heatmap`, `load_heatmap`,
+`import_heatmap_state`) and **with** the captured size only from `apply_new_cutoff` (#109). So:
+fresh → 100%; after a manual resize, the next rebuild restores the dragged size fixed. The helper
+is guarded against stub/None canvases with no `layout` (keeps the #108 render tests happy).
+
+### Tests (reply 2)
+- `tests/test_heatmap_footer.py` — `TestHeatmapCanvasFillsFooter`: a fresh `_refresh_plot()` sets
+  the canvas `layout.width` to `'100%'`; `_refresh_plot(restore_size=(w, h))` sets it to `'auto'`;
+  `_apply_canvas_width` does not raise for a canvas without `layout` (or `None`).
+- Full-suite failure/error set identical to the `develop` baseline (31 pre-existing, no new
+  failures). ⚠️ The on-screen fill depends on ipympl's frontend resize behavior and must be
+  confirmed live in a notebook (the responsive `layout.width='100%'` idiom is standard ipympl, but
+  it can't be exercised by the headless test stubs).

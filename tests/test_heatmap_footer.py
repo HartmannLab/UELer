@@ -19,8 +19,13 @@ from unittest.mock import MagicMock
 
 import tests.bootstrap  # noqa: F401  # Ensure shared test bootstrap runs
 
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import pandas as pd
 
+import ueler.viewer.plugin.heatmap_layers as heatmap_layers
 from ueler.viewer.plugin.heatmap import HeatmapDisplay, UiComponent
 
 
@@ -80,6 +85,67 @@ class TestHeatmapPermanentWideFooter(unittest.TestCase):
         layout = self.heatmap.wide_panel_layout()
         self.assertIsNotNone(layout)
         self.assertIs(layout["content"], self.heatmap.plot_section)
+
+
+class TestHeatmapCanvasFillsFooter(unittest.TestCase):
+    """#121 reply 2: a fresh heatmap fills the footer width, while a remembered
+    (user-resized) size stays fixed.
+
+    ``_refresh_plot`` sets the ipympl canvas ``layout.width`` — ``'100%'`` on a fresh
+    render so ipympl fits the figure to the full footer width, and ``'auto'`` when the
+    #109 resize-remember path restores a user-set figure size.
+    """
+
+    def setUp(self):
+        self._orig_display = heatmap_layers.display
+        heatmap_layers.display = lambda *_a, **_k: None
+        self._was_interactive = plt.isinteractive()
+
+    def tearDown(self):
+        heatmap_layers.display = self._orig_display
+        if self._was_interactive:
+            plt.ion()
+        else:
+            plt.ioff()
+
+    def _make_heatmap(self):
+        from ipywidgets import Output, VBox
+
+        heatmap = HeatmapDisplay.__new__(HeatmapDisplay)
+        heatmap.adapter = SimpleNamespace(is_wide=lambda: True)
+        heatmap._restoring_plot_section = False
+        heatmap.plot_output = Output()
+        heatmap.plot_section = VBox([heatmap.plot_output])
+
+        self.canvas = SimpleNamespace(
+            layout=SimpleNamespace(width=None),
+            draw=lambda: None,
+            new_timer=lambda interval=0: None,
+        )
+
+        def _fake_generate(figsize_override=None):
+            heatmap.data = SimpleNamespace(
+                g=SimpleNamespace(fig=SimpleNamespace(canvas=self.canvas))
+            )
+
+        heatmap.generate_heatmap = _fake_generate
+        return heatmap
+
+    def test_fresh_render_fills_footer_width(self):
+        heatmap = self._make_heatmap()
+        heatmap._refresh_plot()
+        self.assertEqual(self.canvas.layout.width, "100%")
+
+    def test_restored_size_keeps_canvas_width_auto(self):
+        heatmap = self._make_heatmap()
+        heatmap._refresh_plot(restore_size=(10.0, 3.0))
+        self.assertEqual(self.canvas.layout.width, "auto")
+
+    def test_apply_canvas_width_is_defensive_without_layout(self):
+        heatmap = self._make_heatmap()
+        # A stub canvas with no ``layout`` must not raise.
+        heatmap._apply_canvas_width(SimpleNamespace(), None)
+        heatmap._apply_canvas_width(None, None)
 
 
 if __name__ == "__main__":
