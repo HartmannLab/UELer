@@ -95,6 +95,7 @@ IntSlider = _ensure_widget_class("IntSlider")
 TagsInput = _ensure_widget_class("TagsInput")
 Image = _ensure_widget_class("Image")
 
+from .plugin.channel_picker_widget import build_channel_picker  # type: ignore[import-error]
 from .plugin.chart import ChartDisplay  # type: ignore[import-error]
 from .plugin.cell_gallery import CellGalleryDisplay  # type: ignore[import-error]
 from .plugin.heatmap import HeatmapDisplay  # type: ignore[import-error]
@@ -497,10 +498,13 @@ class uicomponents:
 
         self.channel_selector_text = HTML(value='Channels:')
 
-        # Initialize channel selector
-        self.channel_selector = TagsInput(
+        # Initialize channel selector. Uses the searchable, always-scrollable
+        # picker from #125 instead of ``TagsInput``, whose native ``<datalist>``
+        # popup clipped long channel lists and hid most options.
+        self.channel_selector = build_channel_picker(
             allowed_tags=[],  # This will be updated later
             description='Channels:',
+            placeholder='Type to filter channels...',
             disabled=False,
             layout=_content_widget_layout()
         )

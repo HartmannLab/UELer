@@ -19,13 +19,14 @@ import pandas as pd
 
 import ipywidgets as _ipywidgets
 
+from ueler.viewer.plugin.channel_picker_widget import build_channel_picker
+
 Button = getattr(_ipywidgets, "Button")
 Checkbox = getattr(_ipywidgets, "Checkbox")
 Dropdown = getattr(_ipywidgets, "Dropdown")
 HBox = getattr(_ipywidgets, "HBox")
 Layout = getattr(_ipywidgets, "Layout")
 SelectMultiple = getattr(_ipywidgets, "SelectMultiple")
-TagsInput = getattr(_ipywidgets, "TagsInput", None)
 VBox = getattr(_ipywidgets, "VBox")
 
 _logger = logging.getLogger(__name__)
@@ -194,16 +195,15 @@ def numeric_columns(viewer) -> List[str]:
 class ChannelSelector:
     """Bundle of widgets making up a left-panel-consistent channel picker.
 
-    * ``tags`` – the channel widget: an ipywidgets ``TagsInput`` (same UX as the
-      left-panel channel selector) whose ``.value`` is an ordered tuple/list of
-      selected channels; falls back to ``SelectMultiple`` on very old ipywidgets.
+    * ``tags`` – the channel widget: a ``ChannelPickerWidget`` (same UX as the
+      left-panel channel selector) whose ``.value`` is an ordered list of selected
+      channels and whose ``.allowed_tags`` holds the available ones (#125).
     * ``marker_set_dropdown`` – lists pre-defined marker-set names for *loading*
       (a placeholder maps to ``None``); defining new sets stays in the left panel.
     * ``load_button`` – loads the chosen set's channels into ``tags``.
     * ``box`` – a composed ``VBox`` for direct placement in a plugin layout.
     * ``available`` – the numeric columns; used to filter loaded marker sets
-      (and keeps behaviour testable under the headless widget stub, which does
-      not populate ``TagsInput.allowed_tags``).
+      (and keeps behaviour testable independently of the widget layer).
     """
 
     tags: object
@@ -218,25 +218,24 @@ def build_channel_selector(
 ) -> ChannelSelector:
     """Create a channel picker consistent with the left-panel channel selector.
 
-    Mirrors ``ui_components.uicomponents.channel_selector`` (a ``TagsInput``) and
-    adds a marker-set *loading* control.  It intentionally does **not** offer
-    save/update/delete — defining marker sets remains the left panel's job.
+    Mirrors ``ui_components.uicomponents.channel_selector`` (a
+    ``ChannelPickerWidget``) and adds a marker-set *loading* control.  It
+    intentionally does **not** offer save/update/delete — defining marker sets
+    remains the left panel's job.
+
+    The picker is the searchable, always-scrollable widget introduced for #125:
+    long marker/feature lists are fully browsable instead of being cut off by the
+    browser's native ``<datalist>`` popup.  ``height`` is kept for call-site
+    compatibility only — the picker sizes its own scrollable option list.
     """
     cols = numeric_columns(viewer)
-    if TagsInput is not None:
-        tags = TagsInput(
-            allowed_tags=cols,
-            value=[],
-            description=description,
-            allow_duplicates=False,
-            layout=Layout(width="100%"),
-        )
-    else:  # pragma: no cover - only on ipywidgets without TagsInput
-        tags = SelectMultiple(
-            options=cols,
-            description=description,
-            layout=Layout(width="100%", height=height),
-        )
+    tags = build_channel_picker(
+        allowed_tags=cols,
+        value=[],
+        description=description,
+        placeholder="Type to filter markers...",
+        layout=Layout(width="100%"),
+    )
     marker_set_dropdown = Dropdown(
         options=[(_NO_MARKER_SET, None)],
         value=None,

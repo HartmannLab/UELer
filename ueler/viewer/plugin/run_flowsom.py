@@ -27,10 +27,10 @@ from ipywidgets import (
     RadioButtons,
     SelectMultiple,
     Tab,
-    TagsInput,
     Text,
     VBox,
 )
+from ueler.viewer.plugin.channel_picker_widget import build_channel_picker
 from matplotlib.backend_bases import MouseButton
 from matplotlib.text import Annotation
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -225,12 +225,14 @@ class UiComponent:
             value='Channels:',
         )
 
-        self.channel_selector = TagsInput(
-            value = parent.main_viewer.cell_table.columns[0],
+        # Searchable, always-scrollable feature picker (#125): the previous
+        # ``TagsInput`` offered its options through a native ``<datalist>`` popup
+        # that clipped long column lists.
+        self.channel_selector = build_channel_picker(
+            value=parent.main_viewer.cell_table.columns[0],
             allowed_tags=parent.main_viewer.cell_table.columns.tolist(),  # This will be updated later
             description='Channels:',
-            allow_duplicates=False,
-            style={'description_width': 'auto'},
+            placeholder='Type to filter features...',
             layout=Layout(width='100%'),
         )
         cluster_columns = parent.main_viewer.cell_table.select_dtypes(include=['int', 'int64', 'object']).columns.tolist()
