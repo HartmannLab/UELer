@@ -56,7 +56,7 @@ path is not provided.
 base_folder = "/path/to/your/image_data"                     # Required
 masks_folder = "/path/to/segmentation/output"                # Optional
 annotations_folder = "/path/to/annotations"                  # Optional
-cell_table_path = "/path/to/cell_table.csv"                  # Optional
+cell_table_path = "/path/to/cell_table.csv"                  # Optional (.csv or .h5ad)
 ```
 
 | Variable | Purpose | Required |
@@ -64,7 +64,7 @@ cell_table_path = "/path/to/cell_table.csv"                  # Optional
 | `base_folder` | FOV folders containing per-channel TIFF images | ✅ Yes |
 | `masks_folder` | Segmentation `.tif` rasters | ❌ Optional |
 | `annotations_folder` | Annotation raster `.tif` files | ❌ Optional |
-| `cell_table_path` | Per-cell feature table (CSV) | ❌ Optional |
+| `cell_table_path` | Per-cell feature table (`.csv`, or `.h5ad` for AnnData) | ❌ Optional |
 
 ### 3. Launch the Viewer
 
@@ -101,6 +101,15 @@ viewer = ueler.run_viewer(
 # 2. Attach the cell table, then display
 cell_table = pd.read_csv(cell_table_path)
 load_cell_table(viewer, cell_table=cell_table, auto_display=True, after_plugins=True)
+```
+
+If your cell table is an **AnnData** object, pass it directly — see
+[Working with a Cell Table](tutorials/cell-table.md#anndata-input):
+
+```python
+import anndata as ad
+
+load_cell_table(viewer, cell_table=ad.read_h5ad("cells.h5ad"), auto_display=True)
 ```
 
 !!! note "Why two steps?"

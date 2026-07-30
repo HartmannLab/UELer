@@ -1,9 +1,9 @@
 # Working with a Cell Table
 
-A **cell table** is a per-cell feature table (a CSV, e.g. from `ark-analysis`) with one row per
-segmented cell. Loading one turns UELer from an image viewer into a linked single-cell explorer. This
-page explains how to load a table, the idea of **linked selection** that ties everything together,
-and the tools that operate on the current selection.
+A **cell table** is a per-cell feature table (a CSV or an AnnData object, e.g. from `ark-analysis` or
+`scanpy`) with one row per segmented cell. Loading one turns UELer from an image viewer into a linked
+single-cell explorer. This page explains how to load a table, the idea of **linked selection** that
+ties everything together, and the tools that operate on the current selection.
 
 ---
 
@@ -23,6 +23,58 @@ See [Get Started](../getting-started.md) for the full launch flow. Once the tabl
 analytical plugins appear in the right panel (**Scatter plot**, **Histogram**, **Gallery**,
 **Heatmap**, **FlowSOM**, **Cell Annotation**, **Mask painter**, **Go to**, **Cell Table Editor**,
 **Cell tooltip label**).
+
+---
+
+## AnnData Input
+
+An `AnnData` object works just as well as a DataFrame — pass the object, or point
+`cell_table_path` at an `.h5ad` file:
+
+```python
+import anndata as ad
+from ueler import load_cell_table
+
+load_cell_table(viewer, cell_table=ad.read_h5ad("cells.h5ad"), auto_display=True)
+
+# equivalent, straight from disk:
+load_cell_table(viewer, cell_table_path="cells.h5ad", auto_display=True)
+```
+
+**What becomes selectable.** AnnData keeps metadata and measurements apart; UELer offers both:
+
+| From the AnnData | Appears as | Where you'll use it |
+|---|---|---|
+| `obs` columns | metadata columns | **Class:**, **Subset on:**, mask-painter identifier, tooltip labels |
+| `X` (or a `layers` entry), named by `var_names` | one column per marker | marker/channel pickers, heatmap, FlowSOM features |
+| `obsm` arrays up to 3 columns wide, e.g. `X_umap` | `X_umap1`, `X_umap2` | scatter **X:** / **Y:** axes |
+| `obs_names` | an `obs_names` column | cell identity, tooltips |
+
+Markers are listed **first** in the marker pickers, so they aren't buried under `label`, `area`,
+`X` and `Y`.
+
+Your `obs` must still contain the FOV and mask-label columns that link cells to the images — by
+default `fov` and `label`. If yours are named differently, set the **Fov key:** / **Label key:**
+fields in the left panel (or rename the columns in `obs` beforehand).
+
+Two optional arguments:
+
+- `layer="counts"` — read `adata.layers["counts"]` instead of `adata.X`.
+- `obsm_keys=["X_pca"]` — also expose an `obsm` entry that is too wide to be included by default.
+
+### Getting your annotations back out
+
+The object you passed in is kept, and anything the plugins add to the table — FlowSOM clusters,
+heatmap meta-clusters, manual labels from the **Cell Table Editor** — is written back into its `obs`:
+
+```python
+adata = viewer.get_cell_table_adata()
+adata.obs.columns          # now includes e.g. 'FlowSOM_cluster'
+adata.write_h5ad("cells_annotated.h5ad")
+```
+
+This also works for a CSV/DataFrame table: `get_cell_table_adata()` then builds an AnnData for you,
+using the numeric non-key columns as `X`.
 
 ---
 

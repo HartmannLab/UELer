@@ -30,6 +30,7 @@ from ipywidgets import (
     Text,
     VBox,
 )
+from ueler.cell_table import categorical_columns
 from ueler.viewer.plugin.channel_picker_widget import build_channel_picker
 from matplotlib.backend_bases import MouseButton
 from matplotlib.text import Annotation
@@ -55,7 +56,19 @@ from ueler.image_utils import (  # type: ignore[import]
 )
 from ueler.viewer.decorators import update_status_bar
 from ueler.viewer.observable import Observable
+from ueler.viewer.plugin import _chart_common
 from ueler.viewer.plugin.plugin_base import PluginBase
+
+
+def _feature_columns(main_viewer):
+    """Return every cell-table column, AnnData marker columns first (#123).
+
+    FlowSOM deliberately offers *all* columns as clustering features (not just the
+    numeric ones the scatter/histogram pickers show), so this only reorders them.
+    """
+    columns = main_viewer.cell_table.columns.tolist()
+    return _chart_common.marker_first(main_viewer, columns)
+
 
 class RunFlowsom(PluginBase):
     def __init__(self, main_viewer, width, height):
@@ -86,8 +99,8 @@ class RunFlowsom(PluginBase):
 
     def on_cell_table_change(self):
         # Update the channel_selector options
-        self.ui_component.channel_selector.allowed_tags = self.main_viewer.cell_table.columns.tolist()
-        self.ui_component.subset_on_dropdown.options = self.main_viewer.cell_table.select_dtypes(include=['int', 'int64', 'object']).columns.tolist()
+        self.ui_component.channel_selector.allowed_tags = _feature_columns(self.main_viewer)
+        self.ui_component.subset_on_dropdown.options = categorical_columns(self.main_viewer.cell_table)
 
     @update_status_bar
     def run_flowsom(self, b):
@@ -228,14 +241,15 @@ class UiComponent:
         # Searchable, always-scrollable feature picker (#125): the previous
         # ``TagsInput`` offered its options through a native ``<datalist>`` popup
         # that clipped long column lists.
+        feature_columns = _feature_columns(parent.main_viewer)
         self.channel_selector = build_channel_picker(
-            value=parent.main_viewer.cell_table.columns[0],
-            allowed_tags=parent.main_viewer.cell_table.columns.tolist(),  # This will be updated later
+            value=feature_columns[0] if feature_columns else None,
+            allowed_tags=feature_columns,  # This will be updated later
             description='Channels:',
             placeholder='Type to filter features...',
             layout=Layout(width='100%'),
         )
-        cluster_columns = parent.main_viewer.cell_table.select_dtypes(include=['int', 'int64', 'object']).columns.tolist()
+        cluster_columns = categorical_columns(parent.main_viewer.cell_table)
         self.column_name_text = Text(
             value="FlowSOM_cluster",
             description='Save as:',

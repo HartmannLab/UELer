@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Callable, Optional, Protocol, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, Protocol, Sequence, TYPE_CHECKING, Union
 
 from ._compat import ensure_aliases_loaded
 
@@ -345,14 +345,24 @@ def load_cell_table(
 	*,
 	cell_table_path: Optional[PathLike] = None,
 	cell_table: Any = None,
+	layer: Optional[str] = None,
+	obsm_keys: Optional[Sequence[str]] = None,
 	auto_display: bool = True,
 	after_plugins: bool = True,
 ) -> "ImageMaskViewer":
 	"""Attach a cell table to an existing viewer and re-render the UI.
 
 	Exactly one of ``cell_table_path`` or ``cell_table`` must be provided. The
-	former loads the CSV on demand; the latter is forwarded to
-	:meth:`ImageMaskViewer.set_cell_table`.
+	former loads a ``.csv`` or ``.h5ad`` file on demand; the latter is forwarded to
+	:meth:`ImageMaskViewer.set_cell_table` and accepts either a pandas
+	``DataFrame`` or an :class:`anndata.AnnData`.
+
+	For AnnData input the object itself is kept on the viewer and a DataFrame view
+	of it is derived — ``obs`` columns, one column per ``var_names`` entry, and any
+	narrow ``obsm`` array (#123). ``layer`` reads an entry of ``adata.layers``
+	instead of ``X``; ``obsm_keys`` names ``obsm`` entries to expose even when they
+	are too wide to be included by default. Both are ignored for CSV input and
+	rejected for a plain ``DataFrame``.
 	"""
 
 	if viewer is None:
@@ -360,17 +370,23 @@ def load_cell_table(
 	if (cell_table_path is None) == (cell_table is None):
 		raise ValueError("Provide exactly one of cell_table_path or cell_table")
 
+	anndata_kwargs = {}
+	if layer is not None:
+		anndata_kwargs["layer"] = layer
+	if obsm_keys is not None:
+		anndata_kwargs["obsm_keys"] = obsm_keys
+
 	if cell_table_path is not None:
 		file_path = _normalise_file(cell_table_path, argument="cell_table_path")
 		load = getattr(viewer, "load_cell_table_from_path", None)
 		if not callable(load):
 			raise AttributeError("viewer does not support loading a cell table from path")
-		load(file_path)
+		load(file_path, **anndata_kwargs)
 	else:
 		setter = getattr(viewer, "set_cell_table", None)
 		if not callable(setter):
 			raise AttributeError("viewer does not support setting a cell table directly")
-		setter(cell_table)
+		setter(cell_table, **anndata_kwargs)
 
 	_refresh_viewer_state(viewer)
 

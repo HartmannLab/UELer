@@ -27,6 +27,7 @@ except Exception:  # pragma: no cover - optional in non-notebook contexts
     def display(*_args, **_kwargs):
         return None
 
+from ueler.cell_table import categorical_columns
 from ueler.viewer.decorators import update_status_bar
 from ueler.viewer.plugin import _chart_common
 from ipywidgets import HBox, HTML, Layout, Output, Tab, VBox
@@ -582,7 +583,7 @@ class DataLayer:
                 revised_label_column
             ].map(self._meta_cluster_display_name)
 
-        cluster_columns = self.main_viewer.cell_table.select_dtypes(include=['int', 'int64', 'object']).columns.tolist()
+        cluster_columns = categorical_columns(self.main_viewer.cell_table)
         _logger.debug("Cluster-capable columns: %s", cluster_columns)
 
         self.main_viewer.inform_plugins('on_cell_table_change')
@@ -591,7 +592,7 @@ class DataLayer:
         self.display_row_colors_as_patches()
 
     def on_cell_table_change(self):
-        cluster_columns = self.main_viewer.cell_table.select_dtypes(include=['int', 'int64', 'object']).columns.tolist()
+        cluster_columns = categorical_columns(self.main_viewer.cell_table)
         old_cluster = self.ui_component.high_level_cluster_dropdown.value
         self.ui_component.high_level_cluster_dropdown.options = cluster_columns
         self.ui_component.high_level_cluster_dropdown.value = old_cluster

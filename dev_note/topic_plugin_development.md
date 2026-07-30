@@ -195,7 +195,9 @@ useful attributes and methods.
 
 | Attribute | Type | Description |
 |---|---|---|
-| `main_viewer.cell_table` | `pd.DataFrame` | Full cell table (read-only) |
+| `main_viewer.cell_table` | `pd.DataFrame` | Full cell table (read-only) — always a real DataFrame with a `RangeIndex`, even for AnnData input |
+| `main_viewer.cell_table_adata` | `AnnData \| None` | The user's AnnData when one was supplied (#123); `None` for a DataFrame/CSV table |
+| `main_viewer.cell_table_columns` | `dict \| None` | Column provenance for an AnnData table: `{"obs": [...], "var": [...], "obsm": [...], "index": "obs_names", ...}`; `None` otherwise |
 | `main_viewer.fov_key` | `str` | Column name for FOV identifier |
 | `main_viewer.x_key` | `str` | Column name for X coordinate |
 | `main_viewer.y_key` | `str` | Column name for Y coordinate |
@@ -219,7 +221,8 @@ useful attributes and methods.
 | `main_viewer.get_active_fov()` | Returns active FOV name, or `None` in map mode |
 | `main_viewer.capture_viewport_bounds()` | Returns current axis limits as a dict |
 | `main_viewer.get_pixel_size_nm()` | Returns the physical pixel size (map-aware) |
-| `main_viewer.inform_plugins(method_name)` | Broadcast a lifecycle event to all plugins |
+| `main_viewer.inform_plugins(method_name)` | Broadcast a lifecycle event to all plugins (`'on_cell_table_change'` also syncs the table back into `cell_table_adata.obs`) |
+| `main_viewer.get_cell_table_adata()` | Return the cell table as an AnnData, synced with the UI — for `write_h5ad` (#123) |
 | `main_viewer.apply_mask_visibility_state(state)` | Set mask visibility from a `{name: bool}` dict |
 | `main_viewer.on_plugin_mask_outline_change(thickness)` | Update the global mask outline slider from a plugin |
 
@@ -233,6 +236,19 @@ current_fov = self.main_viewer.ui_component.image_selector.value
 # Rows for the current FOV
 fov_rows = df[df[fov_col] == current_fov]
 ```
+
+`cell_table` is a real pandas DataFrame with a `RangeIndex` whether the user supplied a
+DataFrame, a CSV path or an AnnData object (#123), so plugin code needs no special case.
+Two conventions are worth knowing:
+
+* **Column roles.** Use `ueler.cell_table.categorical_columns(df)` for class / cluster /
+  grouping columns instead of `select_dtypes(include=['int', 'int64', 'object'])` — the latter
+  misses the `category` dtype an `.h5ad` round-trip produces. Use
+  `_chart_common.numeric_columns(viewer)` for plottable markers.
+* **AnnData provenance.** For an AnnData table, `viewer.cell_table_columns['var']` lists the
+  expression columns and `['obs']` the metadata ones; `_chart_common.marker_first(viewer, cols)`
+  reorders any column list so markers come first. Columns a plugin adds are pushed into
+  `adata.obs` on the `on_cell_table_change` broadcast, so keep firing it after a write.
 
 ### Triggering a display refresh
 

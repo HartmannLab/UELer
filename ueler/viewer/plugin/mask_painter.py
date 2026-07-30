@@ -39,6 +39,7 @@ except Exception:  # pragma: no cover - executed when ipyfilechooser is absent
 
 FileChooser = getattr(_FileChooserModule, "FileChooser", None)
 
+from ueler.cell_table import categorical_columns
 from ueler.viewer.decorators import update_status_bar
 from ueler.viewer.plugin.plugin_base import PluginBase
 from ueler.viewer.plugin.mask_class_list_widget import MaskClassListWidget
@@ -537,8 +538,9 @@ class MaskPainterDisplay(PluginBase):
     def _initialise_identifier_options(self) -> None:
         identifier_options: Iterable[str] = []
         if self.main_viewer.cell_table is not None:
-            cell_table = self.main_viewer.cell_table
-            identifier_options = cell_table.select_dtypes(include=["int", "int64", "object", "bool"]).columns.tolist()
+            identifier_options = categorical_columns(
+                self.main_viewer.cell_table, include_bool=True
+            )
 
         self.ui_component.identifier_dropdown.options = list(identifier_options)
 

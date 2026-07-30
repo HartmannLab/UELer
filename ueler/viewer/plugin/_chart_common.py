@@ -19,6 +19,7 @@ import pandas as pd
 
 import ipywidgets as _ipywidgets
 
+from ueler.cell_table import categorical_columns
 from ueler.viewer.plugin.channel_picker_widget import build_channel_picker
 
 Button = getattr(_ipywidgets, "Button")
@@ -66,11 +67,17 @@ def prepare_dataframe(
 
 def build_subset_controls(viewer):
     """Create the ``(subset_on_dropdown, subset_selector, impose_fov_checkbox)`` widgets."""
+    # ``category``/``string`` columns are what an ``.h5ad`` round-trip produces for
+    # string obs columns (#123); without ``categorical_columns`` they would be
+    # missing from the subset options even though they are exactly the columns
+    # users want to subset on.
+    grouping = set(categorical_columns(viewer.cell_table))
     subset_columns = [
         col
         for col in viewer.cell_table.columns
         if pd.api.types.is_numeric_dtype(viewer.cell_table[col])
         or pd.api.types.is_object_dtype(viewer.cell_table[col])
+        or col in grouping
     ]
     subset_on_dropdown = Dropdown(
         options=subset_columns,
@@ -177,6 +184,26 @@ def normalize_indices(indices: Iterable[Union[int, str]]) -> Set[Union[int, str]
 # ----------------------------------------------------------------------------
 # Shared channel selector (issue #113)
 # ----------------------------------------------------------------------------
+def marker_first(viewer, columns: Sequence[str]) -> List[str]:
+    """Reorder *columns* so AnnData marker columns come first (#123).
+
+    For an AnnData-backed cell table the expression columns (``var_names``) are
+    the ones users actually plot, but they sort after the ``obs`` metadata by
+    construction, which buries them under ``label``/``area``/``X``/``Y`` in the
+    picker's scrollable list.  Membership is untouched — this is ordering only —
+    and it is a no-op for a plain DataFrame table.
+    """
+    provenance = getattr(viewer, "cell_table_columns", None)
+    if not provenance:
+        return list(columns)
+    markers = set(provenance.get("var", ()))
+    if not markers:
+        return list(columns)
+    return [col for col in columns if col in markers] + [
+        col for col in columns if col not in markers
+    ]
+
+
 def numeric_columns(viewer) -> List[str]:
     """Return the numeric columns of the cell table — the plottable channels.
 
@@ -184,11 +211,14 @@ def numeric_columns(viewer) -> List[str]:
     offer an identical set of options.
     """
     cell_table = viewer.cell_table
-    return [
-        col
-        for col in cell_table.columns
-        if pd.api.types.is_numeric_dtype(cell_table[col])
-    ]
+    return marker_first(
+        viewer,
+        [
+            col
+            for col in cell_table.columns
+            if pd.api.types.is_numeric_dtype(cell_table[col])
+        ],
+    )
 
 
 @dataclass

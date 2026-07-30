@@ -21,6 +21,7 @@ from ipywidgets import IntText, Output, Dropdown, FloatSlider, Checkbox, Button,
 from IPython.display import display
 import pandas as pd
 # Import modules
+from ueler import cell_table as cell_table_utils
 from ueler.constants import PREDEFINED_COLORS, DOWNSAMPLE_FACTORS, DOWNSAMPLE_MAX_DIMENSION, UICOMPNENTS_SKIP
 from ueler.data_loader import (
     load_annotations_for_fov,
@@ -283,6 +284,12 @@ class ImageMaskViewer:
 
         # Initialize the cell table
         self.cell_table = None
+        # When the table came from an AnnData object (#123) the object itself is
+        # kept here and ``cell_table`` holds a DataFrame view of it;
+        # ``cell_table_columns`` records which columns came from obs/var/obsm.
+        # Both stay ``None`` for a plain DataFrame or CSV table.
+        self.cell_table_adata = None
+        self.cell_table_columns = None
 
         # Map mode scaffolding (feature-flagged)
         self._map_mode_enabled = _MAP_MODE_FLAG
@@ -4745,6 +4752,17 @@ class ImageMaskViewer:
 
         loop through all the attributes of self.SidePlots, call the `method_name` method
         '''
+        # Every cell-table write path (FlowSOM, heatmap save, cell-table editor)
+        # funnels through this broadcast, so it is the single place to mirror new
+        # or edited columns back into the user's AnnData (#123). Guarded on its
+        # own: the plugin loop below swallows AttributeError, which must not hide
+        # a sync failure.
+        if method_name == 'on_cell_table_change' and getattr(self, 'cell_table_adata', None) is not None:
+            try:
+                self.sync_cell_table_to_adata()
+            except Exception:
+                logger.warning("Failed to sync the cell table back to AnnData.", exc_info=True)
+
         # Check if the SidePlots attribute exists
         if not hasattr(self, 'SidePlots'):
             return
@@ -5138,10 +5156,24 @@ class ImageMaskViewer:
         self._status_image["processing"] = load_asset_bytes("loading.gif")
         self._status_image["ready"] = load_asset_bytes("ready.png")
 
-    def load_cell_table_from_path(self, file_path):
-        """Load the cell table from a CSV file and convert columns with integer values (allowing NA) to integer."""
+    def load_cell_table_from_path(self, file_path, *, layer=None, obsm_keys=None):
+        """Load the cell table from a CSV or ``.h5ad`` file.
+
+        CSV columns whose float values are all integral are converted to the
+        nullable ``Int64`` dtype (floats are how ``read_csv`` represents an integer
+        column containing NAs).  An ``.h5ad`` file is read with ``anndata`` and
+        handed to :meth:`set_cell_table`, which keeps the AnnData object and
+        derives the DataFrame view from it (#123).
+        """
+        if str(file_path).lower().endswith(".h5ad"):
+            import anndata
+
+            adata = anndata.read_h5ad(file_path)
+            self.set_cell_table(adata, layer=layer, obsm_keys=obsm_keys)
+            return
+
         df = pd.read_csv(file_path)
-        
+
         for col in df.columns:
             # Check if column is numeric and float type (NA causes float type)
             if pd.api.types.is_float_dtype(df[col]):
@@ -5149,12 +5181,79 @@ class ImageMaskViewer:
                 if df[col].dropna().apply(float.is_integer).all():
                     # Use nullable integer dtype so NAs are preserved
                     df[col] = df[col].astype("Int64")
-        
-        self.cell_table = df
 
-    def set_cell_table(self, cell_table):
-        """Load the cell table from a DataFrame."""
+        self.set_cell_table(df)
+
+    def set_cell_table(self, cell_table, *, layer=None, obsm_keys=None):
+        """Attach a cell table, given either a DataFrame or an AnnData object.
+
+        For an AnnData input the object is kept on ``self.cell_table_adata`` and
+        ``self.cell_table`` becomes the DataFrame view built by
+        :func:`ueler.cell_table.flatten_anndata` — ``obs`` columns, one column per
+        ``var_names`` entry, narrow ``obsm`` arrays, and ``obs_names``.  ``layer``
+        selects an entry of ``adata.layers`` instead of ``X``; ``obsm_keys`` opts
+        wide ``obsm`` entries in.  Both arguments only apply to AnnData input.
+        """
+        if cell_table_utils.is_anndata(cell_table):
+            frame, provenance = cell_table_utils.flatten_anndata(
+                cell_table, layer=layer, obsm_keys=obsm_keys
+            )
+            self.cell_table_adata = cell_table
+            self.cell_table_columns = provenance
+            self.cell_table = frame
+            logger.debug(
+                "[cell table] AnnData input: %d rows, %d obs / %d marker / %d obsm columns.",
+                len(frame),
+                len(provenance["obs"]),
+                len(provenance["var"]),
+                len(provenance["obsm"]),
+            )
+            return
+
+        if layer is not None or obsm_keys is not None:
+            raise ValueError(
+                "layer/obsm_keys are only supported for an AnnData cell table"
+            )
+        self.cell_table_adata = None
+        self.cell_table_columns = None
         self.cell_table = cell_table
+
+    def sync_cell_table_to_adata(self):
+        """Push plugin-added/edited columns back into ``cell_table_adata.obs``.
+
+        No-op unless the table came from an AnnData object.  Called from
+        :meth:`inform_plugins` on the ``on_cell_table_change`` broadcast, which is
+        the choke point every write path already goes through.
+        """
+        adata = getattr(self, "cell_table_adata", None)
+        if adata is None or self.cell_table is None:
+            return []
+        return cell_table_utils.sync_cell_table_to_obs(
+            adata, self.cell_table, getattr(self, "cell_table_columns", None)
+        )
+
+    def get_cell_table_adata(self):
+        """Return the cell table as an AnnData object, up to date with the UI.
+
+        For an AnnData input this is the very object the user passed in, with any
+        columns added by the plugins (FlowSOM clusters, heatmap meta-clusters,
+        cell-table edits) synced into ``obs`` — ready for ``write_h5ad(...)``.  For
+        a DataFrame/CSV table an AnnData is built on demand, using the numeric
+        columns that are not viewer key columns as ``X``.
+        """
+        if self.cell_table is None:
+            return None
+        if self.cell_table_adata is not None:
+            self.sync_cell_table_to_adata()
+            return self.cell_table_adata
+        system_keys = [
+            key
+            for key in (self.fov_key, self.label_key, self.x_key, self.y_key, self.mask_key)
+            if key
+        ]
+        return cell_table_utils.dataframe_to_anndata(
+            self.cell_table, None, system_keys=system_keys
+        )
 
     def marker2display(self):
         """

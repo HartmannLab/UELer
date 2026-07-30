@@ -52,7 +52,8 @@ load_cell_table(viewer, cell_table=cell_table, auto_display=True, after_plugins=
 ```
 
 `run_viewer` itself has no `cell_table_path` argument — the table is always attached with
-`load_cell_table`. See [Get Started](getting-started.md) and
+`load_cell_table`. `cell_table=` also accepts an **AnnData** object and `cell_table_path=` an
+`.h5ad` file. See [Get Started](getting-started.md) and
 [Working with a Cell Table](tutorials/cell-table.md).
 
 ### How do I stream a study from the BioImage Archive?
