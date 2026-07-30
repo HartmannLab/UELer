@@ -349,7 +349,12 @@ class AnnotationLoaderTests(unittest.TestCase):
             file_path.write_bytes(b"test")
 
             annotation_names = set()
-            with patch("data_loader.imread", return_value=da.from_array(base_array, chunks=base_array.shape)):
+            # data_loader resolves imread lazily through _ensure_imread(), so the
+            # factory is the patch point rather than a module-level ``imread``.
+            fake_imread = lambda *_args, **_kwargs: da.from_array(
+                base_array, chunks=base_array.shape
+            )
+            with patch("ueler.data_loader._ensure_imread", return_value=fake_imread):
                 loaded = load_annotations_for_fov("FOV1", str(annotations_dir), annotation_names)
 
         self.assertIn("example", loaded)
@@ -551,13 +556,22 @@ class AnnotationLayoutTests(unittest.TestCase):
         viewer.mask_names = ["MaskA"]
         viewer.mask_cache = {}
         viewer.label_masks_cache = {}
+        # Consulted by _ensure_channel_max_computed during update_controls.
+        viewer.channel_max_values = {"Ch1": (1.0, 1.0)}
+        viewer.image_cache = {}
         viewer.predefined_colors = {"Red": "#FF0000", "White": "#FFFFFF"}
 
         viewer.ui_component = types.SimpleNamespace()
+        # update_controls resolves the active FOV through image_selector before
+        # rebuilding the channel widgets.
+        viewer.ui_component.image_selector = types.SimpleNamespace(
+            value="FOV1", observe=lambda *args, **kwargs: None
+        )
         viewer.ui_component.channel_selector = types.SimpleNamespace(
             value=("Ch1",), observe=lambda *args, **kwargs: None
         )
         viewer.ui_component.color_controls = {}
+        viewer.ui_component.channel_visibility_controls = {}
         viewer.ui_component.contrast_min_controls = {}
         viewer.ui_component.contrast_max_controls = {}
         viewer.ui_component.mask_display_controls = {}

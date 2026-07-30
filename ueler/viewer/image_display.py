@@ -234,6 +234,12 @@ class ImageDisplay:
 
     @update_status_bar
     def on_draw(self, event):
+        # ``main_viewer`` is attached by ImageMaskViewer after construction, but a
+        # draw event can already fire before that (any draw_idle() during setup is
+        # processed synchronously by non-interactive backends).
+        if getattr(self, "main_viewer", None) is None:
+            return
+
         current_center_x = (self.ax.get_xlim()[0] + self.ax.get_xlim()[1]) / 2
         current_center_y = (self.ax.get_ylim()[0] + self.ax.get_ylim()[1]) / 2
 

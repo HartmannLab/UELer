@@ -1094,13 +1094,33 @@ def _ensure_skimage_stub() -> None:
     measure_module = types.ModuleType(f"{_SKIMAGE}.measure")
     draw_module = types.ModuleType(f"{_SKIMAGE}.draw")
 
-    def _find_boundaries(mask, *_args, **_kwargs):  # pragma: no cover - lightweight stub
+    def _find_boundaries(mask, connectivity=1, mode="thick", background=0):  # pragma: no cover - lightweight stub
+        """Faithful-enough stand-in for ``skimage.segmentation.find_boundaries``.
+
+        Returning all-zeros (the previous behaviour) silently turned every
+        boundary expectation in the rendering tests into a vacuous assertion.
+        """
+
         try:
             import numpy as _np  # type: ignore
-
-            return _np.zeros_like(mask, dtype=bool)
         except Exception:
             return mask
+
+        arr = _np.asarray(mask)
+        if arr.ndim != 2:
+            return _np.zeros(arr.shape, dtype=bool)
+
+        padded = _np.pad(arr, 1, mode="edge")
+        height, width = arr.shape
+        differs = _np.zeros(arr.shape, dtype=bool)
+        for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            differs |= padded[1 + dy:1 + dy + height, 1 + dx:1 + dx + width] != arr
+
+        if mode == "inner":
+            return differs & (arr != background)
+        if mode == "outer":
+            return differs & (arr == background)
+        return differs
 
     segmentation_module.find_boundaries = _find_boundaries  # type: ignore[attr-defined]
     segmentation_module.__bootstrap_stub__ = True  # type: ignore[attr-defined]

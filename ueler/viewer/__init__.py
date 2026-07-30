@@ -1,21 +1,12 @@
-"""Compatibility re-exports for the viewer package.
+"""The viewer package.
 
-Imported via ``ueler.viewer`` to allow consumers to begin switching namespaces
-without altering runtime behavior. Symbols continue to originate from the
-legacy ``viewer`` package until modules are relocated.
+This is the canonical home of the viewer modules. The top-level entry points are
+re-exported lazily so that ``from ueler.viewer import ImageMaskViewer`` works
+without importing the (heavy) UI modules when only a submodule is needed.
 """
 
 from importlib import import_module as _import_module
 from typing import TYPE_CHECKING, Any
-
-from .._compat import (
-	VIEWER_CORE_ALIASES as _VIEWER_CORE_ALIASES,
-	VIEWER_PLUGIN_ALIASES as _VIEWER_PLUGIN_ALIASES,
-	register_module_aliases as _register_module_aliases,
-)
-
-_register_module_aliases(_VIEWER_CORE_ALIASES)
-_register_module_aliases(_VIEWER_PLUGIN_ALIASES)
 
 __all__ = [
 	"ImageMaskViewer",
@@ -23,24 +14,27 @@ __all__ = [
 	"display_ui",
 ]
 
+_LAZY_EXPORTS = {
+	"ImageMaskViewer": "ueler.viewer.main_viewer",
+	"create_widgets": "ueler.viewer.ui_components",
+	"display_ui": "ueler.viewer.ui_components",
+}
+
 
 def __getattr__(name: str) -> Any:
-	"""Delegate attribute lookups to the legacy viewer package.
+	"""Resolve the package's public entry points on first access.
 
-	Must raise ``AttributeError`` (never ``ModuleNotFoundError``) when the legacy
-	``viewer`` package is absent: ``from ueler.viewer import <submodule>`` probes
-	the package with ``hasattr`` before importing the submodule, and ``hasattr``
-	only swallows ``AttributeError`` — a leaked ``ModuleNotFoundError`` aborts the
-	whole ``from`` import even though the submodule exists under ``ueler.viewer``.
+	Must raise ``AttributeError`` (never ``ModuleNotFoundError``) for unknown
+	names: ``from ueler.viewer import <submodule>`` probes the package with
+	``hasattr`` before importing the submodule, and ``hasattr`` only swallows
+	``AttributeError`` — a leaked ``ModuleNotFoundError`` aborts the whole
+	``from`` import even though the submodule exists.
 	"""
 
-	try:
-		legacy = _import_module("viewer")
-	except ModuleNotFoundError:
+	module_name = _LAZY_EXPORTS.get(name)
+	if module_name is None:
 		raise AttributeError(f"module 'ueler.viewer' has no attribute '{name}'")
-	if hasattr(legacy, name):
-		return getattr(legacy, name)
-	raise AttributeError(f"module 'ueler.viewer' has no attribute '{name}'")
+	return getattr(_import_module(module_name), name)
 
 
 def __dir__() -> list[str]:

@@ -152,8 +152,16 @@ class TestPaintedColorsAllFovs(unittest.TestCase):
             'TypeA': ipywidgets.ColorPicker(description='TypeA', value='#FF00FF'),  # Magenta
             'TypeB': ipywidgets.ColorPicker(description='TypeB', value='#00FFFF'),  # Cyan (but hidden)
         }
-        painter.selected_classes = ['TypeA']  # Only TypeA is selected (visible)
-        painter.ui_component.sorting_items_tagsinput.value = ('TypeA',)
+        # Both classes are active (surfaced in the UI); TypeB is hidden by
+        # unticking its visibility checkbox. A class dropped from the active set
+        # instead counts as *inactive* and keeps the default color, so hiding has
+        # to go through class_visible_controls.
+        painter.class_visible_controls = {
+            'TypeA': ipywidgets.Checkbox(value=True),
+            'TypeB': ipywidgets.Checkbox(value=False),
+        }
+        painter.selected_classes = ['TypeA', 'TypeB']
+        painter.ui_component.sorting_items_tagsinput.value = ('TypeA', 'TypeB')
         painter.ui_component.show_all_checkbox.value = False
         
         # Apply colors

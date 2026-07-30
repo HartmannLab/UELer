@@ -288,6 +288,14 @@ def _normalise_color(color: ColorTuple) -> np.ndarray:
 
 
 def _label_boundaries(mask_labels: np.ndarray) -> np.ndarray:
+    """Stand-in for ``skimage.segmentation.find_boundaries(mode="inner")``.
+
+    Kept behaviourally identical to skimage: only labelled pixels adjacent to a
+    *different* label are outlined. Pixels that merely sit on the array border are
+    not boundaries — treating them as such made outlines differ depending on
+    whether skimage was importable, and drew a frame around every rendered tile.
+    """
+
     labels = mask_labels.astype(np.int64, copy=False)
     boundaries = np.zeros(labels.shape, dtype=bool)
     if labels.size == 0:
@@ -308,13 +316,6 @@ def _label_boundaries(mask_labels: np.ndarray) -> np.ndarray:
     west[:, 1:] = labels[:, 1:] != labels[:, :-1]
 
     boundaries |= (north | south | east | west) & interior
-
-    if labels.shape[0] > 0:
-        boundaries[0, :] |= labels[0, :] != 0
-        boundaries[-1, :] |= labels[-1, :] != 0
-    if labels.shape[1] > 0:
-        boundaries[:, 0] |= labels[:, 0] != 0
-        boundaries[:, -1] |= labels[:, -1] != 0
 
     return boundaries
 

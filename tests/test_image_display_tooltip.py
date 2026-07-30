@@ -448,6 +448,11 @@ class ImageDisplayTooltipIntegrationTests(unittest.TestCase):
 
         image_display = ImageDisplay(width=4, height=4)
         viewer = SimpleNamespace()
+        # The draw_idle() at the end of process_hover_event runs on_draw, which
+        # asks the viewer whether a real render is warranted.
+        viewer.initialized = False
+        viewer._widget_displayed = False
+        viewer.on_downsample_factor_changed = lambda *_a, **_kw: None
         viewer.cell_table = cell_table
         viewer.fov_key = "FOV_ID"
         viewer.label_key = "CellID"

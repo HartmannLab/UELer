@@ -354,3 +354,39 @@ Edge cases & notes
 - Planned: define integration test triage and job
   - Description: define and add an `integration` workflow for GUI and heavy-dependency tests (scheduled and/or manual runs). Document the cadence and resource requirements.
   - Acceptance criteria: an integration job will be available to run nightly or on demand and will produce logs/artifacts for troubleshooting.
+---
+
+### Post-migration shim status (2026-07-30)
+
+The Task 4/5 mapping tables above describe the **mid-migration** routing, where `ueler.*`
+was aliased *onto* the then-still-live `viewer/` package. That direction is now obsolete:
+the migration completed in `9985621`, the top-level `viewer/` package is gone, and every
+module listed in the Checkpoint 3 progress list is a real module under `ueler/viewer/`.
+
+Final state of `ueler/_compat.py`:
+
+- `UTILITY_ALIASES` (`constants`, `data_loader`, `image_utils` → `ueler.*`) is unchanged and
+  still routed through the explicit `_AliasModuleFinder`.
+- The reversed `VIEWER_CORE_ALIASES` / `VIEWER_PLUGIN_ALIASES` tables were **removed** — they
+  pointed at a deleted package.
+- Legacy support is now a **namespace prefix rewrite**, `LEGACY_PACKAGE_PREFIXES`
+  (`viewer` → `ueler.viewer`), served by `_PrefixAliasFinder` and registered through
+  `register_package_prefixes()`. Any `viewer.<anything>` import resolves to the *same module
+  object* as `ueler.viewer.<anything>`; a per-module table could not guarantee that for
+  submodules it did not enumerate (they would be executed a second time under a different
+  name, duplicating every class in them).
+- The finder is inserted at the front of `sys.meta_path` — the aliased parent package shares
+  its `__path__` with the canonical one, so the standard `PathFinder` would otherwise load
+  legacy submodules straight from disk instead of reusing the canonical module.
+- It is registered at `import ueler` time as well as from `ensure_compat_aliases()`, so
+  notebooks only need one `import ueler` before their legacy imports.
+- `LEGACY_VIEWER_ALIASES` / `LEGACY_PLUGIN_ALIASES` are retained as documentation of the
+  explicitly supported legacy surface and as the input to `tests/test_shims_imports.py`
+  (which asserts module *identity*, not just matching `__name__`); they no longer perform
+  the routing.
+
+Consequence for the package `__init__` files: `ueler/__init__.py` and
+`ueler/viewer/__init__.py` no longer delegate `__getattr__` to the legacy `viewer` package.
+With `viewer` aliased onto `ueler.viewer`, that delegation would recurse infinitely;
+`ueler.viewer` now lazily re-exports `ImageMaskViewer`, `create_widgets` and `display_ui`
+from its own submodules.

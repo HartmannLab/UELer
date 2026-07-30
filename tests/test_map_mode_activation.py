@@ -257,6 +257,8 @@ class MapModeActivationTests(unittest.TestCase):
         self.viewer.width = 1
         self.viewer.height = 1
         self.viewer._debug = False
+        # Set by ImageMaskViewer.__init__/display(); update_display consults it.
+        self.viewer._widget_displayed = True
         self.viewer.cell_table = None
         self.viewer.fov_key = "fov"
         self.viewer.label_key = "label"

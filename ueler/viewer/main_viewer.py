@@ -5423,6 +5423,8 @@ class ImageMaskViewer:
                         raise ValueError(f"Image too small: {img_array.shape}")
 
                     imsave(output_path_str, img_array)
+                    if not os.path.exists(output_path_str):
+                        raise IOError(f"Export wrote no file to '{output_path_str}'")
                     return {"output_path": output_path_str}
 
                 return worker

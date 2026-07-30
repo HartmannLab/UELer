@@ -626,12 +626,20 @@ class ExportFOVsBatchTests(unittest.TestCase):
     def test_export_fovs_batch_writes_file(self) -> None:
         viewer = self._make_viewer()
         output_dir = self.base_path / "exports"
-        results = viewer.export_fovs_batch(
-            "test",
-            output_dir=str(output_dir),
-            fovs=["FOV_A"],
-            show_progress=False,
-        )
+        # skimage is replaced by a no-op stub in the fast-stub environment, so the
+        # real writer has to be supplied for the file to actually land on disk.
+        import matplotlib.image as mpimg
+
+        with mock.patch(
+            "ueler.viewer.main_viewer.imsave",
+            side_effect=lambda path, array: mpimg.imsave(path, array),
+        ):
+            results = viewer.export_fovs_batch(
+                "test",
+                output_dir=str(output_dir),
+                fovs=["FOV_A"],
+                show_progress=False,
+            )
         self.assertEqual(results, {"FOV_A": True})
         expected_file = output_dir / "FOV_A.png"
         self.assertTrue(expected_file.exists(), "Expected export file was not created")

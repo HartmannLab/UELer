@@ -10,23 +10,26 @@ class TestShimImportCompatibility(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls._restored_modules = {}
-        # Clear stub modules without origins so the real modules reload for these checks.
-        for target in SHIM_ALIAS_MAP.values():
-            module = sys.modules.get(target)
+        # Clear stub modules without origins so the real modules reload for these
+        # checks. Both sides matter: other test modules inject stubs under the
+        # legacy alias names as well as under the canonical ones.
+        for name in (*SHIM_ALIAS_MAP.keys(), *SHIM_ALIAS_MAP.values()):
+            module = sys.modules.get(name)
             if module is None:
                 continue
             if getattr(module, "__file__", None):
                 continue
-            cls._restored_modules[target] = module
-            sys.modules.pop(target, None)
+            cls._restored_modules[name] = module
+            sys.modules.pop(name, None)
 
         ensure_compat_aliases()
 
     @classmethod
     def tearDownClass(cls):
+        # Put the stubs back exactly as they were so later test modules keep the
+        # lightweight versions they installed.
         for name, module in getattr(cls, "_restored_modules", {}).items():
-            if name not in sys.modules:
-                sys.modules[name] = module
+            sys.modules[name] = module
 
     def test_aliases_mirror_legacy_modules(self):
         for alias, target in SHIM_ALIAS_MAP.items():
@@ -46,9 +49,9 @@ class TestShimImportCompatibility(unittest.TestCase):
                 alias_module = importlib.import_module(alias)
                 self.assertIs(alias_module, sys.modules.get(alias))
                 self.assertIs(target_module, sys.modules.get(target))
-                if alias_module is target_module:
-                    continue
-                self.assertEqual(alias_module.__name__, target_module.__name__)
+                # The shim must hand back the very same module object: a second,
+                # separately-executed copy would duplicate every class in it.
+                self.assertIs(alias_module, target_module)
 
     def test_from_import_core_symbol(self):
         try:
