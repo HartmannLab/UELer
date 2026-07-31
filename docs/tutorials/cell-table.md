@@ -94,6 +94,11 @@ Plots such as the scatter and histogram publish their selection; when their **Ma
 the image and populates the gallery. This is what makes "gate on a marker, see those cells light up
 in the tissue" work.
 
+The selection spans the whole cell table, not just the FOV on screen, so **switching FOV keeps it**:
+the image re-highlights the selected cells belonging to the FOV you moved to. Selections made
+directly in the image — a click or a **lasso** — are spatial and stay with the FOV they were drawn
+in.
+
 ---
 
 ## Selecting Cells

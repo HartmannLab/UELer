@@ -59,6 +59,11 @@ Select cells with the **lasso** tool in the scatter toolbar (pan/zoom and box to
 too). The selection mirrors across all scatter views and, with the **Linked plugins** checkboxes on,
 highlights the cells in the image and gallery. **Clear selection** resets it.
 
+The selection is a set of cells, not a set of pixels, so it **survives a FOV change**: switch FOV in
+**Select Image** and the selected cells belonging to the newly loaded FOV are outlined right away
+(#119). A selection with no cells in the new FOV simply shows nothing until you switch to one that
+has some.
+
 !!! note "Scatter in VS Code"
     In VS Code the scatter defaults to a static Matplotlib fallback. To force the interactive widget,
     set the environment variable `UELER_SCATTER_BACKEND=widget` before launching.

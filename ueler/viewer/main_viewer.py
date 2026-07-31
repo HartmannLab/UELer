@@ -291,6 +291,16 @@ class ImageMaskViewer:
         self.cell_table_adata = None
         self.cell_table_columns = None
 
+        # Cell-table row indices that the linked plots (scatter, histogram,
+        # chart-heatmap) last pushed to the main viewer as a mask highlight.
+        # ``image_display.selected_masks_label`` only ever holds ``(fov, mask,
+        # mask_id)`` triples for the active FOV, so this FOV-independent record is
+        # what lets the highlight be re-projected onto the next FOV instead of
+        # vanishing on a switch (#119).  ``None`` means the highlight currently on
+        # screen did not come from a plot selection (a click, a lasso, or a
+        # cutoff/cluster highlight), in which case there is nothing to re-project.
+        self.linked_selection_indices = None
+
         # Map mode scaffolding (feature-flagged)
         self._map_mode_enabled = _MAP_MODE_FLAG
         self._map_mode_messages = []
@@ -2321,29 +2331,7 @@ class ImageMaskViewer:
         self.update_controls(None)
 
         if self.initialized:
-            if self.SidePlots:
-                histogram_plugin = getattr(self.SidePlots, "histogram_output", None)
-                heatmap_plugin = getattr(self.SidePlots, "heatmap_output", None)
-                heatmap_checkbox = (
-                    getattr(getattr(heatmap_plugin, "ui_component", None), "main_viewer_checkbox", None)
-                    if heatmap_plugin is not None
-                    else None
-                )
-                heatmap_linked = bool(heatmap_checkbox and heatmap_checkbox.value)
-
-                if not heatmap_linked:
-                    self.image_display.clear_patches()
-                    if self._grid_display is not None:
-                        self._grid_display.clear_patches()
-
-                # Re-apply the histogram cutoff highlight for the new FOV. The
-                # histogram plugin (issue #112) owns this; guard because it only
-                # highlights when a cutoff/active channel is set.
-                if histogram_plugin is not None and hasattr(histogram_plugin, "highlight_cells"):
-                    histogram_plugin.highlight_cells()
-
-                if heatmap_linked and heatmap_plugin is not None:
-                    heatmap_plugin.highlight_cells()
+            self._reapply_selection_highlights()
 
         ax = self.image_display.ax
 
@@ -2369,6 +2357,59 @@ class ImageMaskViewer:
             self._update_grid_display(self.current_downsample_factor)
 
         self.inform_plugins('on_fov_change')
+
+    def _reapply_selection_highlights(self):
+        """Re-apply the cell-selection highlight to the newly active FOV (#119).
+
+        The highlight is materialised per FOV: ``set_mask_ids`` resolves the
+        selected cell-table rows into ``(fov, mask, mask_id)`` triples for the
+        active FOV only, and ``update_patches`` draws just the triples that match
+        it.  A FOV switch therefore leaves nothing to draw, and a selection made
+        in a scatter plot or histogram looked like it had been thrown away.
+
+        ``linked_selection_indices`` keeps that selection in its FOV-independent
+        form (cell-table row indices), so it only has to be projected again onto
+        the new FOV.  When no plot selection is in effect the previous behaviour
+        is kept verbatim: drop the stale patches and recompute the histogram
+        cutoff / linked heatmap cluster highlights, both of which already derived
+        themselves from the active FOV and so survived a switch on their own.
+
+        Called from ``on_image_change`` *after* ``update_controls``, because
+        ``update_display`` overwrites the canvas data from ``self.combined`` and
+        would wipe outlines drawn before it.
+        """
+        indices = getattr(self, "linked_selection_indices", None)
+        if indices:
+            from ueler.viewer.plugin import _chart_common
+
+            _chart_common.sync_mask_highlights_from_selection(self, indices)
+            return
+
+        if not getattr(self, "SidePlots", None):
+            return
+
+        histogram_plugin = getattr(self.SidePlots, "histogram_output", None)
+        heatmap_plugin = getattr(self.SidePlots, "heatmap_output", None)
+        heatmap_checkbox = (
+            getattr(getattr(heatmap_plugin, "ui_component", None), "main_viewer_checkbox", None)
+            if heatmap_plugin is not None
+            else None
+        )
+        heatmap_linked = bool(heatmap_checkbox and heatmap_checkbox.value)
+
+        if not heatmap_linked:
+            self.image_display.clear_patches()
+            if self._grid_display is not None:
+                self._grid_display.clear_patches()
+
+        # Re-apply the histogram cutoff highlight for the new FOV. The
+        # histogram plugin (issue #112) owns this; guard because it only
+        # highlights when a cutoff/active channel is set.
+        if histogram_plugin is not None and hasattr(histogram_plugin, "highlight_cells"):
+            histogram_plugin.highlight_cells()
+
+        if heatmap_linked and heatmap_plugin is not None:
+            heatmap_plugin.highlight_cells()
 
     def on_channel_selection_change(self, change):
         self.update_controls(None)

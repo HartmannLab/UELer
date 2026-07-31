@@ -130,6 +130,14 @@ def sync_mask_highlights_from_selection(
 
     Works in both single-FOV and map mode.  Extracted verbatim from the previous
     ``ChartDisplay._sync_mask_highlights_from_selection``.
+
+    In single-FOV mode the projection is lossy on purpose — only cells in the
+    active FOV can be outlined — so *indices* is also recorded on the viewer as
+    ``linked_selection_indices``.  That FOV-independent record is what
+    ``ImageMaskViewer._reapply_selection_highlights`` re-projects after a FOV
+    switch (#119).  It is written *after* ``set_mask_ids``, which clears it, so
+    the cutoff/cluster ``highlight_cells`` methods that call ``set_mask_ids``
+    directly take the highlight over cleanly (last writer wins).
     """
     try:
         image_display = getattr(viewer, "image_display", None)
@@ -169,6 +177,9 @@ def sync_mask_highlights_from_selection(
             image_display.set_mask_ids(
                 mask_name=mask_key, mask_ids=[], fov_mask_pairs=fov_mask_pairs
             )
+
+        # Remember the selection in the form that survives a FOV change (#119).
+        viewer.linked_selection_indices = set(valid_indices)
     except Exception:
         if getattr(viewer, "_debug", False):
             import traceback
