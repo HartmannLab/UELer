@@ -15,8 +15,8 @@ are unreachable — the bug reported in #125.
 
 ``ChannelPickerWidget`` replaces it with an in-DOM picker we own::
 
-    Channels:  [ CD45 x] [ CD3 x]              <- chips: current selection, ordered
-    [ filter markers...                 ] [ v ]
+    Channels:  [::CD45 x] [::CD3 x]            <- chips: current selection, ordered;
+    [ filter markers...                 ] [ v ]    drag the grip to reorder (#126)
     +--------------------------------------+
     | + CD45                               |   scrollable list (max-height + overflow-y)
     |   CD4                                |   every option reachable, keyboard navigable
@@ -31,6 +31,13 @@ stacking context, iframe boundary, or host viewport can clip it.
 The public API is deliberately a drop-in for ``TagsInput``: the observable traits
 ``value`` (ordered list of selected names) and ``allowed_tags`` (available options)
 behave the same, so existing viewer/plugin code keeps working unchanged.
+
+The chips are **drag-reorderable** (issue #126).  ``TagsInput`` let users drag its
+tags to reorder them and the replacement initially did not, which mattered because
+``value`` order is meaningful: ``main_viewer.update_controls`` rebuilds the per-channel
+colour/contrast rows in exactly that order, and channel compositing follows it too.
+Reordering commits a permuted ``value``, so the existing ``on_channel_selection_change``
+observer propagates it to the rest of the UI with no further wiring.
 """
 
 from __future__ import annotations
@@ -100,15 +107,49 @@ _CSS = """
     overflow-y: auto;
 }
 .ucp-chip {
+    /* ``position: relative`` anchors the drop-indicator pseudo-elements below;
+       ``user-select: none`` stops a drag from turning into a text selection (#126). */
+    position: relative;
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    padding: 1px 4px 1px 6px;
+    padding: 1px 4px 1px 3px;
     border-radius: 9px;
     background: var(--jp-brand-color3, #bbdefb);
     color: var(--jp-ui-font-color1, #000);
     font-size: 11px;
     max-width: 100%;
+    cursor: grab;
+    user-select: none;
+}
+.ucp-chip:active { cursor: grabbing; }
+.ucp-chip:focus-visible {
+    outline: 1px solid var(--jp-brand-color1, #2196f3);
+    outline-offset: 1px;
+}
+.ucp-chip.is-dragging { opacity: 0.4; }
+/* Drop indicator: an absolutely-positioned 2px bar in the 3px inter-chip gap.
+   Pseudo-elements are used instead of a border so showing the marker cannot
+   reflow the chip row mid-drag (which would make the drop target jump). */
+.ucp-chip.drop-before::before,
+.ucp-chip.drop-after::after {
+    content: '';
+    position: absolute;
+    top: -1px;
+    bottom: -1px;
+    width: 2px;
+    border-radius: 1px;
+    background: var(--jp-brand-color1, #2196f3);
+}
+.ucp-chip.drop-before::before { left: -3px; }
+.ucp-chip.drop-after::after { right: -3px; }
+.ucp-grip {
+    flex: 0 0 auto;
+    font-size: 9px;
+    line-height: 1;
+    letter-spacing: -1px;
+    opacity: 0.55;
+    cursor: grab;
 }
 .ucp-chip-label {
     overflow: hidden;
@@ -233,11 +274,41 @@ _CSS = """
 
 
 _ESM = r"""
+// --- reorder helper (#126) ---
+// Move *name* to the slot of *target* within *selection* and return the new order.
+// ``after`` places it on the far side of the target; a ``null`` target appends.
+//
+// The target index is resolved *after* the source has been spliced out, so the
+// result is always "the dragged chip ends up where the indicator was", in both
+// directions.  (Resolving it before removal — as a naive implementation does —
+// silently shifts every left-to-right move one slot too far.)
+//
+// Kept at module scope, between these markers, with no DOM access at all: the
+// unit tests extract and execute it under node, so the drop arithmetic the
+// browser runs is the arithmetic that is tested
+// (tests/test_issue126_chip_reorder.py).
+function reorderSelection(selection, name, target, after) {
+  var order = (selection || []).slice();
+  if (!name || name === target) { return order; }
+  var fromIdx = order.indexOf(name);
+  if (fromIdx === -1) { return order; }
+  order.splice(fromIdx, 1);
+  var toIdx = target === null || target === undefined ? -1 : order.indexOf(target);
+  if (toIdx === -1) {
+    order.push(name);
+  } else {
+    order.splice(after ? toIdx + 1 : toIdx, 0, name);
+  }
+  return order;
+}
+// --- end reorder helper ---
+
 export function render({ model, el }) {
   var open = false;
   var query = '';
   var activeIdx = -1;
   var filtered = [];
+  var dragName = null;
 
   function options() { return (model.get('allowed_tags') || []).map(String); }
   function selection() { return (model.get('value') || []).map(String); }
@@ -259,6 +330,7 @@ export function render({ model, el }) {
 
   var chips = document.createElement('div');
   chips.className = 'ucp-chips';
+  chips.setAttribute('role', 'list');
 
   var searchRow = document.createElement('div');
   searchRow.className = 'ucp-search';
@@ -309,7 +381,40 @@ export function render({ model, el }) {
   root.appendChild(searchRow);
   root.appendChild(panel);
 
-  // ---------- chips (current selection) ----------
+  // ---------- chips (current selection, drag-reorderable) ----------
+  function chipNodes() { return chips.querySelectorAll('.ucp-chip'); }
+
+  function clearDropMarkers() {
+    var nodes = chipNodes();
+    for (var i = 0; i < nodes.length; i++) {
+      nodes[i].classList.remove('drop-before', 'drop-after');
+    }
+  }
+
+  function endDrag() {
+    dragName = null;
+    clearDropMarkers();
+    var nodes = chipNodes();
+    for (var i = 0; i < nodes.length; i++) {
+      nodes[i].classList.remove('is-dragging');
+    }
+  }
+
+  // ``commit`` re-renders the chips, so the moved chip is a brand-new element;
+  // re-focus it by name to keep keyboard reordering going without a Tab.
+  function focusChip(name) {
+    var nodes = chipNodes();
+    for (var i = 0; i < nodes.length; i++) {
+      if (nodes[i].dataset.name === name) { nodes[i].focus(); return; }
+    }
+  }
+
+  function moveChip(name, target, after) {
+    var next = reorderSelection(selection(), name, target, after);
+    commit(next);
+    focusChip(name);
+  }
+
   function renderChips() {
     while (chips.firstChild) { chips.removeChild(chips.firstChild); }
     var sel = selection();
@@ -323,24 +428,116 @@ export function render({ model, el }) {
     sel.forEach(function (name) {
       var chip = document.createElement('span');
       chip.className = 'ucp-chip';
+      chip.dataset.name = name;
+      chip.draggable = true;
+      chip.tabIndex = 0;
+      chip.setAttribute('role', 'listitem');
+      chip.setAttribute(
+        'aria-label',
+        name + ' - drag, or press the left/right arrow keys, to reorder'
+      );
+
+      var grip = document.createElement('span');
+      grip.className = 'ucp-grip';
+      grip.textContent = '⋮⋮';
+      grip.title = 'Drag to reorder (or use the ← / → keys)';
+
       var label = document.createElement('span');
       label.className = 'ucp-chip-label';
       label.textContent = name;
       label.title = name;
+
       var x = document.createElement('button');
       x.className = 'ucp-chip-x';
       x.type = 'button';
       x.textContent = '×';
       x.title = 'Remove ' + name;
+      // The × sits inside a draggable chip: opt it out so pressing it starts a
+      // click rather than a drag of its parent.
+      x.draggable = false;
       x.addEventListener('mousedown', function (e) { e.preventDefault(); });
+      x.addEventListener('dragstart', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      });
       x.addEventListener('click', function () {
         commit(selection().filter(function (n) { return n !== name; }));
       });
+
+      chip.addEventListener('dragstart', function (e) {
+        dragName = name;
+        if (e.dataTransfer) {
+          e.dataTransfer.effectAllowed = 'move';
+          // Some embedded hosts refuse a drag that carries no payload.
+          try { e.dataTransfer.setData('text/plain', name); } catch (err) { /* ignore */ }
+        }
+        // Deferred so the browser snapshots the chip before it is dimmed.
+        setTimeout(function () { chip.classList.add('is-dragging'); }, 0);
+      });
+      chip.addEventListener('dragend', endDrag);
+      chip.addEventListener('dragover', function (e) {
+        if (!dragName || dragName === name) { return; }
+        e.preventDefault();
+        e.stopPropagation();  // keep the container's append-to-end handler out
+        if (e.dataTransfer) { e.dataTransfer.dropEffect = 'move'; }
+        var rect = chip.getBoundingClientRect();
+        var after = (e.clientX - rect.left) > rect.width / 2;
+        clearDropMarkers();
+        chip.classList.add(after ? 'drop-after' : 'drop-before');
+      });
+      chip.addEventListener('dragleave', function (e) {
+        if (!chip.contains(e.relatedTarget)) {
+          chip.classList.remove('drop-before', 'drop-after');
+        }
+      });
+      chip.addEventListener('drop', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var after = chip.classList.contains('drop-after');
+        var moved = dragName;
+        endDrag();
+        if (moved && moved !== name) { moveChip(moved, name, after); }
+      });
+      // Keyboard equivalent — HTML5 drag-and-drop is pointer-only, and some
+      // notebook hosts intercept drag events before the widget sees them.
+      chip.addEventListener('keydown', function (e) {
+        var current = selection();
+        var idx = current.indexOf(name);
+        if (idx === -1) { return; }
+        if (e.key === 'ArrowLeft' && idx > 0) {
+          e.preventDefault();
+          moveChip(name, current[idx - 1], false);
+        } else if (e.key === 'ArrowRight' && idx < current.length - 1) {
+          e.preventDefault();
+          moveChip(name, current[idx + 1], true);
+        } else if (e.key === 'Delete' || e.key === 'Backspace') {
+          e.preventDefault();
+          commit(current.filter(function (n) { return n !== name; }));
+        }
+      });
+
+      chip.appendChild(grip);
       chip.appendChild(label);
       chip.appendChild(x);
       chips.appendChild(chip);
     });
   }
+
+  // Dropping in the empty space after the last chip moves it to the end.  The
+  // per-chip handlers stop propagation, so this only fires outside every chip.
+  chips.addEventListener('dragover', function (e) {
+    if (!dragName) { return; }
+    e.preventDefault();
+    if (e.dataTransfer) { e.dataTransfer.dropEffect = 'move'; }
+    clearDropMarkers();
+  });
+  chips.addEventListener('drop', function (e) {
+    if (!dragName) { return; }
+    e.preventDefault();
+    var moved = dragName;
+    endDrag();
+    moveChip(moved, null, false);
+  });
 
   // ---------- option list ----------
   function renderList() {

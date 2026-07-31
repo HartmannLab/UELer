@@ -29,9 +29,17 @@ Some plugins move themselves into the footer automatically when they need the ex
 
 ### Channels
 
-- **Channels:** — a tag input for the visible channels (add/remove one chip at a time; no
-  Shift/Ctrl range select).
-- Per-channel **color** dropdown, visibility checkbox, and **Min** / **Max** contrast sliders.
+- **Channels:** — a searchable picker for the visible channels. Click the field to browse the full
+  scrollable list, type to filter it (case-insensitive), and use **Select all shown** to take a
+  whole filtered group at once or **Clear** to drop everything. Keyboard: ↑/↓ move, Enter toggles,
+  Esc closes, Backspace on an empty filter box removes the last selection.
+- **Reordering the selection** — each selected channel appears as a chip. Drag a chip by its `⋮⋮`
+  grip to move it; a blue bar marks where it will land, and dropping past the last chip sends it to
+  the end. You can also click a chip and press ← / → to move it, or Delete to remove it. The order
+  is applied to the per-channel controls below and to the order channels are composited in.
+- Per-channel **color** dropdown, visibility checkbox, and **Min** / **Max** contrast sliders — one
+  row per selected channel, listed in the order of the chips above. Reordering the chips reorders
+  these rows and keeps each channel's colour and contrast settings.
 - **Show channel legend** — display a color key for the visible channels.
 - **Channel grid view** — render each visible channel as its own labelled pane in a synchronized grid.
 - **Mask &lt;name&gt;** dropdowns + enable checkboxes, and **Mask outline px:** — control segmentation
