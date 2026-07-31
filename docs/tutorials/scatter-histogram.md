@@ -62,7 +62,8 @@ highlights the cells in the image and gallery. **Clear selection** resets it.
 The selection is a set of cells, not a set of pixels, so it **survives a FOV change**: switch FOV in
 **Select Image** and the selected cells belonging to the newly loaded FOV are outlined right away
 (#119). A selection with no cells in the new FOV simply shows nothing until you switch to one that
-has some.
+has some. Zooming and panning keep the outlines too — including while a finer resolution level is
+being loaded.
 
 !!! note "Scatter in VS Code"
     In VS Code the scatter defaults to a static Matplotlib fallback. To force the interactive widget,

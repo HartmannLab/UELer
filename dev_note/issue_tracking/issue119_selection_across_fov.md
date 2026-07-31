@@ -1,7 +1,8 @@
 # Issue #119 — selected cells are not highlighted after switching FOV
 
 > GitHub issue: [#119](https://github.com/HartmannLab/UELer/issues/119)
-> Status: implemented (see *Implementation* below)
+> Status: implemented (see *Implementation* below), plus a reported follow-up — the highlight was also
+> lost on zoom/pan — fixed in [*Follow-up*](#follow-up--the-highlight-disappears-after-zooming-in-or-out)
 
 ## Problem
 
@@ -126,10 +127,11 @@ Design decisions:
   number of FOVs for a whole-dataset selection. Rejected as disproportionate risk for the same
   visible result.
 * Click / lasso selections persisting across FOVs — they are spatial selections in one image.
-* The `update_patches()` call inside `update_display` ([main_viewer.py:4632](../../ueler/viewer/main_viewer.py#L4632))
-  which runs *before* `img_display.set_data(combined)` and so paints outlines onto the array that is
-  about to be replaced. Unrelated to this issue's path (the re-projection runs after
-  `update_display`), but noted here as a real latent bug worth its own issue.
+* ~~The `update_patches()` call inside `update_display` which runs *before*
+  `img_display.set_data(combined)` and so paints outlines onto the array that is about to be
+  replaced.~~ Unrelated to the FOV-switch path (the re-projection runs after `update_display`), so it
+  was left alone in the first pass — but it is what the reported zoom regression turned out to be, and
+  it is fixed in the follow-up below.
 
 ## Implementation
 
@@ -175,3 +177,121 @@ invoked; whether Matplotlib paints them depends on the canvas state, which needs
 Steps: load a cell table spanning ≥2 FOVs, tick **Main viewer** in the Scatter plot, lasso a group
 of cells that spans both FOVs, then switch FOV in **Select Image** — the cells belonging to the new
 FOV should be outlined immediately. Repeat with a histogram brush.
+
+---
+
+# Follow-up — the highlight disappears after zooming in or out
+
+> Reported on #119 after the fix above: *"the selected cells are now highlighted after switching to
+> the next FOV, but they are not persistent after zooming in and out. When the user zooms in and out,
+> the selected cells are first highlighted, but then they are cleared after a few seconds. Either they
+> are really cleared or they are overwritten by a mask update."*
+
+The reporter's second guess is the right one: **they are overwritten.** The selection cache is never
+touched by a zoom — `selected_masks_label` still holds the correct triples for the (unchanged) FOV.
+
+### Root cause
+
+The outline is not a Matplotlib artist. `update_patches` paints white pixels *into* a copy of the RGB
+array and pushes it with `set_data`:
+
+```python
+combined = self._materialize_combined()      # a copy of image_display.combined
+combined[mapped_rows, mapped_cols] = [1, 1, 1]
+self.img_display.set_data(combined)
+```
+
+So any later `set_data` with a freshly rendered array erases it — and that is precisely the order
+`update_display` used:
+
+```python
+            if self.masks_available:
+                ...
+                if hasattr(self.image_display, "update_patches"):
+                    self.image_display.update_patches()   # (1) outline the OLD array
+
+        self.image_display.img_display.set_data(combined)  # (2) …then replace it
+        self.image_display.combined = combined
+```
+
+A zoom or a pan changes the axis limits, which fires a `draw_event` →
+[`ImageDisplay.on_draw`](../../ueler/viewer/image_display.py#L236) → `update_display(...)`. Step (1)
+repainted the *pre-zoom* array (visible for one frame — the "first highlighted" the reporter saw) and
+step (2) then installed the new render without outlines. This is the latent bug listed under *Out of
+scope* above; it did not affect the FOV switch only because `_reapply_selection_highlights()` runs
+*after* `update_display` returns.
+
+Two consequences, both visible in the report:
+
+1. **The highlight is lost on every zoom, pan and resize** — anything that reaches `update_display`.
+2. Even in the frame where it *was* drawn it could be misplaced: `update_patches` compares its expected
+   region size against `combined.shape`, which at that point was still the previous viewport's array,
+   so it could fall back to the absolute-offset mapping (`rows + ymin_ds`) and land the outline outside
+   the visible slice.
+
+### Solution
+
+Repaint the highlight **after** the new array is installed, so it is drawn onto what is actually on
+screen:
+
+```python
+        repaint_selection = hasattr(self.image_display, "update_patches")   # in the mask branch
+
+        self.image_display.img_display.set_data(combined)
+        self.image_display.combined = combined
+        self.image_display.img_display.set_extent(xym_r)
+        if repaint_selection:
+            self.image_display.update_patches()
+```
+
+Notes:
+
+* `image_display.combined` is assigned the **clean** render before the repaint, so the outlines are
+  never baked into the base image and cannot accumulate across redraws — `update_patches` re-derives
+  them from `combined` every time.
+* The flag is only set in the single-FOV mask branch, so map mode is unaffected: there `update_patches`
+  just delegates to `_update_map_mask_highlights()`, which `update_display` already calls itself.
+* Setting the data twice (clean render, then outlined) is deliberate and cheap: `set_data` only swaps
+  the array reference, and the single `draw_idle()` at the end coalesces the render.
+
+### Out of scope (deliberately)
+
+* `MaskPainter.on_mv_update_display` re-applies painted colours through `set_mask_colors_current_fov`,
+  which also rebuilds from `combined` and would wipe the outline. It fires only when the FOV, the
+  identifier or the continuous spec changed — never on a plain zoom — and each of those paths
+  re-highlights afterwards, so it is not part of this report. Worth revisiting if a painted-colour
+  refresh is ever seen to clear a selection.
+* The dead `if getattr(self, '_in_on_draw', False): return` guard at the top of `update_patches`:
+  nothing ever sets `_in_on_draw`, so it is a no-op. Left alone rather than removed or wired up, since
+  making it live would suppress exactly the repaint this fix relies on.
+
+### Tests
+
+`tests/test_issue119_zoom_highlight.py` (12 tests, 2 classes) runs the real
+`ImageMaskViewer.update_display` *and* the real `ImageDisplay.update_patches` against a stub viewer and
+asserts on the **pixels of the array left on screen** — the ordering bug is invisible to a test that
+only inspects `selected_masks_label`.
+
+* **`ZoomKeepsHighlightTestCase`** — the array installed last carries the outline; the outline traces
+  the selected cell and not the unselected one; `image_display.combined` stays outline-free; a
+  zoom-in → zoom-out sequence keeps the highlight at every step without leaking into the base image;
+  after a zoom the outline is placed in the new array's own coordinates (the mis-mapping above); a
+  coarser downsample factor still works. Plus one negative control: a viewport entirely *inside* a cell
+  correctly shows nothing, so the assertions are not read as "an outline at any zoom level".
+* **`UnchangedBehaviourTestCase`** — without a selection the render is shown as-is, the label-mask
+  caches are still populated before the repaint, `on_mv_update_display` is still broadcast, map mode
+  still uses `_update_map_mask_highlights` (and never `update_patches`), and
+  `_suspend_display_updates` still short-circuits.
+
+Verified as a genuine regression test: with the old ordering restored, 8 of the 12 fail.
+
+```bash
+python -m unittest tests.test_issue119_zoom_highlight tests.test_issue119_selection_across_fov \
+    tests.test_lasso_selection tests.test_heatmap_selection tests.test_map_mode_activation
+python -m unittest discover -s tests -t .    # 833 tests, OK
+```
+
+**Not covered by tests, to confirm in a notebook:** the timing the reporter describes ("cleared after a
+few seconds"). Steps: link **Main viewer** in the Scatter plot, lasso some cells, then zoom in with the
+toolbar, zoom out again, and pan — the outlines should stay put throughout, including while a coarser
+downsample level is being loaded.

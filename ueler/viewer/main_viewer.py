@@ -4633,6 +4633,11 @@ class ImageMaskViewer:
                 return
 
         visible_fovs: Tuple[str, ...] = ()
+        # The selection highlight is painted *into* the pixel array rather than
+        # drawn as an artist, so it has to be re-applied after the freshly
+        # rendered array is installed below — otherwise ``set_data(combined)``
+        # silently erases it on every zoom/pan (#119 follow-up).
+        repaint_selection = False
         if self._map_mode_active and self._active_map_id:
             combined, visible_fovs = self._render_map_view(
                 channel_tuple,
@@ -4670,13 +4675,17 @@ class ImageMaskViewer:
                         continue
                     self.current_label_masks[mask_name] = label_mask_ds[ymin_ds:ymax_ds, xmin_ds:xmax_ds]
 
-                if hasattr(self.image_display, "update_patches"):
-                    self.image_display.update_patches()
+                repaint_selection = hasattr(self.image_display, "update_patches")
 
         # Update the displayed image
         self.image_display.img_display.set_data(combined)
         self.image_display.combined = combined
         self.image_display.img_display.set_extent(xym_r)
+        # Re-outline the selected cells on top of the array that is now on
+        # screen.  ``combined`` above is the clean render, so the outlines are
+        # never baked into ``image_display.combined`` and cannot accumulate.
+        if repaint_selection:
+            self.image_display.update_patches()
         if self._widget_displayed:
             self.image_display.fig.canvas.draw_idle()
 

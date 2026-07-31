@@ -95,9 +95,9 @@ the image and populates the gallery. This is what makes "gate on a marker, see t
 in the tissue" work.
 
 The selection spans the whole cell table, not just the FOV on screen, so **switching FOV keeps it**:
-the image re-highlights the selected cells belonging to the FOV you moved to. Selections made
-directly in the image — a click or a **lasso** — are spatial and stay with the FOV they were drawn
-in.
+the image re-highlights the selected cells belonging to the FOV you moved to. Zooming and panning
+keep the highlight as well. Selections made directly in the image — a click or a **lasso** — are
+spatial and stay with the FOV they were drawn in.
 
 ---
 
