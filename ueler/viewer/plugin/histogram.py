@@ -207,6 +207,11 @@ class HistogramDisplay(PluginBase):
         self.ui_component.interaction_mode.observe(
             self._on_interaction_mode_change, names="value"
         )
+        # Toggling the link must act on the highlight immediately (#129), not
+        # only on the next selection.
+        self.ui_component.mv_linked_checkbox.observe(
+            self._on_mv_link_change, names="value"
+        )
         self.ui_component.subset_on_dropdown.observe(
             self.on_subset_on_dropdown_change, names="value"
         )
@@ -697,8 +702,10 @@ class HistogramDisplay(PluginBase):
         highlight after a FOV change); it is folded into ``_gates`` here, with the
         above/below direction captured now so each channel keeps its own.
 
-        Unlike a brush, this always pushes mask highlights — it is the explicit
-        "show the gate in the viewer" entry point, called by the viewer itself.
+        Mask highlights are pushed on exactly the same condition as a brush — the
+        "Main viewer" link (#129). This used to highlight unconditionally, which
+        made a cutoff tap (and the FOV-change re-apply that goes through here)
+        outline cells in the viewer even with the link switched off.
         """
         channel = self._active_histogram_column
         if channel is not None and self.cutoff is not None:
@@ -710,7 +717,10 @@ class HistogramDisplay(PluginBase):
         frame = self._gate_frame()
         if frame is None or not any(ch in frame.columns for ch in self._gates):
             return
-        self._apply_gate(publish=push_to_gallery, highlight=True)
+        self._apply_gate(
+            publish=push_to_gallery,
+            highlight=self.ui_component.mv_linked_checkbox.value,
+        )
 
     def clear_selection(self) -> None:
         """Drop every gate term (both kinds) and the selection it produced."""
@@ -791,6 +801,33 @@ class HistogramDisplay(PluginBase):
     def _on_interaction_mode_change(self, _change) -> None:
         if self._plot_data is not None:
             self._render()
+
+    def _on_mv_link_change(self, _change) -> None:
+        self.sync_main_viewer_link()
+
+    def sync_main_viewer_link(self) -> None:
+        """Push or withdraw this plugin's mask highlights for the current link state (#129).
+
+        Unchecking "Main viewer" has to *take the highlight away*, not merely stop
+        updating it: outlines drawn while linked would otherwise stay on the canvas
+        and read as a live link. Clearing goes through
+        ``sync_mask_highlights_from_selection(..., set())`` so the
+        ``linked_selection_indices`` record (#119) is dropped too and a later FOV
+        switch cannot resurrect the highlight. Re-checking re-projects the current
+        selection onto the active FOV.
+
+        A no-op when this plugin has published no selection, so toggling an idle
+        histogram cannot wipe a highlight the scatter or heatmap plugin owns. The
+        checkbox is read directly rather than from the ``change`` payload, which
+        keeps the handler independent of the observer's change object.
+        """
+        indices = self.selected_indices.value or set()
+        if not indices:
+            return
+        linked = bool(self.ui_component.mv_linked_checkbox.value)
+        _chart_common.sync_mask_highlights_from_selection(
+            self.main_viewer, indices if linked else set()
+        )
 
     def setup_observe(self):
         if self._observers_registered:

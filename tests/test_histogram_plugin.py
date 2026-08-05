@@ -109,8 +109,17 @@ class _FakeImageDisplay:
     def __init__(self):
         self.last_mask_ids: list = []
         self.last_fov_mask_pairs = None
+        # Distinguishes "never asked to highlight" from "asked to clear" (#129).
+        self.set_mask_ids_calls = 0
 
     def set_mask_ids(self, *, mask_name, mask_ids, fov_mask_pairs=None):
+        self.set_mask_ids_calls += 1
+        # Mirror the real ImageDisplay: replacing the highlight drops the
+        # FOV-independent record, which `sync_mask_highlights_from_selection`
+        # re-arms straight after when the selection is non-empty (#119).
+        viewer = getattr(self, "main_viewer", None)
+        if viewer is not None:
+            viewer.linked_selection_indices = None
         if fov_mask_pairs is not None:
             self.last_fov_mask_pairs = list(fov_mask_pairs)
             self.last_mask_ids = []
@@ -132,7 +141,7 @@ def _make_viewer(cell_table: "pd.DataFrame") -> SimpleNamespace:
     image_display = _FakeImageDisplay()
     ui_component = SimpleNamespace(image_selector=SimpleNamespace(value="fov1"))
     side_plots = SimpleNamespace(cell_gallery_output=gallery)
-    return SimpleNamespace(
+    viewer = SimpleNamespace(
         cell_table=cell_table,
         fov_key="fov",
         label_key="label",
@@ -140,8 +149,11 @@ def _make_viewer(cell_table: "pd.DataFrame") -> SimpleNamespace:
         ui_component=ui_component,
         image_display=image_display,
         SidePlots=side_plots,
+        linked_selection_indices=None,
         get_active_fov=lambda: ui_component.image_selector.value,
     )
+    image_display.main_viewer = viewer
+    return viewer
 
 
 def _make_histogram(viewer: SimpleNamespace, *, patch_render=True) -> HistogramDisplay:
@@ -205,6 +217,8 @@ class TestHistogramCutoffGalleryLink(unittest.TestCase):
         self.assertEqual(set(self.gallery.received), expected)
 
     def test_image_display_limited_to_current_fov(self):
+        # Highlighting the viewer requires the "Main viewer" link (#129).
+        self.hist.ui_component.mv_linked_checkbox.value = True
         self.hist.highlight_cells(push_to_gallery=True)
         img = self.viewer.image_display
         self.assertNotIn(1, img.last_mask_ids)
@@ -214,6 +228,7 @@ class TestHistogramCutoffGalleryLink(unittest.TestCase):
             self.assertNotIn(label, img.last_mask_ids)
 
     def test_map_mode_uses_fov_mask_pairs(self):
+        self.hist.ui_component.mv_linked_checkbox.value = True
         self.viewer.get_active_fov = lambda: None
         self.hist.highlight_cells(push_to_gallery=True)
         pairs = self.viewer.image_display.last_fov_mask_pairs
@@ -361,6 +376,118 @@ class TestHistogramBrushLinking(unittest.TestCase):
         self.hist._on_brush("intensity", 4.5, 5.5)
         after = self.hist._histogram_bin_edges("intensity", 15)
         self.assertTrue(np.array_equal(before, after))
+
+
+# ---------------------------------------------------------------------------
+# "Main viewer" link gates every highlight push (#129)
+# ---------------------------------------------------------------------------
+
+class TestHistogramMainViewerLink(unittest.TestCase):
+    """With the link off, nothing this plugin does may highlight the main viewer.
+
+    Cutoff mode used to push highlights unconditionally (``highlight=True`` in
+    ``highlight_cells``), and unchecking the box left the previous outlines on the
+    canvas — both read as "the histogram still affects the main viewer" (#129).
+    """
+
+    def setUp(self):
+        self.viewer = _make_viewer(_two_fov_table())
+        self.hist = _make_histogram(self.viewer)
+        self.img: _FakeImageDisplay = self.viewer.image_display
+        self.hist._plot_data = self.viewer.cell_table.copy()
+        self.hist._channels = ["intensity", "area"]
+
+    def _set_cutoff(self, value=4.0, direction="above"):
+        self.hist._active_histogram_column = "intensity"
+        self.hist.ui_component.above_below_buttons.value = direction
+        self.hist.cutoff = value
+
+    def _toggle_link(self, value: bool):
+        """Flip the checkbox the way a user click does.
+
+        The shared ipywidgets stub ignores ``observe`` registrations, so the
+        observer is invoked explicitly — ``_on_mv_link_change`` reads the
+        checkbox rather than the change payload, so this is the same code path
+        the real widget takes. ``test_link_checkbox_is_observed`` covers the
+        wiring itself.
+        """
+        self.hist.ui_component.mv_linked_checkbox.value = value
+        self.hist._on_mv_link_change(SimpleNamespace(name="value", new=value))
+
+    # -- cutoff mode ---------------------------------------------------------
+    def test_cutoff_does_not_highlight_when_unlinked(self):
+        self._set_cutoff()
+        self.hist.highlight_cells(push_to_gallery=True)
+        # The gate is live (published) but the viewer was never touched.
+        self.assertTrue(self.hist.selected_indices.value)
+        self.assertEqual(self.img.set_mask_ids_calls, 0)
+
+    def test_cutoff_highlights_when_linked(self):
+        self.hist.ui_component.mv_linked_checkbox.value = True
+        self._set_cutoff()
+        self.hist.highlight_cells(push_to_gallery=True)
+        self.assertIn(2, self.img.last_mask_ids)
+        self.assertIn(3, self.img.last_mask_ids)
+
+    def test_above_below_flip_does_not_highlight_when_unlinked(self):
+        self._set_cutoff()
+        self.hist.highlight_cells(push_to_gallery=True)
+        self.hist.ui_component.above_below_buttons.value = "below"
+        self.hist._on_above_below_change(None)
+        self.assertEqual(self.img.set_mask_ids_calls, 0)
+
+    def test_fov_reapply_does_not_highlight_when_unlinked(self):
+        """The viewer re-triggers ``highlight_cells()`` on every FOV change (#119)."""
+        self._set_cutoff()
+        self.hist.highlight_cells(push_to_gallery=True)
+        self.hist.highlight_cells()  # what ImageMaskViewer calls after a FOV switch
+        self.assertEqual(self.img.set_mask_ids_calls, 0)
+
+    def test_brush_does_not_highlight_when_unlinked(self):
+        self.hist.handle_range("intensity", 4.0, 10.0)
+        self.assertTrue(self.hist.selected_indices.value)
+        self.assertEqual(self.img.set_mask_ids_calls, 0)
+
+    # -- toggling the checkbox ----------------------------------------------
+    def test_unchecking_withdraws_the_highlight(self):
+        self.hist.ui_component.mv_linked_checkbox.value = True
+        self.hist.handle_range("intensity", 4.0, 10.0)
+        self.assertTrue(self.img.last_mask_ids)
+        self._toggle_link(False)
+        self.assertEqual(self.img.last_mask_ids, [])
+        # The FOV-independent record is dropped too, so a FOV switch cannot
+        # resurrect the outlines (#119).
+        self.assertIsNone(getattr(self.viewer, "linked_selection_indices", None))
+
+    def test_rechecking_restores_the_highlight(self):
+        self.hist.handle_range("intensity", 4.0, 10.0)
+        self.assertEqual(self.img.set_mask_ids_calls, 0)
+        self._toggle_link(True)
+        self.assertIn(2, self.img.last_mask_ids)
+        self.assertIn(3, self.img.last_mask_ids)
+
+    def test_toggling_without_a_selection_is_a_no_op(self):
+        """Toggling an idle histogram must not wipe another plugin's highlight."""
+        self._toggle_link(True)
+        self._toggle_link(False)
+        self.assertEqual(self.img.set_mask_ids_calls, 0)
+
+    def test_link_checkbox_is_observed(self):
+        """``_wire_events`` really registers the handler on the checkbox (#129)."""
+        recorded: list = []
+
+        class _Recorder:
+            value = False
+
+            def observe(self, callback, names=None):
+                recorded.append((callback, names))
+
+        self.hist.ui_component.mv_linked_checkbox = _Recorder()
+        self.hist._wire_events()
+        self.assertIn(
+            (self.hist._on_mv_link_change, "value"),
+            recorded,
+        )
 
 
 # ---------------------------------------------------------------------------
