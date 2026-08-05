@@ -38,6 +38,11 @@ MAX_DOWNSAMPLE_FACTOR = 8
 DEFAULT_MASK_OUTLINE_THICKNESS = 1
 MAX_MASK_OUTLINE_THICKNESS = 8
 HOVER_DELAY_MS = 300
+# Fill for the part of a cutout that falls outside the FOV. Tiles are displayed at a fixed
+# grid width, so an edge cell's short crop would otherwise be rescaled and break size
+# comparisons across the gallery (issue #128). White reads as "no data" against the black
+# composite background.
+GALLERY_PAD_COLOR = (1.0, 1.0, 1.0)
 
 
 class CellGalleryDisplay(PluginBase):
@@ -817,6 +822,8 @@ def _render_tile_for_index(df, index: int, context: _RenderContext):
             annotation=annotation_settings,
             masks=tuple(masks),
             skip_image_layer=bool(getattr(context.overlay_snapshot, "skip_image_layer", False)),
+            pad_to_size=True,
+            pad_color=GALLERY_PAD_COLOR,
         )
         return np.clip(tile, 0.0, 1.0)
     

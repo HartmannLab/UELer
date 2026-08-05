@@ -364,6 +364,163 @@ class TestHistogramBrushLinking(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Multi-channel gating: ranges AND cutoffs intersect, per-histogram state (#127)
+# ---------------------------------------------------------------------------
+
+class TestHistogramGating(unittest.TestCase):
+    """Every gated channel contributes a term; the selection is their intersection.
+
+    Reference table (row index → intensity / area):
+        0 → 1.0 / 10.0   (fov1)
+        1 → 5.0 / 20.0   (fov1)
+        2 → 9.0 / 30.0   (fov1)
+        3 → 3.0 / 40.0   (fov2)
+        4 → 7.0 / 50.0   (fov2)
+    """
+
+    def setUp(self):
+        self.viewer = _make_viewer(_two_fov_table())
+        self.hist = _make_histogram(self.viewer)
+        self.gallery: _FakeCellGallery = self.viewer.SidePlots.cell_gallery_output
+        self.hist._plot_data = self.viewer.cell_table.copy()
+        self.hist._channels = ["intensity", "area"]
+
+    def _set_cutoff(self, channel, value, direction="above"):
+        self.hist._active_histogram_column = channel
+        self.hist.cutoff = value
+        self.hist.ui_component.above_below_buttons.value = direction
+        self.hist.highlight_cells(push_to_gallery=True)
+
+    # -- intersection across channels ---------------------------------------
+    def test_two_brushes_intersect_instead_of_replacing(self):
+        self.hist.handle_range("intensity", 4.0, 8.0)      # {1, 4}
+        self.assertEqual(set(self.hist.selected_indices.value), {1, 4})
+        self.hist.handle_range("area", 15.0, 35.0)         # {1, 2}
+        self.assertEqual(set(self.hist.selected_indices.value), {1})
+
+    def test_two_cutoffs_intersect(self):
+        self._set_cutoff("intensity", 4.0, "above")        # {1, 2, 4}
+        self._set_cutoff("area", 35.0, "below")            # {0, 1, 2}
+        self.assertEqual(set(self.hist.selected_indices.value), {1, 2})
+
+    def test_range_and_cutoff_intersect(self):
+        self.hist.handle_range("intensity", 4.0, 8.0)      # {1, 4}
+        self._set_cutoff("area", 45.0, "above")            # {4}
+        self.assertEqual(set(self.hist.selected_indices.value), {4})
+
+    def test_cutoff_then_range_on_other_channel_keeps_both_terms(self):
+        self._set_cutoff("intensity", 4.0, "above")        # {1, 2, 4}
+        self.hist.handle_range("area", 15.0, 35.0)         # {1, 2}
+        self.assertEqual(set(self.hist.selected_indices.value), {1, 2})
+        self.assertEqual(set(self.hist._gates), {"intensity", "area"})
+
+    def test_gated_indices_matches_published_selection(self):
+        self.hist.handle_range("intensity", 4.0, 8.0)
+        self._set_cutoff("area", 45.0, "above")
+        self.assertEqual(
+            set(self.hist.gated_indices()), set(self.hist.selected_indices.value)
+        )
+
+    # -- per-channel replacement -------------------------------------------
+    def test_rebrushing_replaces_only_that_channels_term(self):
+        self.hist.handle_range("intensity", 4.0, 8.0)
+        self.hist.handle_range("area", 15.0, 35.0)
+        self.hist.handle_range("intensity", 0.0, 10.0)     # widen intensity only
+        # area's [15, 35] term still gates → {1, 2}
+        self.assertEqual(set(self.hist.selected_indices.value), {1, 2})
+
+    def test_brush_supersedes_a_cutoff_on_the_same_channel(self):
+        self._set_cutoff("intensity", 4.0, "above")        # {1, 2, 4}
+        self.hist.handle_range("intensity", 0.0, 2.0)      # {0}
+        self.assertEqual(set(self.hist.selected_indices.value), {0})
+        self.assertEqual(self.hist._gates["intensity"][0], "range")
+        self.assertIsNone(self.hist.cutoff)
+
+    def test_above_below_toggle_flips_only_the_last_cutoff(self):
+        self._set_cutoff("intensity", 4.0, "above")        # {1, 2, 4}
+        self._set_cutoff("area", 35.0, "below")            # {0, 1, 2} → ∩ {1, 2}
+        # Flipping the toggle re-applies the *area* cutoff as "above" → {3, 4}.
+        # The observer is invoked directly so the test holds with either the real
+        # ipywidgets stack or the stub widgets.
+        self.hist.ui_component.above_below_buttons.value = "above"
+        self.hist._on_above_below_change(None)
+        self.assertEqual(set(self.hist.selected_indices.value), {4})
+        self.assertEqual(self.hist._gates["intensity"], ("cutoff", "above", 4.0))
+
+    # -- clearing ----------------------------------------------------------
+    def test_clear_gate_drops_one_term_and_keeps_the_rest(self):
+        self.hist.handle_range("intensity", 4.0, 8.0)
+        self.hist.handle_range("area", 15.0, 35.0)
+        self.hist.clear_gate("area")
+        self.assertEqual(set(self.hist.selected_indices.value), {1, 4})
+        self.assertEqual(set(self.hist._gates), {"intensity"})
+
+    def test_clear_gate_on_an_ungated_channel_is_a_noop(self):
+        self.hist.handle_range("intensity", 4.0, 8.0)
+        self.hist.clear_gate("area")
+        self.assertEqual(set(self.hist.selected_indices.value), {1, 4})
+
+    def test_clear_selection_empties_all_gates_and_cutoff_state(self):
+        self.hist.handle_range("intensity", 4.0, 8.0)
+        self._set_cutoff("area", 45.0, "above")
+        self.hist.clear_selection()
+        self.assertEqual(self.hist._gates, {})
+        self.assertIsNone(self.hist.cutoff)
+        self.assertIsNone(self.hist._active_histogram_column)
+        self.assertEqual(self.hist.selected_indices.value, set())
+
+    def test_replotting_without_a_channel_drops_its_term(self):
+        self.hist.handle_range("intensity", 4.0, 8.0)
+        self.hist.handle_range("area", 15.0, 35.0)
+        self.hist.ui_component.channel_selector.value = ("intensity",)
+        self.hist.plot_histograms(None)
+        self.assertEqual(set(self.hist._gates), {"intensity"})
+        self.assertEqual(set(self.hist.selected_indices.value), {1, 4})
+
+    def test_external_selection_replaces_the_gate(self):
+        self.hist.handle_range("intensity", 4.0, 8.0)
+        self.hist.show_external_selection([0])
+        self.assertEqual(self.hist._gates, {})
+        self.assertEqual(set(self.hist.selected_indices.value), {0})
+
+    # -- "don't refresh on selection" --------------------------------------
+    def test_gating_never_replots(self):
+        """Selection touches sources/annotations only — never a figure rebuild (#127)."""
+        self.hist._render_calls = 0
+        self.hist.handle_range("intensity", 4.0, 8.0)
+        self._set_cutoff("area", 45.0, "above")
+        self.hist.clear_gate("area")
+        self.hist.clear_selection()
+        self.assertEqual(self.hist._render_calls, 0)
+
+    # -- subset consistency ------------------------------------------------
+    def test_cutoff_gate_respects_the_plotted_subset(self):
+        """A cutoff is evaluated on the plotted frame, like a brush (#127)."""
+        table = self.viewer.cell_table
+        self.hist._plot_data = table.loc[table["fov"] == "fov1"].copy()
+        self._set_cutoff("intensity", 4.0, "above")
+        # fov1 rows above 4.0 → {1, 2}; row 4 (fov2, 7.0) is outside the subset.
+        self.assertEqual(set(self.hist.selected_indices.value), {1, 2})
+
+    def test_cutoff_falls_back_to_the_cell_table_before_any_plot(self):
+        self.hist._plot_data = None
+        self._set_cutoff("intensity", 4.0, "above")
+        self.assertEqual(set(self.hist.selected_indices.value), {1, 2, 4})
+
+    # -- readability -------------------------------------------------------
+    def test_gate_description_lists_every_term(self):
+        self.hist.handle_range("intensity", 4.0, 8.0)
+        self._set_cutoff("area", 45.0, "above")
+        text = self.hist.gate_description()
+        self.assertIn("intensity ∈ [4, 8]", text)
+        self.assertIn("area > 45", text)
+        self.assertIn("AND", text)
+
+    def test_gate_description_when_nothing_is_gated(self):
+        self.assertIn("No gate", self.hist.gate_description())
+
+
+# ---------------------------------------------------------------------------
 # Multi-channel plot state
 # ---------------------------------------------------------------------------
 
@@ -479,16 +636,54 @@ class TestHistogramBokehLayout(unittest.TestCase):
             sources["intensity"]["selected"].data["left"], edges[:-1].tolist()
         )
 
-    def test_cutoff_span_shows_only_on_active_channel(self):
+    def test_cutoff_span_shows_only_on_gated_channels(self):
+        """Each gated channel shows its own cutoff line; ungated ones show none (#127)."""
         self.hist._channels = ["intensity", "area"]
         _layout, sources, spans = self.hist._build_figures()
         self.hist._sources, self.hist._spans = sources, spans
         self.hist._active_histogram_column = "intensity"
         self.hist.cutoff = 5.0
-        self.hist._refresh_cutoff_spans()
+        self.hist.highlight_cells(push_to_gallery=True)
         self.assertTrue(spans["intensity"].visible)
         self.assertEqual(spans["intensity"].location, 5.0)
         self.assertFalse(spans["area"].visible)
+
+        # A second cutoff gates `area` too — the first channel keeps its line.
+        self.hist._active_histogram_column = "area"
+        self.hist.cutoff = 25.0
+        self.hist.highlight_cells(push_to_gallery=True)
+        self.assertTrue(spans["intensity"].visible)
+        self.assertEqual(spans["intensity"].location, 5.0)
+        self.assertTrue(spans["area"].visible)
+        self.assertEqual(spans["area"].location, 25.0)
+
+    def test_range_band_marks_the_brushed_channel_only(self):
+        """A brushed range is drawn as our own persistent band (#127)."""
+        self.hist._channels = ["intensity", "area"]
+        _layout, sources, spans = self.hist._build_figures()
+        self.hist._sources, self.hist._spans = sources, spans
+        self.hist.handle_range("intensity", 4.0, 8.0)
+        band = sources["intensity"]["band"]
+        self.assertTrue(band.visible)
+        self.assertEqual((band.left, band.right), (4.0, 8.0))
+        self.assertFalse(sources["area"]["band"].visible)
+
+    def test_selection_does_not_mute_bars_on_box_select(self):
+        """Bokeh's own (non)selection glyphs are pinned to the base glyph (#127).
+
+        Otherwise a box-select gesture greys out the non-selected bars of the
+        histogram being brushed, which reads as the other channels' state changing.
+        """
+        self.hist.ui_component.interaction_mode.value = "Brush"
+        self.hist._channels = ["intensity"]
+        layout, _sources, _spans = self.hist._build_figures()
+        for fig in layout.children:
+            for renderer in fig.renderers:
+                glyph = getattr(renderer, "glyph", None)
+                if glyph is None:
+                    continue
+                self.assertIs(renderer.selection_glyph, glyph)
+                self.assertIs(renderer.nonselection_glyph, glyph)
 
     def test_brush_mode_activates_box_select_drag(self):
         """Brush mode must set the BoxSelectTool as the active drag gesture (#112 reply).

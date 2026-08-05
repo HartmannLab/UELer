@@ -15,6 +15,12 @@ Bokeh gives native, kernel-backed interactivity:
   see how a selection on one channel distributes across the others.
 * **Cutoff mode** — tap a histogram to set an above/below threshold that
   highlights cells in the viewer (feature parity with the old histogram).
+* **Multi-channel gating (#127)** — each histogram keeps its *own* gate term (a
+  brushed range or an above/below cutoff) in ``_gates``, and the published
+  selection is the **intersection** of every active term.  Acting on one channel
+  replaces only that channel's term and leaves the other histograms' markers,
+  axes and zoom untouched — nothing is replotted on selection.  Double-tap a
+  histogram to drop just that channel's term.
 
 Python owns all binning (so the logic stays unit-testable); Bokeh only draws the
 bars + brush and routes its events back to Python callbacks in the kernel.  When
@@ -61,8 +67,8 @@ if IntSlider is None:  # pragma: no cover - fallback for stub environments
 # interactive ipywidget with kernel-side event callbacks.
 try:  # pragma: no cover - exercised via the real notebook stack
     from bokeh.plotting import figure as _bk_figure
-    from bokeh.models import BoxSelectTool, ColumnDataSource, Span
-    from bokeh.events import SelectionGeometry, Tap
+    from bokeh.models import BoxAnnotation, BoxSelectTool, ColumnDataSource, Span
+    from bokeh.events import DoubleTap, SelectionGeometry, Tap
     from bokeh.layouts import column as _bk_column
 
     _BOKEH_OK = True
@@ -120,9 +126,17 @@ _BOKEH_MISSING_NOTICE = (
 
 _BASE_COLOR = "#1f77b4"        # matplotlib tab:blue
 _OVERLAY_COLOR = "#ff7f0e"     # matplotlib tab:orange
+_BAND_COLOR = "#2ca02c"        # matplotlib tab:green — persistent gate band
 _FIGURE_HEIGHT = 220
 _ROW_OVERHEAD = 40             # approx. per-figure title + axis label DOM height
 _MAX_PLOT_HEIGHT = 560         # scroll the stack once it exceeds this many px
+
+
+# Gate-term kinds (issue #127). A term is ``(kind, a, b)``:
+#   ("range",  lo,        hi)     — brushed [lo, hi] on that channel
+#   ("cutoff", direction, value)  — "above"/"below" *value* on that channel
+_RANGE = "range"
+_CUTOFF = "cutoff"
 
 
 def bin_counts(values, edges) -> np.ndarray:
@@ -145,18 +159,24 @@ class HistogramDisplay(PluginBase):
         self.width = width
         self.height = height
 
-        # Cutoff-mode state (feature parity with the old histogram).
+        # Cutoff-mode state. ``cutoff``/``_active_histogram_column`` track the
+        # *last* cutoff the user set; the authoritative per-channel state lives in
+        # ``_gates``. Kept because the viewer re-triggers ``highlight_cells()`` on
+        # a FOV change and callers/tests set them directly.
         self.cutoff: Optional[float] = None
         self._active_histogram_column: Optional[str] = None
 
-        # Brush-mode state (linked selection across histograms).
-        self._brush_selection: Optional[tuple] = None  # (channel, lo, hi)
+        # Per-channel gate terms, ANDed into one selection (#127). Replaces the
+        # old single ``_brush_selection`` tuple, which could only gate on the
+        # last channel touched.
+        self._gates: dict = {}  # channel -> (kind, a, b)
         self.selected_indices: Observable = Observable(set())
         self.single_point_click_state = 0
 
         self._channels: list = []
         self._plot_data = None
-        # Bokeh render state: per-channel selected-overlay sources + cutoff spans.
+        # Bokeh render state: per-channel selected-overlay sources (each also
+        # carrying that channel's persistent range band) + cutoff spans.
         self._sources: dict = {}
         self._spans: dict = {}
         self._bokeh_model = None
@@ -228,6 +248,7 @@ class HistogramDisplay(PluginBase):
                     ],
                     layout=Layout(gap="12px", align_items="center"),
                 ),
+                self.ui_component.gate_summary,
             ],
             layout=Layout(width="100%", gap="8px"),
         )
@@ -295,14 +316,18 @@ class HistogramDisplay(PluginBase):
             return
         self._channels = channels
         self._plot_data = data
-        # A fresh plot invalidates any previous cutoff/brush that referenced
-        # columns which may no longer be shown.
+        # A fresh plot invalidates any gate term on a column that is no longer
+        # shown (#127) — the remaining terms keep gating.
         if self._active_histogram_column not in channels:
             self._active_histogram_column = None
             self.cutoff = None
-        if self._brush_selection is not None and self._brush_selection[0] not in channels:
-            self._brush_selection = None
+        dropped = [ch for ch in self._gates if ch not in channels]
+        for channel in dropped:
+            del self._gates[channel]
         self._render()
+        if dropped:
+            # The gate changed, so the published selection must follow.
+            self._apply_gate(publish=True, highlight=self.ui_component.mv_linked_checkbox.value)
 
     def _render(self) -> None:
         """Rebuild the Bokeh layout (one figure per channel) and host it."""
@@ -326,9 +351,9 @@ class HistogramDisplay(PluginBase):
             self._bokeh_model.layout.height = scroll_h
             self._bokeh_model.layout.overflow = "hidden auto"
         self._plot_host.children = [self._bokeh_model]
-        # Reflect any existing selection / cutoff on the freshly built figures.
+        # Reflect any existing selection / gate terms on the freshly built figures.
         self._refresh_overlays()
-        self._refresh_cutoff_spans()
+        self._refresh_gate_markers()
 
     def _scroll_height(self):
         """Return a fixed pixel height ('<N>px') once the stack exceeds the cap,
@@ -343,6 +368,11 @@ class HistogramDisplay(PluginBase):
         Python computes the bins; each figure draws a ``quad`` for the full
         counts and a second ``quad`` (fed by ``sources[channel]``) for the
         selected-subset overlay, both on the **same** edges.
+
+        Each figure also gets a ``BoxAnnotation`` (in ``sources[channel]["band"]``)
+        that draws this channel's brushed range, and a ``Span`` for its cutoff.
+        Those are *ours*, not Bokeh's transient box-select overlay, so a gate term
+        stays visible after the user acts on a different histogram (#127).
         """
         bins = self.ui_component.bin_slider.value
         brush_mode = self.ui_component.interaction_mode.value == "Brush"
@@ -367,16 +397,23 @@ class HistogramDisplay(PluginBase):
                 tools="pan,wheel_zoom,reset",
                 title=channel,
             )
-            p.quad(
+            full_r = p.quad(
                 left="left", right="right", bottom=0, top="top",
                 source=full_src, fill_color=_BASE_COLOR, line_color="white",
                 fill_alpha=0.6, legend_label="All",
             )
-            p.quad(
+            sel_r = p.quad(
                 left="left", right="right", bottom=0, top="top",
                 source=sel_src, fill_color=_OVERLAY_COLOR, line_color="white",
                 fill_alpha=0.75, legend_label="Selected",
             )
+            # Pin the selection glyphs to the base glyph so a box-select gesture
+            # never mutes the bars: what the user reads is our own band + overlay,
+            # which survives acting on another histogram (#127).
+            for renderer in (full_r, sel_r):
+                renderer.selection_glyph = renderer.glyph
+                renderer.nonselection_glyph = renderer.glyph
+
             p.xaxis.axis_label = channel
             p.yaxis.axis_label = "Cell count"
             p.legend.click_policy = "hide"
@@ -386,6 +423,15 @@ class HistogramDisplay(PluginBase):
                 line_color="red", line_dash="dashed", line_width=2, visible=False,
             )
             p.add_layout(span)
+
+            band = BoxAnnotation(
+                left=0, right=0, fill_color=_BAND_COLOR, fill_alpha=0.12,
+                line_color=_BAND_COLOR, line_alpha=0.6, line_width=1, visible=False,
+            )
+            p.add_layout(band)
+
+            # Double-tap clears just this channel's gate term (#127).
+            p.on_event(DoubleTap, self._make_clear_gate_handler(channel))
 
             if brush_mode:
                 # Adding the tool is not enough — make it the active drag
@@ -399,7 +445,7 @@ class HistogramDisplay(PluginBase):
                 p.on_event(Tap, self._make_tap_handler(channel))
 
             figures.append(p)
-            sources[channel] = {"selected": sel_src, "edges": edges}
+            sources[channel] = {"selected": sel_src, "edges": edges, "band": band}
             spans[channel] = span
 
         layout = _bk_column(*figures, sizing_mode="stretch_width")
@@ -432,17 +478,30 @@ class HistogramDisplay(PluginBase):
             self.cutoff = float(x)
             self._active_histogram_column = channel
             _logger.info("Cutoff set at %.3f on channel %s", self.cutoff, channel)
+            # highlight_cells() records the cutoff as this channel's gate term and
+            # refreshes the overlay + markers itself.
             self.highlight_cells(push_to_gallery=True)
-            self._refresh_overlays()
-            self._refresh_cutoff_spans()
 
         return _handler
 
-    def _refresh_overlays(self) -> None:
-        """Recompute the selected-subset bar counts for every built figure."""
+    def _make_clear_gate_handler(self, channel: str):
+        """Bokeh ``DoubleTap`` → drop *channel*'s gate term, keeping the others (#127)."""
+
+        def _handler(_event):
+            self.clear_gate(channel)
+
+        return _handler
+
+    def _refresh_overlays(self, indices: Optional[Set[Union[int, str]]] = None) -> None:
+        """Recompute the selected-subset bar counts for every built figure.
+
+        Touches only the ``selected`` ColumnDataSource of each figure — never the
+        figures, axes or bin edges — so refreshing the overlay cannot disturb a
+        zoom/pan or another channel's gate marker (#127).
+        """
         if not self._sources or self._plot_data is None:
             return
-        selected = self.selected_indices.value or set()
+        selected = (self.selected_indices.value if indices is None else indices) or set()
         valid = [i for i in selected if i in self._plot_data.index]
         for channel, info in self._sources.items():
             edges = info["edges"]
@@ -456,14 +515,57 @@ class HistogramDisplay(PluginBase):
                 top=counts.tolist(),
             )
 
-    def _refresh_cutoff_spans(self) -> None:
-        """Show the cutoff line only on the active channel."""
+    def _refresh_gate_markers(self) -> None:
+        """Draw every gated channel's own marker — range band or cutoff line.
+
+        Each histogram shows *its* term (#127), not just the last one touched, so a
+        gate can be built up channel by channel. Channels without a term show
+        nothing. Only annotation properties are written; no figure is rebuilt.
+        """
         for channel, span in self._spans.items():
-            if channel == self._active_histogram_column and self.cutoff is not None:
-                span.location = self.cutoff
+            term = self._gates.get(channel)
+            if term is not None and term[0] == _CUTOFF:
+                span.location = term[2]
                 span.visible = True
             else:
                 span.visible = False
+
+        for channel, info in self._sources.items():
+            band = info.get("band")
+            if band is None:
+                continue
+            term = self._gates.get(channel)
+            if term is not None and term[0] == _RANGE:
+                band.left, band.right = term[1], term[2]
+                band.visible = True
+            else:
+                band.visible = False
+
+        self._refresh_gate_summary()
+
+    # Legacy name kept for callers/tests that predate per-channel gating (#127).
+    def _refresh_cutoff_spans(self) -> None:
+        self._refresh_gate_markers()
+
+    def _refresh_gate_summary(self) -> None:
+        """Restate the active gate in words, so it is readable at a glance."""
+        label = getattr(self.ui_component, "gate_summary", None)
+        if label is None:
+            return
+        label.value = f"<i>{self.gate_description()}</i>"
+
+    def gate_description(self) -> str:
+        """Human-readable rendering of the current gate (``AND`` over all terms)."""
+        if not self._gates:
+            return "No gate — brush or tap a histogram to start one."
+        parts = []
+        for channel, (kind, a, b) in self._gates.items():
+            if kind == _RANGE:
+                lo, hi = (a, b) if a <= b else (b, a)
+                parts.append(f"{channel} ∈ [{lo:.3g}, {hi:.3g}]")
+            else:
+                parts.append(f"{channel} {'>' if a == 'above' else '<'} {b:.3g}")
+        return "Gate: " + " AND ".join(parts)
 
     def _histogram_bin_edges(self, channel: str, bins: int):
         """Bin edges computed over the *full* plotted data for ``channel``.
@@ -477,6 +579,28 @@ class HistogramDisplay(PluginBase):
     # ------------------------------------------------------------------
     # Selection logic
     # ------------------------------------------------------------------
+    def _gate_frame(self):
+        """The frame the gate terms are evaluated on.
+
+        The plotted (subset-filtered, NaN-dropped) ``_plot_data`` when a plot
+        exists, so a gate always means the same thing whichever mode produced its
+        terms; the full cell table otherwise, which is what a cutoff set before any
+        plot (or re-applied on a FOV change) has to fall back to.
+        """
+        if self._plot_data is not None:
+            return self._plot_data
+        return getattr(self.main_viewer, "cell_table", None)
+
+    @staticmethod
+    def _term_mask(frame, channel: str, term: tuple):
+        """Boolean mask of the rows of ``frame`` satisfying one gate ``term``."""
+        kind, a, b = term
+        if kind == _RANGE:
+            lo, hi = (a, b) if a <= b else (b, a)
+            return frame[channel].between(lo, hi)
+        comparator = np.greater if a == "above" else np.less
+        return pd.Series(comparator(frame[channel], b), index=frame.index)
+
     def _cells_in_range(self, channel: str, lo: float, hi: float) -> Set[Union[int, str]]:
         """Row indices of the (filtered) data whose ``channel`` value is within [lo, hi]."""
         data = self._plot_data
@@ -486,69 +610,118 @@ class HistogramDisplay(PluginBase):
         mask = data[channel].between(lo, hi)
         return set(data.index[mask])
 
+    def gated_indices(self) -> Set[Union[int, str]]:
+        """Row indices satisfying **every** active gate term (#127).
+
+        The intersection is the whole point: a range on CD4 plus a cutoff on CD8
+        selects the cells that pass both. With a single term this is exactly the
+        old single-channel behaviour. Terms naming a column absent from the frame
+        are skipped rather than emptying the gate.
+        """
+        frame = self._gate_frame()
+        if frame is None or not self._gates:
+            return set()
+        mask = None
+        for channel, term in self._gates.items():
+            if channel not in frame.columns:
+                continue
+            channel_mask = self._term_mask(frame, channel, term)
+            mask = channel_mask if mask is None else (mask & channel_mask)
+        if mask is None:
+            return set()
+        return set(frame.index[mask])
+
+    def _apply_gate(self, *, publish: bool = True, highlight: bool = False) -> None:
+        """Recompute the gated selection and reflect it everywhere.
+
+        Deliberately narrow: it publishes ``selected_indices``, optionally pushes
+        mask highlights, and rewrites only the overlay sources + gate annotations.
+        It never calls ``_render``/``plot_histograms``, so a selection cannot
+        replot the stack or lose a zoom/pan (#127; cf. #109, #119).
+        """
+        indices = _chart_common.normalize_indices(self.gated_indices())
+        if publish:
+            self._update_single_point_state(indices)
+            self.selected_indices.value = indices
+        if highlight:
+            _chart_common.sync_mask_highlights_from_selection(self.main_viewer, indices)
+        self._refresh_overlays(indices)
+        self._refresh_gate_markers()
+
+    def set_gate(self, channel: str, term: tuple, *, publish: bool = True) -> None:
+        """Set (or replace) ``channel``'s gate term, leaving other channels' alone."""
+        self._gates[channel] = term
+        self._apply_gate(
+            publish=publish, highlight=self.ui_component.mv_linked_checkbox.value
+        )
+
+    def clear_gate(self, channel: str) -> None:
+        """Drop just ``channel``'s gate term; the remaining terms keep gating (#127)."""
+        if self._gates.pop(channel, None) is None:
+            return
+        if self._active_histogram_column == channel:
+            self._active_histogram_column = None
+            self.cutoff = None
+        _logger.info("Cleared the gate term on channel %s", channel)
+        self._apply_gate(
+            publish=True, highlight=self.ui_component.mv_linked_checkbox.value
+        )
+
     def handle_range(self, channel: str, lo: float, hi: float) -> None:
-        """Apply a brushed [lo, hi] range on ``channel`` as a cell selection.
+        """Record a brushed [lo, hi] on ``channel`` as that channel's gate term.
 
         Pure of Bokeh (event handlers delegate here), so it is unit-testable with
-        plain floats. Publishes ``selected_indices`` (→ cell gallery + viewer when
-        linked) and refreshes the cross-histogram overlay.
+        plain floats. The published selection is the intersection over all gated
+        channels (#127); a brush supersedes any cutoff previously set on the same
+        channel. Other histograms keep their own markers and zoom.
         """
         if lo == hi:
             return
-        self._brush_selection = (channel, lo, hi)
-        indices = _chart_common.normalize_indices(self._cells_in_range(channel, lo, hi))
-        self._update_single_point_state(indices)
-        # Publish the selection (drives the cell-gallery observer when linked).
-        self.selected_indices.value = indices
-        if self.ui_component.mv_linked_checkbox.value:
-            _chart_common.sync_mask_highlights_from_selection(self.main_viewer, indices)
-        # Update every histogram's overlay to show the selected subset.
-        self._refresh_overlays()
+        if self._active_histogram_column == channel:
+            # This channel is now range-gated, so its cutoff no longer applies.
+            self._active_histogram_column = None
+            self.cutoff = None
+        self.set_gate(channel, (_RANGE, float(lo), float(hi)))
 
     # Backwards-compatible alias (kept for callers/tests using the old name).
     def _on_brush(self, channel: str, lo: float, hi: float) -> None:
         self.handle_range(channel, lo, hi)
 
     def highlight_cells(self, *, push_to_gallery: bool = False) -> None:
-        """Cutoff-based highlight: select cells above/below the active-channel cutoff."""
+        """Apply the gate, recording the pending cutoff as its channel's term.
+
+        The cutoff now participates in the same intersection as brushed ranges
+        (#127): tapping channel A while channel B is gated selects the cells that
+        pass both. ``cutoff``/``_active_histogram_column`` carry the cutoff the user
+        just set (or one a caller assigned directly, e.g. the viewer re-applying a
+        highlight after a FOV change); it is folded into ``_gates`` here, with the
+        above/below direction captured now so each channel keeps its own.
+
+        Unlike a brush, this always pushes mask highlights — it is the explicit
+        "show the gate in the viewer" entry point, called by the viewer itself.
+        """
         channel = self._active_histogram_column
-        if channel is None or self.cutoff is None:
+        if channel is not None and self.cutoff is not None:
+            direction = self.ui_component.above_below_buttons.value or "below"
+            self._gates[channel] = (_CUTOFF, direction, float(self.cutoff))
+        if not self._gates:
             _logger.warning("No active channel or cutoff set.")
             return
-        cell_table = self.main_viewer.cell_table
-        if channel not in cell_table.columns:
+        frame = self._gate_frame()
+        if frame is None or not any(ch in frame.columns for ch in self._gates):
             return
-        select_above = self.ui_component.above_below_buttons.value == "above"
-        comparator = np.greater if select_above else np.less
-        matches = comparator(cell_table[channel], self.cutoff)
-        active_fov = self.main_viewer.get_active_fov()
-        if active_fov:
-            within_fov = cell_table[self.main_viewer.fov_key] == active_fov
-            mask_ids = cell_table.loc[
-                within_fov & matches, self.main_viewer.label_key
-            ].tolist()
-            self.main_viewer.image_display.set_mask_ids(
-                mask_name=self.main_viewer.mask_key, mask_ids=mask_ids
-            )
-        else:
-            fov_col = self.main_viewer.fov_key
-            lbl_col = self.main_viewer.label_key
-            matched_rows = cell_table.loc[matches, [fov_col, lbl_col]]
-            fov_mask_pairs = list(
-                zip(matched_rows[fov_col].astype(str), matched_rows[lbl_col].astype(int))
-            )
-            self.main_viewer.image_display.set_mask_ids(
-                mask_name=self.main_viewer.mask_key, mask_ids=[], fov_mask_pairs=fov_mask_pairs
-            )
-        if push_to_gallery:
-            self.selected_indices.value = set(cell_table.loc[matches].index)
+        self._apply_gate(publish=push_to_gallery, highlight=True)
 
     def clear_selection(self) -> None:
-        self._brush_selection = None
+        """Drop every gate term (both kinds) and the selection it produced."""
+        self._gates = {}
+        self.cutoff = None
+        self._active_histogram_column = None
         self.selected_indices.value = set()
         if self.ui_component.mv_linked_checkbox.value:
             _chart_common.sync_mask_highlights_from_selection(self.main_viewer, set())
         self._refresh_overlays()
+        self._refresh_gate_markers()
 
     def show_external_selection(self, row_indices: Iterable[Union[int, str]]) -> None:
         """Overlay an externally-supplied selection as the "Selected" distribution.
@@ -560,15 +733,23 @@ class HistogramDisplay(PluginBase):
         machinery that brush selections use. Indices that fall outside the
         currently plotted data are ignored by ``_refresh_overlays``, so the
         overlay reflects whatever channels/subset the histogram is showing.
+
+        An external selection replaces the local gate rather than intersecting with
+        it (#127) — the incoming indices come from another plugin's own criteria, so
+        leaving stale gate terms drawn would misrepresent what is selected.
         """
         # A programmatic push is never a single-point viewer focus.
         self.single_point_click_state = 0
+        self._gates = {}
+        self.cutoff = None
+        self._active_histogram_column = None
         self.selected_indices.value = _chart_common.normalize_indices(row_indices)
         if self.ui_component.mv_linked_checkbox.value:
             _chart_common.sync_mask_highlights_from_selection(
                 self.main_viewer, self.selected_indices.value
             )
         self._refresh_overlays()
+        self._refresh_gate_markers()
 
     # ------------------------------------------------------------------
     # Data helpers
@@ -601,9 +782,11 @@ class HistogramDisplay(PluginBase):
             self._render()
 
     def _on_above_below_change(self, _change) -> None:
-        if self._active_histogram_column is not None and self.cutoff is not None:
-            self.highlight_cells(push_to_gallery=True)
-            self._refresh_overlays()
+        """Flip the direction of the *last* cutoff; other channels keep theirs (#127)."""
+        channel = self._active_histogram_column
+        if channel is None or self.cutoff is None:
+            return
+        self.highlight_cells(push_to_gallery=True)
 
     def _on_interaction_mode_change(self, _change) -> None:
         if self._plot_data is not None:
@@ -652,10 +835,15 @@ class UiComponent:
             value="Cutoff",
             description="Interaction:",
             tooltips=[
-                "Click a histogram to set an above/below cutoff",
-                "Drag a range to select cells and overlay the selection on every histogram",
+                "Click a histogram to set an above/below cutoff on that channel",
+                "Drag a range to gate on that channel",
             ],
             style={"description_width": "auto"},
+        )
+        # Gating is only useful if the user can see which terms are active (#127).
+        self.gate_summary = HTML(
+            value="<i>No gate — brush or tap a histogram to start one.</i>",
+            layout=Layout(width="100%"),
         )
         self.above_below_buttons = ToggleButtons(
             options=["below", "above"],
@@ -666,6 +854,10 @@ class UiComponent:
         self.clear_selection_button = Button(
             description="Clear selection",
             icon="eraser",
+            tooltip=(
+                "Clear every channel's gate term "
+                "(double-click a histogram to clear just that channel)"
+            ),
             layout=Layout(width="150px"),
         )
         (

@@ -524,6 +524,51 @@ def render_fov_to_array(
     return composite.astype(np.float32, copy=False)
 
 
+def _pad_region_to_requested_size(
+    array: np.ndarray,
+    requested_xy: Region,
+    region_ds: Region,
+    downsample_factor: int,
+    pad_color: ColorTuple,
+) -> np.ndarray:
+    """Pad a clamped crop back to the size that was originally requested.
+
+    A crop centred near a FOV border is clamped to the available data, so it comes back
+    smaller than ``size_px``. Displaying that array at a fixed tile width silently rescales
+    it, which makes cells look bigger or smaller than they are (issue #128). Padding restores
+    the requested extent, placing the real pixels at the offset the missing rows/columns
+    would have occupied so the cell stays put inside the tile.
+    """
+
+    full_width = max(1, int(math.ceil((requested_xy[1] - requested_xy[0]) / downsample_factor)))
+    full_height = max(1, int(math.ceil((requested_xy[3] - requested_xy[2]) / downsample_factor)))
+
+    height, width = array.shape[:2]
+    if height == full_height and width == full_width:
+        return array
+
+    # Offsets are derived on the downsampled grid the array itself was sliced on, so the
+    # padded seam lands on a whole output pixel.
+    col_offset = region_ds[0] - (requested_xy[0] // downsample_factor)
+    row_offset = region_ds[2] - (requested_xy[2] // downsample_factor)
+    col_offset = int(min(max(col_offset, 0), max(0, full_width - width)))
+    row_offset = int(min(max(row_offset, 0), max(0, full_height - height)))
+
+    channels = array.shape[2] if array.ndim == 3 else 1
+    colour = np.asarray(pad_color, dtype=np.float32).reshape(-1)
+    if colour.size < channels:
+        colour = np.resize(colour, channels)
+    canvas = np.empty((full_height, full_width, channels), dtype=array.dtype)
+    canvas[:, :] = colour[:channels].astype(array.dtype, copy=False)
+
+    rows = min(height, full_height - row_offset)
+    cols = min(width, full_width - col_offset)
+    if rows > 0 and cols > 0:
+        placed = array if array.ndim == 3 else array[..., np.newaxis]
+        canvas[row_offset : row_offset + rows, col_offset : col_offset + cols] = placed[:rows, :cols]
+    return canvas
+
+
 def render_crop_to_array(
     fov_name: str,
     channel_arrays: Mapping[str, object],
@@ -536,20 +581,31 @@ def render_crop_to_array(
     annotation: Optional[AnnotationRenderSettings] = None,
     masks: Optional[Iterable[MaskRenderSettings]] = None,
     skip_image_layer: bool = False,
+    pad_to_size: bool = False,
+    pad_color: ColorTuple = (1.0, 1.0, 1.0),
 ) -> np.ndarray:
+    """Render a square cutout centred on ``center_xy``.
+
+    The region is always clamped to the FOV, so a crop near a border is smaller than
+    ``size_px`` unless ``pad_to_size`` is set, in which case the missing strip is filled with
+    ``pad_color`` and the output is exactly the requested size. Callers that re-derive the
+    clamped region themselves (e.g. batch export overlay registration) must leave
+    ``pad_to_size`` off.
+    """
+
     bounds = _infer_region(channel_arrays, selected_channels)
     half_size = max(1, int(size_px) // 2)
     center_x = int(round(center_xy[0]))
     center_y = int(round(center_xy[1]))
-    region_xy = (
+    requested_xy = (
         center_x - half_size,
         center_x + half_size,
         center_y - half_size,
         center_y + half_size,
     )
-    region_xy = _ensure_region_within_bounds(region_xy, bounds)
+    region_xy = _ensure_region_within_bounds(requested_xy, bounds)
     region_ds = _derive_downsampled_region(region_xy, downsample_factor)
-    return render_fov_to_array(
+    array = render_fov_to_array(
         fov_name,
         channel_arrays,
         selected_channels,
@@ -560,6 +616,15 @@ def render_crop_to_array(
         annotation=annotation,
         masks=masks,
         skip_image_layer=skip_image_layer,
+    )
+    if not pad_to_size:
+        return array
+    return _pad_region_to_requested_size(
+        array,
+        requested_xy,
+        region_ds,
+        max(1, int(downsample_factor)),
+        pad_color,
     )
 
 

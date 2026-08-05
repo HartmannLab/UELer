@@ -842,6 +842,99 @@ class TestTileGalleryRendering(unittest.TestCase):
         self.assertEqual(focus_calls, [])
 
 
+class TestGalleryEdgeTileScale(unittest.TestCase):
+    """Tiles keep the requested size at the FOV border, so the gallery scale is uniform.
+
+    Tiles are displayed at a fixed grid column width, so a short crop would be rescaled and
+    make an edge cell look larger than an interior one (issue #128).
+    """
+
+    CROP_WIDTH = 40
+
+    def setUp(self):
+        clear_cell_colors()
+        # 100x100 FOV: cells at 10 px from a border cannot fill a 40 px cutout.
+        self.df = pd.DataFrame({
+            "FOV": ["FOV_001"] * 5,
+            "X": [50.0, 10.0, 90.0, 50.0, 10.0],
+            "Y": [50.0, 50.0, 50.0, 10.0, 10.0],
+            "label": [1, 2, 3, 4, 5],
+        })
+        self.viewer = MagicMock()
+        self.viewer.image_cache = {
+            "FOV_001": {"channel1": np.full((100, 100), 0.5, dtype=np.float32)}
+        }
+        self.viewer.mask_cache = {"FOV_001": {}}
+        self.viewer.load_fov = MagicMock()
+
+    def tearDown(self):
+        clear_cell_colors()
+
+    def _context(self, downsample_factor=1):
+        return _RenderContext(
+            viewer=self.viewer,
+            fov_key="FOV",
+            x_key="X",
+            y_key="Y",
+            label_key="label",
+            selected_channels=("channel1",),
+            channel_settings={
+                "channel1": ChannelRenderSettings(
+                    color=(1.0, 1.0, 1.0), contrast_min=0.0, contrast_max=1.0
+                )
+            },
+            crop_width=self.CROP_WIDTH,
+            downsample_factor=downsample_factor,
+            overlay_snapshot=None,
+            overlay_cache={},
+            mask_name=None,
+            highlight_rgb=(1.0, 1.0, 1.0),
+            outline_thickness=1,
+            neighbor_outline_thickness=1,
+            use_uniform_color=False,
+        )
+
+    def test_every_tile_is_square_at_the_requested_size(self):
+        context = self._context()
+
+        shapes = {
+            _render_tile_for_index(self.df, index, context).shape
+            for index in range(len(self.df))
+        }
+
+        self.assertEqual(shapes, {(self.CROP_WIDTH, self.CROP_WIDTH, 3)})
+
+    def test_edge_tile_matches_interior_tile_size(self):
+        context = self._context()
+
+        interior = _render_tile_for_index(self.df, 0, context)
+        left_edge = _render_tile_for_index(self.df, 1, context)
+        corner = _render_tile_for_index(self.df, 4, context)
+
+        self.assertEqual(left_edge.shape, interior.shape)
+        self.assertEqual(corner.shape, interior.shape)
+
+    def test_out_of_fov_area_is_padded_not_stretched(self):
+        context = self._context()
+
+        left_edge = _render_tile_for_index(self.df, 1, context)
+
+        # Cell at x=10 with a 40 px cutout: the leftmost 10 columns lie outside the FOV.
+        np.testing.assert_allclose(left_edge[:, :10], 1.0)
+        # Real data keeps its own value rather than being spread across the tile.
+        np.testing.assert_allclose(left_edge[:, 10:], 0.5, atol=1e-6)
+
+    def test_padding_holds_at_a_downsample_factor(self):
+        context = self._context(downsample_factor=2)
+
+        shapes = {
+            _render_tile_for_index(self.df, index, context).shape
+            for index in range(len(self.df))
+        }
+
+        self.assertEqual(shapes, {(self.CROP_WIDTH // 2, self.CROP_WIDTH // 2, 3)})
+
+
 if __name__ == "__main__":
     unittest.main()
 
