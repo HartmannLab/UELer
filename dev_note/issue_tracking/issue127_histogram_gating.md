@@ -157,3 +157,66 @@ python -m unittest discover -s tests -t .
 - ✅ 60 histogram tests pass; full suite **853 tests, OK**.
 - Not verified: the pointer gestures themselves (double-tap to clear, the band's
   appearance during a drag) need a notebook — the dev environment has no browser.
+
+---
+
+# Reply 1 — switching Brush ↔ Cutoff still resets the plot
+
+The gating itself is remembered across a mode switch (it lives in `_gates`, not in
+any figure), but the **plot** resets: zoom/pan is lost and the stack flashes.
+
+## Cause
+
+`_on_interaction_mode_change()` called `self._render()`, which rebuilds the layout via
+`_build_figures()` and swaps in a new `BokehModel`. #127 removed every replot from the
+*selection* path but left this one on the *mode* path.
+
+The replot was structurally necessary at the time: `_build_figures()` wired the
+gestures conditionally — `brush_mode` chose between a `BoxSelectTool` +
+`SelectionGeometry` handler and a `Tap` handler — and Bokeh offers no clean way to
+unregister an `on_event` callback, so changing the wiring meant rebuilding the figure.
+
+## Design
+
+**Wire both gestures once; switch only the active drag tool.**
+
+| Piece | Before | After |
+| --- | --- | --- |
+| `BoxSelectTool` | added only in brush mode | added to every figure |
+| `SelectionGeometry` handler | brush mode only | always registered |
+| `Tap` handler | cutoff mode only | always registered, ignores taps while brushing |
+| Mode switch | `_render()` (full rebuild) | `_apply_interaction_mode()` (property write) |
+
+- `_figures` / `_box_tools` hold the live figures, so `_apply_interaction_mode()` can
+  set `toolbar.active_drag` to the figure's box tool (brush) or its `PanTool`
+  (cutoff, via `_pan_tool()`, falling back to `"auto"`). Both are writes on models the
+  frontend already has — nothing is rebuilt, so bars, markers, overlay and zoom persist.
+- `_build_figures()` ends with the same call, so first-render behaviour and the two
+  existing `active_drag` tests (#112 reply) are unchanged.
+- `_make_tap_handler` guards on `_brush_mode()`: Bokeh raises `Tap` for any click
+  whatever the active tool is, and a bare click during a brush must not set a cutoff.
+- `_make_range_handler` is deliberately **not** guarded — a box-select drag is
+  unambiguous, so activating the tool from the toolbar in cutoff mode gates a range
+  instead of being silently dropped.
+- `_render()` clears `_figures` / `_box_tools` before its early returns, so a later
+  mode switch cannot write to detached figures.
+- `_on_bin_slider_change()` still replots; a different bin count is a different set of bars.
+
+## Files changed
+
+- `ueler/viewer/plugin/histogram.py` — `PanTool` import; `_figures` / `_box_tools`
+  state; new `_brush_mode`, `_pan_tool`, `_apply_interaction_mode`; `_build_figures`
+  wires both gestures unconditionally; `_make_tap_handler` mode guard;
+  `_on_interaction_mode_change` no longer renders; `_render` resets the figure registry.
+- `tests/test_histogram_plugin.py` — new `TestHistogramInteractionModeSwitch` (7 tests).
+
+## Tests
+
+```bash
+python -m unittest tests.test_histogram_plugin
+python -m unittest discover -s tests -t .
+```
+
+- ✅ 76 histogram tests pass; full suite **882 tests, OK** (875 before).
+- Not verified: the gesture itself — dragging a range right after flipping the toggle,
+  and the zoom actually surviving — needs a notebook; no browser here.

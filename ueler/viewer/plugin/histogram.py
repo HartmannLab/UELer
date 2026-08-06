@@ -20,7 +20,9 @@ Bokeh gives native, kernel-backed interactivity:
   selection is the **intersection** of every active term.  Acting on one channel
   replaces only that channel's term and leaves the other histograms' markers,
   axes and zoom untouched — nothing is replotted on selection.  Double-tap a
-  histogram to drop just that channel's term.
+  histogram to drop just that channel's term.  Switching between Cutoff and
+  Brush does not replot either: both gestures are wired on every figure and the
+  toggle only re-points ``toolbar.active_drag`` (#127 reply).
 
 Python owns all binning (so the logic stays unit-testable); Bokeh only draws the
 bars + brush and routes its events back to Python callbacks in the kernel.  When
@@ -67,7 +69,13 @@ if IntSlider is None:  # pragma: no cover - fallback for stub environments
 # interactive ipywidget with kernel-side event callbacks.
 try:  # pragma: no cover - exercised via the real notebook stack
     from bokeh.plotting import figure as _bk_figure
-    from bokeh.models import BoxAnnotation, BoxSelectTool, ColumnDataSource, Span
+    from bokeh.models import (
+        BoxAnnotation,
+        BoxSelectTool,
+        ColumnDataSource,
+        PanTool,
+        Span,
+    )
     from bokeh.events import DoubleTap, SelectionGeometry, Tap
     from bokeh.layouts import column as _bk_column
 
@@ -179,6 +187,11 @@ class HistogramDisplay(PluginBase):
         # carrying that channel's persistent range band) + cutoff spans.
         self._sources: dict = {}
         self._spans: dict = {}
+        # Live figures + their box-select tools, kept so switching the
+        # interaction mode can flip the drag gesture in place instead of
+        # rebuilding the stack (#127 reply).
+        self._figures: dict = {}
+        self._box_tools: dict = {}
         self._bokeh_model = None
         self._observers_registered = False
 
@@ -338,6 +351,11 @@ class HistogramDisplay(PluginBase):
         """Rebuild the Bokeh layout (one figure per channel) and host it."""
         data = self._plot_data
         channels = self._channels
+        # Drop references to the outgoing figures up front; _build_figures
+        # repopulates them, and a path that bails out must not leave a mode
+        # switch pointing at detached figures.
+        self._figures = {}
+        self._box_tools = {}
         if data is None or not channels:
             self._plot_host.children = [self._plot_placeholder]
             return
@@ -378,14 +396,19 @@ class HistogramDisplay(PluginBase):
         that draws this channel's brushed range, and a ``Span`` for its cutoff.
         Those are *ours*, not Bokeh's transient box-select overlay, so a gate term
         stays visible after the user acts on a different histogram (#127).
+
+        Both gestures (box-select and tap) are wired on **every** figure whatever
+        the current mode, so a mode switch only has to re-point the active drag
+        tool — see ``_apply_interaction_mode`` (#127 reply).
         """
         bins = self.ui_component.bin_slider.value
-        brush_mode = self.ui_component.interaction_mode.value == "Brush"
         data = self._plot_data
 
         figures = []
         sources: dict = {}
         spans: dict = {}
+        self._figures = {}
+        self._box_tools = {}
         for channel in self._channels:
             edges = self._histogram_bin_edges(channel, bins)
             left = edges[:-1].tolist()
@@ -438,23 +461,52 @@ class HistogramDisplay(PluginBase):
             # Double-tap clears just this channel's gate term (#127).
             p.on_event(DoubleTap, self._make_clear_gate_handler(channel))
 
-            if brush_mode:
-                # Adding the tool is not enough — make it the active drag
-                # gesture, otherwise the default (pan) still handles click-drag
-                # and no range can be brushed (#112 reply).
-                box = BoxSelectTool(dimensions="width")
-                p.add_tools(box)
-                p.toolbar.active_drag = box
-                p.on_event(SelectionGeometry, self._make_range_handler(channel))
-            else:
-                p.on_event(Tap, self._make_tap_handler(channel))
+            # The box-select tool exists on every figure; whether it *owns* the
+            # click-drag gesture is decided by _apply_interaction_mode below.
+            # Adding the tool is not enough — it has to be the active drag,
+            # otherwise the default (pan) still handles click-drag and no range
+            # can be brushed (#112 reply).
+            box = BoxSelectTool(dimensions="width")
+            p.add_tools(box)
+            p.on_event(SelectionGeometry, self._make_range_handler(channel))
+            p.on_event(Tap, self._make_tap_handler(channel))
 
             figures.append(p)
             sources[channel] = {"selected": sel_src, "edges": edges, "band": band}
             spans[channel] = span
+            self._figures[channel] = p
+            self._box_tools[channel] = box
 
+        self._apply_interaction_mode()
         layout = _bk_column(*figures, sizing_mode="stretch_width")
         return layout, sources, spans
+
+    def _brush_mode(self) -> bool:
+        return self.ui_component.interaction_mode.value == "Brush"
+
+    @staticmethod
+    def _pan_tool(p):
+        """The figure's PanTool, so cutoff mode can hand the drag back to it."""
+        for tool in p.tools:
+            if isinstance(tool, PanTool):
+                return tool
+        return "auto"
+
+    def _apply_interaction_mode(self) -> None:
+        """Point each live figure's drag gesture at the current mode (#127 reply).
+
+        Brush mode makes the ``BoxSelectTool`` the active drag; cutoff mode hands
+        the drag back to pan so a click can register as a tap. Both are property
+        writes on figures that already exist, so switching modes keeps the bars,
+        the gate markers, the overlay and — the point of the fix — the user's
+        zoom/pan. Rebuilding the figures (the old behaviour) threw all of that away.
+        """
+        brush_mode = self._brush_mode()
+        for channel, p in self._figures.items():
+            box = self._box_tools.get(channel)
+            if box is None:
+                continue
+            p.toolbar.active_drag = box if brush_mode else self._pan_tool(p)
 
     def _make_range_handler(self, channel: str):
         """Bokeh ``SelectionGeometry`` → ``handle_range`` (brush mode)."""
@@ -474,9 +526,17 @@ class HistogramDisplay(PluginBase):
         return _handler
 
     def _make_tap_handler(self, channel: str):
-        """Bokeh ``Tap`` → set the cutoff for ``channel`` (cutoff mode)."""
+        """Bokeh ``Tap`` → set the cutoff for ``channel`` (cutoff mode only).
+
+        Registered on every figure, so it has to ignore taps raised while the
+        user is brushing: a bare click is ambiguous, and Bokeh fires ``Tap`` for
+        one whatever the active tool is. A box-select gesture is *not* ambiguous,
+        so ``_make_range_handler`` accepts it in either mode.
+        """
 
         def _handler(event):
+            if self._brush_mode():
+                return
             x = getattr(event, "x", None)
             if x is None:
                 return
@@ -799,8 +859,13 @@ class HistogramDisplay(PluginBase):
         self.highlight_cells(push_to_gallery=True)
 
     def _on_interaction_mode_change(self, _change) -> None:
-        if self._plot_data is not None:
-            self._render()
+        """Switch the drag gesture in place; never replot (#127 reply).
+
+        This used to call ``_render()``, which rebuilt the whole Bokeh layout —
+        the gate survived (it lives in ``_gates``) but the plot visibly reset,
+        losing zoom/pan, exactly the kind of refresh #127 set out to remove.
+        """
+        self._apply_interaction_mode()
 
     def _on_mv_link_change(self, _change) -> None:
         self.sync_main_viewer_link()

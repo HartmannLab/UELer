@@ -836,6 +836,79 @@ class TestHistogramBokehLayout(unittest.TestCase):
             self.assertNotIsInstance(fig.toolbar.active_drag, BoxSelectTool)
 
 
+class TestHistogramInteractionModeSwitch(unittest.TestCase):
+    """Cutoff ↔ Brush switches the gesture in place, never the plot (#127 reply)."""
+
+    def setUp(self):
+        if not _bokeh_available():
+            self.skipTest("bokeh not available in this environment")
+        self.viewer = _make_viewer(_two_fov_table())
+        self.hist = _make_histogram(self.viewer)
+        self.hist._plot_data = self.viewer.cell_table.copy()
+        self.hist._channels = ["intensity", "area"]
+        self.hist.ui_component.interaction_mode.value = "Cutoff"
+        _layout, sources, spans = self.hist._build_figures()
+        self.hist._sources, self.hist._spans = sources, spans
+        self.hist._render_calls = 0
+
+    def _switch_to(self, mode):
+        self.hist.ui_component.interaction_mode.value = mode
+        # Direct call as well, so the assertion holds under the widget stubs
+        # (no traitlets) as well as with real ipywidgets.
+        self.hist._on_interaction_mode_change(None)
+
+    def test_switching_mode_never_replots(self):
+        self._switch_to("Brush")
+        self._switch_to("Cutoff")
+        self.assertEqual(self.hist._render_calls, 0)
+
+    def test_switching_mode_keeps_the_same_figures(self):
+        """The very objects holding the user's zoom/pan must survive the switch."""
+        before = dict(self.hist._figures)
+        self._switch_to("Brush")
+        for channel, fig in before.items():
+            self.assertIs(self.hist._figures[channel], fig)
+
+    def test_switching_flips_the_active_drag_tool_in_place(self):
+        from bokeh.models import BoxSelectTool
+
+        self._switch_to("Brush")
+        for channel, fig in self.hist._figures.items():
+            self.assertIs(fig.toolbar.active_drag, self.hist._box_tools[channel])
+        self._switch_to("Cutoff")
+        for fig in self.hist._figures.values():
+            self.assertNotIsInstance(fig.toolbar.active_drag, BoxSelectTool)
+
+    def test_both_gestures_are_wired_in_either_mode(self):
+        """Handlers stay registered, so the toggle has nothing to rebuild."""
+        from bokeh.events import SelectionGeometry, Tap
+
+        for fig in self.hist._figures.values():
+            self.assertTrue(fig._event_callbacks.get(SelectionGeometry.event_name))
+            self.assertTrue(fig._event_callbacks.get(Tap.event_name))
+
+    def test_switching_mode_keeps_the_gate_and_its_markers(self):
+        self.hist.handle_range("intensity", 4.0, 8.0)
+        selected = set(self.hist.selected_indices.value)
+        self._switch_to("Brush")
+        self.assertEqual(self.hist.selected_indices.value, selected)
+        self.assertTrue(self.hist._sources["intensity"]["band"].visible)
+        self.assertEqual(self.hist.gate_description(), "Gate: intensity ∈ [4, 8]")
+
+    def test_tap_is_ignored_while_brushing(self):
+        """A bare click during a brush must not silently set a cutoff."""
+        self.hist.ui_component.interaction_mode.value = "Brush"
+        self.hist._make_tap_handler("intensity")(SimpleNamespace(x=5.0))
+        self.assertIsNone(self.hist.cutoff)
+        self.assertEqual(self.hist._gates, {})
+
+    def test_tap_sets_a_cutoff_in_cutoff_mode(self):
+        self.hist.ui_component.interaction_mode.value = "Cutoff"
+        self.hist._make_tap_handler("intensity")(SimpleNamespace(x=5.0))
+        self.assertEqual(self.hist.cutoff, 5.0)
+        self.assertIn("intensity", self.hist._gates)
+
+
 class TestHistogramRendering(unittest.TestCase):
     """Exercise the full interactive render path (skipped without the Bokeh stack)."""
 
