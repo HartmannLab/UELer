@@ -10,7 +10,7 @@ from matplotlib.colors import to_rgb
 from skimage.segmentation import find_boundaries
 
 from ueler.rendering import get_all_cell_colors_for_fov
-from ueler.rendering.engine import scale_outline_thickness, thicken_outline
+from ueler.rendering.engine import scale_outline_thickness
 
 Region = Tuple[int, int, int, int]
 
@@ -171,10 +171,19 @@ def _resolve_outline_dilation(thickness: int, downsample_factor: int) -> int:
     return max(0, effective - 1)
 
 
-def _region_colored_ids(region_array: np.ndarray, registry: Mapping[int, str], exclude_ids: set) -> list:
+def _region_index(region_array: np.ndarray) -> np.ndarray:
+    """The region as an integer array usable to index a per-id lookup table."""
+    if np.issubdtype(region_array.dtype, np.integer):
+        return region_array
+    return region_array.astype(np.intp)
+
+
+def _region_colored_ids(
+    unique_ids: np.ndarray, registry: Mapping[int, str], exclude_ids: set
+) -> list:
     """Distinct, non-excluded mask ids in the region that have a registry color."""
     colored = []
-    for raw in np.unique(region_array):
+    for raw in unique_ids:
         if not raw:
             continue
         try:
@@ -188,69 +197,121 @@ def _region_colored_ids(region_array: np.ndarray, registry: Mapping[int, str], e
     return colored
 
 
-def _can_vectorize_fill(
-    colored_ids: list,
-    mode_map: Mapping[int, str],
-    opacity_map: Mapping[int, float],
-    fill_alpha: float,
-    show_borders_on_filled: bool,
-) -> bool:
-    """Fast-path guard: every colored cell is opaque-ish fill with no border.
+def _max_dilate_labels_4(labels: np.ndarray, iterations: int) -> np.ndarray:
+    """4-connected dilation of a *label* image; the largest label wins overlaps.
 
-    This is the common continuous-coloring case (all cells filled, uniform-ish
-    opacity, no outlines). Anything needing outlines/borders/zero-alpha fallback
-    falls back to the per-cell loop so categorical behavior is untouched.
+    Mirrors ``ueler.rendering.engine._binary_dilation_4`` shift for shift — including its
+    border handling, where edge rows/columns receive only a partial update — so a batched
+    outline is geometrically identical to the per-cell ``thicken_outline`` it replaces.
+
+    Substituting ``np.maximum`` for ``|`` keeps every thickened pixel attributed to the cell
+    it grew from, which is what lets one dilation replace N per-cell ones. It also resolves
+    collisions exactly as the old code did: ``pending_edges`` was painted in ascending id
+    order and the last write won, i.e. the highest mask id won.
     """
-    if show_borders_on_filled:
-        return False
-    for mask_id in colored_ids:
-        if mode_map.get(mask_id) != "fill":
-            return False
-        try:
-            alpha = float(opacity_map.get(mask_id, fill_alpha))
-        except (TypeError, ValueError):
-            alpha = fill_alpha
-        if alpha <= 0.0:
-            return False
-    return True
+    if iterations <= 0:
+        return labels
+    result = labels
+    for _ in range(iterations):
+        expanded = result.copy()
+        if result.shape[0] > 1:
+            np.maximum(expanded[0, :], result[1, :], out=expanded[0, :])
+            np.maximum(expanded[-1, :], result[-2, :], out=expanded[-1, :])
+        if result.shape[1] > 1:
+            np.maximum(expanded[:, 0], result[:, 1], out=expanded[:, 0])
+            np.maximum(expanded[:, -1], result[:, -2], out=expanded[:, -1])
+        if result.shape[0] > 2 and result.shape[1] > 2:
+            core = expanded[1:-1, 1:-1]
+            np.maximum(core, result[:-2, 1:-1], out=core)
+            np.maximum(core, result[2:, 1:-1], out=core)
+            np.maximum(core, result[1:-1, :-2], out=core)
+            np.maximum(core, result[1:-1, 2:], out=core)
+        result = expanded
+    return result
 
 
-def _apply_region_colors_fill_vectorized(
+def _dilate_within_labels(
+    seeds: np.ndarray, labels: np.ndarray, iterations: int
+) -> np.ndarray:
+    """4-connected dilation of ``seeds`` that never crosses a label boundary.
+
+    This is the batched equivalent of the old "dilate the cell's edges freely, then clip the
+    result back to that cell". The two agree exactly: the shortest path from a pixel to its
+    own cell's boundary never leaves that cell, because the step before it would exit is
+    itself a boundary pixel and would have terminated the path sooner. Restricting
+    propagation up front is what lets one pass serve every cell — a free dilation would let a
+    neighbouring cell's pixels win ground that the clip then discards, erasing borders the
+    per-cell version drew.
+
+    Shares the shift pattern (and border handling) of ``engine._binary_dilation_4``.
+    """
+    if iterations <= 0:
+        return seeds
+    result = seeds
+    for _ in range(iterations):
+        expanded = result.copy()
+        if result.shape[0] > 1:
+            expanded[0, :] |= result[1, :] & (labels[1, :] == labels[0, :])
+            expanded[-1, :] |= result[-2, :] & (labels[-2, :] == labels[-1, :])
+        if result.shape[1] > 1:
+            expanded[:, 0] |= result[:, 1] & (labels[:, 1] == labels[:, 0])
+            expanded[:, -1] |= result[:, -2] & (labels[:, -2] == labels[:, -1])
+        if result.shape[0] > 2 and result.shape[1] > 2:
+            core = expanded[1:-1, 1:-1]
+            lab = labels[1:-1, 1:-1]
+            core |= result[:-2, 1:-1] & (labels[:-2, 1:-1] == lab)
+            core |= result[2:, 1:-1] & (labels[2:, 1:-1] == lab)
+            core |= result[1:-1, :-2] & (labels[1:-1, :-2] == lab)
+            core |= result[1:-1, 2:] & (labels[1:-1, 2:] == lab)
+        result = expanded
+    return result
+
+
+def _resolve_alpha(mask_id: int, opacity_map: Mapping[int, float], fill_alpha: float) -> float:
+    try:
+        alpha = float(opacity_map.get(mask_id, fill_alpha))
+    except (TypeError, ValueError):
+        alpha = fill_alpha
+    return max(0.0, min(1.0, alpha))
+
+
+def _paint_border_group(
     canvas: np.ndarray,
-    region_array: np.ndarray,
-    registry: Mapping[int, str],
-    colored_ids: list,
-    opacity_map: Mapping[int, float],
-    fill_alpha: float,
+    region_idx: np.ndarray,
+    boundaries: np.ndarray,
+    active: np.ndarray,
+    color_lut: np.ndarray,
+    dilation: int,
+    clip_to_own_cell: bool,
 ) -> None:
-    """Vectorized fill recolor via a per-id lookup table (O(pixels), not O(cells×pixels))."""
-    region_idx = region_array if np.issubdtype(region_array.dtype, np.integer) else region_array.astype(np.intp)
-    max_id = int(region_idx.max())
-    color_lut = np.zeros((max_id + 1, 3), dtype=np.float32)
-    alpha_lut = np.zeros((max_id + 1,), dtype=np.float32)
-    active = np.zeros((max_id + 1,), dtype=bool)
-    for mask_id in colored_ids:
-        if mask_id > max_id:
-            continue
-        rgb = _to_rgb_safe(registry.get(mask_id))
-        if rgb is None:
-            continue
-        try:
-            alpha = float(opacity_map.get(mask_id, fill_alpha))
-        except (TypeError, ValueError):
-            alpha = fill_alpha
-        alpha = max(0.0, min(1.0, alpha))
-        color_lut[mask_id] = rgb
-        alpha_lut[mask_id] = alpha
-        active[mask_id] = True
+    """Paint one group of borders in a single vectorised pass.
 
-    fill_mask = active[region_idx]
-    if not fill_mask.any():
+    ``active`` selects which ids belong to this group; ``color_lut`` holds their colors.
+    Thickening dilates an owner-label image so each grown pixel still knows which cell it
+    came from. ``clip_to_own_cell`` drops pixels that grew past their owner — required for
+    filled cells, whose borders must not dim a neighbour's fill (issue #91), and deliberately
+    off for outline mode, which has always allowed thick outlines to spill.
+    """
+    seeds = boundaries & active[region_idx]
+    if not seeds.any():
         return
-    rgb_px = color_lut[region_idx]
-    alpha_px = alpha_lut[region_idx][..., None]
-    blended = (1.0 - alpha_px) * canvas + alpha_px * rgb_px
-    canvas[fill_mask] = blended[fill_mask].astype(canvas.dtype, copy=False)
+
+    if clip_to_own_cell:
+        # Confined borders: every painted pixel belongs to the cell it sits in, so the
+        # region itself is the owner map.
+        painted = _dilate_within_labels(seeds, region_idx, dilation)
+        owner = region_idx
+    else:
+        owner = np.where(seeds, region_idx, 0)
+        if dilation > 0:
+            owner = _max_dilate_labels_4(owner, dilation)
+            painted = owner > 0
+        else:
+            painted = seeds
+
+    if not painted.any():
+        return
+    canvas[painted] = color_lut[owner[painted]].astype(canvas.dtype, copy=False)
 
 
 def _apply_region_colors(
@@ -265,82 +326,79 @@ def _apply_region_colors(
     fill_alpha: float,
     show_borders_on_filled: bool,
 ) -> None:
+    """Composite painted cells onto ``canvas`` in O(pixels), independent of cell count.
+
+    Every mode is vectorised through per-id lookup tables. Boundaries are computed **once**
+    on the label image: ``find_boundaries(labels, "inner")`` restricted to one cell equals
+    ``find_boundaries(labels == cell, "inner")``, so this is an exact rewrite of the former
+    per-cell loop rather than an approximation (issue #131).
+
+    Fills are blended before any border is drawn, preserving the ordering fix from issue #91.
+    """
     if region_array.size == 0:
         return
 
-    # Fast vectorized path for the common all-fill, no-border case (continuous
-    # coloring). Falls back to the per-cell loop for outlines/borders/mixed modes.
-    colored_ids = _region_colored_ids(region_array, registry, exclude_ids)
+    region_idx = _region_index(region_array)
+    colored_ids = _region_colored_ids(np.unique(region_idx), registry, exclude_ids)
     if not colored_ids:
         return
-    if _can_vectorize_fill(colored_ids, mode_map, opacity_map, fill_alpha, show_borders_on_filled):
-        _apply_region_colors_fill_vectorized(
-            canvas, region_array, registry, colored_ids, opacity_map, fill_alpha
-        )
-        return
 
-    pending_edges: list[tuple[np.ndarray, np.ndarray]] = []
+    max_id = int(region_idx.max())
+    lut_size = max_id + 1
 
-    for raw_mask_id, colour_hex in _iter_mask_region_ids(region_array, registry):
-        # Skip excluded IDs (e.g., currently selected cells)
-        if raw_mask_id in exclude_ids:
+    fill_colors = np.zeros((lut_size, 3), dtype=np.float32)
+    fill_alphas = np.zeros((lut_size,), dtype=np.float32)
+    fill_active = np.zeros((lut_size,), dtype=bool)
+    # Outline-mode borders: colored with the cell color, free to spill when thickened.
+    outline_colors = np.zeros((lut_size, 3), dtype=np.float32)
+    outline_active = np.zeros((lut_size,), dtype=bool)
+    # Filled-cell borders: colored with the border color, clipped to the owning cell.
+    border_colors = np.zeros((lut_size, 3), dtype=np.float32)
+    border_active = np.zeros((lut_size,), dtype=bool)
+
+    for mask_id in colored_ids:
+        if mask_id > max_id:
             continue
-
+        colour_hex = registry.get(mask_id)
         rgb = _to_rgb_safe(colour_hex)
         if rgb is None:
             continue
-        border_rgb = _to_rgb_safe(border_registry.get(int(raw_mask_id), colour_hex))
-        if border_rgb is None:
-            border_rgb = rgb
 
-        mask_bool = region_array == raw_mask_id
-        if not np.any(mask_bool):
+        if mode_map.get(mask_id, "outline") != "fill":
+            outline_colors[mask_id] = rgb
+            outline_active[mask_id] = True
             continue
 
-        render_mode = mode_map.get(int(raw_mask_id), "outline")
-        if render_mode == "fill":
-            resolved_alpha = opacity_map.get(int(raw_mask_id), fill_alpha)
-            try:
-                resolved_alpha = max(0.0, min(1.0, float(resolved_alpha)))
-            except (TypeError, ValueError):
-                resolved_alpha = fill_alpha
-            rgb_arr = np.array(rgb, dtype=np.float32)
-            if resolved_alpha > 0.0:
-                canvas[mask_bool] = (
-                    (1.0 - resolved_alpha) * canvas[mask_bool] + resolved_alpha * rgb_arr
-                ).astype(canvas.dtype)
-            if show_borders_on_filled or resolved_alpha <= 0.0:
-                edges = find_boundaries(mask_bool, mode="inner")
-                if dilation > 0:
-                    edges = thicken_outline(edges, dilation)
-                edges = np.logical_and(edges, mask_bool)
-                if np.any(edges):
-                    pending_edges.append((edges, np.array(border_rgb, dtype=np.float32)))
-        else:
-            edges = find_boundaries(mask_bool, mode="inner")
-            if dilation > 0:
-                edges = thicken_outline(edges, dilation)
-            if np.any(edges):
-                pending_edges.append((edges, np.array(rgb, dtype=np.float32)))
+        alpha = _resolve_alpha(mask_id, opacity_map, fill_alpha)
+        if alpha > 0.0:
+            fill_colors[mask_id] = rgb
+            fill_alphas[mask_id] = alpha
+            fill_active[mask_id] = True
+        if show_borders_on_filled or alpha <= 0.0:
+            border_rgb = _to_rgb_safe(border_registry.get(mask_id, colour_hex)) or rgb
+            border_colors[mask_id] = border_rgb
+            border_active[mask_id] = True
 
-    for edges, edge_rgb in pending_edges:
-        canvas[edges] = edge_rgb.astype(canvas.dtype, copy=False)
+    fill_px = fill_active[region_idx]
+    if fill_px.any():
+        alpha_px = fill_alphas[region_idx][..., None]
+        blended = (1.0 - alpha_px) * canvas + alpha_px * fill_colors[region_idx]
+        canvas[fill_px] = blended[fill_px].astype(canvas.dtype, copy=False)
 
+    if not (outline_active.any() or border_active.any()):
+        return
 
-def _iter_mask_region_ids(
-    region_array: np.ndarray,
-    registry: Mapping[int, str],
-):
-    for raw_mask_id in np.unique(region_array):
-        if not raw_mask_id:
-            continue
-        try:
-            mask_id = int(raw_mask_id)
-        except (TypeError, ValueError):
-            continue
-        colour_hex = registry.get(mask_id)
-        if colour_hex:
-            yield raw_mask_id, colour_hex
+    # One boundary computation for every cell in the region, instead of one per cell.
+    boundaries = np.asarray(find_boundaries(region_idx, mode="inner"), dtype=bool)
+
+    _paint_border_group(
+        canvas, region_idx, boundaries, outline_active, outline_colors, dilation,
+        clip_to_own_cell=False,
+    )
+    _paint_border_group(
+        canvas, region_idx, boundaries, border_active, border_colors, dilation,
+        clip_to_own_cell=True,
+    )
 
 
 def _to_rgb_safe(colour_hex: str) -> Optional[Tuple[float, float, float]]:
