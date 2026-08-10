@@ -23,8 +23,7 @@ class RunnerSmokeTest(unittest.TestCase):
 		masks_dir.mkdir(parents=True, exist_ok=True)
 		base_dir.mkdir(parents=True, exist_ok=True)
 
-		with patch("ueler.runner.ensure_aliases_loaded") as ensure_aliases, \
-			patch("ueler.runner._load_viewer_factory") as load_factory, \
+		with patch("ueler.runner._load_viewer_factory") as load_factory, \
 			patch("ueler.runner._load_display_helpers") as load_display:
 
 			viewer_instance = MagicMock()
@@ -49,7 +48,6 @@ class RunnerSmokeTest(unittest.TestCase):
 				custom_arg="value",
 			)
 
-			ensure_aliases.assert_called_once()
 			self.assertEqual(factory_calls["base"], str(base_dir))
 			self.assertEqual(factory_calls["masks"], str(masks_dir))
 			self.assertEqual(factory_calls["annotations"], str(annotations_dir))
@@ -62,8 +60,7 @@ class RunnerSmokeTest(unittest.TestCase):
 		base_dir = self.tmp_root / "run_viewer_flags"
 		base_dir.mkdir(parents=True, exist_ok=True)
 
-		with patch("ueler.runner.ensure_aliases_loaded") as ensure_aliases, \
-			patch("ueler.runner._load_viewer_factory") as load_factory, \
+		with patch("ueler.runner._load_viewer_factory") as load_factory, \
 			patch("ueler.runner._load_display_helpers") as load_display:
 
 			viewer_instance = MagicMock()
@@ -77,12 +74,38 @@ class RunnerSmokeTest(unittest.TestCase):
 				base_dir,
 				auto_display=False,
 				after_plugins=False,
-				ensure_aliases=False,
 			)
 
-			ensure_aliases.assert_not_called()
 			load_display.assert_not_called()
 			viewer_instance.after_all_plugins_loaded.assert_not_called()
+
+	def test_run_viewer_warns_and_ignores_removed_ensure_aliases(self) -> None:
+		"""The removed kwarg must not leak into ``**viewer_kwargs``.
+
+		It is forwarded verbatim to the viewer factory, so silently keeping it
+		would surface as an opaque ``TypeError`` from ``ImageMaskViewer``.
+		"""
+
+		base_dir = self.tmp_root / "run_viewer_removed_kwarg"
+		base_dir.mkdir(parents=True, exist_ok=True)
+
+		with patch("ueler.runner._load_viewer_factory") as load_factory, \
+			patch("ueler.runner._load_display_helpers") as load_display:
+
+			viewer_instance = MagicMock()
+			seen = {}
+
+			def fake_factory(base_folder, **kwargs):
+				seen["kwargs"] = kwargs
+				return viewer_instance
+
+			load_factory.return_value = fake_factory
+			load_display.return_value = (MagicMock(), MagicMock())
+
+			with self.assertWarns(DeprecationWarning):
+				run_viewer(base_dir, ensure_aliases=False)
+
+			self.assertNotIn("ensure_aliases", seen["kwargs"])
 
 	def test_module_reexports_runner(self) -> None:
 		self.assertTrue(hasattr(ueler, "run_viewer"))

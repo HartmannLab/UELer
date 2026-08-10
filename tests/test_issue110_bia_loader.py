@@ -490,8 +490,7 @@ class RunViewerBiaTest(unittest.TestCase):
             made["kwargs"] = kwargs
             return MagicMock()
 
-        with patch("ueler.runner.ensure_aliases_loaded"), \
-                patch("ueler.runner._normalise_directory") as normalise, \
+        with patch("ueler.runner._normalise_directory") as normalise, \
                 patch("ueler.runner._load_display_helpers") as load_display:
             load_display.return_value = (MagicMock(), MagicMock())
             run_viewer_bia(
@@ -521,8 +520,7 @@ class RunViewerBiaTest(unittest.TestCase):
             seen["descriptor"] = descriptor
             return SimpleNamespace()
 
-        with patch("ueler.runner.ensure_aliases_loaded"), \
-                patch("ueler.runner._load_display_helpers") as load_display:
+        with patch("ueler.runner._load_display_helpers") as load_display:
             load_display.return_value = (MagicMock(), MagicMock())
             run_viewer_bia(
                 "https://example.org/study",

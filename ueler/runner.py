@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import logging
+import warnings
 from pathlib import Path
 from typing import Any, Callable, Optional, Protocol, Sequence, TYPE_CHECKING, Union
-
-from ._compat import ensure_aliases_loaded
 
 _logger = logging.getLogger(__name__)
 
@@ -80,13 +79,31 @@ def _load_display_helpers() -> tuple[Callable[["ImageMaskViewer"], None], Callab
 	return _display_ui, _update_panel
 
 
+def _drop_removed_kwargs(viewer_kwargs: dict, *, caller: str) -> None:
+	"""Discard keyword arguments that UELer no longer accepts.
+
+	``**viewer_kwargs`` is forwarded verbatim to the viewer factory, so a caller
+	still passing a removed argument would otherwise hit an opaque ``TypeError``
+	from ``ImageMaskViewer`` instead of learning that the argument is gone.
+	"""
+
+	if "ensure_aliases" in viewer_kwargs:
+		viewer_kwargs.pop("ensure_aliases")
+		warnings.warn(
+			f"{caller}(ensure_aliases=...) is ignored: the pre-0.2 import "
+			"compatibility shims have been removed. Import from the 'ueler.*' "
+			"namespace instead.",
+			DeprecationWarning,
+			stacklevel=3,
+		)
+
+
 def run_viewer(
 	base_folder: PathLike,
 	*,
 	masks_folder: Optional[PathLike] = None,
 	annotations_folder: Optional[PathLike] = None,
 	auto_display: bool = True,
-	ensure_aliases: bool = True,
 	after_plugins: bool = True,
 	viewer_factory: Optional[_ViewerFactory] = None,
 	display_callback: Optional[Callable[["ImageMaskViewer"], None]] = None,
@@ -104,9 +121,6 @@ def run_viewer(
 	auto_display:
 		If ``True`` (default) render the widget tree immediately via
 		``display_ui``.
-	ensure_aliases:
-		When ``True`` (default) register the compatibility shims before
-		instantiating the viewer so legacy modules stay importable.
 	after_plugins:
 		Call ``viewer.after_all_plugins_loaded()`` after displaying the UI when
 		available (defaults to ``True``).
@@ -127,8 +141,7 @@ def run_viewer(
 		notebook session.
 	"""
 
-	if ensure_aliases:
-		ensure_aliases_loaded()
+	_drop_removed_kwargs(viewer_kwargs, caller="run_viewer")
 
 	base_dir = _normalise_directory(base_folder, argument="base_folder")
 	masks_dir = _normalise_optional_directory(masks_folder, argument="masks_folder")
@@ -206,7 +219,6 @@ def run_viewer_bia(
 	local_dir: Optional[PathLike] = None,
 	max_download_bytes: Optional[int] = None,
 	auto_display: bool = True,
-	ensure_aliases: bool = True,
 	after_plugins: bool = True,
 	viewer_factory: Optional[_ViewerFactory] = None,
 	display_callback: Optional[Callable[["ImageMaskViewer"], None]] = None,
@@ -243,8 +255,7 @@ def run_viewer_bia(
 	ueler.viewer.main_viewer.ImageMaskViewer
 	"""
 
-	if ensure_aliases:
-		ensure_aliases_loaded()
+	_drop_removed_kwargs(viewer_kwargs, caller="run_viewer_bia")
 
 	descriptor_obj = _load_descriptor(descriptor)
 	workspace = _bia_workspace(source, local_dir)
