@@ -1,10 +1,13 @@
 # Issue #79 — PyPI release readiness plan
 
 > Status: written 2026-08-10 against `develop` @ `377c1bb` + working tree at `v0.5.0-alpha`.
-> **Gate A is complete** (committed as `88b0e6e`). **Gate B is complete**
-> (2026-08-10, working tree — B2 and B3 consciously declined, plus one item the
-> original list missed). Gates **C** and **D** remain open. Developer decisions
-> taken so far are recorded under [Decisions taken](#decisions-taken).
+> **Gate A is complete** (`88b0e6e`). **Gate B is complete** (`f9fcfae` — B2 and B3
+> consciously declined, plus one item the original list missed). **Gate C is
+> complete** (2026-08-10, working tree on `nightly` — C1 landed in a different shape
+> than planned and C3 was decided as "don't"). **Gate D remains**, and it is the
+> half that needs a human: a TestPyPI rehearsal, a live notebook run, then the
+> upload. Developer decisions are recorded under
+> [Decisions taken](#decisions-taken).
 > Related: [#79 — Package UELer as a pip package](https://github.com/HartmannLab/UELer/issues/79),
 > [#4 — Packaging plan](https://github.com/HartmannLab/UELer/issues/4),
 > [dev_note/topic_packaging_and_project.md](../topic_packaging_and_project.md),
@@ -79,6 +82,30 @@ imported in two fresh venvs).
   deters adopters as effectively as the GPL. Applies going forward; tags through
   `v0.4.1` stay GPL as published, and nothing was ever uploaded to PyPI, so there
   is no released artifact to reconcile.
+- **C1** → **CI runs the real dependency stack, not the fast stubs**, and the
+  workflow fails on the *first skipped test*. The long-standing "add a CI fast-stub
+  job" item is closed as **superseded**: measured, the stub bootstrap collects only
+  671 of 913 tests in a minimal environment and errors on 68, so a stub-based job
+  would report green over a third of the suite never running. Zero skips is a
+  measurement — 0 of 913 in a complete environment — so it can be a hard gate.
+- **C1 (3.12)** → **added as a non-blocking matrix leg** rather than settled by
+  argument. `requires-python` permits 3.12 and nothing had ever run there; a
+  `continue-on-error` leg produces that evidence on the next push at no risk.
+  Widening the classifiers then becomes a one-line follow-up backed by data — and
+  `classifiers` and `requires-python` still have to move together.
+- **C2** → **a tag push publishes to TestPyPI only; PyPI needs a manual dispatch.**
+  The plan had tags publishing straight to PyPI. Given that a PyPI version can be
+  yanked but never reused, making `git push --tags` an irreversible public act is
+  the wrong default for a solo-maintained project. The real upload takes an explicit
+  `workflow_dispatch` from a tag ref, behind a GitHub environment reviewer.
+- **C3** → **no tag backfill.** Developer's call: the `v0.4.2`–`v0.4.4` gaps were
+  intentional, not drift. The first tag created through the release workflow is
+  `v0.5.0-alpha`, after Gate D.
+- **D3** → **the first upload is `0.5.0-alpha`**, not a final `0.5.0`. Stated by the
+  developer ("let's start with v0.5.0-a0 after we have done with all the gates").
+  pip will not install it without `--pre`, which the README and the docs site both
+  already document, so it validates the whole pipeline without becoming the version
+  a casual `pip install ueler` picks up.
 
 ### A1. Reconcile the project description and keywords — ✅ done
 
@@ -470,9 +497,42 @@ been told to clone the repository anyway, and given a Python bound that
 
 ---
 
-## Gate C — infrastructure
+## Gate C — infrastructure — ✅ **DONE**
 
-### C1. Add a CI test workflow
+Implemented 2026-08-10 in the working tree, on top of Gate A + B (`f9fcfae`).
+All three items are done, but **C1 changed shape once measured** — the
+"fast-stub CI job" that had been an open item since the packaging migration turns
+out not to be buildable, and the reason is worth reading before someone tries
+again. **C3 was decided by the developer: no backfill.**
+
+### How to actually use the two workflows
+
+Recorded here because the useful half of Gate C is operational knowledge, not code.
+
+**`tests.yml`** needs no action. It runs on pushes to `main` / `develop` /
+`nightly` / `pre-release`, on every pull request, on manual dispatch, and it is
+called by `release.yml`. The local equivalent of its gate is `make test-ci`.
+
+**`release.yml`** needs a one-time setup, because it holds no API token:
+
+1. On **TestPyPI** → *Account settings* → *Publishing* → add a **pending
+   publisher**: owner `HartmannLab`, repository `UELer`, workflow `release.yml`,
+   environment `testpypi`.
+2. The same on **PyPI**, with environment `pypi`. "Pending" is the mechanism for
+   a project that does not exist on the index yet — which is our case exactly.
+3. On GitHub → *Settings* → *Environments* → `pypi`, add a **required reviewer**
+   so the real upload also needs a human click.
+
+Then there are two paths, and only two:
+
+| Action | What happens |
+|---|---|
+| `git push origin v0.5.0-alpha` | tests → build → verify tag against artifacts → upload to **TestPyPI**. Never touches PyPI. |
+| Actions → *Release* → *Run workflow*, ref = **the tag**, `publish_to: pypi` | the same gates, then upload to **PyPI** (behind the environment reviewer) |
+
+Before tagging: `make check-release TAG=v0.5.0-alpha`.
+
+### C1. Add a CI test workflow — ✅ done
 
 There is **no test workflow** — `.github/workflows/` contains only `docs.yml`.
 Releasing a package with no automated test gate means the artifact users install
@@ -488,8 +548,71 @@ environment that happened to be missing bokeh.
   skips are how the 3.11 gap stayed invisible.
 - This closes the long-standing "Define and add a CI fast-stub job" open item in
   [topic_packaging_and_project.md](../topic_packaging_and_project.md).
+- **Done:** [.github/workflows/tests.yml](../../.github/workflows/tests.yml) with two
+  jobs. `unit` is a matrix over **3.10** and **3.11** that installs the *full*
+  runtime stack (`pip install -e ".[dev]"`) and runs the suite through a new
+  skip gate; `package` builds the sdist + wheel, runs `twine check --strict`,
+  cross-checks the version declarations, then installs the wheel into a clean
+  venv and imports it **from outside the repository** — the clean-checkout case a
+  developer never sees, and the one **A5** was about. It uploads the artifacts as
+  a `dist` artifact, which **C2** publishes.
+- **The skip gate is the point.** [tools/run_test_suite.py](../../tools/run_test_suite.py)
+  runs the same discovery `unittest` does, then prints every skipped test with its
+  reason and exits non-zero if the count exceeds `--max-skips` (CI passes `0`).
+  `make test-ci` runs the identical gate locally. Rationale: `unittest` prints
+  `OK` for a run that quietly dropped 14 tests, which is precisely how the 3.11
+  bokeh gap in the table above stayed invisible. **Measured: a complete
+  environment skips 0 of 913 tests**, so `0` is a fact rather than an aspiration.
+- **`actions/setup-node` is deliberate, not incidental.** Two tests in
+  `tests/test_issue126_chip_reorder.py` gate on `shutil.which("node")` to parse
+  the anywidget ESM bundle. `ubuntu-latest` happens to ship node, but a zero-skip
+  gate is only honest if every optional tool is present on purpose.
+- **The "fast-stub CI job" is not achievable, and that is the finding.** The open
+  item assumed the `tests/bootstrap.py` stubs let the suite run without the heavy
+  dependency stack. Measured in a fresh venv:
+  - numpy only → **302** of 913 tests even collected, 113 errors
+    (`traitlets`, `matplotlib.path`, `anndata` missing).
+  - numpy + `traitlets` + `anndata` + real `matplotlib` → **671** collected, 68
+    errors, 19 skips.
+  - The blocker is structural: `_ensure_matplotlib_stub()` skips itself only when
+    `matplotlib.pyplot` is **already in `sys.modules`**. In a full environment
+    `seaborn_image` imports it first, so the stub never installs and the real
+    library is used. In a minimal environment the stub *does* install — and it
+    has no `matplotlib.path` and no `colors.Normalize`, so ~52 tests error out.
+  - Conclusion: the stubs are a *speed* optimisation for an already-complete
+    environment, not a substitute for one. A stub-based CI job would produce a
+    green tick over a suite that never ran a third of itself — worse than no job.
+    **The open item is closed as superseded**, not implemented. Reopen it only if
+    someone is willing to finish the matplotlib stub, and note the full install is
+    ~15 s of wheels anyway, so the payoff is small.
+- **3.12 is a non-blocking matrix leg** (`continue-on-error: true`), which turns
+  open decision C1 from a guess into a measurement — see *Decisions taken*.
+- **Blocker found and fixed on the way in — `.gitignore` ignored `.github/`.** Line
+  31 was a blanket directory rule, so both new workflow files were invisible to
+  `git status` and would have been committed nowhere and run never. It also explains
+  why `docs.yml` is the *only* tracked file under `.github/`: it was force-added.
+  This is **A5's failure mode applied to CI instead of to assets**, and A5's own
+  technique note predicts the trap — a negation cannot re-include anything under an
+  ignored *directory*, so `!.github/workflows/*.yml` would not have worked. Fixed by
+  narrowing the rule to the local-only assistant scaffolding
+  (`.github/agents/`, `.github/chatmodes/`, `.github/prompts/`,
+  `.github/copilot-instructions.md`), leaving `.github/workflows/` visible.
+  **Verified both directions:** the two workflows now appear as `??` in
+  `git status`, and all four scaffolding paths are still reported ignored by
+  `git check-ignore`. `MANIFEST.in` already prunes `.github`, so nothing about this
+  reaches the sdist.
+- **Verified:** both workflow files parse as YAML; the Python embedded in the
+  wheel-check step was extracted and `ast.parse`d, then **run verbatim** against a
+  clean venv install of `dist/ueler-0.5.0a0-py3-none-any.whl` from `/tmp` (it
+  imports `ueler`, imports the heaviest module `ueler.viewer.main_viewer`, reads
+  the packaged `ready.png` through `load_asset_bytes`, and asserts none of the
+  four legacy top-level names leaked into `sys.modules`) — exit 0. The skip gate
+  was exercised in both directions: exit 0 on the full environment with 0 skips,
+  exit 1 in the minimal venv with all 19 skips printed and named.
+- **Not verified:** nothing has run on GitHub's runners yet. The first push is the
+  real test of the workflow files.
 
-### C2. Add a release workflow with Trusted Publishing
+### C2. Add a release workflow with Trusted Publishing — ✅ done
 
 - **Action:** `.github/workflows/release.yml` triggered on `v*` tags: build,
   `twine check`, then publish via **PyPI Trusted Publishing** (OIDC, no API
@@ -497,8 +620,42 @@ environment that happened to be missing bokeh.
 - Configure the trusted publisher on PyPI *before* the first upload, since it
   must be created against a project that may not exist yet (PyPI supports
   "pending" publishers for exactly this).
+- **Done:** [.github/workflows/release.yml](../../.github/workflows/release.yml),
+  four jobs: `tests` (calls `tests.yml` as a reusable workflow), `verify`,
+  `testpypi`, `pypi`. Both uploads use `pypa/gh-action-pypi-publish` with
+  `id-token: write` — **no API token exists in the repository's secrets**.
+- **Deliberately asymmetric, because PyPI is append-only.** A tag push gets you as
+  far as **TestPyPI** and no further. The real upload requires a
+  `workflow_dispatch` with `publish_to: pypi` **and** a tag as the ref, so there
+  is no sequence of ordinary git commands that publishes to PyPI by accident. The
+  plan's "triggered on `v*` tags: … then publish" would have made
+  `git push --tags` an irreversible act; that seemed like the wrong default for
+  the one operation in this project that cannot be undone.
+- **It publishes what was tested.** `tests.yml` is invoked with `workflow_call`, so
+  it runs at the release commit inside the same run, and its `package` job's `dist`
+  artifact is what the publish jobs download. Nothing is rebuilt between the test
+  and the upload — the same reasoning as `make publish` depending on `check-dist`
+  rather than on `build` (**A4**).
+- **`verify` checks the tag against the artifacts, not just against the source.**
+  [tools/check_release_tag.py](../../tools/check_release_tag.py) compares four
+  things — the tag, `pyproject.toml`, `ueler.__version__`, and both `dist/`
+  filenames — on **PEP 440-normalised** versions. That normalisation is load-bearing:
+  the repo tags in SemVer style (`v0.2.0-alpha` is an existing tag) while setuptools
+  writes `0.5.0a0`, so a string comparison would reject a *correct* tag. Both
+  `v0.5.0-alpha` and `v0.5.0-a0` validate, since both normalise to `0.5.0a0`.
+- **`skip-existing: true` on the TestPyPI upload only.** A rehearsal may already
+  have pushed that version by hand, and a workflow re-run should not fail on it.
+  The PyPI job has no such flag — there, a duplicate must be an error.
+- **Setup the developer must still do by hand** (see the operational table above):
+  pending Trusted Publishers on both indexes, plus a required reviewer on the
+  `pypi` GitHub environment. Until those exist the publish jobs will fail at the
+  OIDC exchange, which is the correct failure.
+- **Verified:** YAML parses; job graph is `tests → verify → {testpypi, pypi}`. The
+  `verify` step's checker was run locally against the real `dist/` for a correct
+  tag (exit 0, both spellings) and a wrong one (`v0.5.0` → exit 1). The publish
+  jobs themselves cannot be tested without pushing a tag — that is **D1**.
 
-### C3. Reconcile the git tags with the shipped versions
+### C3. Reconcile the git tags with the shipped versions — ✅ decided: no backfill
 
 `git tag --sort=-v:refname` shows `v0.4.1` as the newest tag, but `v0.4.2`,
 `v0.4.3` and `v0.4.4` all shipped per `doc/log.md`. If **C2** triggers on tags,
@@ -506,6 +663,18 @@ this drift becomes a release mechanism problem rather than a bookkeeping one.
 
 - **Action:** backfill the missing tags against their release commits (or
   consciously decide not to and start clean from `v0.5.0`).
+- **Decided by the developer (2026-08-10): do not backfill. The skipped tags were
+  intentional.** The premise of this item was wrong — it read the gaps as drift,
+  and they were choices. Nothing is broken: `doc/log.md` remains the record of what
+  shipped, and tags mark what was *released through the release mechanism*, which
+  did not exist for `v0.4.2`–`v0.4.4`.
+- **Consequence for C2:** none. `release.yml` triggers on tag *pushes*, and the
+  historical tags are already pushed, so no old tag can fire it. The first tag the
+  workflow will ever see is the next one.
+- **First tag under the new mechanism: `v0.5.0-alpha`**, created after Gate D. That
+  spelling matches the existing `v0.2.0-alpha` and the version-bump skill's SemVer
+  convention; `v0.5.0-a0` also validates, since the checker normalises both to
+  `0.5.0a0`. Either works — `v0.5.0-alpha` is the consistent one.
 
 ---
 
@@ -582,31 +751,45 @@ split at commit time if you prefer:
 5. **`docs: state the license and the PyPI install path`** — B4, B6, plus the
    `doc/log.md` and README summary entries.
 
-Remaining:
+Gate B landed as `f9fcfae`. Gate C is one working-tree change set on top of it:
 
-6. **`ci: add test and release workflows`** — C1, C2, C3.
+6. **`ci: add test and release workflows`** — C1 (`tests.yml`,
+   `tools/run_test_suite.py`), C2 (`release.yml`, `tools/check_release_tag.py`),
+   the `Makefile` targets, and the C3 decision recorded in the docs.
 
 Then Gate D by hand.
 
+### Gate D, in the order it has to happen
+
+Gate C built the mechanism; nothing has exercised it. The remaining sequence:
+
+1. **Push the Gate C commit** and let `tests.yml` run for the first time. Read the
+   3.12 leg's result — it either widens the classifiers or tightens
+   `requires-python`, and either way `classifiers` moves with it.
+2. **Configure the Trusted Publishers** on TestPyPI and PyPI, plus the `pypi`
+   environment reviewer (see the table in Gate C).
+3. `make check-release TAG=v0.5.0-alpha`, then **push the tag** → the workflow
+   rehearses on **TestPyPI** by itself. That is **D1**.
+4. **Install from TestPyPI** into a fresh env and read the rendered page — the
+   sidebar, the `Summary`, the long description. Then the notebook smoke test
+   (**D2**), which needs a browser this environment does not have.
+5. **Dispatch the release** to PyPI (**D3**).
+
 ### Open decisions for the developer
 
-*(A1, A3 and B4 are resolved — see [Decisions taken](#decisions-taken). B2 and B3
-are closed as "declined for `0.5.0`", which needed no code change.)*
+*(A1, A3, B4, C1, C2, C3 and D3 are resolved — see
+[Decisions taken](#decisions-taken). B2 and B3 are closed as "declined for
+`0.5.0`", which needed no code change.)*
 
 1. **B4 leftover (non-code)** — confirm with **DKFZ** that the BSD copyright line
    naming both the author and the institute matches institutional policy. The
    licensing decision itself is made; this is the institutional half of it.
-2. **C1** — add **3.12** to the CI matrix, or tighten `requires-python` to
-   `<3.12`? The current `<3.13` bound permits an untested minor. Note the
-   per-minor classifiers added in **B1** list only 3.10 and 3.11, so whichever way
-   this goes, `classifiers` and `requires-python` must move together.
-3. **C3** — backfill `v0.4.2`–`v0.4.4` tags, or start clean at `v0.5.0`?
-4. **D3** — is `0.5.0-alpha` the version that goes to PyPI, or should the first
-   public upload be a final `0.5.0`? (An `-alpha` upload is a normal way to
-   validate the pipeline, and pip will not install it without `--pre`. The README
-   documents both forms, so either choice is already covered.)
-5. **A1 leftover** — the **GitHub repo description** still needs updating in the
+2. **The 3.12 answer, once CI reports it** — the matrix leg makes this a reading
+   rather than a judgement, but someone still has to act on it: add
+   `Programming Language :: Python :: 3.12` and drop `continue-on-error`, or tighten
+   `requires-python` to `<3.12` and leave the classifiers alone.
+3. **A1 leftover** — the **GitHub repo description** still needs updating in the
    GitHub UI; it is not a tracked file.
-6. **B5 leftover (trivial)** — `graphify-out/legacy-ueler-scoped-2026-07-31/` is
+4. **B5 leftover (trivial)** — `graphify-out/legacy-ueler-scoped-2026-07-31/` is
    kept only because deleting someone else's generated data unasked is rude. It is
    stale and regenerable; delete it when you notice it.

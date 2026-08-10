@@ -143,11 +143,24 @@ make test-fast                      # or, equivalently:
 python -m unittest discover tests
 ```
 
-The suite runs against lightweight stubs for `pandas`, `matplotlib` and `ipywidgets`
-(`tests/bootstrap.py`), which is why it finishes in seconds. `make test-fast` also sets
-`UELER_TEST_BOOTSTRAP=1`, which lets `sitecustomize.py` install those stubs at interpreter
-startup. That is **opt-in** — without the variable a plain interpreter always gets the real
-libraries, so nothing you run outside the tests is affected.
+`tests/bootstrap.py` carries lightweight stubs for `pandas`, `matplotlib` and
+`ipywidgets`, but each one installs only when the real library is missing — in a complete
+`dev` environment they are inert and the suite runs against the real stack in about six
+seconds. `make test-fast` also sets `UELER_TEST_BOOTSTRAP=1`, which lets
+`sitecustomize.py` install the stubs at interpreter startup. That is **opt-in** — without
+the variable a plain interpreter always gets the real libraries, so nothing you run outside
+the tests is affected.
+
+To run the suite the way CI does, which fails on the first **skipped** test:
+
+```shell
+make test-ci                        # or, equivalently:
+python tools/run_test_suite.py --max-skips 0
+```
+
+A skipped test means an optional dependency is missing, and plain `unittest` still prints
+`OK` in that case — so a partially installed environment can look green while a whole
+code path goes untested. This target prints every skip with its reason instead.
 
 ---
 

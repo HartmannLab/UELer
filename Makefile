@@ -1,6 +1,6 @@
 # Default developer targets for the UELer packaging skeleton
 
-.PHONY: help venv install test-fast test-integration scan scan-package scan-project docs docs-serve clean clean-dist build check-dist publish-test publish
+.PHONY: help venv install test-fast test-integration test-ci scan scan-package scan-project docs docs-serve clean clean-dist build check-dist check-release publish-test publish
 
 VENV ?= .venv
 BIN_DIR := $(if $(filter Windows_NT,$(OS)),Scripts,bin)
@@ -13,6 +13,7 @@ help:
 	@echo "  make install           # install UELer in editable mode"
 	@echo "  make test-fast         # run fast stubbed unit tests"
 	@echo "  make test-integration  # placeholder for integration suite"
+	@echo "  make test-ci           # run the suite in the active env, no skips allowed"
 	@echo "  make scan              # scan pkg + project for local/machine info"
 	@echo "  make scan-package      # scan the ueler package only (what ships)"
 	@echo "  make scan-project      # scan the whole repository"
@@ -21,6 +22,7 @@ help:
 	@echo "  make clean-dist        # remove stale build artefacts from dist/"
 	@echo "  make build             # build a fresh sdist + wheel into dist/"
 	@echo "  make check-dist        # validate the built artefacts with twine"
+	@echo "  make check-release     # cross-check every version declaration (TAG=v0.5.0-alpha)"
 	@echo "  make publish-test      # upload dist/* to TestPyPI"
 	@echo "  make publish           # upload dist/* to PyPI (irreversible)"
 	@echo "  make clean             # remove the virtual environment"
@@ -41,6 +43,13 @@ test-fast: venv
 test-integration: venv
 	@echo "Running integration test placeholder..."
 	UELER_TEST_BOOTSTRAP=1 UELER_TEST_MODE=integration $(PYTHON) -m unittest discover tests
+
+# What CI runs (.github/workflows/tests.yml): the suite against whatever is
+# installed in the active interpreter, failing on the first skipped test. A skip
+# means a dependency is missing, and a missing dependency turns a whole code path
+# into an untested one while `unittest` still prints OK.
+test-ci:
+	python tools/run_test_suite.py --max-skips 0
 
 scan:
 	python tools/scan_local_info.py --scope both
@@ -69,6 +78,11 @@ build: clean-dist
 
 check-dist:
 	python -m twine check --strict dist/*
+
+# Run this before creating a release tag. TAG is optional: without it the source
+# declarations and dist/ are cross-checked; with it, the tag joins the comparison.
+check-release:
+	python tools/check_release_tag.py $(if $(TAG),$(TAG),--no-tag)
 
 publish-test: check-dist
 	python -m twine upload --repository testpypi dist/*

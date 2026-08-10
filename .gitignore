@@ -28,7 +28,16 @@ Thumbs.db
 # Project-specific
 dev_note/github_issues.md
 .binder/
-.github/
+# `.github/` used to be ignored wholesale, which made CI impossible to add: a
+# workflow file that git cannot see never reaches GitHub and never runs. That is
+# also why `.github/workflows/docs.yml` is in the repository only because someone
+# `git add -f`'d it. A *directory* rule cannot be undone by a negation (see the
+# note below the asset patterns), so the local-only assistant scaffolding is
+# listed explicitly and `.github/workflows/` stays visible.
+.github/agents/
+.github/chatmodes/
+.github/prompts/
+.github/copilot-instructions.md
 .specify/
 .local/
 specs/

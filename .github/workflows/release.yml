@@ -1,0 +1,127 @@
+name: Release
+
+# PyPI is append-only: a version can be yanked but never replaced or reused.
+# So this workflow is deliberately asymmetric —
+#
+#   pushing a `v*` tag  -> test, build, verify, upload to **TestPyPI**
+#   uploading to PyPI   -> only ever a manual workflow_dispatch from the tag
+#
+# There is no path where a `git push --tags` reaches the real index by itself.
+# Uploads use PyPI Trusted Publishing (OIDC): no API token lives in this
+# repository's secrets. Both indexes need a publisher configured *before* the
+# first upload — PyPI supports "pending" publishers for a project that does not
+# exist yet. Configure them against this repository, workflow `release.yml`, and
+# environment `pypi` / `testpypi` respectively.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      publish_to:
+        description: "Where to upload the artifacts"
+        type: choice
+        options:
+          - none
+          - testpypi
+          - pypi
+        default: testpypi
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # The same suite that guards the branches, run at this commit. Its `package`
+  # job builds and uploads the `dist` artifact that the jobs below publish, so
+  # what reaches an index is literally what was tested — the same reason the
+  # Makefile's `publish` depends on `check-dist` rather than on `build`.
+  tests:
+    uses: ./.github/workflows/tests.yml
+
+  verify:
+    name: verify the artifacts against the tag
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install the checking tools
+        run: python -m pip install --upgrade pip twine packaging
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Show exactly what would be uploaded
+        run: ls -l dist
+
+      - name: Validate the metadata again
+        run: python -m twine check --strict dist/*
+
+      # On a tag push this is the check that matters: the tag, pyproject.toml,
+      # ueler.__version__ and both artifact filenames must describe one release.
+      # Comparison is PEP 440-normalised, so `v0.5.0-alpha` matches `0.5.0a0`.
+      - name: Tag and versions must agree
+        if: github.ref_type == 'tag'
+        run: python tools/check_release_tag.py "${{ github.ref_name }}" --require-dist
+
+      - name: Cross-check the versions (no tag on this ref)
+        if: github.ref_type != 'tag'
+        run: python tools/check_release_tag.py --no-tag --require-dist
+
+  testpypi:
+    name: publish to TestPyPI
+    needs: verify
+    if: github.event_name == 'push' || inputs.publish_to == 'testpypi'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: testpypi
+    permissions:
+      id-token: write # OIDC for Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          # A rehearsal may already have uploaded this version by hand; a
+          # re-run of the workflow should not fail on that.
+          skip-existing: true
+
+  pypi:
+    name: publish to PyPI (manual, irreversible)
+    needs: verify
+    # Three conditions, all required: an explicit dispatch, an explicit choice
+    # of PyPI, and a tag as the ref — so the upload is always tied to a tagged
+    # commit that `verify` has matched against the artifacts. Put a required
+    # reviewer on the `pypi` environment for a fourth.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      && inputs.publish_to == 'pypi'
+      && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: pypi
+    permissions:
+      id-token: write # OIDC for Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
