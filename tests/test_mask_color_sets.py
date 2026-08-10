@@ -276,7 +276,7 @@ class MaskColorPersistenceTests(unittest.TestCase):
         display.ui_component.only_specified_checkbox.value = True
         display.ui_component.global_fill_checkbox.value = False
         display.ui_component.global_fill_opacity_input.value = 40
-        display.ui_component.show_fill_borders_checkbox.value = True
+        display.ui_component.border_checkbox.value = True
         display.ui_component.border_color_mode_dropdown.value = BORDER_COLOR_MODE_SAME_AS_FILL
         display.ui_component.set_name_input.value = "Example"
         display._push_to_widget()
@@ -302,7 +302,7 @@ class MaskColorPersistenceTests(unittest.TestCase):
         display.ui_component.only_specified_checkbox.value = False
         display.ui_component.global_fill_checkbox.value = True
         display.ui_component.global_fill_opacity_input.value = 10
-        display.ui_component.show_fill_borders_checkbox.value = False
+        display.ui_component.border_checkbox.value = False
         display.ui_component.border_color_mode_dropdown.value = "mask_type_color"
 
         display._load_color_set(saved_path)
@@ -313,7 +313,7 @@ class MaskColorPersistenceTests(unittest.TestCase):
         self.assertEqual(display.class_opacity_controls["A"].value, 75)
         self.assertEqual(display.ui_component.global_fill_checkbox.value, False)
         self.assertEqual(display.ui_component.global_fill_opacity_input.value, 40)
-        self.assertEqual(display.ui_component.show_fill_borders_checkbox.value, True)
+        self.assertEqual(display.ui_component.border_checkbox.value, True)
         self.assertEqual(display.ui_component.border_color_mode_dropdown.value, BORDER_COLOR_MODE_SAME_AS_FILL)
         self.assertEqual(display.ui_component.only_specified_checkbox.value, True)
         self.assertEqual(list(display.ui_component.class_list_widget.class_order), ["C", "A"])

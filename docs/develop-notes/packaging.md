@@ -13,7 +13,8 @@ UELer has been refactored from a notebook-first script layout into a proper Pyth
 ## Key Decisions
 
 - **Notebooks as primary entrypoint.** `ueler.runner.run_viewer` provides a programmatic entrypoint, but the main audience uses `script/run_ueler.ipynb`.
-- **Compatibility shims.** Legacy `viewer.*` imports continue to work during the transition via `_AliasModuleFinder` in `ueler/_compat.py`.
+- **No import-time side effects.** `import ueler` registers no `sys.meta_path` finders and claims no top-level module names, so it cannot change how any other import in the session resolves — a hard requirement for a PyPI-distributed package. Enforced by `tests/test_import_namespace_hygiene.py`.
+- **Compatibility shims removed.** The `_AliasModuleFinder` / `_PrefixAliasFinder` layer in `ueler/_compat.py` that kept legacy `viewer.*`, `constants`, `data_loader` and `image_utils` imports working through the migration has been deleted; those four names were claimed at `sys.meta_path[0]` for every session that imported UELer. Import from `ueler.*`.
 - **Editable install.** `pip install -e .` is the recommended install mode; it makes `git pull` upgrades instant.
 - **Fast-stub test bootstrap.** `tests/bootstrap.py` stubs out heavy dependencies (`pandas`, `ipywidgets`, `matplotlib`) so the test suite runs quickly without a full environment.
 
@@ -24,7 +25,6 @@ UELer has been refactored from a notebook-first script layout into a proper Pyth
 ```
 ueler/
 ├── __init__.py          # Public API surface
-├── _compat.py           # Legacy import shims
 ├── image_utils.py       # Image helper functions
 ├── runner.py            # Programmatic entrypoint
 └── viewer/
@@ -44,7 +44,7 @@ ueler/
 ## Current Status
 
 - `ueler/` package skeleton, `pyproject.toml`, and `Makefile` are in place.
-- Import shims are implemented and tested (`tests/test_shims_imports.py`).
+- The legacy import shims are removed; `import ueler` is side-effect free and asserted so by `tests/test_import_namespace_hygiene.py`.
 - All module moves from `viewer.*` → `ueler.viewer.*` are complete.
 - `ueler.image_utils` is restored as a real packaged module (post-cleanup regression fix).
 

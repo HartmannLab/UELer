@@ -95,6 +95,7 @@ IntSlider = _ensure_widget_class("IntSlider")
 TagsInput = _ensure_widget_class("TagsInput")
 Image = _ensure_widget_class("Image")
 
+from .plugin.channel_picker_widget import build_channel_picker  # type: ignore[import-error]
 from .plugin.chart import ChartDisplay  # type: ignore[import-error]
 from .plugin.cell_gallery import CellGalleryDisplay  # type: ignore[import-error]
 from .plugin.heatmap import HeatmapDisplay  # type: ignore[import-error]
@@ -137,10 +138,16 @@ def build_wide_plugin_pane(control=None, content=None):
     if content is None:
         return VBox(children=(control,), layout=_bounded_panel_layout(overflow_y='auto'))
 
+    # Stack the controls on top of the plot content (#118). The plot content
+    # spans the full width below so wide/multi-pair plots (e.g. the scatter
+    # matrix) are not squeezed into the space left over next to a fixed-width
+    # control column, which cropped data points. The control box itself keeps
+    # its ~6in width and is left-aligned within a full-width parent row.
     control_box = VBox(children=(control,), layout=Layout(width='6in', flex='0 0 6in', overflow_y='auto', gap='8px'))
-    content_box = VBox(children=(content,), layout=Layout(flex='1 1 auto', min_width='0', overflow='auto', min_height='360px'))
-    return HBox(
-        children=(control_box, content_box),
+    control_row = HBox(children=(control_box,), layout=Layout(width='100%', justify_content='flex-start'))
+    content_box = VBox(children=(content,), layout=Layout(width='100%', flex='1 1 auto', min_width='0', overflow='auto', min_height='360px'))
+    return VBox(
+        children=(control_row, content_box),
         layout=_bounded_panel_layout(gap='12px', align_items='stretch'),
     )
 
@@ -322,6 +329,10 @@ def display_ui(viewer):
     accordion_children = []
     for attr_name in dir(viewer.SidePlots):
         attr = getattr(viewer.SidePlots, attr_name)
+        # Footer-only plugins (#121) render exclusively in the wide-footer panel,
+        # so they are not added to the side accordion.
+        if getattr(attr, 'footer_only', False):
+            continue
         if hasattr(attr, 'ui') and hasattr(attr, 'displayed_name'):
             accordion_children.append(
                 Accordion(
@@ -487,10 +498,13 @@ class uicomponents:
 
         self.channel_selector_text = HTML(value='Channels:')
 
-        # Initialize channel selector
-        self.channel_selector = TagsInput(
+        # Initialize channel selector. Uses the searchable, always-scrollable
+        # picker from #125 instead of ``TagsInput``, whose native ``<datalist>``
+        # popup clipped long channel lists and hid most options.
+        self.channel_selector = build_channel_picker(
             allowed_tags=[],  # This will be updated later
             description='Channels:',
+            placeholder='Type to filter channels...',
             disabled=False,
             layout=_content_widget_layout()
         )

@@ -369,5 +369,94 @@ class RenderingHelpersTests(unittest.TestCase):
         self.assertEqual(result.shape, (4, 4, 3))
 
 
+class CropPaddingTests(unittest.TestCase):
+    """``pad_to_size`` keeps edge crops at the requested scale (issue #128)."""
+
+    def setUp(self) -> None:
+        # A 10x10 FOV that renders to a uniform mid-grey, so real pixels are distinguishable
+        # from both the white default padding and the blue padding used by the tests below.
+        self.channels = {"A": np.full((10, 10), 0.5, dtype=np.float32)}
+        self.settings = {
+            "A": ChannelRenderSettings(color=(1.0, 1.0, 1.0), contrast_min=0.0, contrast_max=1.0)
+        }
+
+    def _crop(self, center_xy, size_px=6, downsample_factor=1, **kwargs):
+        return render_crop_to_array(
+            "FOV",
+            self.channels,
+            ("A",),
+            self.settings,
+            center_xy=center_xy,
+            size_px=size_px,
+            downsample_factor=downsample_factor,
+            **kwargs,
+        )
+
+    def test_edge_crop_is_short_without_padding(self) -> None:
+        # Guards the default: the export path re-derives the clamped region itself.
+        crop = self._crop((1.0, 5.0))
+        self.assertEqual(crop.shape, (6, 4, 3))
+
+    def test_left_edge_crop_is_padded_to_requested_size_with_white_default(self) -> None:
+        crop = self._crop((1.0, 5.0), pad_to_size=True)
+
+        self.assertEqual(crop.shape, (6, 6, 3))
+        # The 2 columns left of the FOV are white padding; the remaining 4 hold real data.
+        np.testing.assert_allclose(crop[:, :2], 1.0)
+        np.testing.assert_allclose(crop[:, 2:], 0.5, atol=1e-6)
+
+    def test_padding_uses_pad_color_and_preserves_real_pixels(self) -> None:
+        crop = self._crop((1.0, 5.0), pad_to_size=True, pad_color=(0.0, 0.0, 1.0))
+
+        self.assertEqual(crop.shape, (6, 6, 3))
+        # Padded band carries the pad colour ...
+        np.testing.assert_allclose(crop[:, :2], np.broadcast_to([0.0, 0.0, 1.0], (6, 2, 3)))
+        # ... and the real pixels are untouched, sitting to the right of it.
+        unpadded = self._crop((1.0, 5.0))
+        np.testing.assert_allclose(crop[:, 2:], unpadded, atol=1e-6)
+
+    def test_top_edge_pads_above_the_data(self) -> None:
+        crop = self._crop((5.0, 1.0), pad_to_size=True, pad_color=(0.0, 0.0, 1.0))
+
+        self.assertEqual(crop.shape, (6, 6, 3))
+        np.testing.assert_allclose(crop[:2, :], np.broadcast_to([0.0, 0.0, 1.0], (2, 6, 3)))
+        np.testing.assert_allclose(crop[2:, :], self._crop((5.0, 1.0)), atol=1e-6)
+
+    def test_bottom_right_edges_pad_after_the_data(self) -> None:
+        crop = self._crop((9.0, 9.0), pad_to_size=True, pad_color=(0.0, 0.0, 1.0))
+
+        self.assertEqual(crop.shape, (6, 6, 3))
+        # Data occupies rows/cols 0..3 (x,y in 6..9); the trailing 2 are padded.
+        np.testing.assert_allclose(crop[:4, :4], self._crop((9.0, 9.0)), atol=1e-6)
+        np.testing.assert_allclose(crop[4:, :], np.broadcast_to([0.0, 0.0, 1.0], (2, 6, 3)))
+        np.testing.assert_allclose(crop[:, 4:], np.broadcast_to([0.0, 0.0, 1.0], (6, 2, 3)))
+
+    def test_corner_crop_pads_two_sides(self) -> None:
+        crop = self._crop((1.0, 1.0), pad_to_size=True, pad_color=(0.0, 0.0, 1.0))
+
+        self.assertEqual(crop.shape, (6, 6, 3))
+        np.testing.assert_allclose(crop[:2, :], np.broadcast_to([0.0, 0.0, 1.0], (2, 6, 3)))
+        np.testing.assert_allclose(crop[:, :2], np.broadcast_to([0.0, 0.0, 1.0], (6, 2, 3)))
+        np.testing.assert_allclose(crop[2:, 2:], self._crop((1.0, 1.0)), atol=1e-6)
+
+    def test_interior_crop_is_unchanged_by_padding(self) -> None:
+        interior = self._crop((5.0, 5.0))
+        padded = self._crop((5.0, 5.0), pad_to_size=True, pad_color=(0.0, 0.0, 1.0))
+
+        self.assertEqual(padded.shape, (6, 6, 3))
+        np.testing.assert_allclose(padded, interior, atol=1e-6)
+
+    def test_padding_respects_downsample_factor(self) -> None:
+        crop = self._crop((1.0, 5.0), size_px=6, downsample_factor=2, pad_to_size=True)
+
+        # ceil(6 / 2) in both axes, so tiles stay square at any downsample factor.
+        self.assertEqual(crop.shape, (3, 3, 3))
+
+    def test_all_edges_yield_the_same_tile_size(self) -> None:
+        centers = [(1.0, 1.0), (5.0, 1.0), (9.0, 1.0), (1.0, 5.0), (5.0, 5.0), (9.0, 9.0)]
+        shapes = {self._crop(c, pad_to_size=True).shape for c in centers}
+        self.assertEqual(shapes, {(6, 6, 3)})
+
+
 if __name__ == "__main__":
     unittest.main()

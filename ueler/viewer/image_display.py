@@ -13,6 +13,7 @@ except Exception:  # pragma: no cover - handled in update_channel_legend
     VPacker = None
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
 from matplotlib.colors import to_rgb
+from ueler.constants import DOWNSAMPLE_MAX_DIMENSION
 from ueler.image_utils import (
     calculate_downsample_factor,
     generate_edges,
@@ -233,6 +234,12 @@ class ImageDisplay:
 
     @update_status_bar
     def on_draw(self, event):
+        # ``main_viewer`` is attached by ImageMaskViewer after construction, but a
+        # draw event can already fire before that (any draw_idle() during setup is
+        # processed synchronously by non-interactive backends).
+        if getattr(self, "main_viewer", None) is None:
+            return
+
         current_center_x = (self.ax.get_xlim()[0] + self.ax.get_xlim()[1]) / 2
         current_center_y = (self.ax.get_ylim()[0] + self.ax.get_ylim()[1]) / 2
 
@@ -264,7 +271,10 @@ class ImageDisplay:
             range_width_y = self.ax.get_ylim()[1] - self.ax.get_ylim()[0]
 
             new_downsample_factor = calculate_downsample_factor(
-                np.abs(range_width_x), np.abs(range_width_y), not self.main_viewer.ui_component.enable_downsample_checkbox.value
+                np.abs(range_width_x),
+                np.abs(range_width_y),
+                not self.main_viewer.ui_component.enable_downsample_checkbox.value,
+                max_dimension=DOWNSAMPLE_MAX_DIMENSION,
             )
         else:
             new_downsample_factor = 8
@@ -385,13 +395,29 @@ class ImageDisplay:
                 self.selected_masks_label.discard(selection)
             else:
                 self.selected_masks_label.add(selection)
+            self._forget_linked_selection()
             self.update_patches(do_not_reset=multi_select)
             self.main_viewer.inform_plugins("on_selection_change")
         elif event.button in {MouseButton.RIGHT, 3}:  # Right click fallback to legacy value
             self.clear_patches()
 
+    def _forget_linked_selection(self):
+        """Drop the viewer's memory of the plot-driven cell selection (#119).
+
+        Called whenever the highlight is replaced by something that is not a
+        linked-plot selection — a click, a lasso, a cutoff/cluster
+        ``highlight_cells``, or an outright clear.  Those are either spatial or
+        recomputed per FOV, so a stale plot selection must not be resurrected on
+        the next FOV switch.  ``sync_mask_highlights_from_selection`` re-arms the
+        record straight after its own ``set_mask_ids`` call.
+        """
+        viewer = getattr(self, "main_viewer", None)
+        if viewer is not None:
+            viewer.linked_selection_indices = None
+
     def clear_patches(self):
         self.selected_masks_label.clear()
+        self._forget_linked_selection()
         self.update_patches()
         self.main_viewer.inform_plugins("on_selection_change")
 
@@ -511,6 +537,13 @@ class ImageDisplay:
             fov_mask_pairs (list, optional): Explicit list of (fov_name, mask_id) tuples.
                 Used in map mode where multiple FOVs may be visible at once.
         """
+        # This call replaces the whole highlight, so whatever plot selection was
+        # remembered for the next FOV switch no longer describes what is on screen
+        # (#119).  ``sync_mask_highlights_from_selection`` re-arms it immediately
+        # after; the cutoff/cluster ``highlight_cells`` callers do not, and are
+        # recomputed per FOV anyway.
+        self._forget_linked_selection()
+
         # if mask_ids is empty and no explicit pairs given, clear all selections
         if not mask_ids and not fov_mask_pairs:
             self.selected_masks_label.clear()
@@ -757,6 +790,7 @@ class ImageDisplay:
             new_selections = set()
 
         self.selected_masks_label.update(new_selections)
+        self._forget_linked_selection()
         self.update_patches()
         self.main_viewer.inform_plugins("on_selection_change")
 

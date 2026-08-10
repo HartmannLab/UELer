@@ -26,6 +26,24 @@ _DEFAULT_SELECTED_COLOR = (1, 0, 0, 1)
 _DEFAULT_POINT_COLOR = (0.2, 0.4, 0.8, 0.85)
 
 
+def _padded_domain(values, fraction: float = 0.05) -> Tuple[float, float]:
+    """Return a ``(lo, hi)`` axis domain padded by ``fraction`` of the data range.
+
+    jscatter otherwise frames the view on the raw data min/max, so points at the
+    extremes are drawn on the very canvas edge and their marker radius spills past
+    it (cropping, #118). Padding the domain keeps every point inside the view.
+    Falls back to a small symmetric pad for empty / all-equal / non-finite data.
+    """
+    arr = np.asarray(values, dtype="float64")
+    arr = arr[np.isfinite(arr)]
+    if arr.size == 0:
+        return (-1.0, 1.0)
+    lo, hi = float(arr.min()), float(arr.max())
+    span = hi - lo
+    pad = span * fraction if span > 0 else max(abs(hi) * fraction, 1.0)
+    return (lo - pad, hi + pad)
+
+
 def _normalize_indices(values: Iterable[Union[int, str, np.integer]]) -> Set[Union[int, str]]:
     """Convert incoming selection ids to hashable scalars."""
     normalized: Set[Union[int, str]] = set()
@@ -97,6 +115,12 @@ class ScatterPlotWidget:
             y=y,
             data=self._data,
             data_use_index=True,
+            # Pad the x/y domains at construction so edge points are never
+            # clipped (#118) and the axis scale domain is set before the first
+            # render (setting the scale post-construction re-normalizes the
+            # points without re-fitting the view, #118 reply).
+            x_scale=_padded_domain(self._data[x]),
+            y_scale=_padded_domain(self._data[y]),
         )
         self._scatter.axes(axes=True, grid=True, labels=[x, y])
         self._scatter.height(self._height)
@@ -113,8 +137,10 @@ class ScatterPlotWidget:
         # a fresh widget has ``layout.height = None`` and self-sizes from its
         # ``height`` trait). Pinning it to the plot height clips both axes — for
         # single-pair plots as well as the matrix (#113 reply). Width only.
-        self._jwidget.layout = Layout(width="100%")
         self._jwidget.mouse_mode = "panZoom"
+        # Start bound to the container ('auto'); the multi-pair matrix switches
+        # each plot to an explicit pixel width via ``set_canvas_width`` (#118).
+        self.set_canvas_width("auto")
 
         self._selection_handler = self._create_selection_handler()
         self._hover_handler = self._create_hover_handler()
@@ -166,6 +192,30 @@ class ScatterPlotWidget:
                 callback(hovered)
 
         return _handler
+
+    def set_canvas_width(self, width: Union[int, str]) -> None:
+        """Set the plot width in pixels, or ``"auto"`` to bind to the container.
+
+        In the multi-pair footer matrix jscatter's ``"auto"`` width relies on a
+        frontend ``ResizeObserver`` that mis-measured the (initially hidden /
+        not-yet-laid-out) grid cell: the canvas rendered too narrow, leaving a
+        blank strip and hiding the right-hand y-axis ticks/labels until the user
+        clicked "reset view". An explicit pixel width removes that measurement
+        entirely, so every plot renders correctly framed on the first render
+        without any reset (#118 reply). Single-pair plots keep ``"auto"`` (they
+        live in the always-visible side panel, where measurement is reliable).
+        """
+        if width == "auto":
+            self._scatter.width("auto")
+            self._jwidget.layout = Layout(width="100%")
+        else:
+            self._scatter.width(int(width))
+            # Do NOT pin the DOM width to the plot width (mirrors the height note
+            # above): jscatter draws the right-hand y-axis ticks/label *outside*
+            # the plot canvas, so the widget must be free to self-size wider than
+            # the plot — pinning it re-clips the axis. The ``width`` trait sizes
+            # the WebGL plot area; the DOM element self-sizes around it.
+            self._jwidget.layout = Layout()
 
     def _emit_selection(self, indices: Set[Union[int, str]], origin: str) -> None:
         for callback in self._selection_callbacks:

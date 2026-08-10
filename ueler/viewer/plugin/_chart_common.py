@@ -19,13 +19,15 @@ import pandas as pd
 
 import ipywidgets as _ipywidgets
 
+from ueler.cell_table import categorical_columns
+from ueler.viewer.plugin.channel_picker_widget import build_channel_picker
+
 Button = getattr(_ipywidgets, "Button")
 Checkbox = getattr(_ipywidgets, "Checkbox")
 Dropdown = getattr(_ipywidgets, "Dropdown")
 HBox = getattr(_ipywidgets, "HBox")
 Layout = getattr(_ipywidgets, "Layout")
 SelectMultiple = getattr(_ipywidgets, "SelectMultiple")
-TagsInput = getattr(_ipywidgets, "TagsInput", None)
 VBox = getattr(_ipywidgets, "VBox")
 
 _logger = logging.getLogger(__name__)
@@ -65,11 +67,17 @@ def prepare_dataframe(
 
 def build_subset_controls(viewer):
     """Create the ``(subset_on_dropdown, subset_selector, impose_fov_checkbox)`` widgets."""
+    # ``category``/``string`` columns are what an ``.h5ad`` round-trip produces for
+    # string obs columns (#123); without ``categorical_columns`` they would be
+    # missing from the subset options even though they are exactly the columns
+    # users want to subset on.
+    grouping = set(categorical_columns(viewer.cell_table))
     subset_columns = [
         col
         for col in viewer.cell_table.columns
         if pd.api.types.is_numeric_dtype(viewer.cell_table[col])
         or pd.api.types.is_object_dtype(viewer.cell_table[col])
+        or col in grouping
     ]
     subset_on_dropdown = Dropdown(
         options=subset_columns,
@@ -122,6 +130,14 @@ def sync_mask_highlights_from_selection(
 
     Works in both single-FOV and map mode.  Extracted verbatim from the previous
     ``ChartDisplay._sync_mask_highlights_from_selection``.
+
+    In single-FOV mode the projection is lossy on purpose — only cells in the
+    active FOV can be outlined — so *indices* is also recorded on the viewer as
+    ``linked_selection_indices``.  That FOV-independent record is what
+    ``ImageMaskViewer._reapply_selection_highlights`` re-projects after a FOV
+    switch (#119).  It is written *after* ``set_mask_ids``, which clears it, so
+    the cutoff/cluster ``highlight_cells`` methods that call ``set_mask_ids``
+    directly take the highlight over cleanly (last writer wins).
     """
     try:
         image_display = getattr(viewer, "image_display", None)
@@ -161,6 +177,9 @@ def sync_mask_highlights_from_selection(
             image_display.set_mask_ids(
                 mask_name=mask_key, mask_ids=[], fov_mask_pairs=fov_mask_pairs
             )
+
+        # Remember the selection in the form that survives a FOV change (#119).
+        viewer.linked_selection_indices = set(valid_indices)
     except Exception:
         if getattr(viewer, "_debug", False):
             import traceback
@@ -176,6 +195,26 @@ def normalize_indices(indices: Iterable[Union[int, str]]) -> Set[Union[int, str]
 # ----------------------------------------------------------------------------
 # Shared channel selector (issue #113)
 # ----------------------------------------------------------------------------
+def marker_first(viewer, columns: Sequence[str]) -> List[str]:
+    """Reorder *columns* so AnnData marker columns come first (#123).
+
+    For an AnnData-backed cell table the expression columns (``var_names``) are
+    the ones users actually plot, but they sort after the ``obs`` metadata by
+    construction, which buries them under ``label``/``area``/``X``/``Y`` in the
+    picker's scrollable list.  Membership is untouched — this is ordering only —
+    and it is a no-op for a plain DataFrame table.
+    """
+    provenance = getattr(viewer, "cell_table_columns", None)
+    if not provenance:
+        return list(columns)
+    markers = set(provenance.get("var", ()))
+    if not markers:
+        return list(columns)
+    return [col for col in columns if col in markers] + [
+        col for col in columns if col not in markers
+    ]
+
+
 def numeric_columns(viewer) -> List[str]:
     """Return the numeric columns of the cell table — the plottable channels.
 
@@ -183,27 +222,29 @@ def numeric_columns(viewer) -> List[str]:
     offer an identical set of options.
     """
     cell_table = viewer.cell_table
-    return [
-        col
-        for col in cell_table.columns
-        if pd.api.types.is_numeric_dtype(cell_table[col])
-    ]
+    return marker_first(
+        viewer,
+        [
+            col
+            for col in cell_table.columns
+            if pd.api.types.is_numeric_dtype(cell_table[col])
+        ],
+    )
 
 
 @dataclass
 class ChannelSelector:
     """Bundle of widgets making up a left-panel-consistent channel picker.
 
-    * ``tags`` – the channel widget: an ipywidgets ``TagsInput`` (same UX as the
-      left-panel channel selector) whose ``.value`` is an ordered tuple/list of
-      selected channels; falls back to ``SelectMultiple`` on very old ipywidgets.
+    * ``tags`` – the channel widget: a ``ChannelPickerWidget`` (same UX as the
+      left-panel channel selector) whose ``.value`` is an ordered list of selected
+      channels and whose ``.allowed_tags`` holds the available ones (#125).
     * ``marker_set_dropdown`` – lists pre-defined marker-set names for *loading*
       (a placeholder maps to ``None``); defining new sets stays in the left panel.
     * ``load_button`` – loads the chosen set's channels into ``tags``.
     * ``box`` – a composed ``VBox`` for direct placement in a plugin layout.
     * ``available`` – the numeric columns; used to filter loaded marker sets
-      (and keeps behaviour testable under the headless widget stub, which does
-      not populate ``TagsInput.allowed_tags``).
+      (and keeps behaviour testable independently of the widget layer).
     """
 
     tags: object
@@ -218,25 +259,24 @@ def build_channel_selector(
 ) -> ChannelSelector:
     """Create a channel picker consistent with the left-panel channel selector.
 
-    Mirrors ``ui_components.uicomponents.channel_selector`` (a ``TagsInput``) and
-    adds a marker-set *loading* control.  It intentionally does **not** offer
-    save/update/delete — defining marker sets remains the left panel's job.
+    Mirrors ``ui_components.uicomponents.channel_selector`` (a
+    ``ChannelPickerWidget``) and adds a marker-set *loading* control.  It
+    intentionally does **not** offer save/update/delete — defining marker sets
+    remains the left panel's job.
+
+    The picker is the searchable, always-scrollable widget introduced for #125:
+    long marker/feature lists are fully browsable instead of being cut off by the
+    browser's native ``<datalist>`` popup.  ``height`` is kept for call-site
+    compatibility only — the picker sizes its own scrollable option list.
     """
     cols = numeric_columns(viewer)
-    if TagsInput is not None:
-        tags = TagsInput(
-            allowed_tags=cols,
-            value=[],
-            description=description,
-            allow_duplicates=False,
-            layout=Layout(width="100%"),
-        )
-    else:  # pragma: no cover - only on ipywidgets without TagsInput
-        tags = SelectMultiple(
-            options=cols,
-            description=description,
-            layout=Layout(width="100%", height=height),
-        )
+    tags = build_channel_picker(
+        allowed_tags=cols,
+        value=[],
+        description=description,
+        placeholder="Type to filter markers...",
+        layout=Layout(width="100%"),
+    )
     marker_set_dropdown = Dropdown(
         options=[(_NO_MARKER_SET, None)],
         value=None,

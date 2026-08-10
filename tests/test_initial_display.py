@@ -453,5 +453,49 @@ class TestDisplayBackstopRender(unittest.TestCase):
         )
 
 
+class TestInitialFactorHonorsDownsampleCheckbox(unittest.TestCase):
+    """Reply to #116: the initial downsample factor must honor the Downsample
+    checkbox that is restored from saved widget state, matching the zoom
+    (on_draw) path.  Previously ``select_downsample_factor`` ran at init before
+    the checkbox existed and always downsampled by image size, so a large FOV
+    was downsampled on load even when the user had turned Downsample off.
+    """
+
+    def _build_factor(self, *, downsample_on, size_based_factor):
+        def cw(viewer):
+            viewer.ui_component = _StubUI()
+            viewer.ui_component.enable_downsample_checkbox.value = downsample_on
+
+        patches = _viewer_patches(create_widgets_side_effect=cw) + [
+            # Simulate a FOV whose size would downsample by `size_based_factor`.
+            patch(
+                "ueler.viewer.main_viewer.select_downsample_factor",
+                lambda *_a, **_kw: size_based_factor,
+            ),
+            patch.object(ImageMaskViewer, "update_display", _noop),
+            patch.object(ImageMaskViewer, "on_image_change", _noop),
+        ]
+        with TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            _make_temp_fov_dir(base)
+            with contextlib.ExitStack() as stack:
+                for p in patches:
+                    stack.enter_context(p)
+                viewer = ImageMaskViewer(str(base))
+            return viewer.current_downsample_factor
+
+    def test_init_native_resolution_when_downsample_off(self):
+        # Downsample off → factor 1 even though the FOV size would give 4.
+        self.assertEqual(
+            self._build_factor(downsample_on=False, size_based_factor=4), 1
+        )
+
+    def test_init_downsamples_when_downsample_on(self):
+        # Downsample on → the size-based factor is used.
+        self.assertEqual(
+            self._build_factor(downsample_on=True, size_based_factor=4), 4
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

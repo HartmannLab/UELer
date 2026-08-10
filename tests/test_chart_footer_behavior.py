@@ -514,47 +514,33 @@ class ChartDisplayFooterTests(unittest.TestCase):
 
         self.assertEqual(gallery.received, multi)
 
-    def test_footer_layout_toggles_with_scatter_count(self):
-        # Initial state: vertical layout retained
-        self.assertEqual(self.chart._section_location, "vertical")
-        self.assertEqual(
-            list(self.chart.ui.children),
-            [self.chart.controls_section, self.chart.plot_section],
-        )
-        self.assertEqual(self.viewer.refresh_calls, 0)
+    def test_scatter_plugin_is_permanently_wide_footer(self):
+        # The scatter plugin lives permanently in the wide footer (#121): it is
+        # flagged footer-only and always exposes a footer layout regardless of
+        # how many scatters are active.
+        self.assertTrue(self.chart.footer_only)
 
-        # One scatter: stays vertical, no footer refresh
+        def _assert_footer_layout():
+            layout = self.chart.wide_panel_layout()
+            self.assertIsNotNone(layout)
+            self.assertEqual(layout["title"], self.chart.displayed_name)
+            self.assertIs(layout["control"], self.chart.controls_section)
+            self.assertIs(layout["content"], self.chart.plot_section)
+
+        # Zero scatters: still footer.
+        _assert_footer_layout()
+
+        # One scatter: still footer (previously fell back to the side panel).
         self.chart._scatter_views["s1"] = _DummyScatter("s1")
-        self.chart._sync_panel_location()
-        self.assertEqual(self.chart._section_location, "vertical")
-        self.assertEqual(self.viewer.refresh_calls, 0)
+        _assert_footer_layout()
 
-        # Two scatters: switch to footer with refresh
+        # Two scatters: still footer.
         self.chart._scatter_views["s2"] = _DummyScatter("s2")
-        self.chart._sync_panel_location()
-        self.assertEqual(self.chart._section_location, "horizontal")
-        self.assertEqual(self.viewer.refresh_calls, 1)
-        self.assertEqual(list(self.chart.ui.children), [self.chart._wide_notice])
-        layout = self.chart.wide_panel_layout()
-        self.assertIsNotNone(layout)
-        self.assertIs(layout["control"], self.chart.controls_section)
-        self.assertIs(layout["content"], self.chart.plot_section)
+        _assert_footer_layout()
 
-        # Subsequent sync does not double refresh when already horizontal
-        self.chart._sync_panel_location()
-        self.assertEqual(self.viewer.refresh_calls, 1)
-
-        # Drop back to a single scatter: returns to vertical and refreshes
+        # Back to one scatter: still footer (no return to the side panel).
         self.chart._scatter_views.pop("s2")
-        self.chart._sync_panel_location()
-        self.assertEqual(self.chart._section_location, "vertical")
-        self.assertEqual(self.viewer.refresh_calls, 2)
-        self.assertEqual(
-            list(self.chart.ui.children),
-            [self.chart.controls_section, self.chart.plot_section],
-        )
-        layout = self.chart.wide_panel_layout()
-        self.assertIsNone(layout)
+        _assert_footer_layout()
 
     def test_compose_disables_selection_sync(self):
         scatter_one = _ComposeStubScatter("s1")
@@ -652,20 +638,29 @@ class MultiPairScatterTests(unittest.TestCase):
         # A plot cell wraps a scatter widget; a blank (lower-triangle) cell is empty.
         return len(getattr(cell, "children", ())) > 0
 
+    @staticmethod
+    def _grid_rows(grid, cols):
+        # The GridBox holds a flat, row-major list of cells; chunk it into rows.
+        cells = list(grid.children)
+        return [cells[i:i + cols] for i in range(0, len(cells), cols)]
+
     def test_plot_all_pairs_renders_triangular_rows(self):
         chart = self._make_chart(["a", "b", "c"])
         chart.ui_component.multipair_channels.value = ("a", "b", "c")
         chart.plot_all_pairs(None)
 
         grid = chart._plot_host.children[0]
-        rows = grid.children
-        # N-1 == 2 rows for 3 channels, each with N-1 == 2 cells.
+        # The matrix is a CSS-grid GridBox (#118): cells are a flat, row-major
+        # list placed into N-1 == 2 equal `1fr` columns.
+        cols = grid.layout.grid_template_columns.split()
+        self.assertEqual(len(cols), 2)
+        rows = self._grid_rows(grid, cols=2)
+        # 2 rows for 3 channels, each with N-1 == 2 cells.
         self.assertEqual(len(rows), 2)
-        self.assertTrue(all(len(row.children) == 2 for row in rows))
         # Row 0 (channel a): both cells are plots (a,b) and (a,c).
-        self.assertEqual([self._is_plot_cell(c) for c in rows[0].children], [True, True])
+        self.assertEqual([self._is_plot_cell(c) for c in rows[0]], [True, True])
         # Row 1 (channel b): a leading blank, then the (b,c) plot.
-        self.assertEqual([self._is_plot_cell(c) for c in rows[1].children], [False, True])
+        self.assertEqual([self._is_plot_cell(c) for c in rows[1]], [False, True])
 
     def test_single_pair_after_matrix_goes_to_new_row(self):
         chart = self._make_chart(["a", "b", "c", "d"])
@@ -679,10 +674,10 @@ class MultiPairScatterTests(unittest.TestCase):
         chart.plot_chart(None)
 
         grid = chart._plot_host.children[0]
-        rows = grid.children
+        rows = self._grid_rows(grid, cols=2)
         # Matrix keeps its 2 rows; the extra single-pair view lands on a 3rd row.
         self.assertEqual(len(rows), 3)
-        self.assertTrue(self._is_plot_cell(rows[2].children[0]))
+        self.assertTrue(self._is_plot_cell(rows[2][0]))
 
     def test_removing_matrix_view_falls_back_to_compose(self):
         chart = self._make_chart(["a", "b", "c"])
@@ -707,28 +702,32 @@ class HeatmapFooterPersistenceTests(unittest.TestCase):
         viewer.refresh_calls = 0
         heatmap.restore_footer_canvas_calls = 0
 
+        # The chart is permanently a footer entry (#121), so both the heatmap and
+        # the chart occupy footer tabs from the first refresh.
         viewer.refresh_bottom_panel()
         self.assertIs(viewer.BottomPlots.heatmap_output, heatmap)
         self.assertIn(heatmap.plot_output, getattr(heatmap.plot_section, "children", ()))
         self.assertGreaterEqual(heatmap.restore_footer_canvas_calls, 1)
-        self.assertEqual(len(viewer.wide_plugin_tab.children), 1)
+        self.assertEqual(len(viewer.wide_plugin_tab.children), 2)
 
+        # Adding scatters keeps both tabs and preserves the heatmap pane.
         chart._scatter_views["s1"] = _DummyScatter("s1")
         chart._scatter_views["s2"] = _DummyScatter("s2")
-        chart._sync_panel_location()
+        viewer.refresh_bottom_panel()
 
         self.assertIs(viewer.BottomPlots.heatmap_output, heatmap)
         self.assertIn(heatmap.plot_output, getattr(heatmap.plot_section, "children", ()))
         self.assertGreaterEqual(heatmap.restore_footer_canvas_calls, 2)
         self.assertEqual(len(viewer.wide_plugin_tab.children), 2)
 
+        # Removing a scatter still keeps both tabs — the chart never leaves the footer.
         chart._scatter_views.pop("s2")
-        chart._sync_panel_location()
+        viewer.refresh_bottom_panel()
 
         self.assertIs(viewer.BottomPlots.heatmap_output, heatmap)
         self.assertIn(heatmap.plot_output, getattr(heatmap.plot_section, "children", ()))
         self.assertGreaterEqual(heatmap.restore_footer_canvas_calls, 3)
-        self.assertEqual(len(viewer.wide_plugin_tab.children), 1)
+        self.assertEqual(len(viewer.wide_plugin_tab.children), 2)
 
 
 if __name__ == "__main__":  # pragma: no cover

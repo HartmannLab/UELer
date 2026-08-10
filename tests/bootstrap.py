@@ -716,6 +716,7 @@ def _build_ipywidgets_stub():
     # Map all widget types we rely on to the base ``Widget`` implementation.
     for name in [
         "Widget",
+        "BoundedFloatText",
         "BoundedIntText",
         "Button",
         "Box",
@@ -724,6 +725,7 @@ def _build_ipywidgets_stub():
         "Combobox",
         "Dropdown",
         "FloatSlider",
+        "FloatText",
         "GridBox",
         "HBox",
         "HTML",
@@ -1092,13 +1094,33 @@ def _ensure_skimage_stub() -> None:
     measure_module = types.ModuleType(f"{_SKIMAGE}.measure")
     draw_module = types.ModuleType(f"{_SKIMAGE}.draw")
 
-    def _find_boundaries(mask, *_args, **_kwargs):  # pragma: no cover - lightweight stub
+    def _find_boundaries(mask, connectivity=1, mode="thick", background=0):  # pragma: no cover - lightweight stub
+        """Faithful-enough stand-in for ``skimage.segmentation.find_boundaries``.
+
+        Returning all-zeros (the previous behaviour) silently turned every
+        boundary expectation in the rendering tests into a vacuous assertion.
+        """
+
         try:
             import numpy as _np  # type: ignore
-
-            return _np.zeros_like(mask, dtype=bool)
         except Exception:
             return mask
+
+        arr = _np.asarray(mask)
+        if arr.ndim != 2:
+            return _np.zeros(arr.shape, dtype=bool)
+
+        padded = _np.pad(arr, 1, mode="edge")
+        height, width = arr.shape
+        differs = _np.zeros(arr.shape, dtype=bool)
+        for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            differs |= padded[1 + dy:1 + dy + height, 1 + dx:1 + dx + width] != arr
+
+        if mode == "inner":
+            return differs & (arr != background)
+        if mode == "outer":
+            return differs & (arr == background)
+        return differs
 
     segmentation_module.find_boundaries = _find_boundaries  # type: ignore[attr-defined]
     segmentation_module.__bootstrap_stub__ = True  # type: ignore[attr-defined]
@@ -1326,6 +1348,7 @@ def _build_jscatter_stub() -> types.ModuleType:
             self.mouse_mode = None
             self._observers = {}
             self.buttons = ()
+            self.children = ()
 
         def observe(self, callback, names=None):
             names = tuple(names or ())
@@ -1338,11 +1361,13 @@ def _build_jscatter_stub() -> types.ModuleType:
     _SELECTION_SENTINEL = object()
 
     class Scatter:
-        def __init__(self, *, x, y, data, data_use_index=False):  # noqa: D401 - match real signature
+        def __init__(self, *, x, y, data, data_use_index=False, x_scale=None, y_scale=None):  # noqa: D401 - match real signature
             self._x = x
             self._y = y
             self._data = data
             self._data_use_index = data_use_index
+            self._x_scale = x_scale
+            self._y_scale = y_scale
             self._selection = []
             self._height = 0
             self._size = None
@@ -1353,6 +1378,25 @@ def _build_jscatter_stub() -> types.ModuleType:
 
         def axes(self, *args, **kwargs):  # pragma: no cover - simple stub
             return None
+
+        def x(self, x=None, scale=None, **kwargs):
+            if x is not None:
+                self._x = x
+            if scale is not None:
+                self._x_scale = scale
+            return self
+
+        def y(self, y=None, scale=None, **kwargs):
+            if y is not None:
+                self._y = y
+            if scale is not None:
+                self._y_scale = scale
+            return self
+
+        def width(self, value=None):
+            if value is not None:
+                self._width = value
+            return getattr(self, "_width", "auto")
 
         def height(self, value=None):
             if value is not None:
@@ -1392,7 +1436,12 @@ def _build_jscatter_stub() -> types.ModuleType:
 
         def show(self, buttons=None):
             self.widget.buttons = tuple(buttons or ())
-            return self.widget
+            # Mirror real jscatter's ``show()``, which returns a *container*
+            # widget wrapping the canvas (``VBox([HBox([buttons, plot])])``) —
+            # so callers can tell a plot cell (has children) from a blank cell.
+            wrapper = _WidgetStub()
+            wrapper.children = (self.widget,)
+            return wrapper
 
         def selection(self, values=_SELECTION_SENTINEL):
             if values is _SELECTION_SENTINEL:

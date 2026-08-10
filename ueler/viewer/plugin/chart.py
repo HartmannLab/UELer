@@ -19,6 +19,7 @@ Button = getattr(_ipywidgets, "Button")
 Checkbox = getattr(_ipywidgets, "Checkbox")
 Dropdown = getattr(_ipywidgets, "Dropdown")
 FloatSlider = getattr(_ipywidgets, "FloatSlider", getattr(_ipywidgets, "Widget"))
+GridBox = getattr(_ipywidgets, "GridBox", getattr(_ipywidgets, "Box"))
 HBox = getattr(_ipywidgets, "HBox")
 HTML = getattr(_ipywidgets, "HTML")
 Layout = getattr(_ipywidgets, "Layout")
@@ -40,6 +41,21 @@ from .scatter_widget import ScatterPlotWidget
 _SELECTION_NOTICE = (
     "<i>No scatter plots generated yet. Choose axes, then click <b>Plot</b>.</i>"
 )
+
+# The pairwise matrix is rendered the same way ``jscatter.compose`` renders its
+# grid (#118): equal ``1fr`` CSS-grid columns + plots left at ``width='auto'``, so
+# jscatter sizes its own SVG to fill each cell and lays out the axes (including the
+# right-hand y-axis label) *inside* that SVG. Pinning an explicit plot width was
+# tried and reverted — it made jscatter size the SVG to exactly plot+ticks and drew
+# the y-axis label at the SVG's right edge, where jscatter's own ``overflow:hidden``
+# clipped it (confirmed via DOM inspection). ``1fr`` columns give ``width='auto'`` a
+# *definite* cell to measure (the old flexbox cells collapsed, which is what caused
+# the mis-scaled render); the padded axis domain is set at construction in
+# ``scatter_widget`` so the framing is correct on the first render. Rows are a fixed
+# height (canvas + x-axis reserve) so nothing clips vertically.
+_SCATTER_CANVAS_HEIGHT_PX = 320
+_SCATTER_AXES_RESERVE_PX = 36
+_SCATTER_ROW_HEIGHT_PX = _SCATTER_CANVAS_HEIGHT_PX + _SCATTER_AXES_RESERVE_PX
 
 
 class ChartDisplay(PluginBase):
@@ -74,13 +90,9 @@ class ChartDisplay(PluginBase):
             children=[self._plot_placeholder], layout=Layout(width="100%", gap="8px")
         )
 
-        self._wide_notice = HTML(
-            value=(
-                "<b>Multiple scatter plots are active.</b> Controls and plots appear in the footer."
-            ),
-            layout=Layout(width="100%", padding="8px"),
-        )
-        self._section_location = "vertical"
+        # The scatter plugin lives permanently in the wide-footer panel (#121);
+        # it is not shown in the side accordion.
+        self.footer_only = True
 
         self.single_point_click_state = 0
         backend_env = os.environ.get("UELER_SCATTER_BACKEND")
@@ -267,7 +279,6 @@ class ChartDisplay(PluginBase):
 
         self._add_scatter_view(data, x_col, y_col, c_col)
         self._render_scatter_area()
-        self._sync_panel_location()
 
     @update_status_bar
     def plot_all_pairs(self, _button):
@@ -304,7 +315,6 @@ class ChartDisplay(PluginBase):
         if last_id is not None:
             self._update_scatter_controls(selected_id=last_id)
         self._render_scatter_area()
-        self._sync_panel_location()
 
     def _add_scatter_view(
         self, data: pd.DataFrame, x_col: str, y_col: str, c_col: str
@@ -467,6 +477,9 @@ class ChartDisplay(PluginBase):
             return
         if len(self._scatter_views) == 1:
             view = next(iter(self._scatter_views.values()))
+            # Single plot lives in the always-visible footer panel (#121), where
+            # the container width is reliable — bind to it (#118).
+            view.set_canvas_width("auto")
             self._plot_host.children = [view.widget()]
             return
         grid = self._triangular_grid()
@@ -489,12 +502,16 @@ class ChartDisplay(PluginBase):
     def _triangular_grid(self):
         """Lay the pairwise scatters out as an upper-triangular matrix (#113).
 
-        Built as a ``VBox`` of ``HBox`` rows (plain flexbox) rather than a
-        CSS-grid ``GridBox``: every row has exactly ``N-1`` equal-flex cells so
-        the columns line up, blank cells fill the lower triangle, and each cell
-        lets its scatter self-size (no fixed height, so axes are never clipped).
+        Built as a CSS-grid ``GridBox`` with ``N-1`` equal ``1fr`` columns — the
+        same layout ``jscatter.compose`` uses for the working single-pair plots.
+        The plots stay at ``width='auto'`` so jscatter sizes its own SVG to fill
+        the cell and draws the axes (incl. the right-hand y-axis label) inside it;
+        the ``1fr`` columns give ``width='auto'`` a definite cell to measure
+        (#118). Cells are laid out row-major: row ``i`` has ``i`` leading blanks
+        (lower triangle) then the plots for ``(i, j)``, ``j > i``; the CSS grid
+        places them left→right, top→bottom.
 
-        Returns the ``VBox`` when a full pairwise matrix for
+        Returns the ``GridBox`` when a full pairwise matrix for
         ``self._multipair_channels_last`` is present — with any extra
         (single-pair) views appended as new rows below it — or ``None`` when
         there is no active matrix to anchor the layout (callers then fall back
@@ -517,13 +534,12 @@ class ChartDisplay(PluginBase):
             for sid, view in self._scatter_views.items()
         }
 
-        rows = []
+        cells = []
         # Matrix rows: row i has i leading blanks, then plots for (i, j), j>i.
         for i in range(n - 1):
-            cells = [self._blank_cell() for _ in range(i)]
+            cells.extend(self._blank_cell() for _ in range(i))
             for j in range(i + 1, n):
                 cells.append(self._plot_cell(view_by_pair[(channels[i], channels[j])]))
-            rows.append(self._grid_row(cells))
 
         # Extra views (e.g. single-pair plots added after the matrix): append as
         # new full rows below, flowing left→right, padded with blanks to N-1.
@@ -534,29 +550,31 @@ class ChartDisplay(PluginBase):
         ]
         for start in range(0, len(extras), cols):
             chunk = extras[start:start + cols]
-            cells = [self._plot_cell(view) for view in chunk]
+            cells.extend(self._plot_cell(view) for view in chunk)
             cells.extend(self._blank_cell() for _ in range(cols - len(chunk)))
-            rows.append(self._grid_row(cells))
 
-        return VBox(children=rows, layout=Layout(width="100%", gap="8px"))
+        return GridBox(
+            children=cells,
+            layout=Layout(
+                width="100%",
+                grid_template_columns=" ".join(["1fr"] * cols),
+                grid_auto_rows=f"{_SCATTER_ROW_HEIGHT_PX}px",
+                grid_gap="8px",
+            ),
+        )
 
     @staticmethod
-    def _plot_cell(view) -> "Box":
-        return Box(
-            children=[view.widget()],
-            layout=Layout(flex="1 1 0%", min_width="0"),
-        )
+    def _plot_cell(view):
+        # Keep the plot at width='auto' (like jscatter.compose): the 1fr grid
+        # column gives it a definite cell to measure, and jscatter draws the
+        # right-hand y-axis label inside its own SVG rather than clipping it at a
+        # fixed-width edge (#118).
+        view.set_canvas_width("auto")
+        return view.widget()
 
     @staticmethod
     def _blank_cell() -> "Box":
-        return Box(children=[], layout=Layout(flex="1 1 0%", min_width="0"))
-
-    @staticmethod
-    def _grid_row(cells) -> "HBox":
-        return HBox(
-            children=cells,
-            layout=Layout(width="100%", gap="4px", align_items="stretch"),
-        )
+        return Box(children=[], layout=Layout())
 
     def _render_scatter_matplotlib(
         self, data: pd.DataFrame, x_col: str, y_col: str, c_col: Optional[str]
@@ -616,7 +634,6 @@ class ChartDisplay(PluginBase):
         scatter.dispose()
         self._update_scatter_controls()
         self._render_scatter_area()
-        self._sync_panel_location()
 
     def _clear_all_scatter_views(self, _button) -> None:
         for scatter in self._scatter_views.values():
@@ -626,7 +643,6 @@ class ChartDisplay(PluginBase):
         self._multipair_channels_last = []
         self._update_scatter_controls()
         self._render_scatter_area()
-        self._sync_panel_location()
         self.selected_indices.value = set()
 
     def _on_scatter_selector_change(self, change) -> None:
@@ -636,47 +652,15 @@ class ChartDisplay(PluginBase):
     # ------------------------------------------------------------------
     # Layout helpers
     # ------------------------------------------------------------------
-    def _has_multiple_scatter(self) -> bool:
-        return len(self._scatter_views) > 1
-
-    def _place_sections_vertical(self) -> None:
-        if self._section_location == "vertical":
-            return
-        self.ui.children = [self.controls_section, self.plot_section]
-        self._section_location = "vertical"
-
-    def _place_sections_horizontal(self) -> None:
-        if self._section_location == "horizontal":
-            return
-        self.ui.children = [self._wide_notice]
-        self._section_location = "horizontal"
-
-    def _sync_panel_location(self) -> bool:
-        _logger.debug("[chart] sync panel location: %s", self._section_location)
-        previous_location = self._section_location
-        if self._has_multiple_scatter():
-            self._place_sections_horizontal()
-        else:
-            self._place_sections_vertical()
-        layout_changed = previous_location != self._section_location
-        if (
-            layout_changed
-            and hasattr(self.main_viewer, "refresh_bottom_panel")
-        ):
-            _logger.debug("[chart] refreshing bottom panel due to layout change")
-            self.main_viewer.refresh_bottom_panel()
-        return layout_changed
-
     def wide_panel_layout(self):
-        if self._has_multiple_scatter():
-            self._place_sections_horizontal()
-            return {
-                "title": self.displayed_name,
-                "control": self.controls_section,
-                "content": self.plot_section,
-            }
-        self._place_sections_vertical()
-        return None
+        # The scatter plugin is permanently allocated to the wide-footer panel
+        # (#121): always expose its controls + plots there, regardless of how
+        # many scatters are active.
+        return {
+            "title": self.displayed_name,
+            "control": self.controls_section,
+            "content": self.plot_section,
+        }
 
     def on_marker_sets_changed(self):
         """Keep the marker-set dropdown in sync with the left panel (#113)."""
@@ -688,11 +672,8 @@ class ChartDisplay(PluginBase):
         super().after_all_plugins_loaded()
         # Marker sets are restored from widget_states.json after plugin __init__.
         self.on_marker_sets_changed()
-        layout_changed = self._sync_panel_location()
-        if (
-            not layout_changed
-            and hasattr(self.main_viewer, "refresh_bottom_panel")
-        ):
+        # Populate the footer panel on load (#121).
+        if hasattr(self.main_viewer, "refresh_bottom_panel"):
             self.main_viewer.refresh_bottom_panel()
 
     # ------------------------------------------------------------------

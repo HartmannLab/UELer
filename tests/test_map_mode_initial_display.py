@@ -421,6 +421,8 @@ class TestOnDrawViewportSizeTracking(unittest.TestCase):
         # instead of constructing a full ImageDisplay (which needs matplotlib).
         viewer = SimpleNamespace(
             initialized=True,
+            # on_draw only re-renders once the widget is on screen.
+            _widget_displayed=True,
             current_downsample_factor=1,
             on_downsample_factor_changed=lambda *_a, **_kw: None,
             update_display=MagicMock(),
@@ -625,6 +627,8 @@ class TestMapNeedsInitialRenderFlag(unittest.TestCase):
         update_calls: list = []
         viewer = SimpleNamespace(
             initialized=True,
+            # on_draw only re-renders once the widget is on screen.
+            _widget_displayed=True,
             current_downsample_factor=1,
             on_downsample_factor_changed=lambda *_a, **_kw: None,
             update_display=lambda *_a, **_kw: update_calls.append("update_display"),

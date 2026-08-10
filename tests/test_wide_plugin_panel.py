@@ -263,16 +263,24 @@ class WidePanelHelperTests(unittest.TestCase):
         self.assertEqual(getattr(layout, "min_width", None), "0")
         self.assertEqual(getattr(layout, "box_sizing", None), "border-box")
 
-    def test_build_wide_plugin_pane_wraps_control_and_content(self):
+    def test_build_wide_plugin_pane_stacks_control_above_content(self):
         control = widgets.VBox()
         content = widgets.VBox()
 
         pane = build_wide_plugin_pane(control, content)
 
+        # Controls stack on top of the content (#118) so the content spans the
+        # full width below instead of sharing a row with a fixed control column.
         self.assertEqual(len(pane.children), 2)
-        left_column, right_column = pane.children
-        self.assertIn(control, left_column.children)
-        self.assertIn(content, right_column.children)
+        control_row, content_box = pane.children
+        # The control box keeps its ~6in width, left-aligned inside a
+        # full-width parent row; the control is one level deeper than before.
+        self.assertEqual(len(control_row.children), 1)
+        control_box = control_row.children[0]
+        self.assertIn(control, control_box.children)
+        self.assertEqual(getattr(control_box.layout, "width", None), "6in")
+        self.assertEqual(getattr(control_row.layout, "width", None), "100%")
+        self.assertIn(content, content_box.children)
         self.assertEqual(getattr(pane.layout, "max_width", None), "99%")
         self.assertEqual(getattr(pane.layout, "min_width", None), "0")
         self.assertEqual(getattr(pane.layout, "box_sizing", None), "border-box")

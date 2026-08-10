@@ -21,7 +21,8 @@ from ipywidgets import IntText, Output, Dropdown, FloatSlider, Checkbox, Button,
 from IPython.display import display
 import pandas as pd
 # Import modules
-from ueler.constants import PREDEFINED_COLORS, DOWNSAMPLE_FACTORS, UICOMPNENTS_SKIP
+from ueler import cell_table as cell_table_utils
+from ueler.constants import PREDEFINED_COLORS, DOWNSAMPLE_FACTORS, DOWNSAMPLE_MAX_DIMENSION, UICOMPNENTS_SKIP
 from ueler.data_loader import (
     load_annotations_for_fov,
     load_channel_struct_fov,
@@ -283,6 +284,22 @@ class ImageMaskViewer:
 
         # Initialize the cell table
         self.cell_table = None
+        # When the table came from an AnnData object (#123) the object itself is
+        # kept here and ``cell_table`` holds a DataFrame view of it;
+        # ``cell_table_columns`` records which columns came from obs/var/obsm.
+        # Both stay ``None`` for a plain DataFrame or CSV table.
+        self.cell_table_adata = None
+        self.cell_table_columns = None
+
+        # Cell-table row indices that the linked plots (scatter, histogram,
+        # chart-heatmap) last pushed to the main viewer as a mask highlight.
+        # ``image_display.selected_masks_label`` only ever holds ``(fov, mask,
+        # mask_id)`` triples for the active FOV, so this FOV-independent record is
+        # what lets the highlight be re-projected onto the next FOV instead of
+        # vanishing on a switch (#119).  ``None`` means the highlight currently on
+        # screen did not come from a plot selection (a click, a lasso, or a
+        # cutoff/cluster highlight), in which case there is nothing to re-project.
+        self.linked_selection_indices = None
 
         # Map mode scaffolding (feature-flagged)
         self._map_mode_enabled = _MAP_MODE_FLAG
@@ -475,7 +492,7 @@ class ImageMaskViewer:
         initial_factor = select_downsample_factor(
             self.width,
             self.height,
-            max_dimension=512,
+            max_dimension=DOWNSAMPLE_MAX_DIMENSION,
             allowed_factors=self.downsample_factors,
         )
         self.on_downsample_factor_changed(initial_factor)
@@ -577,11 +594,31 @@ class ImageMaskViewer:
             self.load_widget_states(os.path.join(self.base_folder, ".UELer", 'widget_states.json'))
         finally:
             self._suspend_display_updates = False
+        # Reconcile the initial downsample factor now that the saved
+        # "Downsample" preference has been restored.  select_downsample_factor
+        # runs at init before create_widgets, so it cannot see the checkbox and
+        # always downsamples by image size; without this the viewer downsamples
+        # on load even when Downsample is off (reply to #116).  When Downsample
+        # is on the reconciled value matches the size-based factor; when off the
+        # viewer starts at native resolution, matching the zoom (on_draw) path.
+        enable_ds = getattr(self.ui_component, "enable_downsample_checkbox", None)
+        if enable_ds is not None and not getattr(enable_ds, "value", True):
+            reconciled_factor = 1
+        else:
+            reconciled_factor = select_downsample_factor(
+                self.width,
+                self.height,
+                max_dimension=DOWNSAMPLE_MAX_DIMENSION,
+                allowed_factors=self.downsample_factors,
+            )
+        self.on_downsample_factor_changed(reconciled_factor)
         # One render after widget-state restoration so the display reflects
         # the restored channel/contrast/FOV selections (fixes #84).
         self.update_display(self.current_downsample_factor)
         if self._debug:
-            logger.debug("[INIT DEBUG] load_widget_states done")
+            logger.debug(
+                f"[INIT DEBUG] load_widget_states done; reconciled downsample factor={self.current_downsample_factor}"
+            )
 
         # Setup attribute observers
         if self._debug:
@@ -1855,7 +1892,8 @@ class ImageMaskViewer:
             if section_view.size == 0:
                 continue
 
-            show_borders_on_filled = painter.get_show_borders_on_filled() if painter is not None else False
+            show_borders = painter.get_show_borders() if painter is not None else True
+            border_alpha = painter.get_border_alpha() if painter is not None else 1.0
 
             rows = min(section_view.shape[0], mask_region_ds.shape[0])
             cols = min(section_view.shape[1], mask_region_ds.shape[1])
@@ -1872,7 +1910,8 @@ class ImageMaskViewer:
                 border_color_map=border_color_map_for_fov,
                 mode_map=mode_map_for_fov,
                 opacity_map=opacity_map_for_fov,
-                show_borders_on_filled=show_borders_on_filled,
+                show_borders=show_borders,
+                border_alpha=border_alpha,
             )
             if np.any(painted != section_view[:rows, :cols]):
                 section_view[:rows, :cols] = painted
@@ -2294,29 +2333,7 @@ class ImageMaskViewer:
         self.update_controls(None)
 
         if self.initialized:
-            if self.SidePlots:
-                histogram_plugin = getattr(self.SidePlots, "histogram_output", None)
-                heatmap_plugin = getattr(self.SidePlots, "heatmap_output", None)
-                heatmap_checkbox = (
-                    getattr(getattr(heatmap_plugin, "ui_component", None), "main_viewer_checkbox", None)
-                    if heatmap_plugin is not None
-                    else None
-                )
-                heatmap_linked = bool(heatmap_checkbox and heatmap_checkbox.value)
-
-                if not heatmap_linked:
-                    self.image_display.clear_patches()
-                    if self._grid_display is not None:
-                        self._grid_display.clear_patches()
-
-                # Re-apply the histogram cutoff highlight for the new FOV. The
-                # histogram plugin (issue #112) owns this; guard because it only
-                # highlights when a cutoff/active channel is set.
-                if histogram_plugin is not None and hasattr(histogram_plugin, "highlight_cells"):
-                    histogram_plugin.highlight_cells()
-
-                if heatmap_linked and heatmap_plugin is not None:
-                    heatmap_plugin.highlight_cells()
+            self._reapply_selection_highlights()
 
         ax = self.image_display.ax
 
@@ -2342,6 +2359,59 @@ class ImageMaskViewer:
             self._update_grid_display(self.current_downsample_factor)
 
         self.inform_plugins('on_fov_change')
+
+    def _reapply_selection_highlights(self):
+        """Re-apply the cell-selection highlight to the newly active FOV (#119).
+
+        The highlight is materialised per FOV: ``set_mask_ids`` resolves the
+        selected cell-table rows into ``(fov, mask, mask_id)`` triples for the
+        active FOV only, and ``update_patches`` draws just the triples that match
+        it.  A FOV switch therefore leaves nothing to draw, and a selection made
+        in a scatter plot or histogram looked like it had been thrown away.
+
+        ``linked_selection_indices`` keeps that selection in its FOV-independent
+        form (cell-table row indices), so it only has to be projected again onto
+        the new FOV.  When no plot selection is in effect the previous behaviour
+        is kept verbatim: drop the stale patches and recompute the histogram
+        cutoff / linked heatmap cluster highlights, both of which already derived
+        themselves from the active FOV and so survived a switch on their own.
+
+        Called from ``on_image_change`` *after* ``update_controls``, because
+        ``update_display`` overwrites the canvas data from ``self.combined`` and
+        would wipe outlines drawn before it.
+        """
+        indices = getattr(self, "linked_selection_indices", None)
+        if indices:
+            from ueler.viewer.plugin import _chart_common
+
+            _chart_common.sync_mask_highlights_from_selection(self, indices)
+            return
+
+        if not getattr(self, "SidePlots", None):
+            return
+
+        histogram_plugin = getattr(self.SidePlots, "histogram_output", None)
+        heatmap_plugin = getattr(self.SidePlots, "heatmap_output", None)
+        heatmap_checkbox = (
+            getattr(getattr(heatmap_plugin, "ui_component", None), "main_viewer_checkbox", None)
+            if heatmap_plugin is not None
+            else None
+        )
+        heatmap_linked = bool(heatmap_checkbox and heatmap_checkbox.value)
+
+        if not heatmap_linked:
+            self.image_display.clear_patches()
+            if self._grid_display is not None:
+                self._grid_display.clear_patches()
+
+        # Re-apply the histogram cutoff highlight for the new FOV. The
+        # histogram plugin (issue #112) owns this; guard because it only
+        # highlights when a cutoff/active channel is set.
+        if histogram_plugin is not None and hasattr(histogram_plugin, "highlight_cells"):
+            histogram_plugin.highlight_cells()
+
+        if heatmap_linked and heatmap_plugin is not None:
+            heatmap_plugin.highlight_cells()
 
     def on_channel_selection_change(self, change):
         self.update_controls(None)
@@ -3992,7 +4062,8 @@ class ImageMaskViewer:
         painter_border_color_map = None
         painter_mode_map = None
         painter_opacity_map = None
-        painter_show_borders_on_filled = False
+        painter_show_borders = True
+        painter_border_alpha = 1.0
         if painter is not None:
             state_maps_helper = getattr(painter, "get_effective_state_maps_for_fov", None)
             if callable(state_maps_helper):
@@ -4013,9 +4084,12 @@ class ImageMaskViewer:
                 opacity_helper = getattr(painter, "get_effective_opacity_map_for_fov", None)
                 if callable(opacity_helper):
                     painter_opacity_map = opacity_helper(fov_name)
-            border_helper = getattr(painter, "get_show_borders_on_filled", None)
+            border_helper = getattr(painter, "get_show_borders", None)
             if callable(border_helper):
-                painter_show_borders_on_filled = bool(border_helper())
+                painter_show_borders = bool(border_helper())
+            border_alpha_helper = getattr(painter, "get_border_alpha", None)
+            if callable(border_alpha_helper):
+                painter_border_alpha = float(border_alpha_helper())
         painter_controls_primary_mask = bool(painter_color_map)
 
         mask_settings = []
@@ -4096,7 +4170,8 @@ class ImageMaskViewer:
                 border_color_map=painter_border_color_map,
                 mode_map=painter_mode_map,
                 opacity_map=painter_opacity_map,
-                show_borders_on_filled=painter_show_borders_on_filled,
+                show_borders=painter_show_borders,
+                border_alpha=painter_border_alpha,
             )
 
         return combined
@@ -4261,11 +4336,24 @@ class ImageMaskViewer:
         self,
         snapshot: Optional[MaskPainterSnapshot],
         fov_name: str,
-    ) -> tuple[Dict[int, str], Dict[int, str], Dict[int, str], Dict[int, float], bool]:
+    ) -> tuple[Dict[int, str], Dict[int, str], Dict[int, str], Dict[int, float], bool, float]:
         if snapshot is None or self.cell_table is None:
-            return {}, {}, {}, {}, False
+            return {}, {}, {}, {}, True, 1.0
 
         from ueler.viewer.plugin.mask_painter import build_painter_state_maps_for_fov
+
+        continuous = None
+        if str(getattr(snapshot, "color_mode", "categorical")) == "continuous":
+            continuous = {
+                "column": getattr(snapshot, "continuous_column", ""),
+                "colormap": getattr(snapshot, "colormap", "viridis"),
+                "vmin": getattr(snapshot, "vmin", 0.0),
+                "vmax": getattr(snapshot, "vmax", 1.0),
+                "arcsinh": getattr(snapshot, "arcsinh", False),
+                "cofactor": getattr(snapshot, "arcsinh_cofactor", 5.0),
+                "opacity": getattr(snapshot, "continuous_opacity", 100),
+                "fill": getattr(snapshot, "continuous_fill", True),
+            }
 
         color_map, border_color_map, mode_map, opacity_map = build_painter_state_maps_for_fov(
             cell_table=self.cell_table,
@@ -4282,9 +4370,13 @@ class ImageMaskViewer:
             global_fill=getattr(snapshot, "global_fill", False),
             global_fill_opacity=snapshot.global_fill_opacity,
             border_color_mode=getattr(snapshot, "border_color_mode", "mask_type_color"),
+            border_custom_color=getattr(snapshot, "border_custom_color", "#FFFFFF"),
             mask_type_color=getattr(snapshot, "mask_type_color", snapshot.default_color),
+            continuous=continuous,
         )
-        return color_map, border_color_map, mode_map, opacity_map, bool(snapshot.show_borders_on_filled)
+        show_borders = bool(getattr(snapshot, "show_borders", True))
+        border_alpha = max(0.0, min(1.0, float(getattr(snapshot, "border_opacity", 100)) / 100.0))
+        return color_map, border_color_map, mode_map, opacity_map, show_borders, border_alpha
 
     def apply_overlay_snapshot_to_array(
         self,
@@ -4326,10 +4418,14 @@ class ImageMaskViewer:
         if mask_region.size == 0:
             return array
 
-        color_map, border_color_map, mode_map, opacity_map, show_borders = self.resolve_mask_painter_snapshot_for_fov(
-            painter_snapshot,
-            fov_name,
-        )
+        (
+            color_map,
+            border_color_map,
+            mode_map,
+            opacity_map,
+            show_borders,
+            border_alpha,
+        ) = self.resolve_mask_painter_snapshot_for_fov(painter_snapshot, fov_name)
         if not color_map:
             return array
 
@@ -4343,7 +4439,8 @@ class ImageMaskViewer:
             border_color_map=border_color_map,
             mode_map=mode_map,
             opacity_map=opacity_map,
-            show_borders_on_filled=show_borders,
+            show_borders=show_borders,
+            border_alpha=border_alpha,
         )
 
     def apply_overlay_snapshot_to_map_array(
@@ -4414,10 +4511,14 @@ class ImageMaskViewer:
             if rows <= 0 or cols <= 0:
                 continue
 
-            color_map, border_color_map, mode_map, opacity_map, show_borders = self.resolve_mask_painter_snapshot_for_fov(
-                painter_snapshot,
-                str(tile.name),
-            )
+            (
+                color_map,
+                border_color_map,
+                mode_map,
+                opacity_map,
+                show_borders,
+                border_alpha,
+            ) = self.resolve_mask_painter_snapshot_for_fov(painter_snapshot, str(tile.name))
             if not color_map:
                 continue
 
@@ -4431,7 +4532,8 @@ class ImageMaskViewer:
                 border_color_map=border_color_map,
                 mode_map=mode_map,
                 opacity_map=opacity_map,
-                show_borders_on_filled=show_borders,
+                show_borders=show_borders,
+                border_alpha=border_alpha,
             )
             if np.any(painted != section_view[:rows, :cols]):
                 section_view[:rows, :cols] = painted
@@ -4551,6 +4653,11 @@ class ImageMaskViewer:
                 return
 
         visible_fovs: Tuple[str, ...] = ()
+        # The selection highlight is painted *into* the pixel array rather than
+        # drawn as an artist, so it has to be re-applied after the freshly
+        # rendered array is installed below — otherwise ``set_data(combined)``
+        # silently erases it on every zoom/pan (#119 follow-up).
+        repaint_selection = False
         if self._map_mode_active and self._active_map_id:
             combined, visible_fovs = self._render_map_view(
                 channel_tuple,
@@ -4588,13 +4695,17 @@ class ImageMaskViewer:
                         continue
                     self.current_label_masks[mask_name] = label_mask_ds[ymin_ds:ymax_ds, xmin_ds:xmax_ds]
 
-                if hasattr(self.image_display, "update_patches"):
-                    self.image_display.update_patches()
+                repaint_selection = hasattr(self.image_display, "update_patches")
 
         # Update the displayed image
         self.image_display.img_display.set_data(combined)
         self.image_display.combined = combined
         self.image_display.img_display.set_extent(xym_r)
+        # Re-outline the selected cells on top of the array that is now on
+        # screen.  ``combined`` above is the clean render, so the outlines are
+        # never baked into ``image_display.combined`` and cannot accumulate.
+        if repaint_selection:
+            self.image_display.update_patches()
         if self._widget_displayed:
             self.image_display.fig.canvas.draw_idle()
 
@@ -4711,6 +4822,17 @@ class ImageMaskViewer:
 
         loop through all the attributes of self.SidePlots, call the `method_name` method
         '''
+        # Every cell-table write path (FlowSOM, heatmap save, cell-table editor)
+        # funnels through this broadcast, so it is the single place to mirror new
+        # or edited columns back into the user's AnnData (#123). Guarded on its
+        # own: the plugin loop below swallows AttributeError, which must not hide
+        # a sync failure.
+        if method_name == 'on_cell_table_change' and getattr(self, 'cell_table_adata', None) is not None:
+            try:
+                self.sync_cell_table_to_adata()
+            except Exception:
+                logger.warning("Failed to sync the cell table back to AnnData.", exc_info=True)
+
         # Check if the SidePlots attribute exists
         if not hasattr(self, 'SidePlots'):
             return
@@ -5104,10 +5226,24 @@ class ImageMaskViewer:
         self._status_image["processing"] = load_asset_bytes("loading.gif")
         self._status_image["ready"] = load_asset_bytes("ready.png")
 
-    def load_cell_table_from_path(self, file_path):
-        """Load the cell table from a CSV file and convert columns with integer values (allowing NA) to integer."""
+    def load_cell_table_from_path(self, file_path, *, layer=None, obsm_keys=None):
+        """Load the cell table from a CSV or ``.h5ad`` file.
+
+        CSV columns whose float values are all integral are converted to the
+        nullable ``Int64`` dtype (floats are how ``read_csv`` represents an integer
+        column containing NAs).  An ``.h5ad`` file is read with ``anndata`` and
+        handed to :meth:`set_cell_table`, which keeps the AnnData object and
+        derives the DataFrame view from it (#123).
+        """
+        if str(file_path).lower().endswith(".h5ad"):
+            import anndata
+
+            adata = anndata.read_h5ad(file_path)
+            self.set_cell_table(adata, layer=layer, obsm_keys=obsm_keys)
+            return
+
         df = pd.read_csv(file_path)
-        
+
         for col in df.columns:
             # Check if column is numeric and float type (NA causes float type)
             if pd.api.types.is_float_dtype(df[col]):
@@ -5115,12 +5251,79 @@ class ImageMaskViewer:
                 if df[col].dropna().apply(float.is_integer).all():
                     # Use nullable integer dtype so NAs are preserved
                     df[col] = df[col].astype("Int64")
-        
-        self.cell_table = df
 
-    def set_cell_table(self, cell_table):
-        """Load the cell table from a DataFrame."""
+        self.set_cell_table(df)
+
+    def set_cell_table(self, cell_table, *, layer=None, obsm_keys=None):
+        """Attach a cell table, given either a DataFrame or an AnnData object.
+
+        For an AnnData input the object is kept on ``self.cell_table_adata`` and
+        ``self.cell_table`` becomes the DataFrame view built by
+        :func:`ueler.cell_table.flatten_anndata` — ``obs`` columns, one column per
+        ``var_names`` entry, narrow ``obsm`` arrays, and ``obs_names``.  ``layer``
+        selects an entry of ``adata.layers`` instead of ``X``; ``obsm_keys`` opts
+        wide ``obsm`` entries in.  Both arguments only apply to AnnData input.
+        """
+        if cell_table_utils.is_anndata(cell_table):
+            frame, provenance = cell_table_utils.flatten_anndata(
+                cell_table, layer=layer, obsm_keys=obsm_keys
+            )
+            self.cell_table_adata = cell_table
+            self.cell_table_columns = provenance
+            self.cell_table = frame
+            logger.debug(
+                "[cell table] AnnData input: %d rows, %d obs / %d marker / %d obsm columns.",
+                len(frame),
+                len(provenance["obs"]),
+                len(provenance["var"]),
+                len(provenance["obsm"]),
+            )
+            return
+
+        if layer is not None or obsm_keys is not None:
+            raise ValueError(
+                "layer/obsm_keys are only supported for an AnnData cell table"
+            )
+        self.cell_table_adata = None
+        self.cell_table_columns = None
         self.cell_table = cell_table
+
+    def sync_cell_table_to_adata(self):
+        """Push plugin-added/edited columns back into ``cell_table_adata.obs``.
+
+        No-op unless the table came from an AnnData object.  Called from
+        :meth:`inform_plugins` on the ``on_cell_table_change`` broadcast, which is
+        the choke point every write path already goes through.
+        """
+        adata = getattr(self, "cell_table_adata", None)
+        if adata is None or self.cell_table is None:
+            return []
+        return cell_table_utils.sync_cell_table_to_obs(
+            adata, self.cell_table, getattr(self, "cell_table_columns", None)
+        )
+
+    def get_cell_table_adata(self):
+        """Return the cell table as an AnnData object, up to date with the UI.
+
+        For an AnnData input this is the very object the user passed in, with any
+        columns added by the plugins (FlowSOM clusters, heatmap meta-clusters,
+        cell-table edits) synced into ``obs`` — ready for ``write_h5ad(...)``.  For
+        a DataFrame/CSV table an AnnData is built on demand, using the numeric
+        columns that are not viewer key columns as ``X``.
+        """
+        if self.cell_table is None:
+            return None
+        if self.cell_table_adata is not None:
+            self.sync_cell_table_to_adata()
+            return self.cell_table_adata
+        system_keys = [
+            key
+            for key in (self.fov_key, self.label_key, self.x_key, self.y_key, self.mask_key)
+            if key
+        ]
+        return cell_table_utils.dataframe_to_anndata(
+            self.cell_table, None, system_keys=system_keys
+        )
 
     def marker2display(self):
         """
@@ -5389,6 +5592,8 @@ class ImageMaskViewer:
                         raise ValueError(f"Image too small: {img_array.shape}")
 
                     imsave(output_path_str, img_array)
+                    if not os.path.exists(output_path_str):
+                        raise IOError(f"Export wrote no file to '{output_path_str}'")
                     return {"output_path": output_path_str}
 
                 return worker

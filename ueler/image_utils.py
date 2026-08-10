@@ -14,6 +14,7 @@ import tifffile
 from dask import delayed
 from skimage.segmentation import find_boundaries
 
+from ueler.constants import DOWNSAMPLE_MAX_DIMENSION
 from ueler.rendering.engine import scale_outline_thickness, thicken_outline
 
 
@@ -32,7 +33,7 @@ def generate_edges(mask, *, thickness: int = 1, downsample: int = 1):
 	return delayed(_compute_edges)(mask, iterations)
 
 
-def calculate_downsample_factor(width, height, ignore_zoom=False, max_dimension=512):
+def calculate_downsample_factor(width, height, ignore_zoom=False, max_dimension=DOWNSAMPLE_MAX_DIMENSION):
 	"""Return the smallest power-of-two factor that fits within ``max_dimension``."""
 
 	if ignore_zoom:
@@ -49,7 +50,7 @@ def select_downsample_factor(
 	width,
 	height,
 	*,
-	max_dimension=512,
+	max_dimension=DOWNSAMPLE_MAX_DIMENSION,
 	allowed_factors=None,
 	minimum=1,
 ):

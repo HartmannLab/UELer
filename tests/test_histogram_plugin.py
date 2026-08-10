@@ -109,8 +109,17 @@ class _FakeImageDisplay:
     def __init__(self):
         self.last_mask_ids: list = []
         self.last_fov_mask_pairs = None
+        # Distinguishes "never asked to highlight" from "asked to clear" (#129).
+        self.set_mask_ids_calls = 0
 
     def set_mask_ids(self, *, mask_name, mask_ids, fov_mask_pairs=None):
+        self.set_mask_ids_calls += 1
+        # Mirror the real ImageDisplay: replacing the highlight drops the
+        # FOV-independent record, which `sync_mask_highlights_from_selection`
+        # re-arms straight after when the selection is non-empty (#119).
+        viewer = getattr(self, "main_viewer", None)
+        if viewer is not None:
+            viewer.linked_selection_indices = None
         if fov_mask_pairs is not None:
             self.last_fov_mask_pairs = list(fov_mask_pairs)
             self.last_mask_ids = []
@@ -132,7 +141,7 @@ def _make_viewer(cell_table: "pd.DataFrame") -> SimpleNamespace:
     image_display = _FakeImageDisplay()
     ui_component = SimpleNamespace(image_selector=SimpleNamespace(value="fov1"))
     side_plots = SimpleNamespace(cell_gallery_output=gallery)
-    return SimpleNamespace(
+    viewer = SimpleNamespace(
         cell_table=cell_table,
         fov_key="fov",
         label_key="label",
@@ -140,8 +149,11 @@ def _make_viewer(cell_table: "pd.DataFrame") -> SimpleNamespace:
         ui_component=ui_component,
         image_display=image_display,
         SidePlots=side_plots,
+        linked_selection_indices=None,
         get_active_fov=lambda: ui_component.image_selector.value,
     )
+    image_display.main_viewer = viewer
+    return viewer
 
 
 def _make_histogram(viewer: SimpleNamespace, *, patch_render=True) -> HistogramDisplay:
@@ -205,6 +217,8 @@ class TestHistogramCutoffGalleryLink(unittest.TestCase):
         self.assertEqual(set(self.gallery.received), expected)
 
     def test_image_display_limited_to_current_fov(self):
+        # Highlighting the viewer requires the "Main viewer" link (#129).
+        self.hist.ui_component.mv_linked_checkbox.value = True
         self.hist.highlight_cells(push_to_gallery=True)
         img = self.viewer.image_display
         self.assertNotIn(1, img.last_mask_ids)
@@ -214,6 +228,7 @@ class TestHistogramCutoffGalleryLink(unittest.TestCase):
             self.assertNotIn(label, img.last_mask_ids)
 
     def test_map_mode_uses_fov_mask_pairs(self):
+        self.hist.ui_component.mv_linked_checkbox.value = True
         self.viewer.get_active_fov = lambda: None
         self.hist.highlight_cells(push_to_gallery=True)
         pairs = self.viewer.image_display.last_fov_mask_pairs
@@ -295,6 +310,34 @@ class TestHistogramBrushLinking(unittest.TestCase):
         self.hist.clear_selection()
         self.assertEqual(self.hist.selected_indices.value, set())
 
+    def test_show_external_selection_publishes_indices(self):
+        """A linked plugin (e.g. heatmap #114) can push a selection in."""
+        self.hist.show_external_selection([2, 4])
+        self.assertEqual(set(self.hist.selected_indices.value), {2, 4})
+
+    def test_show_external_selection_forwards_to_gallery_when_linked(self):
+        self.hist.ui_component.cell_gallery_linked_checkbox.value = True
+        self.hist.show_external_selection([1, 2, 3])
+        self.assertIsNotNone(self.gallery.received)
+        self.assertEqual(set(self.gallery.received), {1, 2, 3})
+
+    def test_show_external_selection_highlights_viewer_when_mv_linked(self):
+        self.hist.ui_component.mv_linked_checkbox.value = True
+        # Rows 1 and 2 are both in fov1, with labels 2 and 3.
+        self.hist.show_external_selection([1, 2])
+        self.assertIn(2, self.viewer.image_display.last_mask_ids)
+        self.assertIn(3, self.viewer.image_display.last_mask_ids)
+
+    @unittest.skipUnless(_bokeh_available(), "bokeh not available")
+    def test_show_external_selection_drives_overlay(self):
+        """The pushed selection is drawn as the 'Selected' overlay distribution."""
+        layout, sources, spans = self.hist._build_figures()
+        self.hist._sources, self.hist._spans = sources, spans
+        # Two valid row indices → two overlaid cells across the bins.
+        self.hist.show_external_selection([2, 4])
+        total = sum(sources["intensity"]["selected"].data["top"])
+        self.assertEqual(total, 2)
+
     def test_bin_counts_matches_numpy_histogram(self):
         from ueler.viewer.plugin.histogram import bin_counts
 
@@ -333,6 +376,275 @@ class TestHistogramBrushLinking(unittest.TestCase):
         self.hist._on_brush("intensity", 4.5, 5.5)
         after = self.hist._histogram_bin_edges("intensity", 15)
         self.assertTrue(np.array_equal(before, after))
+
+
+# ---------------------------------------------------------------------------
+# "Main viewer" link gates every highlight push (#129)
+# ---------------------------------------------------------------------------
+
+class TestHistogramMainViewerLink(unittest.TestCase):
+    """With the link off, nothing this plugin does may highlight the main viewer.
+
+    Cutoff mode used to push highlights unconditionally (``highlight=True`` in
+    ``highlight_cells``), and unchecking the box left the previous outlines on the
+    canvas — both read as "the histogram still affects the main viewer" (#129).
+    """
+
+    def setUp(self):
+        self.viewer = _make_viewer(_two_fov_table())
+        self.hist = _make_histogram(self.viewer)
+        self.img: _FakeImageDisplay = self.viewer.image_display
+        self.hist._plot_data = self.viewer.cell_table.copy()
+        self.hist._channels = ["intensity", "area"]
+
+    def _set_cutoff(self, value=4.0, direction="above"):
+        self.hist._active_histogram_column = "intensity"
+        self.hist.ui_component.above_below_buttons.value = direction
+        self.hist.cutoff = value
+
+    def _toggle_link(self, value: bool):
+        """Flip the checkbox the way a user click does.
+
+        The shared ipywidgets stub ignores ``observe`` registrations, so the
+        observer is invoked explicitly — ``_on_mv_link_change`` reads the
+        checkbox rather than the change payload, so this is the same code path
+        the real widget takes. ``test_link_checkbox_is_observed`` covers the
+        wiring itself.
+        """
+        self.hist.ui_component.mv_linked_checkbox.value = value
+        self.hist._on_mv_link_change(SimpleNamespace(name="value", new=value))
+
+    # -- cutoff mode ---------------------------------------------------------
+    def test_cutoff_does_not_highlight_when_unlinked(self):
+        self._set_cutoff()
+        self.hist.highlight_cells(push_to_gallery=True)
+        # The gate is live (published) but the viewer was never touched.
+        self.assertTrue(self.hist.selected_indices.value)
+        self.assertEqual(self.img.set_mask_ids_calls, 0)
+
+    def test_cutoff_highlights_when_linked(self):
+        self.hist.ui_component.mv_linked_checkbox.value = True
+        self._set_cutoff()
+        self.hist.highlight_cells(push_to_gallery=True)
+        self.assertIn(2, self.img.last_mask_ids)
+        self.assertIn(3, self.img.last_mask_ids)
+
+    def test_above_below_flip_does_not_highlight_when_unlinked(self):
+        self._set_cutoff()
+        self.hist.highlight_cells(push_to_gallery=True)
+        self.hist.ui_component.above_below_buttons.value = "below"
+        self.hist._on_above_below_change(None)
+        self.assertEqual(self.img.set_mask_ids_calls, 0)
+
+    def test_fov_reapply_does_not_highlight_when_unlinked(self):
+        """The viewer re-triggers ``highlight_cells()`` on every FOV change (#119)."""
+        self._set_cutoff()
+        self.hist.highlight_cells(push_to_gallery=True)
+        self.hist.highlight_cells()  # what ImageMaskViewer calls after a FOV switch
+        self.assertEqual(self.img.set_mask_ids_calls, 0)
+
+    def test_brush_does_not_highlight_when_unlinked(self):
+        self.hist.handle_range("intensity", 4.0, 10.0)
+        self.assertTrue(self.hist.selected_indices.value)
+        self.assertEqual(self.img.set_mask_ids_calls, 0)
+
+    # -- toggling the checkbox ----------------------------------------------
+    def test_unchecking_withdraws_the_highlight(self):
+        self.hist.ui_component.mv_linked_checkbox.value = True
+        self.hist.handle_range("intensity", 4.0, 10.0)
+        self.assertTrue(self.img.last_mask_ids)
+        self._toggle_link(False)
+        self.assertEqual(self.img.last_mask_ids, [])
+        # The FOV-independent record is dropped too, so a FOV switch cannot
+        # resurrect the outlines (#119).
+        self.assertIsNone(getattr(self.viewer, "linked_selection_indices", None))
+
+    def test_rechecking_restores_the_highlight(self):
+        self.hist.handle_range("intensity", 4.0, 10.0)
+        self.assertEqual(self.img.set_mask_ids_calls, 0)
+        self._toggle_link(True)
+        self.assertIn(2, self.img.last_mask_ids)
+        self.assertIn(3, self.img.last_mask_ids)
+
+    def test_toggling_without_a_selection_is_a_no_op(self):
+        """Toggling an idle histogram must not wipe another plugin's highlight."""
+        self._toggle_link(True)
+        self._toggle_link(False)
+        self.assertEqual(self.img.set_mask_ids_calls, 0)
+
+    def test_link_checkbox_is_observed(self):
+        """``_wire_events`` really registers the handler on the checkbox (#129)."""
+        recorded: list = []
+
+        class _Recorder:
+            value = False
+
+            def observe(self, callback, names=None):
+                recorded.append((callback, names))
+
+        self.hist.ui_component.mv_linked_checkbox = _Recorder()
+        self.hist._wire_events()
+        self.assertIn(
+            (self.hist._on_mv_link_change, "value"),
+            recorded,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Multi-channel gating: ranges AND cutoffs intersect, per-histogram state (#127)
+# ---------------------------------------------------------------------------
+
+class TestHistogramGating(unittest.TestCase):
+    """Every gated channel contributes a term; the selection is their intersection.
+
+    Reference table (row index → intensity / area):
+        0 → 1.0 / 10.0   (fov1)
+        1 → 5.0 / 20.0   (fov1)
+        2 → 9.0 / 30.0   (fov1)
+        3 → 3.0 / 40.0   (fov2)
+        4 → 7.0 / 50.0   (fov2)
+    """
+
+    def setUp(self):
+        self.viewer = _make_viewer(_two_fov_table())
+        self.hist = _make_histogram(self.viewer)
+        self.gallery: _FakeCellGallery = self.viewer.SidePlots.cell_gallery_output
+        self.hist._plot_data = self.viewer.cell_table.copy()
+        self.hist._channels = ["intensity", "area"]
+
+    def _set_cutoff(self, channel, value, direction="above"):
+        self.hist._active_histogram_column = channel
+        self.hist.cutoff = value
+        self.hist.ui_component.above_below_buttons.value = direction
+        self.hist.highlight_cells(push_to_gallery=True)
+
+    # -- intersection across channels ---------------------------------------
+    def test_two_brushes_intersect_instead_of_replacing(self):
+        self.hist.handle_range("intensity", 4.0, 8.0)      # {1, 4}
+        self.assertEqual(set(self.hist.selected_indices.value), {1, 4})
+        self.hist.handle_range("area", 15.0, 35.0)         # {1, 2}
+        self.assertEqual(set(self.hist.selected_indices.value), {1})
+
+    def test_two_cutoffs_intersect(self):
+        self._set_cutoff("intensity", 4.0, "above")        # {1, 2, 4}
+        self._set_cutoff("area", 35.0, "below")            # {0, 1, 2}
+        self.assertEqual(set(self.hist.selected_indices.value), {1, 2})
+
+    def test_range_and_cutoff_intersect(self):
+        self.hist.handle_range("intensity", 4.0, 8.0)      # {1, 4}
+        self._set_cutoff("area", 45.0, "above")            # {4}
+        self.assertEqual(set(self.hist.selected_indices.value), {4})
+
+    def test_cutoff_then_range_on_other_channel_keeps_both_terms(self):
+        self._set_cutoff("intensity", 4.0, "above")        # {1, 2, 4}
+        self.hist.handle_range("area", 15.0, 35.0)         # {1, 2}
+        self.assertEqual(set(self.hist.selected_indices.value), {1, 2})
+        self.assertEqual(set(self.hist._gates), {"intensity", "area"})
+
+    def test_gated_indices_matches_published_selection(self):
+        self.hist.handle_range("intensity", 4.0, 8.0)
+        self._set_cutoff("area", 45.0, "above")
+        self.assertEqual(
+            set(self.hist.gated_indices()), set(self.hist.selected_indices.value)
+        )
+
+    # -- per-channel replacement -------------------------------------------
+    def test_rebrushing_replaces_only_that_channels_term(self):
+        self.hist.handle_range("intensity", 4.0, 8.0)
+        self.hist.handle_range("area", 15.0, 35.0)
+        self.hist.handle_range("intensity", 0.0, 10.0)     # widen intensity only
+        # area's [15, 35] term still gates → {1, 2}
+        self.assertEqual(set(self.hist.selected_indices.value), {1, 2})
+
+    def test_brush_supersedes_a_cutoff_on_the_same_channel(self):
+        self._set_cutoff("intensity", 4.0, "above")        # {1, 2, 4}
+        self.hist.handle_range("intensity", 0.0, 2.0)      # {0}
+        self.assertEqual(set(self.hist.selected_indices.value), {0})
+        self.assertEqual(self.hist._gates["intensity"][0], "range")
+        self.assertIsNone(self.hist.cutoff)
+
+    def test_above_below_toggle_flips_only_the_last_cutoff(self):
+        self._set_cutoff("intensity", 4.0, "above")        # {1, 2, 4}
+        self._set_cutoff("area", 35.0, "below")            # {0, 1, 2} → ∩ {1, 2}
+        # Flipping the toggle re-applies the *area* cutoff as "above" → {3, 4}.
+        # The observer is invoked directly so the test holds with either the real
+        # ipywidgets stack or the stub widgets.
+        self.hist.ui_component.above_below_buttons.value = "above"
+        self.hist._on_above_below_change(None)
+        self.assertEqual(set(self.hist.selected_indices.value), {4})
+        self.assertEqual(self.hist._gates["intensity"], ("cutoff", "above", 4.0))
+
+    # -- clearing ----------------------------------------------------------
+    def test_clear_gate_drops_one_term_and_keeps_the_rest(self):
+        self.hist.handle_range("intensity", 4.0, 8.0)
+        self.hist.handle_range("area", 15.0, 35.0)
+        self.hist.clear_gate("area")
+        self.assertEqual(set(self.hist.selected_indices.value), {1, 4})
+        self.assertEqual(set(self.hist._gates), {"intensity"})
+
+    def test_clear_gate_on_an_ungated_channel_is_a_noop(self):
+        self.hist.handle_range("intensity", 4.0, 8.0)
+        self.hist.clear_gate("area")
+        self.assertEqual(set(self.hist.selected_indices.value), {1, 4})
+
+    def test_clear_selection_empties_all_gates_and_cutoff_state(self):
+        self.hist.handle_range("intensity", 4.0, 8.0)
+        self._set_cutoff("area", 45.0, "above")
+        self.hist.clear_selection()
+        self.assertEqual(self.hist._gates, {})
+        self.assertIsNone(self.hist.cutoff)
+        self.assertIsNone(self.hist._active_histogram_column)
+        self.assertEqual(self.hist.selected_indices.value, set())
+
+    def test_replotting_without_a_channel_drops_its_term(self):
+        self.hist.handle_range("intensity", 4.0, 8.0)
+        self.hist.handle_range("area", 15.0, 35.0)
+        self.hist.ui_component.channel_selector.value = ("intensity",)
+        self.hist.plot_histograms(None)
+        self.assertEqual(set(self.hist._gates), {"intensity"})
+        self.assertEqual(set(self.hist.selected_indices.value), {1, 4})
+
+    def test_external_selection_replaces_the_gate(self):
+        self.hist.handle_range("intensity", 4.0, 8.0)
+        self.hist.show_external_selection([0])
+        self.assertEqual(self.hist._gates, {})
+        self.assertEqual(set(self.hist.selected_indices.value), {0})
+
+    # -- "don't refresh on selection" --------------------------------------
+    def test_gating_never_replots(self):
+        """Selection touches sources/annotations only — never a figure rebuild (#127)."""
+        self.hist._render_calls = 0
+        self.hist.handle_range("intensity", 4.0, 8.0)
+        self._set_cutoff("area", 45.0, "above")
+        self.hist.clear_gate("area")
+        self.hist.clear_selection()
+        self.assertEqual(self.hist._render_calls, 0)
+
+    # -- subset consistency ------------------------------------------------
+    def test_cutoff_gate_respects_the_plotted_subset(self):
+        """A cutoff is evaluated on the plotted frame, like a brush (#127)."""
+        table = self.viewer.cell_table
+        self.hist._plot_data = table.loc[table["fov"] == "fov1"].copy()
+        self._set_cutoff("intensity", 4.0, "above")
+        # fov1 rows above 4.0 → {1, 2}; row 4 (fov2, 7.0) is outside the subset.
+        self.assertEqual(set(self.hist.selected_indices.value), {1, 2})
+
+    def test_cutoff_falls_back_to_the_cell_table_before_any_plot(self):
+        self.hist._plot_data = None
+        self._set_cutoff("intensity", 4.0, "above")
+        self.assertEqual(set(self.hist.selected_indices.value), {1, 2, 4})
+
+    # -- readability -------------------------------------------------------
+    def test_gate_description_lists_every_term(self):
+        self.hist.handle_range("intensity", 4.0, 8.0)
+        self._set_cutoff("area", 45.0, "above")
+        text = self.hist.gate_description()
+        self.assertIn("intensity ∈ [4, 8]", text)
+        self.assertIn("area > 45", text)
+        self.assertIn("AND", text)
+
+    def test_gate_description_when_nothing_is_gated(self):
+        self.assertIn("No gate", self.hist.gate_description())
 
 
 # ---------------------------------------------------------------------------
@@ -451,16 +763,54 @@ class TestHistogramBokehLayout(unittest.TestCase):
             sources["intensity"]["selected"].data["left"], edges[:-1].tolist()
         )
 
-    def test_cutoff_span_shows_only_on_active_channel(self):
+    def test_cutoff_span_shows_only_on_gated_channels(self):
+        """Each gated channel shows its own cutoff line; ungated ones show none (#127)."""
         self.hist._channels = ["intensity", "area"]
         _layout, sources, spans = self.hist._build_figures()
         self.hist._sources, self.hist._spans = sources, spans
         self.hist._active_histogram_column = "intensity"
         self.hist.cutoff = 5.0
-        self.hist._refresh_cutoff_spans()
+        self.hist.highlight_cells(push_to_gallery=True)
         self.assertTrue(spans["intensity"].visible)
         self.assertEqual(spans["intensity"].location, 5.0)
         self.assertFalse(spans["area"].visible)
+
+        # A second cutoff gates `area` too — the first channel keeps its line.
+        self.hist._active_histogram_column = "area"
+        self.hist.cutoff = 25.0
+        self.hist.highlight_cells(push_to_gallery=True)
+        self.assertTrue(spans["intensity"].visible)
+        self.assertEqual(spans["intensity"].location, 5.0)
+        self.assertTrue(spans["area"].visible)
+        self.assertEqual(spans["area"].location, 25.0)
+
+    def test_range_band_marks_the_brushed_channel_only(self):
+        """A brushed range is drawn as our own persistent band (#127)."""
+        self.hist._channels = ["intensity", "area"]
+        _layout, sources, spans = self.hist._build_figures()
+        self.hist._sources, self.hist._spans = sources, spans
+        self.hist.handle_range("intensity", 4.0, 8.0)
+        band = sources["intensity"]["band"]
+        self.assertTrue(band.visible)
+        self.assertEqual((band.left, band.right), (4.0, 8.0))
+        self.assertFalse(sources["area"]["band"].visible)
+
+    def test_selection_does_not_mute_bars_on_box_select(self):
+        """Bokeh's own (non)selection glyphs are pinned to the base glyph (#127).
+
+        Otherwise a box-select gesture greys out the non-selected bars of the
+        histogram being brushed, which reads as the other channels' state changing.
+        """
+        self.hist.ui_component.interaction_mode.value = "Brush"
+        self.hist._channels = ["intensity"]
+        layout, _sources, _spans = self.hist._build_figures()
+        for fig in layout.children:
+            for renderer in fig.renderers:
+                glyph = getattr(renderer, "glyph", None)
+                if glyph is None:
+                    continue
+                self.assertIs(renderer.selection_glyph, glyph)
+                self.assertIs(renderer.nonselection_glyph, glyph)
 
     def test_brush_mode_activates_box_select_drag(self):
         """Brush mode must set the BoxSelectTool as the active drag gesture (#112 reply).
@@ -484,6 +834,79 @@ class TestHistogramBokehLayout(unittest.TestCase):
         layout, _sources, _spans = self.hist._build_figures()
         for fig in layout.children:
             self.assertNotIsInstance(fig.toolbar.active_drag, BoxSelectTool)
+
+
+class TestHistogramInteractionModeSwitch(unittest.TestCase):
+    """Cutoff ↔ Brush switches the gesture in place, never the plot (#127 reply)."""
+
+    def setUp(self):
+        if not _bokeh_available():
+            self.skipTest("bokeh not available in this environment")
+        self.viewer = _make_viewer(_two_fov_table())
+        self.hist = _make_histogram(self.viewer)
+        self.hist._plot_data = self.viewer.cell_table.copy()
+        self.hist._channels = ["intensity", "area"]
+        self.hist.ui_component.interaction_mode.value = "Cutoff"
+        _layout, sources, spans = self.hist._build_figures()
+        self.hist._sources, self.hist._spans = sources, spans
+        self.hist._render_calls = 0
+
+    def _switch_to(self, mode):
+        self.hist.ui_component.interaction_mode.value = mode
+        # Direct call as well, so the assertion holds under the widget stubs
+        # (no traitlets) as well as with real ipywidgets.
+        self.hist._on_interaction_mode_change(None)
+
+    def test_switching_mode_never_replots(self):
+        self._switch_to("Brush")
+        self._switch_to("Cutoff")
+        self.assertEqual(self.hist._render_calls, 0)
+
+    def test_switching_mode_keeps_the_same_figures(self):
+        """The very objects holding the user's zoom/pan must survive the switch."""
+        before = dict(self.hist._figures)
+        self._switch_to("Brush")
+        for channel, fig in before.items():
+            self.assertIs(self.hist._figures[channel], fig)
+
+    def test_switching_flips_the_active_drag_tool_in_place(self):
+        from bokeh.models import BoxSelectTool
+
+        self._switch_to("Brush")
+        for channel, fig in self.hist._figures.items():
+            self.assertIs(fig.toolbar.active_drag, self.hist._box_tools[channel])
+        self._switch_to("Cutoff")
+        for fig in self.hist._figures.values():
+            self.assertNotIsInstance(fig.toolbar.active_drag, BoxSelectTool)
+
+    def test_both_gestures_are_wired_in_either_mode(self):
+        """Handlers stay registered, so the toggle has nothing to rebuild."""
+        from bokeh.events import SelectionGeometry, Tap
+
+        for fig in self.hist._figures.values():
+            self.assertTrue(fig._event_callbacks.get(SelectionGeometry.event_name))
+            self.assertTrue(fig._event_callbacks.get(Tap.event_name))
+
+    def test_switching_mode_keeps_the_gate_and_its_markers(self):
+        self.hist.handle_range("intensity", 4.0, 8.0)
+        selected = set(self.hist.selected_indices.value)
+        self._switch_to("Brush")
+        self.assertEqual(self.hist.selected_indices.value, selected)
+        self.assertTrue(self.hist._sources["intensity"]["band"].visible)
+        self.assertEqual(self.hist.gate_description(), "Gate: intensity ∈ [4, 8]")
+
+    def test_tap_is_ignored_while_brushing(self):
+        """A bare click during a brush must not silently set a cutoff."""
+        self.hist.ui_component.interaction_mode.value = "Brush"
+        self.hist._make_tap_handler("intensity")(SimpleNamespace(x=5.0))
+        self.assertIsNone(self.hist.cutoff)
+        self.assertEqual(self.hist._gates, {})
+
+    def test_tap_sets_a_cutoff_in_cutoff_mode(self):
+        self.hist.ui_component.interaction_mode.value = "Cutoff"
+        self.hist._make_tap_handler("intensity")(SimpleNamespace(x=5.0))
+        self.assertEqual(self.hist.cutoff, 5.0)
+        self.assertIn("intensity", self.hist._gates)
 
 
 class TestHistogramRendering(unittest.TestCase):
@@ -534,6 +957,25 @@ class TestHistogramRendering(unittest.TestCase):
         self.hist.ui_component.channel_selector.value = ("intensity",)
         self.hist.plot_histograms(None)
         self.assertIsNone(self.hist._bokeh_model.layout.height)
+
+
+class TestHistogramSideOnly(unittest.TestCase):
+    """The histogram lives in the side accordion, not the wide footer (#121 reply).
+
+    The first pass at #121 briefly moved the histogram into the footer; the reply
+    corrected that — the histogram belongs in the side panel and the heatmap is the
+    plugin that gets the permanent wide-footer allocation instead.
+    """
+
+    def setUp(self):
+        self.viewer = _make_viewer(_two_fov_table())
+        self.hist = _make_histogram(self.viewer)
+
+    def test_histogram_is_not_footer_only(self):
+        self.assertFalse(self.hist.footer_only)
+
+    def test_wide_panel_layout_is_none(self):
+        self.assertIsNone(self.hist.wide_panel_layout())
 
 
 if __name__ == "__main__":

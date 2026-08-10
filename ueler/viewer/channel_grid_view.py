@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.backend_bases import MouseButton
 
+from ueler.constants import DOWNSAMPLE_MAX_DIMENSION
 from ueler.image_utils import calculate_downsample_factor, get_axis_limits_with_padding
 from ueler.viewer.tooltip_utils import format_tooltip_value
 
@@ -447,7 +448,9 @@ class GridChannelDisplay:
         disable_ds = not getattr(
             self.main_viewer.ui_component, "enable_downsample_checkbox", None
         ) or not self.main_viewer.ui_component.enable_downsample_checkbox.value
-        new_factor = calculate_downsample_factor(range_x, range_y, disable_ds)
+        new_factor = calculate_downsample_factor(
+            range_x, range_y, disable_ds, max_dimension=DOWNSAMPLE_MAX_DIMENSION
+        )
 
         if new_factor != self.main_viewer.current_downsample_factor:
             self.main_viewer.on_downsample_factor_changed(new_factor)

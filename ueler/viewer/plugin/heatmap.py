@@ -6,10 +6,12 @@ from ipywidgets import (SelectMultiple, FloatSlider, Dropdown, VBox, Output, Tag
                         Checkbox, Text, Button, HBox, Layout, IntSlider, Tab, RadioButtons, HTML)
 from scipy.cluster.hierarchy import dendrogram
 import pandas as pd
+from ueler.cell_table import categorical_columns
 from ueler.viewer.observable import Observable
 from ueler.viewer.plugin.plugin_base import PluginBase
 from ueler.viewer.plugin.heatmap_adapter import HeatmapModeAdapter
 from ueler.viewer.plugin.heatmap_layers import DataLayer, InteractionLayer, DisplayLayer
+from ueler.viewer.plugin import _chart_common
 
 _logger = logging.getLogger(__name__)
 
@@ -18,11 +20,16 @@ class HeatmapDisplay(DataLayer, InteractionLayer, DisplayLayer, PluginBase):
         super().__init__(main_viewer, width, height)
         self.SidePlots_id = "heatmap_output"
         self.displayed_name = "Heatmap"
+        # Permanently allocated to the wide-footer panel (#121 reply): the heatmap
+        # always lives in the footer and always renders in the wide (horizontal)
+        # orientation, so it is skipped in the side accordion and the old
+        # footer/side + orientation toggle is gone.
+        self.footer_only = True
         self.main_viewer = main_viewer
         self.width = width
         self.height = height
 
-        self.adapter = HeatmapModeAdapter(mode="vertical")
+        self.adapter = HeatmapModeAdapter(mode="wide")
 
         self.ui_component = UiComponent(self)
         self.data = Data()
@@ -33,6 +40,14 @@ class HeatmapDisplay(DataLayer, InteractionLayer, DisplayLayer, PluginBase):
         self.data.current_clusters["index"].add_observer(self.update_ui_components)
         self.ui_component.lock_cutoff_button.observe(self._on_lock_cutoff_change, names='value')
         self.ui_component.lock_override_button.on_click(self._request_lock_override)
+        # Load the channels of the selected marker set into this plugin's picker
+        # (local only — does not repaint the main image viewer). Mirrors the
+        # scatter/histogram plugins (issue #117).
+        self.ui_component.channel_selector_bundle.load_button.on_click(
+            lambda _btn: _chart_common.apply_marker_set_to_selector(
+                self.ui_component.channel_selector_bundle, self.main_viewer
+            )
+        )
         self.plot_output = Output()
 
         self.orientation_state = {
@@ -55,8 +70,6 @@ class HeatmapDisplay(DataLayer, InteractionLayer, DisplayLayer, PluginBase):
         self.update_ui_components(self.data.current_clusters["index"].value)
         self._reset_selection_cache()
         self.initialized = True
-        # Ensure layout reflects the starting orientation before observers fire.
-        self._sync_panel_location()
 
     def _on_lock_cutoff_change(self, change):
         if self._suppress_lock_observer:
@@ -96,19 +109,16 @@ class HeatmapDisplay(DataLayer, InteractionLayer, DisplayLayer, PluginBase):
 
 class UiComponent:
     def __init__(self, parent):
-        self.channel_selector_text = HTML(
-            value='Channels:',
+        # Shared channel picker (issue #117): reuse the same bundle as the scatter
+        # and histogram plugins so the marker-selection UI/UX is identical — a
+        # TagsInput plus a "Marker set:" dropdown + "Load set" button. Aliasing
+        # ``channel_selector`` to ``bundle.tags`` keeps every existing
+        # ``ui_component.channel_selector.value`` access working unchanged.
+        self.channel_selector_bundle = _chart_common.build_channel_selector(
+            parent.main_viewer
         )
-
-        self.channel_selector = TagsInput(
-            value = parent.main_viewer.cell_table.columns[0],
-            allowed_tags=parent.main_viewer.cell_table.columns.tolist(),  # This will be updated later
-            description='Channels:',
-            allow_duplicates=False,
-            style={'description_width': 'auto'},
-            layout=Layout(width='100%')
-        )
-        cluster_columns = parent.main_viewer.cell_table.select_dtypes(include=['int', 'int64', 'object']).columns.tolist()
+        self.channel_selector = self.channel_selector_bundle.tags
+        cluster_columns = categorical_columns(parent.main_viewer.cell_table)
         self.high_level_cluster_dropdown = Dropdown(
             options=cluster_columns,
             description='Class:',
@@ -140,13 +150,6 @@ class UiComponent:
             value='euclidean',
             description='Metric:',
         )
-        self.horizontal_layout_checkbox = Checkbox(
-            value=False,
-            description='Horizontal layout',
-            disabled=False,
-            indent=False
-        )
-        self.horizontal_layout_checkbox.observe(parent.on_orientation_toggle, names='value')
         self.zscore_across_markers_checkbox = Checkbox(
             value=False,
             description='Z-score across markers',
@@ -263,7 +266,14 @@ class UiComponent:
         
         self.chart_checkbox = Checkbox(
             value=False,
-            description='Chart',
+            description='Scatter plot',
+            disabled=False,
+            indent=False
+        )
+
+        self.histogram_checkbox = Checkbox(
+            value=False,
+            description='Histogram',
             disabled=False,
             indent=False
         )

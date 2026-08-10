@@ -1,5 +1,5 @@
 site_name: UELer
-site_description: Usability Enhanced Linked Viewer for MIBI imaging
+site_description: Unified Exploratory Linked Viewer for Spatial Proteomics
 site_author: Yu-Le Wu (Hartmann Lab, DKFZ)
 site_url: https://hartmannlab.github.io/UELer/
 repo_url: https://github.com/HartmannLab/UELer
@@ -35,9 +35,13 @@ theme:
     - content.tabs.link
   icon:
     repo: fontawesome/brands/github
+  logo: img/UELer_icon_gw.png
 
 plugins:
   - search
+  - mike:
+      alias_type: symlink
+      canonical_version: latest
 
 markdown_extensions:
   - admonition
@@ -82,3 +86,7 @@ nav:
       - ROI Workflows: develop-notes/roi-gallery.md
       - Heatmap & Cell Annotation: develop-notes/heatmap.md
       - OME-TIFF Loading: develop-notes/ome-tiff.md
+extra:
+  version:
+    provider: mike
+    default: latest

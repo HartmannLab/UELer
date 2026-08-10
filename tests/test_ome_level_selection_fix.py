@@ -50,22 +50,26 @@ class TestOMELevelSelectionFix(unittest.TestCase):
 
     def test_select_level_fallback(self):
         # Levels: 2, 4, 8 (Missing 1, base shape 1000x1000)
-        # Note: OMEFovWrapper usually has scale 1 level, but let's test robustness
+        # Note: OMEFovWrapper usually has scale 1 level, but let's test robustness.
+        # _level_specs[0] is treated as the base, so the expected output size is
+        # derived from the scale-2 level: ceil(500 / 3) -> 166 px.
         wrapper = MockOMEFovWrapper([2, 4, 8])
-        
+
         # Request ds=3
-        # Exact divisors of 3: None.
-        # Fallback: <= 3: 2. Best = 2.
-        # Residual = ceil(3/2) = 2.
-        # Effective = 2 * 2 = 4.
-        
+        # Selection walks levels coarsest-first and takes the first one that still
+        # covers the expected size: scale 8 (125 px) is too small, scale 4 (250 px)
+        # covers it with residual ceil(3/4) = 1.
+        # Effective = 4 * 1 = 4 — the same effective factor the scale-2 level would
+        # give with residual 2, but reading a quarter of the pixels.
+
         best, residual = wrapper._select_level(3)
         effective = best["scale"] * residual
-        
+
         print(f"Request: 3. Got Level Scale: {best['scale']}, Residual: {residual}, Effective: {effective}")
-        
+
         self.assertEqual(effective, 4)
-        self.assertEqual(best["scale"], 2)
+        self.assertEqual(best["scale"], 4)
+        self.assertEqual(residual, 1)
 
     def test_imperfect_pyramid_coverage(self):
         # Base: 1000x1000.

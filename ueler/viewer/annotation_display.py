@@ -31,6 +31,7 @@ def _require_widgets():
         raise ImportError("ipywidgets is required for AnnotationDisplay") from exc
     return widgets
 
+from ueler.cell_table import categorical_columns
 from ueler.image_utils import color_one_image, estimate_color_range, process_single_crop
 from ueler.viewer.observable import Observable
 
@@ -55,8 +56,7 @@ class AnnotationDisplay:
 
         # Get columns that are of integer or string types
         if self.main_viewer.cell_table is not None:
-            cell_table = self.main_viewer.cell_table
-            label_columns = cell_table.select_dtypes(include=["int", "int64", "object"]).columns.tolist()
+            label_columns = categorical_columns(self.main_viewer.cell_table)
 
             # Create checkboxes for each label column
             self.ui_component.label_checkboxes = []

@@ -4,6 +4,10 @@ The ROI browser allows users to compose tag filters using familiar
 boolean operators. This module provides a small parser that converts the
 user input into an evaluable predicate so the gallery can quickly decide
 whether an ROI matches the active expression.
+
+Tag names may contain spaces (``tumour core & !edge``): whitespace only
+separates a name from an operator, a parenthesis or a quote, never one name
+from another. Quotes remain available for names holding operator characters.
 """
 from __future__ import annotations
 
@@ -35,6 +39,17 @@ _RIGHT_ASSOCIATIVE = {"!"}
 _VALID_NAME_CHARS = set("+-._:/")
 
 
+def _normalise_name(text: str) -> str:
+    """Strip the ends of *text* and collapse internal whitespace runs.
+
+    Tag names may contain spaces, so whitespace inside a name is meaningful.
+    Normalising both the parsed name and the ROI's tags the same way keeps
+    ``my   tag`` matching the tag ``my tag``.
+    """
+
+    return " ".join(text.split())
+
+
 def _tokenize(expression: str) -> List[Token]:
     tokens: List[Token] = []
     buffer: List[str] = []
@@ -44,7 +59,7 @@ def _tokenize(expression: str) -> List[Token]:
     def flush_buffer() -> None:
         nonlocal buffer
         if buffer:
-            token_text = "".join(buffer).strip()
+            token_text = _normalise_name("".join(buffer))
             if token_text:
                 tokens.append(Token("name", token_text))
             buffer = []
@@ -52,7 +67,12 @@ def _tokenize(expression: str) -> List[Token]:
     while index < length:
         char = expression[index]
         if char.isspace():
-            flush_buffer()
+            # Names may contain spaces, so whitespace does not end a name; it
+            # only separates a name from an operator, a parenthesis or a quote.
+            # Skipping it while the buffer is empty drops leading whitespace;
+            # trailing whitespace is removed when the buffer is flushed.
+            if buffer:
+                buffer.append(char)
             index += 1
             continue
         if char in "()&|!":
@@ -61,6 +81,7 @@ def _tokenize(expression: str) -> List[Token]:
             index += 1
             continue
         if char in ('"', "'"):
+            flush_buffer()
             quote = char
             index += 1
             start = index
@@ -77,7 +98,10 @@ def _tokenize(expression: str) -> List[Token]:
                 index += 1
             else:
                 raise TagExpressionError("Unclosed quoted string in expression.")
-            tokens.append(Token("name", "".join(escaped)))
+            quoted_name = _normalise_name("".join(escaped))
+            if not quoted_name:
+                raise TagExpressionError("Empty quoted name in expression.")
+            tokens.append(Token("name", quoted_name))
             index += 1  # skip closing quote
             continue
         if char.isalnum() or char in _VALID_NAME_CHARS:
@@ -93,11 +117,20 @@ def _tokenize(expression: str) -> List[Token]:
 def _to_postfix(tokens: Sequence[Token]) -> List[Token]:
     output: List[Token] = []
     stack: List[Token] = []
+    previous: Token | None = None
 
     for token in tokens:
         if token.kind == "name":
+            if previous is not None and previous.kind == "name":
+                # Unquoted names absorb their spaces, so adjacency can only come
+                # from quoting; say so instead of failing later on stack size.
+                raise TagExpressionError(
+                    f"Missing operator between '{previous.value}' and '{token.value}'."
+                )
+            previous = token
             output.append(token)
             continue
+        previous = token
         if token.kind == "operator":
             precedence = _OPERATOR_PRECEDENCE[token.value]
             while stack:
@@ -202,7 +235,11 @@ def compile_tag_expression(expression: str) -> Callable[[Iterable[str]], bool]:
         raise TagExpressionError(str(exc)) from exc
 
     def predicate(tags: Iterable[str]) -> bool:
-        tag_set = {str(tag).strip() for tag in tags if str(tag).strip()}
+        tag_set = {
+            normalised
+            for normalised in (_normalise_name(str(tag)) for tag in tags)
+            if normalised
+        }
         return _evaluate_postfix(postfix, tag_set)
 
     return predicate

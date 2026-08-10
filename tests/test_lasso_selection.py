@@ -23,16 +23,51 @@ def _stub_module(name, **attrs):
 if "cv2" not in sys.modules:
     _stub_module("cv2")
 
+def _get_axis_limits_with_padding(viewer, ds):
+    # return (xmin, xmax, ymin, ymax, xmin_ds, xmax_ds, ymin_ds, ymax_ds)
+    return (0, viewer._test_width, 0, viewer._test_height, 0, 0, 0, 0)
+
+
 if "ueler.image_utils" not in sys.modules:
     _iu = _stub_module("ueler.image_utils")
-
-    def _get_axis_limits_with_padding(viewer, ds):
-        # return (xmin, xmax, ymin, ymax, xmin_ds, xmax_ds, ymin_ds, ymax_ds)
-        return (0, viewer._test_width, 0, viewer._test_height, 0, 0, 0, 0)
-
     _iu.calculate_downsample_factor = lambda *a, **kw: 1  # type: ignore[attr-defined]
     _iu.generate_edges = lambda *a, **kw: np.zeros((1, 1))  # type: ignore[attr-defined]
     _iu.get_axis_limits_with_padding = _get_axis_limits_with_padding  # type: ignore[attr-defined]
+
+
+class _PatchAxisLimitsMixin:
+    """Force ``get_axis_limits_with_padding`` to the lightweight stub for the
+    duration of each lasso test, restoring it afterward.
+
+    The module-level stub above is only installed when this file imports
+    ``ueler.image_utils`` first; in the full suite the real module is already
+    loaded, so its real ``get_axis_limits_with_padding`` (which needs viewer
+    attributes this file's minimal stub omits) would otherwise be used. Patching
+    per-test keeps the tests order-independent without polluting other modules.
+
+    Two references must be patched: ``ueler.image_utils`` (picked up by the
+    function-local ``from ... import`` in ``_find_masks_in_lasso_single_fov``)
+    and ``ueler.viewer.image_display`` (the name bound at module load, used by
+    ``update_patches``).
+    """
+
+    _PATCH_TARGETS = ("ueler.image_utils", "ueler.viewer.image_display")
+
+    def setUp(self):
+        super().setUp()
+        import importlib
+
+        self._orig_axis_limits = {}
+        for target in self._PATCH_TARGETS:
+            mod = sys.modules.get(target) or importlib.import_module(target)
+            if hasattr(mod, "get_axis_limits_with_padding"):
+                self._orig_axis_limits[target] = mod.get_axis_limits_with_padding
+                mod.get_axis_limits_with_padding = _get_axis_limits_with_padding
+
+    def tearDown(self):
+        for target, original in self._orig_axis_limits.items():
+            sys.modules[target].get_axis_limits_with_padding = original
+        super().tearDown()
 
 # skimage stub
 if "skimage" not in sys.modules:
@@ -109,7 +144,7 @@ def _square_lasso(x0, y0, x1, y1):
 # Single-FOV lasso tests
 # ---------------------------------------------------------------------------
 
-class TestFindMasksInLassoSingleFov(unittest.TestCase):
+class TestFindMasksInLassoSingleFov(_PatchAxisLimitsMixin, unittest.TestCase):
 
     def _call(self, image_display, viewer, verts):
         image_display.main_viewer = viewer
@@ -225,7 +260,7 @@ class TestFindMasksInLassoSingleFov(unittest.TestCase):
 # Map mode lasso tests
 # ---------------------------------------------------------------------------
 
-class TestFindMasksInLassoMapMode(unittest.TestCase):
+class TestFindMasksInLassoMapMode(_PatchAxisLimitsMixin, unittest.TestCase):
     """Verify that _find_masks_in_lasso_map_mode maps canvas coords to tile masks."""
 
     def _make_tile_viewport(self, dest_x0, dest_y0, dest_x1, dest_y1,
@@ -356,7 +391,7 @@ class TestFindMasksInLassoMapMode(unittest.TestCase):
 # on_lasso_selected lifecycle tests
 # ---------------------------------------------------------------------------
 
-class TestOnLassoSelected(unittest.TestCase):
+class TestOnLassoSelected(_PatchAxisLimitsMixin, unittest.TestCase):
 
     def test_lasso_deactivated_after_completion(self):
         mask = np.zeros((10, 10), dtype=np.int32)

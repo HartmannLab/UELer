@@ -38,6 +38,11 @@ MAX_DOWNSAMPLE_FACTOR = 8
 DEFAULT_MASK_OUTLINE_THICKNESS = 1
 MAX_MASK_OUTLINE_THICKNESS = 8
 HOVER_DELAY_MS = 300
+# Fill for the part of a cutout that falls outside the FOV. Tiles are displayed at a fixed
+# grid width, so an edge cell's short crop would otherwise be rescaled and break size
+# comparisons across the gallery (issue #128). White reads as "no data" against the black
+# composite background.
+GALLERY_PAD_COLOR = (1.0, 1.0, 1.0)
 
 
 class CellGalleryDisplay(PluginBase):
@@ -703,7 +708,8 @@ def _render_tile_for_index(df, index: int, context: _RenderContext):
                 painter_border_color_map = {}
                 painter_mode_map = {}
                 painter_opacity_map = {}
-                show_borders_on_filled = False
+                show_borders = True
+                border_alpha = 1.0
                 if painter_snapshot is not None:
                     resolver = getattr(viewer, "resolve_mask_painter_snapshot_for_fov", None)
                     if callable(resolver):
@@ -712,43 +718,37 @@ def _render_tile_for_index(df, index: int, context: _RenderContext):
                             painter_border_color_map,
                             painter_mode_map,
                             painter_opacity_map,
-                            show_borders_on_filled,
+                            show_borders,
+                            border_alpha,
                         ) = resolver(painter_snapshot, fov)
 
                 def _append_cell_mask(cell_id: int, cell_color, thickness: int) -> None:
+                    # Fill and border are independent switches (issue #132); the tile mirrors the
+                    # main viewer, where a cell with both off is simply not painted.
                     cell_mode = painter_mode_map.get(int(cell_id), "outline")
                     cell_alpha = float(painter_opacity_map.get(int(cell_id), 0.0))
                     border_color = painter_border_color_map.get(int(cell_id), cell_color)
                     mask_region = mask_array == cell_id
-                    if cell_mode == "fill":
-                        if cell_alpha > 0.0:
-                            masks.append(
-                                MaskRenderSettings(
-                                    array=mask_region,
-                                    color=cell_color,
-                                    mode="fill",
-                                    alpha=cell_alpha,
-                                    outline_thickness=thickness,
-                                    downsample_factor=context.downsample_factor,
-                                )
+                    if cell_mode == "fill" and cell_alpha > 0.0:
+                        masks.append(
+                            MaskRenderSettings(
+                                array=mask_region,
+                                color=cell_color,
+                                mode="fill",
+                                alpha=cell_alpha,
+                                outline_thickness=thickness,
+                                downsample_factor=context.downsample_factor,
                             )
-                        if show_borders_on_filled or cell_alpha <= 0.0:
-                            masks.append(
-                                MaskRenderSettings(
-                                    array=mask_region,
-                                    color=to_rgb(border_color) if isinstance(border_color, str) else border_color,
-                                    mode="outline",
-                                    outline_thickness=thickness,
-                                    downsample_factor=context.downsample_factor,
-                                )
-                            )
+                        )
+                    if not show_borders or border_alpha <= 0.0:
                         return
 
                     masks.append(
                         MaskRenderSettings(
                             array=mask_region,
-                            color=cell_color,
+                            color=to_rgb(border_color) if isinstance(border_color, str) else border_color,
                             mode="outline",
+                            alpha=border_alpha,
                             outline_thickness=thickness,
                             downsample_factor=context.downsample_factor,
                         )
@@ -817,6 +817,8 @@ def _render_tile_for_index(df, index: int, context: _RenderContext):
             annotation=annotation_settings,
             masks=tuple(masks),
             skip_image_layer=bool(getattr(context.overlay_snapshot, "skip_image_layer", False)),
+            pad_to_size=True,
+            pad_color=GALLERY_PAD_COLOR,
         )
         return np.clip(tile, 0.0, 1.0)
     

@@ -1,22 +1,19 @@
-"""UELer package skeleton with compatibility shims.
+"""UELer: the public ``ueler`` namespace.
 
-This module keeps the current runtime behavior by delegating imports to the
-legacy modules while providing a stable place to register compatibility alias
-modules. The helper re-exports allow notebooks to begin using the ``ueler``
-namespace without breaking existing code.
+Importing this package must stay free of global side effects: it registers no
+``sys.meta_path`` finders and claims no top-level module names, so ``import
+ueler`` cannot change how any other import in the session resolves. The heavy UI
+modules are pulled in lazily via ``__getattr__``.
+
+The pre-0.2 compatibility layer that aliased the legacy top-level ``viewer``,
+``constants``, ``data_loader`` and ``image_utils`` names onto their packaged
+counterparts has been removed. Notebooks must import from ``ueler.*``.
 """
 
 from importlib import import_module as _import_module
 from typing import TYPE_CHECKING, Any
 
-from ._compat import (
-	UTILITY_ALIASES as _UTILITY_ALIASES,
-	ensure_aliases_loaded as _ensure_aliases_loaded,
-	register_module_aliases as _register_module_aliases,
-)
 from .runner import load_cell_table, run_viewer, run_viewer_bia
-
-_register_module_aliases(_UTILITY_ALIASES)
 
 __all__ = [
 	"viewer",
@@ -26,27 +23,27 @@ __all__ = [
 	"run_viewer",
 	"run_viewer_bia",
 	"load_cell_table",
-	"ensure_compat_aliases",
 ]
 
-__version__ = "0.4.1"
-
-
-def ensure_compat_aliases() -> None:
-	"""Ensure all planned alias modules are registered."""
-
-	_ensure_aliases_loaded()
+__version__ = "0.5.0a0"
 
 
 def __getattr__(name: str) -> Any:
-	"""Dynamically resolve compatibility attributes."""
+	"""Resolve the viewer subpackage lazily.
+
+	Must raise ``AttributeError`` (never ``ModuleNotFoundError``) for unknown
+	names: ``import ueler.<submodule>`` resolves the parent via
+	``getattr(ueler, '<submodule>')`` when the submodule isn't bound as an
+	attribute, and a leaked ``ModuleNotFoundError`` there aborts otherwise-valid
+	submodule imports.
+	"""
 
 	if name == "viewer":
 		return _import_module("ueler.viewer")
 
-	legacy = _import_module("viewer")
-	if hasattr(legacy, name):
-		return getattr(legacy, name)
+	if name in {"ImageMaskViewer", "create_widgets", "display_ui"}:
+		return getattr(_import_module("ueler.viewer"), name)
+
 	raise AttributeError(f"module 'ueler' has no attribute '{name}'")
 
 
