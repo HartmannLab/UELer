@@ -28,6 +28,11 @@ def _run_in_subprocess(body: str) -> subprocess.CompletedProcess:
 	A subprocess is required: the test suite's own bootstrap stubs modules and
 	other test modules import ``ueler``, so ``sys.meta_path`` in this process
 	says nothing about what a *fresh* ``import ueler`` does.
+
+	The env is built from scratch rather than inherited so the child cannot pick
+	up the bootstrap. ``UELER_TEST_BOOTSTRAP`` is simply absent (the bootstrap is
+	opt-in); ``UELER_SKIP_TEST_BOOTSTRAP`` is set as well so the child stays
+	clean even if that default is ever flipped back.
 	"""
 
 	return subprocess.run(

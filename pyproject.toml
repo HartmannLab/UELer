@@ -1,19 +1,28 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "ueler"
 version = "0.5.0-alpha"
-description = "Usability Enhanced Linked Viewer for MIBI imaging"
+description = "Unified Exploratory Linked Viewer for spatial proteomics and multiplexed imaging"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.13"
 license = "GPL-3.0-only"
 license-files = ["LICENSE.txt"]
 authors = [
     { name = "Yu-Le Wu (Hartmann Lab, DKFZ)" }
 ]
-keywords = ["imaging", "viewer", "notebook", "MIBI"]
+keywords = [
+    "spatial proteomics",
+    "multiplexed imaging",
+    "image viewer",
+    "jupyter",
+    "napari-alternative",
+    "MIBI",
+    "IMC",
+    "bioimage analysis",
+]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
@@ -48,6 +57,8 @@ ark = ["ark-analysis==0.7.0"]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    "build>=1.0",
+    "twine>=5.0",
 ]
 docs = [
     "mkdocs-material>=9.5",

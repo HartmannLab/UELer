@@ -42,3 +42,13 @@ CLAUDE.md
 .claude/
 graphify-out/
 *.png
+
+# Assets that ship in the wheel or render in the docs must survive the blanket
+# *.txt / *.png rules above. setuptools builds from the working tree, so an
+# ignored asset is present in a local build and silently missing from one made
+# on a clean checkout (CI, or a fresh clone) — a wheel that only breaks for
+# users. Negations must stay below the patterns they override: last match wins.
+!LICENSE.txt
+!ueler/**/*.png
+!doc/**/*.png
+!docs/**/*.png

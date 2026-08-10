@@ -5,6 +5,9 @@ module is present on ``sys.path``. We use the hook to add the repository root to
 ``sys.path`` and initialise the shared test bootstrap so unittest discovery that
 imports test modules as top-level modules still benefits from the dependency
 shims.
+
+Opt-in via ``UELER_TEST_BOOTSTRAP=1``, mirroring ``sitecustomize.py`` — see the
+rationale there.
 """
 
 from __future__ import annotations
@@ -18,7 +21,9 @@ ROOT_STR = str(ROOT)
 if ROOT_STR not in sys.path:
     sys.path.insert(0, ROOT_STR)
 
-if os.environ.get("UELER_SKIP_TEST_BOOTSTRAP") == "1":  # pragma: no cover
+if os.environ.get("UELER_TEST_BOOTSTRAP") != "1":  # pragma: no cover
+    pass
+elif os.environ.get("UELER_SKIP_TEST_BOOTSTRAP") == "1":  # pragma: no cover
     pass
 else:  # pragma: no cover - simple bootstrap wiring
     try:
@@ -26,8 +31,12 @@ else:  # pragma: no cover - simple bootstrap wiring
 
         if hasattr(bootstrap, "initialize"):
             bootstrap.initialize()
-    except Exception:
-        # Importing the bootstrap should never be fatal to runtime usage. If it
-        # fails (for example, tests package missing), swallow the error and
-        # continue with normal interpreter startup.
-        pass
+    except Exception as exc:
+        # See sitecustomize.py: never fatal, but never silent either.
+        import warnings
+
+        warnings.warn(
+            f"UELER_TEST_BOOTSTRAP=1 was set but the test bootstrap failed to "
+            f"initialise ({exc!r}); continuing without dependency stubs.",
+            RuntimeWarning,
+        )

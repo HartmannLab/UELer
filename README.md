@@ -7,38 +7,46 @@ You can try UELer without installation by launching it on [Binder](https://mybin
 
 ## Installation
 
-### 1. Set up the environment
+### Option A — install from PyPI (recommended)
 
-You can create a compatible environment using the `env/environment.yml` file provided in this repository.
+```shell
+pip install ueler
+```
 
-1. Download the `environment.yml` file to your preferred folder.
-2. Change your current directory to that folder.
-3. Create the environment by running:
+While UELer is still on a pre-release version, ask pip for it explicitly:
+
+```shell
+pip install --pre ueler
+```
+
+This pulls in every runtime dependency. Two optional extras are available:
+
+```shell
+pip install "ueler[ark]"    # adds ark-analysis (pinned) for ark-based workflows
+pip install "ueler[docs]"   # adds the mkdocs toolchain for building the docs
+```
+
+Requires Python 3.10 or 3.11.
+
+### Option B — install from source (for development)
+
+Use this if you want to modify UELer or track the `develop` branch.
+
+1. Create a compatible environment from the `env/environment.yml` file in this repository:
 
    ```shell
    micromamba env create --name ark-analysis-ueler --file environment.yml
    ```
-
-### 2. Install UELer
-
-1. Navigate to the directory where you want to install the tool, then clone the repository:
+2. Clone the repository and activate the environment:
 
    ```shell
    git clone https://github.com/HartmannLab/UELer.git
-   ```
-2. Activate your environment:
-
-   ```shell
    micromamba activate ark-analysis-ueler
    ```
-3. Change into the cloned UELer directory:
+3. Install in editable mode from the cloned directory:
 
    ```shell
-   cd <path-to-UELer-folder>
-   ```
-4. Install the package in editable mode:
-
-   ```shell
+   cd UELer
    pip install -e .
    ```
 
@@ -59,14 +67,22 @@ micromamba install dask-image
 After completing these steps, your environment should be ready to go!
 
 ### Upgrade UELer
-To update UELer, navigate to your UELer directory and run:
+If you installed from PyPI:
+```shell
+pip install --upgrade ueler
+```
+If you installed from source, pull the latest commits in your UELer directory. Re-run the install
+only when the dependencies changed — an editable install picks up code changes on its own:
 ```shell
 git pull
+pip install -e .   # only needed if env/environment.yml or pyproject.toml changed
 ```
 
 ## Getting started
 1. Open your favorite editor that supports Jupyter notebook.
-2. Navigate to the cloned UELer repository, then open the notebook `/script/run_ueler.ipynb`.
+2. Open the starter notebook `script/run_ueler.ipynb`. If you installed from PyPI rather than
+   cloning, download it from
+   [the repository](https://github.com/HartmannLab/UELer/blob/main/script/run_ueler.ipynb).
 3. Select the kernel for an ark-analysis compatible conda/micromamba env.
 4. Change the lines according to the instructions in the notebook: when configuring the `/script/run_ueler.ipynb`, ensure that you specify the following directory paths:
   - **`base_folder`**: The directory containing the FOV (Field of View) folders with image data (e.g., `.../image_data`).
@@ -113,7 +129,7 @@ Examples for three real studies — `S-BIAD2557` (single-dir masks), `S-BIAD2864
 folders), and `S-BIAD2708` (zipped FOVs + per-FOV masks) — are in `script/run_ueler_BIA.ipynb`.
 
 ## User interface
-![GUI_preview](/doc/GUI_preview.png)
+![GUI_preview](https://raw.githubusercontent.com/HartmannLab/UELer/main/doc/GUI_preview.png)
 The GUI can be split into four main regions (wide plugins toggle the optional footer automatically):
 - left: overall settings (channel, annotation, and mask accordions)
 - middle: main viewer with overlay controls and image navigation
@@ -137,10 +153,12 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### **UELer v0.5.0-alpha Summary**
+- **UELer is being prepared for release on PyPI (`pip install ueler`).** Installation now leads with a pip install rather than a `git clone`, and "Upgrade UELer" covers both paths. The supported Python versions are stated explicitly (**3.10 and 3.11**) instead of implied — the previous open-ended range would have let pip install UELer on interpreters it has never been tested against. Packaging fixes behind the scenes: bundled image assets can no longer be dropped from a build by an over-broad `.gitignore` rule, the source distribution no longer carries unusable test files, and `make build` / `make publish` targets always start from a clean `dist/`. The tool's one-line description is now consistent across the README, the docs site and the package metadata.
+- **For developers working from a clone:** the test dependency stubs installed by `sitecustomize.py` / `usercustomize.py` are now **opt-in** via `UELER_TEST_BOOTSTRAP=1` (which `make test-fast` sets for you). Previously they were on by default, so any interpreter that had the repo root on `PYTHONPATH` could silently get stubbed versions of `pandas`, `matplotlib` and `ipywidgets`.
 - **⚠️ Legacy `viewer` / `constants` / `data_loader` / `image_utils` imports have been removed (packaging cleanup).** Until now, `import ueler` also made the *old* pre-v0.2 module names importable, so a notebook could still say `from viewer.main_viewer import ImageMaskViewer`. That shim worked by claiming those four names for UELer across your whole Python session, which is not safe once UELer is installed from PyPI — a file of your own called `constants.py` or `data_loader.py` could be quietly shadowed by UELer's. The shim is gone. **If you have an old notebook using those names, change the import to the `ueler.` version** — `from ueler.viewer.main_viewer import ImageMaskViewer`, `import ueler.constants`, and so on. The modules themselves are unchanged; only the old spelling is no longer accepted. The `ensure_aliases=` argument of `run_viewer()` / `run_viewer_bia()` and the `ueler.ensure_compat_aliases()` helper are removed too; passing `ensure_aliases=` now prints a warning and is ignored rather than failing.
 
-_Earlier changes (v0.4.4 and before) are in the [update log](/doc/log.md)._
+_Earlier changes (v0.4.4 and before) are in the [update log](https://github.com/HartmannLab/UELer/blob/main/doc/log.md)._
 
 ## Earlier Updates  
 
-You can find previous update logs [here](/doc/log.md).
+You can find previous update logs [here](https://github.com/HartmannLab/UELer/blob/main/doc/log.md).

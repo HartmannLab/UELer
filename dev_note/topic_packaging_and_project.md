@@ -7,8 +7,11 @@ UELer has been refactored into a package-first layout with `ueler/` as the canon
 - Keep notebooks as the primary entrypoint and add `ueler.runner.run_viewer` for programmatic use.
 - Use a lightweight fast-stub test bootstrap to keep the test suite runnable without heavy dependencies.
 - **`import ueler` must have no global side effects.** It registers no `sys.meta_path` finders and claims no top-level module names, so it cannot change how any other import in the session resolves. This is a hard requirement for distributing on PyPI and is enforced by `tests/test_import_namespace_hygiene.py`.
+- **The test dependency stubs are opt-in, never on by default.** `sitecustomize.py` / `usercustomize.py` initialise `tests.bootstrap` only when `UELER_TEST_BOOTSTRAP=1` is set (the `make test-*` targets do). The stubs replace `pandas`, `matplotlib` and `ipywidgets`, so defaulting them on meant any interpreter with the repo root on `PYTHONPATH` could silently run against fakes. A requested-but-failed bootstrap now warns rather than passing silently.
+- **Anything that ships must be visible to git.** `.gitignore` carries blanket `*.txt` / `*.png` rules, so packaged and doc assets are re-included explicitly (`!LICENSE.txt`, `!ueler/**/*.png`, `!doc/**/*.png`, `!docs/**/*.png`). setuptools builds from the working tree, so an ignored asset is present in a local build and absent from a clean-checkout build — add new asset types to those negations.
 
 ## Current status
+- **Gate A of the PyPI release plan is complete** (2026-08-10): `MANIFEST.in` added, `setuptools>=77` floor, `requires-python = ">=3.10,<3.13"`, one settled project description, a PyPI-first README, `.gitignore` negations for packaged assets, opt-in test bootstrap, and `clean-dist`/`build`/`check-dist`/`publish-test`/`publish` Makefile targets. Gates B–D remain — see the plan linked under *Open items*.
 - `ueler/` package skeleton, `pyproject.toml`, and `Makefile` are in place.
 - Module moves from `viewer.*` to `ueler.viewer.*` are complete.
 - A runner entrypoint exists for notebook usage.
@@ -18,7 +21,8 @@ UELer has been refactored into a package-first layout with `ueler/` as the canon
 - Define and add a CI fast-stub job.
 - Add an integration test workflow for heavier dependencies and GUI paths.
 - Keep the packaging notes and release documentation aligned as changes land.
-- Remaining pre-PyPI items (assessed, not yet done): raise the `build-system` setuptools floor to `>=77` for the PEP 639 `license` field, clear the stale `dist/` artifacts and add a release target, `prune tests` in a `MANIFEST.in` (the sdist currently ships `tests/test_*.py` without `bootstrap.py`, so they cannot run), invert the `sitecustomize.py` / `usercustomize.py` bootstrap to opt-*in*, and fill out the PyPI classifiers and URLs.
+- Remaining pre-PyPI items are tracked as Gates B–D in [issue_tracking/issue79_pypi_release_readiness.md](issue_tracking/issue79_pypi_release_readiness.md): PyPI classifiers and `[project.urls]`, stating the license in user-facing docs, moving `ueler/graphify-out/` out of the package directory, CI test + release workflows (Trusted Publishing), the git-tag backfill, and the TestPyPI rehearsal plus a live notebook smoke test.
+- Decide whether **Python 3.12** joins the CI matrix or `requires-python` tightens to `<3.12` — the current `">=3.10,<3.13"` bound permits a minor version that has never been run.
 
 ## Related GitHub issues
 - https://github.com/HartmannLab/UELer/issues/4
