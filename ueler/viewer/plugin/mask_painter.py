@@ -39,7 +39,11 @@ except Exception:  # pragma: no cover - executed when ipyfilechooser is absent
 
 FileChooser = getattr(_FileChooserModule, "FileChooser", None)
 
-from ueler.cell_table import categorical_columns
+from ueler.cell_table import (
+    categorical_columns,
+    is_float_column_dtype,
+    is_integer_column_dtype,
+)
 from ueler.viewer.decorators import update_status_bar
 from ueler.viewer.plugin.plugin_base import PluginBase
 from ueler.viewer.plugin.mask_class_list_widget import MaskClassListWidget
@@ -1861,9 +1865,9 @@ class MaskPainterDisplay(PluginBase):
         column = self.main_viewer.cell_table[identifier]
         dtype = column.dtype
         def _convert(value: str):
-            if np.issubdtype(dtype, np.integer):
+            if is_integer_column_dtype(dtype):
                 return int(value)
-            if np.issubdtype(dtype, np.floating):
+            if is_float_column_dtype(dtype):
                 return float(value)
             return value
 

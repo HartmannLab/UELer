@@ -36,6 +36,20 @@ UELer has been refactored from a notebook-first script layout into a proper Pyth
   `colors.Normalize`. The stubs make an already-complete environment fast; the
   planned "CI fast-stub job" was dropped because it would report green over a third
   of the suite never running.
+- **Every directly-imported dependency is declared, even when it would arrive
+  transitively.** `pandas` was imported by fourteen modules and named nowhere in
+  `pyproject.toml`, arriving only via seaborn and anndata — which is how pip came
+  to resolve a different pandas *major* per Python minor (pandas 3 requires
+  ≥ 3.11, so the CI 3.12 leg got the new default `StringDtype` and the 3.10/3.11
+  legs did not). Now `pandas>=2.0`.
+- **Column dtypes are classified through `pandas.api.types`, never
+  `np.issubdtype`.** `np.issubdtype` raises `TypeError` on every pandas
+  *extension* dtype — nullable `Int64`/`Float64`, `category`, and pandas 3's
+  default `StringDtype` — and `flatten_anndata` produces all of them.
+  `ueler.cell_table.is_integer_column_dtype` / `is_float_column_dtype` handle both
+  families and unwrap categoricals to `.categories.dtype`, because a `category`
+  column of integers still needs its labels converted (`series == "1"` matches no
+  rows where `series == 1` matches).
 - **A tag push can reach TestPyPI but never PyPI.** The real upload takes an
   explicit `workflow_dispatch` from a tag ref, behind a GitHub environment
   reviewer. A PyPI version can be yanked but never reused, so `git push --tags`
@@ -74,6 +88,7 @@ ueler/
 - **Gate A of the PyPI release plan is complete.** The build is reproducible and safe to publish: `python -m build` is clean, `twine check --strict` passes on both artifacts, and wheel and sdist have each been installed into a fresh venv and imported from outside the repository.
 - **Gate B is complete** (2026-08-10). The release now describes itself: ten PyPI classifiers, `[project.urls]` covering repository / issues / changelog, the license stated in the README, the docs-site install page realigned with the PyPI-first flow, and the stale graphify cache moved out of `ueler/`.
 - **Gate C is complete** (2026-08-10). Two workflows: `tests.yml` (unit matrix + a build-and-import-the-wheel job) and `release.yml` (Trusted Publishing). See *Continuous integration* and *Release process* below.
+- **CI paid for itself on its first run** (2026-08-10): 3.10, 3.11 and `package` green, and the non-blocking 3.12 leg surfaced 19 errors that were a live pandas bug rather than a 3.12 one — mask painting was broken for any AnnData-derived `category` identifier column on *current* pandas too. Suite now **922 tests, 0 skips**.
 - **Remaining: Gate D** — configure the Trusted Publishers, rehearse on TestPyPI, run the notebook end to end from an installed wheel, then publish `0.5.0-alpha`.
 
 ### Continuous integration
@@ -138,7 +153,8 @@ spelling (`0.5.0a0`) — `v0.5.0-a0` works too.
 - ~~Define and add a CI fast-stub job~~ — **closed as superseded**; the skip threshold it asked for exists, but on the real dependency stack (see the key decisions above).
 - Add an integration test workflow for the **GUI** paths. The full dependency stack is now covered by `tests.yml`; the widget layer still needs a browser, so it stays manual.
 - Rehearse on TestPyPI before the first real upload, and configure the Trusted Publishers described under *Release process*.
-- Act on the 3.12 result once `tests.yml` has run: either add `Programming Language :: Python :: 3.12` and drop `continue-on-error`, or tighten `requires-python` to `<3.12`. The classifiers and the bound move together.
+- Act on the 3.12 result. The leg has run **once**, and its first reading was not about 3.12: 19 errors, all one `np.issubdtype` call meeting pandas 3's default string dtype — now fixed. Tightening `requires-python` to `<3.12` would have concealed it, since pandas 3 installs on 3.11 too. Re-read after the fix lands; the evidence argues for *widening* (add `Programming Language :: Python :: 3.12`, drop `continue-on-error`), and the classifiers and the bound move together. Keep the leg regardless — it is the only coverage of pandas-3 semantics.
+- Revisit the **3.10 floor** before it costs coverage: pandas 3 and anndata 0.12 both require ≥ 3.11, and anndata 0.13 requires ≥ 3.12, so a 3.10 install is pinned to the older half of the stack. Nothing is broken today — pandas 3 cannot be installed on 3.10 at all, so the bad pandas-3-with-anndata-0.11 pairing is unreachable.
 - Confirm with DKFZ that naming both the author and the institute in the BSD copyright line matches institutional policy — the only part of the relicense that is not purely a code change.
 - Revisit `ipykernel` / `ipympl` as hard runtime dependencies before `1.0`: `pip install ueler` currently installs a Jupyter kernel. Moving them to a `notebook` extra also requires updating `.binder/postBuild`, which runs a bare `pip install .`.
 

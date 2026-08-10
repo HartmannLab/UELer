@@ -53,6 +53,13 @@ dependencies = [
     "ipywidgets>=8.1",
     "anywidget>=0.9",
     "numpy",
+    # Declared explicitly although seaborn/anndata would drag it in anyway: the
+    # viewer imports pandas directly in ~14 modules, and leaving it transitive is
+    # what let pip resolve a different major version per Python minor (pandas 3
+    # needs >=3.11, so the CI 3.12 leg got the new string dtype and 3.10/3.11 did
+    # not). The floor is conservative rather than measured -- the suite is only
+    # exercised against 2.3 and, via `future.infer_string`, pandas-3 semantics.
+    "pandas>=2.0",
     "ipykernel",
     "ipympl",
     "anndata>=0.10",

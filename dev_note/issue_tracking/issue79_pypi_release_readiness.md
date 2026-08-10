@@ -4,7 +4,9 @@
 > **Gate A is complete** (`88b0e6e`). **Gate B is complete** (`f9fcfae` — B2 and B3
 > consciously declined, plus one item the original list missed). **Gate C is
 > complete** (2026-08-10, working tree on `nightly` — C1 landed in a different shape
-> than planned and C3 was decided as "don't"). **Gate D remains**, and it is the
+> than planned and C3 was decided as "don't"). **CI has now run once** (run
+> `31407846635`): 3.10, 3.11 and `package` green; the non-blocking 3.12 leg found a
+> real bug, fixed in **C5**. **Gate D remains**, and it is the
 > half that needs a human: a TestPyPI rehearsal, a live notebook run, then the
 > upload. Developer decisions are recorded under
 > [Decisions taken](#decisions-taken).
@@ -31,7 +33,7 @@ Measured on 2026-08-10, not inferred from config:
 | Wheel install in a clean venv | ✅ `import ueler`, `ueler.viewer.main_viewer`, bundled `images/` assets all resolve |
 | **sdist** install in a clean venv | ✅ builds and imports (`pip install ueler-0.5.0a0.tar.gz`) |
 | Dependency resolution from PyPI | ✅ all 22 core deps; the `[ark]` extra (`ark-analysis==0.7.0`) also resolves |
-| PyPI name availability | ✅ both `ueler` and `UELer` are free (404 on the JSON API) |
+| PyPI name availability | ⚠️ **partly wrong — re-measured 2026-08-10.** `ueler` is indeed unregistered on **PyPI** (404 on both `/pypi/ueler/json` and `/simple/ueler/`), but *unregistered* is not the same as *allowed*: PyPI's pending-publisher form rejects it with **"This project name isn't allowed"**, which is its message for an administratively **prohibited** name, not for a taken one. See **C4**. And the row only ever checked PyPI — **TestPyPI already holds `ueler` 0.3.1**, uploaded 2026-04-10 (see **D1**). |
 | Local-path / machine-info leakage | ✅ `make scan-package` → 0 high, 0 medium, 2 low (docstrings naming `~/.ueler`) |
 | Wheel hygiene | ✅ no `__pycache__`, no `ueler/graphify-out/`, no tests, no `_compat.py`; license lands in `dist-info/licenses/` |
 | Test suite, Python 3.10 | ✅ 913 tests, OK (5 skips) |
@@ -93,6 +95,21 @@ imported in two fresh venvs).
   `continue-on-error` leg produces that evidence on the next push at no risk.
   Widening the classifiers then becomes a one-line follow-up backed by data — and
   `classifiers` and `requires-python` still have to move together.
+  **Vindicated on the first run, but not in the expected way:** the leg's 19 errors
+  were a pandas-3 forward-compatibility bug that was *already live on current
+  pandas* for AnnData-derived `category` columns, not a 3.12 incompatibility. Had
+  the decision gone the other way — argue it out and tighten to `<3.12` — the bug
+  would have shipped. See **C5**.
+- **C5 (dtype classification)** → **`pandas.api.types`, never `np.issubdtype`, for
+  anything holding a pandas column dtype.** `np.issubdtype` raises `TypeError` on
+  every pandas extension dtype. The predicates live in `ueler/cell_table.py`
+  because the dtype in question is always a cell-table column's, and categoricals
+  are unwrapped to their categories' dtype rather than reported as non-numeric —
+  otherwise a loud crash becomes a silently empty selection.
+- **C5 (dependencies)** → **declare what the code imports, even when it arrives
+  transitively.** `pandas` was imported in fourteen modules and named nowhere, so
+  pip was free to resolve a different major per Python minor with nothing in the
+  repository recording the expectation. Now `pandas>=2.0`.
 - **C2** → **a tag push publishes to TestPyPI only; PyPI needs a manual dispatch.**
   The plan had tags publishing straight to PyPI. Given that a PyPI version can be
   yanked but never reused, making `git push --tags` an irreversible public act is
@@ -609,8 +626,11 @@ environment that happened to be missing bokeh.
   four legacy top-level names leaked into `sys.modules`) — exit 0. The skip gate
   was exercised in both directions: exit 0 on the full environment with 0 skips,
   exit 1 in the minimal venv with all 19 skips printed and named.
-- **Not verified:** nothing has run on GitHub's runners yet. The first push is the
-  real test of the workflow files.
+- **Now verified on GitHub's runners** (run `31407846635`, branch `nightly`):
+  `unit (py3.10)` ✅, `unit (py3.11)` ✅, `build + verify the distribution` ✅,
+  `unit (py3.12)` ❌ — and the **run as a whole is `success`**, which is the
+  `continue-on-error` contract working as designed. The 3.12 result is written up
+  in **C5** below. The publish jobs still cannot be exercised without a tag.
 
 ### C2. Add a release workflow with Trusted Publishing — ✅ done
 
@@ -655,6 +675,92 @@ environment that happened to be missing bokeh.
   tag (exit 0, both spellings) and a wrong one (`v0.5.0` → exit 1). The publish
   jobs themselves cannot be tested without pushing a tag — that is **D1**.
 
+### C4. **BLOCKER — PyPI will not accept the name `ueler`** 🚨 open
+
+**Not in the original plan; found 2026-08-10 while the developer configured the
+Trusted Publishers.** PyPI's pending-publisher form rejects the project name with
+**"This project name isn't allowed."**
+
+- **What is and is not established.** Measured here: `ueler` is *unregistered* on
+  PyPI — 404 from both `https://pypi.org/pypi/ueler/json` and
+  `https://pypi.org/simple/ueler/`. So this is **not** "someone took the name";
+  PyPI's message for that case is "This project name is already being used."
+  The message the developer got is warehouse's response for a name matching its
+  **prohibited-names** list, which is checked against both the PEP 503 normalised
+  form and an "ultranormalised" form that collapses visually confusable characters
+  (`l`/`I`/`1`, `0`/`O`, and `-_.`). That list is administrative and **not readable
+  from outside PyPI**, so the *reason* for the block cannot be determined from here
+  — only that the block exists and is not an availability problem.
+- **Confirmed 2026-08-10: `ueler` and `UELer` fail identically**, which is the expected
+  result — the validator normalises before comparing, so the two are the same name to
+  PyPI. The form also shows a generic banner, **"The trusted publisher could not be
+  registered"**, above the field-level reason; they are two halves of one failure, not
+  two problems.
+- **Control test run 2026-08-10: `ueler-viewer` registers successfully.** So the
+  rejection is specific to the string `ueler` — not the account, not the pending-publisher
+  cap, not the form, not 2FA. `ueler` is unregistered *and* administratively blocked.
+  The `ueler-viewer` pending publisher is being kept rather than deleted: it costs
+  nothing and it is the ready-made fallback if PyPI declines.
+- **Why it is a blocker rather than a nuisance:** the distribution name is the one
+  piece of packaging that everything else quotes. `pip install ueler` appears in the
+  README, `docs/installation.md`, `docs/index.md` and the Binder instructions, and
+  it is what **D3** uploads. Nothing after Gate C can proceed until the name is
+  settled.
+- **Steps, cheapest first:**
+  1. Re-try the form with lowercase `ueler`. Validation normalises the name so case
+     should not matter, but eliminate it in ten seconds.
+  2. Submit a control name (e.g. `ueler-viewer`) on the same form. If that is
+     accepted, the block is specific to `ueler`; delete the control publisher after.
+  3. **Ask PyPI to release the name — by email to `admin@pypi.org`, not via
+     `pypi/support`.** Established 2026-08-10:
+     - `pypi/support` sets `blank_issues_enabled: false`, and its seven templates are
+       network access, account recovery, two size limits, mass name squatting, and
+       PEP 541. **None covers a prohibited name**, and no free-form issue is possible.
+     - **PEP 541 is the wrong instrument.** It governs claiming a name **away from an
+       existing owner** (abandoned or squatted projects). `ueler` has no owner and no
+       project object at all.
+     - `admin@pypi.org` is one of only two addresses published on
+       [pypi.org/help](https://pypi.org/help/) (the other is `security@pypi.org`).
+     **Which of PyPI's four documented reasons applies**, per its own
+     [`#project-name`](https://pypi.org/help/#project-name) answer — three eliminated
+     empirically, so the fourth holds by elimination:
+
+     | Reason | Verdict |
+     |---|---|
+     | Conflicts with a Python stdlib module (2.5 → present) | ✗ there is no `ueler` module |
+     | Too similar to / confusable with an existing project | ✗ every confusable variant 404s — `ueier`, `ue1er`, `u-eler`, `u_eler`, `ue-ler`, `uel-er`, `uele-r`, `ueller`, `uelr`. Only `euler` exists, and character-level confusable folding maps lookalike *characters*, not letter order |
+     | Registered by another user with no releases | ✗ `/simple/ueler/` returns 404, so no project object exists — a registered-but-empty project would still have a simple-index page |
+     | **Explicitly prohibited by the PyPI administrators** | ✓ by elimination |
+
+     Include in the mail: the exact error, that `ueler` 404s on both
+     `/pypi/ueler/json` and `/simple/ueler/`, that `ueler-viewer` registers
+     immediately from the same account and form, that no confusable variant exists,
+     and the evidence this is a real tool (repository, docs site, Binder deployment,
+     the existing TestPyPI project). **Set expectations accordingly:** this is an
+     unqueued admin request with no SLA, and a name can be prohibited for a reason
+     nobody outside PyPI can see.
+  4. **Only if that fails: rename the distribution.** Note the import name is
+     independent — `pyproject.toml`'s `name` can become `ueler-viewer` while
+     `import ueler` stays exactly as it is, so **no code changes**. What changes is
+     `pyproject.toml`, every `pip install ueler` in the README / `docs/installation.md`
+     / `docs/index.md`, and the TestPyPI publisher. The mismatch is unremarkable —
+     `scikit-image`/`skimage`, `opencv-python`/`cv2`, `pillow`/`PIL`.
+- **The name only has to be settled before D3, not before D1.** TestPyPI accepts
+  `ueler`, so the rehearsal and the notebook smoke test can run now while the support
+  request is open. Decide the final name before the real upload, because the cleanest
+  outcome is publishing under one name from the start: if `0.5.0-alpha` goes out as
+  `ueler-viewer` and PyPI later grants `ueler`, you end up maintaining two
+  distribution names for a while.
+- **Do not try to force it with a token upload first.** The prohibited-name check runs
+  on upload too, so it fails identically — and if it somehow did not, `0.5.0a0` would
+  be on real PyPI before the rehearsal, which is the exact outcome Gate D exists to
+  prevent.
+- **This is the argument for Gate A existing, arriving on schedule.** The name is the
+  one property that cannot be corrected after an upload, and it surfaced during
+  configuration rather than during `twine upload`.
+- **Not blocked by this:** the TestPyPI rehearsal (**D1**), because TestPyPI already
+  accepts the name — see below.
+
 ### C3. Reconcile the git tags with the shipped versions — ✅ decided: no backfill
 
 `git tag --sort=-v:refname` shows `v0.4.1` as the newest tag, but `v0.4.2`,
@@ -676,6 +782,100 @@ this drift becomes a release mechanism problem rather than a bookkeeping one.
   convention; `v0.5.0-a0` also validates, since the checker normalises both to
   `0.5.0a0`. Either works — `v0.5.0-alpha` is the consistent one.
 
+### C5. The 3.12 leg's first reading — ✅ fixed (it was a pandas bug, not a 3.12 one)
+
+The non-blocking leg existed to turn open decision #3 into a measurement. It ran
+on the first push (run `31407846635`) and returned **19 errors**, with 3.10, 3.11
+and `package` all green. The finding is not what the open decision anticipated.
+
+**What the 19 errors were.** All of them, without exception:
+`TypeError: Cannot interpret '<StringDtype(na_value=nan)>' as a data type`. All of
+them passed through the *same four-line closure* — `_convert` inside
+`MaskPainterDisplay.apply_colors_to_masks` (`mask_painter.py`), which converts the
+class labels the widgets return (always strings) to the identifier column's dtype
+so `cell_table[identifier] == value` matches rows. It asked `np.issubdtype`.
+Extracted from the tracebacks, the implicated `ueler/` lines were exactly:
+`mask_painter.py:1864` ×19 (and `:1870` ×38, the two call frames per failure).
+
+**It is not a Python 3.12 problem — proved by reproducing it on 3.10.** Setting
+`pd.options.future.infer_string = True` on this project's own environment (Python
+3.10.19, pandas 2.3.3) yields **19 identical errors**, an exact match with CI. The
+matrix difference is the *resolver*, not the language: **pandas 3.0 requires
+Python ≥ 3.11**, so the 3.12 leg received a pandas that had already made
+`StringDtype` the default for object string columns, and `np.issubdtype` raises
+`TypeError` on every pandas **extension** dtype.
+
+**So the obvious action would have been the wrong one.** Open decision #3 offered
+"add the 3.12 classifier, or tighten to `<3.12`". Tightening would have removed
+the *symptom* while leaving the bug: pandas 3 installs happily on 3.11, so the
+same 19 errors sat one dependency resolution away from a **supported** Python. The
+3.11 leg passing is the resolver's current preference, not evidence of
+correctness.
+
+**The bug was already live on current pandas, which is the part that mattered.**
+`np.issubdtype` also raises on `Int64Dtype`, `Float64Dtype` and `CategoricalDtype`,
+and `flatten_anndata` produces all three — `obs` columns arrive categorical as a
+matter of course. Painting a cell table whose identifier column is a `category`
+therefore crashed on **today's** pandas, on **every** supported Python. No test
+covered it, so nothing said so. This is the strongest argument for the CI gate
+that has come up in the whole issue: the job found a user-facing bug on its first
+run, in a code path the release audit had not touched.
+
+**Fix.** `is_integer_column_dtype` / `is_float_column_dtype` in
+`ueler/cell_table.py` (the cell-table dtype domain, already imported by
+`mask_painter.py` for `categorical_columns`). They ask `pandas.api.types` first —
+it understands numpy and extension dtypes alike — and fall back to `np.issubdtype`
+only for the minimal pandas stand-in in `tests/bootstrap.py`, whose `api.types`
+namespace carries a different, *value*-based set of helpers. Unknown objects
+return `False` rather than raising.
+
+- **Categoricals are unwrapped to `.categories.dtype`, deliberately.**
+  `pd.Series(pd.Categorical([1, 2])) == "1"` matches **0** rows where `== 1`
+  matches 1. Classifying `category` as "neither integer nor float" would have
+  traded a loud `TypeError` for a silently empty selection — strictly worse,
+  because an empty result looks like an answer.
+- **`pandas` is now a declared dependency** (`pandas>=2.0`). Fourteen modules
+  `import pandas as pd` while nothing in `pyproject.toml` named it; it arrived
+  through seaborn and anndata. That omission is *why* pip could hand a different
+  pandas major to a different Python minor with no signal. The floor is
+  conservative rather than measured, and the comment in `pyproject.toml` says so.
+- **`anndata` was checked and deliberately left at `>=0.10`.** Under
+  `future.infer_string` this environment shows 24 *further* failures, but they are
+  confined to three h5ad modules and fail **inside anndata 0.11.4**
+  (`IORegistryError: No method registered for writing
+  ArrowStringArrayNumpySemantics`), not in UELer. They never appeared in CI, and
+  the pairing is unreachable by a fresh install: pandas 3 needs ≥ 3.11; on 3.11+
+  anndata 0.12+ is available and handles it; on 3.10 the newest anndata is 0.11.4
+  but pandas 3 cannot be installed at all.
+- **Noted for later:** anndata 0.12 requires ≥ 3.11 and anndata 0.13 requires
+  ≥ 3.12, and pandas 3 requires ≥ 3.11. The part of this project's Python range
+  under real pressure is the **3.10 floor**, not the 3.12 ceiling.
+
+**Tests — 9 new, in `tests/test_cell_table_dtype_predicates.py`.** They cover each
+dtype family, assert that `np.issubdtype` *does* raise on the extension dtypes (so
+the helper's reason for existing is itself a test), and drive
+`apply_colors_to_masks` end to end through `category` and nullable-`Int64`
+identifier columns — cases that fail on **every** supported pandas, so the
+regression is caught without needing pandas 3 present. The pandas-3 string dtype
+joins the parameter list only when constructible, rather than via `skipUnless`,
+because CI runs `--max-skips 0` and a skip would be an invisible hole.
+
+**Verified.** Non-vacuous: restoring the old `np.issubdtype` call makes the
+end-to-end group fail with 2 errors; the new code makes it pass.
+`python tools/run_test_suite.py --max-skips 0` → **922 tests, OK**, "No tests were
+skipped", exit 0. Under `future.infer_string`, `StringDtype` errors go **19 → 0**
+and only the 24 anndata ones remain. `python -m build` clean; wheel `METADATA`
+reads `Requires-Dist: pandas>=2.0`. **Not verified:** the 3.12 leg itself — that
+needs the next push.
+
+**Standing reproducer, no new tooling required:**
+
+```bash
+python -c "import pandas as pd; pd.options.future.infer_string = True; \
+import runpy, sys; sys.argv = ['x', '--max-skips', '0']; \
+runpy.run_path('tools/run_test_suite.py', run_name='__main__')"
+```
+
 ---
 
 ## Gate D — rehearsal and publish
@@ -692,6 +892,26 @@ pip install --index-url https://test.pypi.org/simple/ \
             --extra-index-url https://pypi.org/simple/ "ueler[notebook]"
 ```
 The `--extra-index-url` is required: TestPyPI does not mirror the 22 real deps.
+
+**Update 2026-08-10 — TestPyPI already has a `ueler` project, and it is ours.**
+`ueler` **0.3.1** was uploaded there on 2026-04-10 by the developer, from the same
+stale `dist/` that **A4** later purged. Consequences, none of them harmful but all
+worth knowing before the rehearsal:
+
+- **The project exists, so a *pending* publisher is the wrong mechanism there.**
+  Pending publishers are for names with no project behind them. Confirm the
+  publisher actually attached: test.pypi.org → *Your projects* → `ueler` → *Manage*
+  → *Publishing* should list it. If it only appears under *Account settings →
+  Publishing* as pending, add it on the project instead, or the OIDC exchange will
+  fail at upload.
+- **Do not judge the metadata from the 0.3.1 page.** It predates all of Gate A and B:
+  `Summary` is the old "Usability Enhanced Linked Viewer for MIBI imaging" and the
+  license shows as **Proprietary**. The point of **D1** is to read the *0.5.0a0*
+  page.
+- **No version collision.** 0.5.0a0 ≠ 0.3.1, so `skip-existing: true` on the
+  workflow's TestPyPI step is not doing any work here — it is there for re-runs.
+- **The name is accepted on TestPyPI**, which is why **C4**'s block on PyPI did not
+  show up in April.
 
 - **Check:** the rendered README, the `Summary` line, classifiers, and the URLs
   sidebar.
@@ -763,9 +983,12 @@ Then Gate D by hand.
 
 Gate C built the mechanism; nothing has exercised it. The remaining sequence:
 
-1. **Push the Gate C commit** and let `tests.yml` run for the first time. Read the
-   3.12 leg's result — it either widens the classifiers or tightens
-   `requires-python`, and either way `classifiers` moves with it.
+1. ~~**Push the Gate C commit** and let `tests.yml` run for the first time.~~ **Done**
+   — run `31407846635`. The 3.12 leg's 19 errors turned out to be a pandas bug that
+   was already live on current pandas; fixed in **C5**. **Push the C5 fix and read
+   the 3.12 leg again**: if it is green, widen the classifiers (`classifiers` and
+   `requires-python` move together). Do not tighten to `<3.12` — that was the answer
+   the first reading ruled out.
 2. **Configure the Trusted Publishers** on TestPyPI and PyPI, plus the `pypi`
    environment reviewer (see the table in Gate C).
 3. `make check-release TAG=v0.5.0-alpha`, then **push the tag** → the workflow
@@ -781,15 +1004,28 @@ Gate C built the mechanism; nothing has exercised it. The remaining sequence:
 [Decisions taken](#decisions-taken). B2 and B3 are closed as "declined for
 `0.5.0`", which needed no code change.)*
 
-1. **B4 leftover (non-code)** — confirm with **DKFZ** that the BSD copyright line
+1. 🚨 **C4 — `ueler` vs `ueler-viewer` on PyPI.** `ueler` is unregistered but
+   administratively **prohibited**; `ueler-viewer` registers fine (control test), so
+   the block is name-specific. Ask PyPI to release `ueler` via
+   [pypi/support](https://github.com/pypi/support/issues), and fall back to
+   `ueler-viewer` — whose pending publisher already exists — if they decline or go
+   quiet. Renaming needs no code changes, only `pyproject.toml` and every
+   `pip install ueler` in the README and the docs. **Not blocking D1/D2** (TestPyPI
+   accepts `ueler`); it must be settled **before D3**.
+2. **B4 leftover (non-code)** — confirm with **DKFZ** that the BSD copyright line
    naming both the author and the institute matches institutional policy. The
    licensing decision itself is made; this is the institutional half of it.
-2. **The 3.12 answer, once CI reports it** — the matrix leg makes this a reading
-   rather than a judgement, but someone still has to act on it: add
-   `Programming Language :: Python :: 3.12` and drop `continue-on-error`, or tighten
-   `requires-python` to `<3.12` and leave the classifiers alone.
-3. **A1 leftover** — the **GitHub repo description** still needs updating in the
+3. **The 3.12 answer — one reading in, and it changed the question.** The leg's
+   first run reported 19 errors that were a **pandas** bug, not a 3.12
+   incompatibility, and they are now fixed (**C5**). Tightening `requires-python`
+   to `<3.12` would have hidden it rather than fixed it. What is left is genuinely
+   a reading: re-run after this lands, and if 3.12 is green, add
+   `Programming Language :: Python :: 3.12` and drop `continue-on-error`. **Keep
+   the leg regardless of the decision** — it is the project's only coverage of
+   pandas-3 semantics, and it is what caught this. Classifiers and the bound still
+   move together.
+4. **A1 leftover** — the **GitHub repo description** still needs updating in the
    GitHub UI; it is not a tracked file.
-4. **B5 leftover (trivial)** — `graphify-out/legacy-ueler-scoped-2026-07-31/` is
+5. **B5 leftover (trivial)** — `graphify-out/legacy-ueler-scoped-2026-07-31/` is
    kept only because deleting someone else's generated data unasked is rude. It is
    stale and regenerable; delete it when you notice it.

@@ -39,6 +39,8 @@ __all__ = [
     "dataframe_to_anndata",
     "flatten_anndata",
     "is_anndata",
+    "is_float_column_dtype",
+    "is_integer_column_dtype",
     "new_provenance",
     "sync_cell_table_to_obs",
 ]
@@ -72,6 +74,60 @@ def is_anndata(obj: Any) -> bool:
     if obj is None or isinstance(obj, (pd.DataFrame, pd.Series)):
         return False
     return all(hasattr(obj, attr) for attr in ("obs", "var", "X", "n_obs"))
+
+
+def _column_dtype_is(dtype: Any, pandas_check: str, numpy_kind: Any) -> bool:
+    """Classify a *cell-table column* dtype, across numpy and pandas dtypes.
+
+    ``np.issubdtype`` raises ``TypeError`` on every pandas **extension** dtype:
+    nullable ``Int64``/``Float64``, ``category``, and the ``StringDtype`` that
+    pandas 3 gives object string columns by default.  A cell table flattened from
+    ``AnnData`` produces all of those, so numpy cannot be the primary check --
+    asking it is how a plain string identifier column became 19 errors on the CI
+    Python 3.12 leg, where pip resolved a pandas that had already switched.
+
+    ``pandas.api.types`` understands both families.  The numpy fallback is for the
+    minimal pandas stand-in in ``tests/bootstrap.py``, whose ``api.types``
+    namespace carries a different, value-based set of helpers.
+
+    Categorical dtypes are unwrapped to the dtype of their categories: a
+    ``category`` column over integers has to convert its labels to ``int`` like a
+    plain integer column would, because ``series == "1"`` matches no rows where
+    ``series == 1`` matches.
+    """
+
+    categories_dtype = getattr(getattr(dtype, "categories", None), "dtype", None)
+    if categories_dtype is not None:
+        dtype = categories_dtype
+
+    check = getattr(getattr(getattr(pd, "api", None), "types", None), pandas_check, None)
+    if callable(check):
+        try:
+            return bool(check(dtype))
+        except (TypeError, ValueError):
+            return False
+    try:
+        return bool(np.issubdtype(dtype, numpy_kind))
+    except TypeError:
+        return False
+
+
+def is_integer_column_dtype(dtype: Any) -> bool:
+    """Return ``True`` for numpy and pandas integer dtypes alike.
+
+    See :func:`_column_dtype_is` for why ``np.issubdtype`` is not enough.
+    """
+
+    return _column_dtype_is(dtype, "is_integer_dtype", np.integer)
+
+
+def is_float_column_dtype(dtype: Any) -> bool:
+    """Return ``True`` for numpy and pandas floating-point dtypes alike.
+
+    See :func:`_column_dtype_is` for why ``np.issubdtype`` is not enough.
+    """
+
+    return _column_dtype_is(dtype, "is_float_dtype", np.floating)
 
 
 def new_provenance() -> Dict[str, Any]:

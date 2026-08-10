@@ -21,6 +21,24 @@ UELer has been refactored into a package-first layout with `ueler/` as the canon
   matplotlib with a stub that has no `matplotlib.path` and no `colors.Normalize`
   whenever `matplotlib.pyplot` is not already imported. The stubs make an
   already-complete environment fast; they do not replace one.
+- **Every dependency the code imports directly must be declared, even when it
+  arrives transitively anyway.** `pandas` was imported in fourteen modules and
+  named nowhere in `pyproject.toml`, arriving only through seaborn and anndata.
+  That is what let pip resolve a different pandas *major* per Python minor —
+  pandas 3 requires ≥ 3.11, so the CI 3.12 leg got the new default `StringDtype`
+  and the 3.10/3.11 legs did not, which surfaced as 19 errors on one leg and
+  silence on the others. Declared `pandas>=2.0`; the floor is conservative, not
+  measured.
+- **Column dtypes are classified through `pandas.api.types`, never
+  `np.issubdtype`.** `np.issubdtype` raises `TypeError` on every pandas
+  *extension* dtype — nullable `Int64`/`Float64`, `category`, and the
+  `StringDtype` pandas 3 gives object string columns by default — and
+  `flatten_anndata` produces all of them. `ueler.cell_table` owns
+  `is_integer_column_dtype` / `is_float_column_dtype`, which unwrap categoricals
+  to `.categories.dtype` (a `category` column of integers must still convert its
+  labels to `int`, because `series == "1"` matches no rows where `series == 1`
+  matches) and fall back to numpy only for the value-based `api.types` namespace
+  in `tests/bootstrap.py`.
 - **A tag push can reach TestPyPI but never PyPI.** `release.yml` publishes to the
   real index only on an explicit `workflow_dispatch` from a tag ref, behind a
   GitHub environment reviewer, using Trusted Publishing (OIDC — no API token in the
@@ -32,6 +50,7 @@ UELer has been refactored into a package-first layout with `ueler/` as the canon
 - **Gate A of the PyPI release plan is complete** (`88b0e6e`): `MANIFEST.in` added, `setuptools>=77` floor, `requires-python = ">=3.10,<3.13"`, one settled project description, a PyPI-first README, `.gitignore` negations for packaged assets, opt-in test bootstrap, and `clean-dist`/`build`/`check-dist`/`publish-test`/`publish` Makefile targets.
 - **Gate B is complete** (2026-08-10): ten PyPI classifiers and five `[project.urls]` entries, the license stated in the README, the docs-site install page realigned with the PyPI-first flow, and `ueler/graphify-out/` moved out of the package directory. `ipykernel`/`ipympl` stay hard dependencies and there is still no `console_scripts` entry point — both declined for `0.5.0` rather than overlooked.
 - **Gate C is complete** (2026-08-10): `.github/workflows/tests.yml` (matrix over 3.10/3.11 with a non-blocking 3.12 leg, full runtime stack, zero-skip gate, plus a `package` job that builds and imports the wheel from outside the repo) and `.github/workflows/release.yml` (Trusted Publishing; tag → TestPyPI, manual dispatch → PyPI). `v0.4.2`–`v0.4.4` are **not** being backfilled — those tag gaps were intentional. **Gate D remains** and needs a human: TestPyPI rehearsal, live notebook smoke test, then the upload. See the plan linked under *Open items*.
+- **CI has now run, and it paid for itself on the first push** (2026-08-10): 3.10 ✅, 3.11 ✅, `package` ✅, and the non-blocking 3.12 leg surfaced 19 errors that turned out to be a live pandas bug rather than a 3.12 one — `np.issubdtype` on a pandas extension dtype, which broke mask painting for any AnnData-derived `category` identifier column on *current* pandas too. Fixed with dtype predicates in `ueler/cell_table.py`, plus `pandas` finally declared as a direct dependency; suite now **922 tests, 0 skips**.
 - `ueler/` package skeleton, `pyproject.toml`, and `Makefile` are in place.
 - Module moves from `viewer.*` to `ueler.viewer.*` are complete.
 - A runner entrypoint exists for notebook usage.
@@ -42,7 +61,8 @@ UELer has been refactored into a package-first layout with `ueler/` as the canon
 - Add an integration test workflow for heavier dependencies and GUI paths. (`tests.yml`'s `unit` job now covers the full dependency stack; what is still missing is the *GUI* half, which needs a browser.)
 - Keep the packaging notes and release documentation aligned as changes land.
 - Remaining pre-PyPI items are tracked as Gate D in [issue_tracking/issue79_pypi_release_readiness.md](issue_tracking/issue79_pypi_release_readiness.md): configure the Trusted Publishers, rehearse on TestPyPI, run the notebook smoke test from an installed wheel, then upload `0.5.0-alpha`.
-- **Act on the 3.12 result** once `tests.yml` has run: the non-blocking matrix leg turns this into a reading rather than a judgement, but someone must then either add `Programming Language :: Python :: 3.12` and drop `continue-on-error`, or tighten `requires-python` to `<3.12`. The classifiers and the bound move together.
+- **Act on the 3.12 result** — the leg has now run **once**, and its first reading was not about 3.12 at all: 19 errors, all of them one `np.issubdtype` call meeting the pandas-3 string dtype (fixed; see the key decisions above and the log entry). Tightening `requires-python` to `<3.12` would have hidden that rather than fixed it, since pandas 3 installs on 3.11 too. Re-read the leg after the fix lands; the evidence so far argues for *widening* — add `Programming Language :: Python :: 3.12` and drop `continue-on-error` — and the classifiers and the bound still move together. **Keep the leg either way:** it is the project's only coverage of pandas-3 semantics and it is what caught this.
+- **The 3.10 floor is the part of the Python range under real pressure, not the 3.12 ceiling.** pandas 3 requires ≥ 3.11, anndata 0.12 requires ≥ 3.11 and anndata 0.13 requires ≥ 3.12, so a 3.10 install is already pinned to the older half of the stack. Nothing is broken today — the dangerous pandas-3-with-anndata-0.11 pairing is unreachable, because pandas 3 cannot be installed on 3.10 at all — but the floor will need revisiting before it starts costing coverage.
 - **Confirm with DKFZ** that the BSD-3 copyright line naming both the author and the institute matches institutional policy — the one part of the relicense that is not a code change.
 
 ## Related GitHub issues
