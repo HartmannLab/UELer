@@ -39,6 +39,9 @@ theme:
 
 plugins:
   - search
+  - mike:
+      alias_type: symlink
+      canonical_version: latest
 
 markdown_extensions:
   - admonition
@@ -84,5 +87,6 @@ nav:
       - Heatmap & Cell Annotation: develop-notes/heatmap.md
       - OME-TIFF Loading: develop-notes/ome-tiff.md
 extra:
-  - version:
-      - provider: mike
+  version:
+    provider: mike
+    default: latest
