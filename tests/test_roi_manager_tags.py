@@ -410,7 +410,7 @@ class ROIManagerTagsTests(unittest.TestCase):
                     class_opacity={"Tumor": 60},
                     default_color="#ffffff",
                     global_fill_opacity=35,
-                    show_borders_on_filled=True,
+                    show_borders=True,
                     outline_thickness=2,
                 )
 

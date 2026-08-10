@@ -986,8 +986,12 @@ class BatchExportPlugin(PluginBase):
             global_fill_opacity=_normalise_opacity_percent(
                 payload.get("global_fill_opacity", FILL_OPACITY_DEFAULT_PERCENT)
             ),
-            show_borders_on_filled=bool(payload.get("show_fill_borders", False)),
+            # Palettes saved before the fill/border split (issue #132) lack "show_borders"; they
+            # always outlined unfilled cells, so they replay with borders on.
+            show_borders=bool(payload.get("show_borders", True)),
+            border_opacity=_normalise_opacity_percent(payload.get("border_opacity", 100), 100),
             border_color_mode=str(payload.get("border_color_mode", "mask_type_color") or "mask_type_color"),
+            border_custom_color=str(payload.get("border_custom_color", "#FFFFFF") or "#FFFFFF"),
             mask_type_color=mask_type_color if mask_type_color else default_color,
             outline_thickness=outline_thickness,
         )

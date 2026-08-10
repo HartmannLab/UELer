@@ -264,7 +264,7 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
             "TypeB": W.BoundedIntText(value=35, min=0, max=100),
         }
         painter.ui_component.global_fill_opacity_input.value = 40
-        painter.ui_component.show_fill_borders_checkbox.value = True
+        painter.ui_component.border_checkbox.value = True
         self.viewer.mask_outline_thickness = 3
 
         snapshot = painter.capture_snapshot()
@@ -274,8 +274,9 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
         self.assertEqual(snapshot.class_fill["TypeA"], True)
         self.assertEqual(snapshot.class_opacity["TypeA"], 55)
         self.assertEqual(snapshot.global_fill_opacity, 40)
-        self.assertEqual(snapshot.show_borders_on_filled, True)
-        self.assertEqual(snapshot.border_color_mode, "mask_type_color")
+        self.assertEqual(snapshot.show_borders, True)
+        # "Painted color" is the shipped default (issue #132).
+        self.assertEqual(snapshot.border_color_mode, "same_as_fill")
         self.assertEqual(snapshot.mask_type_color, "#00ff00")
         self.assertEqual(snapshot.outline_thickness, 3)
 
@@ -302,7 +303,7 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
                 class_opacity={"TypeA": 65, "TypeB": 35},
                 default_color="#FFFFFF",
                 global_fill_opacity=45,
-                show_borders_on_filled=True,
+                show_borders=True,
                 border_color_mode="mask_type_color",
                 mask_type_color="#00FF00",
                 outline_thickness=2,
@@ -316,7 +317,7 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
         self.assertEqual(painter.class_mode_controls["TypeA"].value, True)
         self.assertEqual(painter.class_opacity_controls["TypeA"].value, 65)
         self.assertEqual(painter.ui_component.global_fill_opacity_input.value, 45)
-        self.assertEqual(painter.ui_component.show_fill_borders_checkbox.value, True)
+        self.assertEqual(painter.ui_component.border_checkbox.value, True)
         self.assertEqual(painter.ui_component.border_color_mode_dropdown.value, "mask_type_color")
         self.assertEqual(self.viewer.ui_component.mask_color_controls["cell"].value, "Green")
 
@@ -466,7 +467,7 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
             "TypeB": W.BoundedIntText(value=20, min=0, max=100),
         }
         painter.ui_component.global_fill_opacity_input.value = 35
-        painter.ui_component.show_fill_borders_checkbox.value = True
+        painter.ui_component.border_checkbox.value = True
 
         with tempfile.TemporaryDirectory() as tmpdir:
             # Manually build and write a payload as save_current_color_set would
@@ -495,7 +496,7 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
                 "visible": visible_map,
                 "opacities": {"TypeA": 70, "TypeB": 20},
                 "global_fill_opacity": 35,
-                "show_fill_borders": True,
+                "show_borders": True,
                 "saved_at": "2024-01-01T00:00:00Z",
             }
             write_color_set_file(path, payload)
@@ -505,7 +506,7 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
             painter.class_visible_controls["TypeB"].value = True
             painter.class_opacity_controls["TypeA"].value = 35
             painter.class_opacity_controls["TypeB"].value = 35
-            painter.ui_component.show_fill_borders_checkbox.value = False
+            painter.ui_component.border_checkbox.value = False
 
             painter._load_color_set(path)
 
@@ -518,7 +519,7 @@ class TestMaskPainterModeVisibility(unittest.TestCase):
             self.assertEqual(painter.class_opacity_controls["TypeA"].value, 70)
             self.assertEqual(painter.class_opacity_controls["TypeB"].value, 20)
             self.assertEqual(painter.ui_component.global_fill_opacity_input.value, 35)
-            self.assertTrue(painter.ui_component.show_fill_borders_checkbox.value)
+            self.assertTrue(painter.ui_component.border_checkbox.value)
 
 
 class TestMaskPainterAddRemoveClass(unittest.TestCase):
@@ -653,7 +654,8 @@ class TestMaskPainterRenderPath(unittest.TestCase):
             get_effective_border_color_map_for_fov=lambda fov: {1: "#00FF00"},
             get_effective_mode_map_for_fov=lambda fov: {1: "fill"},
             get_effective_opacity_map_for_fov=lambda fov: {1: 0.7},
-            get_show_borders_on_filled=lambda: True,
+            get_show_borders=lambda: True,
+            get_border_alpha=lambda: 1.0,
         )
         viewer = types.SimpleNamespace(
             image_cache={"FOV_001": {"ch1": np.zeros((2, 2), dtype=np.uint16)}},
@@ -697,7 +699,7 @@ class TestMaskPainterRenderPath(unittest.TestCase):
         self.assertEqual(kwargs["border_color_map"], {1: "#00FF00"})
         self.assertEqual(kwargs["mode_map"], {1: "fill"})
         self.assertEqual(kwargs["opacity_map"], {1: 0.7})
-        self.assertTrue(kwargs["show_borders_on_filled"])
+        self.assertTrue(kwargs["show_borders"])
 
     def test_compose_fov_image_forwards_no_image_mode(self):
         from ueler.viewer.main_viewer import ImageMaskViewer
@@ -785,7 +787,8 @@ class TestMaskPainterRenderPath(unittest.TestCase):
             get_effective_opacity_map_for_fov=lambda fov: {1: 0.4},
             get_mode_map_for_fov=lambda fov: {1: "outline"},
             get_opacity_map_for_fov=lambda fov: {1: 0.0},
-            get_show_borders_on_filled=lambda: True,
+            get_show_borders=lambda: True,
+            get_border_alpha=lambda: 1.0,
         )
 
         class _ImageHandle:
@@ -833,7 +836,7 @@ class TestMaskPainterRenderPath(unittest.TestCase):
         self.assertEqual(kwargs["border_color_map"], {1: "#00FF00"})
         self.assertEqual(kwargs["mode_map"], {1: "fill"})
         self.assertEqual(kwargs["opacity_map"], {1: 0.4})
-        self.assertTrue(kwargs["show_borders_on_filled"])
+        self.assertTrue(kwargs["show_borders"])
 
 
 class TestMaskPainterOnlySpecified(unittest.TestCase):
@@ -952,17 +955,71 @@ class TestMaskPainterOnlySpecified(unittest.TestCase):
         self.assertEqual(list(w.class_order), ["TypeC", "TypeA", "TypeB"])
         self.assertEqual(list(w.available_classes), [])
 
-    def test_global_fill_layout_uses_spacing_and_narrow_opacity_input(self):
-        """Global fill controls should have a spacer and a compact opacity input width."""
+    def test_global_fill_layout_uses_spacing_and_shared_opacity_width(self):
+        """The fill row should have a spacer, and every opacity input the same width."""
+        from ueler.viewer.plugin.mask_painter import OPACITY_INPUT_WIDTH, MaskPainterDisplay
+
+        painter = MaskPainterDisplay(self.viewer, width=400, height=300)
+        # Continuous coloring (issue #115) wraps the categorical controls in a dedicated
+        # sub-layout; since issue #132 the identifier heads it and the fill row is third.
+        global_fill_row = painter.ui_component.categorical_layout.children[2]
+
+        # One width across both modes, so the discrete and continuous panes line up.
+        for widget in (
+            painter.ui_component.global_fill_opacity_input,
+            painter.ui_component.border_opacity_input,
+            painter.ui_component.continuous_opacity_input,
+        ):
+            self.assertEqual(widget.layout.width, OPACITY_INPUT_WIDTH)
+            self.assertEqual(widget.layout.min_width, OPACITY_INPUT_WIDTH)
+        # Checkbox, spacer, opacity — the border moved out to its own shared row.
+        self.assertEqual(len(global_fill_row.children), 3)
+
+    def test_identifier_lives_in_the_categorical_section(self):
+        """Issue #132: the identifier only drives discrete coloring, so it sits there."""
         from ueler.viewer.plugin.mask_painter import MaskPainterDisplay
 
         painter = MaskPainterDisplay(self.viewer, width=400, height=300)
-        # Continuous coloring (issue #115) wraps the categorical controls in a
-        # dedicated sub-layout; the global-fill row is its second child.
-        global_fill_row = painter.ui_component.categorical_layout.children[1]
+        painter.initiate_ui()
 
-        self.assertEqual(painter.ui_component.global_fill_opacity_input.layout.width, "95px")
-        self.assertEqual(len(global_fill_row.children), 4)
+        self.assertIs(
+            painter.ui_component.categorical_layout.children[0],
+            painter.ui_component.identifier_dropdown,
+        )
+        header_children = painter.ui_component.control_panel.children[0].children
+        self.assertNotIn(painter.ui_component.identifier_dropdown, header_children)
+
+    def test_border_controls_are_shared_by_both_modes(self):
+        """The border group sits outside both mode layouts so it stays visible in each."""
+        from ueler.viewer.plugin.mask_painter import MaskPainterDisplay
+
+        painter = MaskPainterDisplay(self.viewer, width=400, height=300)
+        ui = painter.ui_component
+
+        self.assertIn(ui.border_layout, ui.colors_layout.children)
+        self.assertNotIn(ui.border_layout, ui.categorical_layout.children)
+        self.assertNotIn(ui.border_layout, ui.continuous_layout.children)
+        # Borders are on by default, so the default view still shows outlines.
+        self.assertTrue(ui.border_checkbox.value)
+        self.assertEqual(ui.border_opacity_input.value, 100)
+
+    def test_custom_border_color_picker_is_hidden_unless_selected(self):
+        from ueler.viewer.plugin.mask_painter import (
+            BORDER_COLOR_MODE_CUSTOM,
+            BORDER_COLOR_MODE_MASK_TYPE,
+            MaskPainterDisplay,
+        )
+
+        painter = MaskPainterDisplay(self.viewer, width=400, height=300)
+        self.assertEqual(painter.ui_component.border_color_picker.layout.display, "none")
+
+        painter.ui_component.border_color_mode_dropdown.value = BORDER_COLOR_MODE_CUSTOM
+        painter._on_border_color_mode_change({"new": BORDER_COLOR_MODE_CUSTOM})
+        self.assertEqual(painter.ui_component.border_color_picker.layout.display, "block")
+
+        painter.ui_component.border_color_mode_dropdown.value = BORDER_COLOR_MODE_MASK_TYPE
+        painter._on_border_color_mode_change({"new": BORDER_COLOR_MODE_MASK_TYPE})
+        self.assertEqual(painter.ui_component.border_color_picker.layout.display, "none")
 
     def test_only_specified_off_restores_all_classes(self):
         """Disabling 'Only specified' restores all current_classes to active."""
@@ -1156,6 +1213,39 @@ class TestPainterStateMapsCaching(unittest.TestCase):
         painter._push_to_widget()
         return painter
 
+    def test_unfilled_classes_get_a_border_color(self):
+        """Issue #132: the border color control reaches outlines, not just filled cells."""
+        from ueler.viewer.plugin.mask_painter import (
+            BORDER_COLOR_MODE_CUSTOM,
+            BORDER_COLOR_MODE_SAME_AS_FILL,
+        )
+
+        painter = self._make_painter()  # both classes are outline-only
+        painter.ui_component.border_color_mode_dropdown.value = BORDER_COLOR_MODE_SAME_AS_FILL
+        painter._invalidate_state_maps_cache()
+        color_map, border_map, mode_map, _ = painter.get_effective_state_maps_for_fov("FOV_001")
+
+        self.assertTrue(border_map, "unfilled cells must still carry a border color")
+        self.assertTrue(all(mode == "outline" for mode in mode_map.values()))
+        self.assertEqual(border_map, color_map)
+
+        painter.ui_component.border_color_mode_dropdown.value = BORDER_COLOR_MODE_CUSTOM
+        painter.ui_component.border_color_picker.value = "#123456"
+        painter._invalidate_state_maps_cache()
+        _, border_map, _, _ = painter.get_effective_state_maps_for_fov("FOV_001")
+        self.assertTrue(all(colour == "#123456" for colour in border_map.values()))
+
+    def test_border_control_change_invalidates_the_state_map_cache(self):
+        """A new border color has to reach the canvas without an unrelated edit first."""
+        painter = self._make_painter()
+        painter.main_viewer.update_display = lambda _factor: None
+
+        painter.get_effective_state_maps_for_fov("FOV_001")
+        self.assertTrue(painter._state_maps_cache)
+
+        painter._on_border_change({"new": False})
+        self.assertEqual(painter._state_maps_cache, {})
+
     def test_get_effective_state_maps_returns_all_four_maps(self):
         """Combined method returns the same results as the four individual methods."""
         painter = self._make_painter()
@@ -1231,7 +1321,8 @@ class TestPainterStateMapsCaching(unittest.TestCase):
 
         fake_painter = types.SimpleNamespace(
             get_effective_state_maps_for_fov=fake_state_maps,
-            get_show_borders_on_filled=lambda: False,
+            get_show_borders=lambda: False,
+            get_border_alpha=lambda: 1.0,
         )
         viewer = types.SimpleNamespace(
             image_cache={"FOV_001": {"ch1": np.zeros((2, 2), dtype=np.uint16)}},

@@ -1270,8 +1270,12 @@ class ROIManagerPlugin(PluginBase):
                 default_color=str(data.get("default_color") or "#FFFFFF"),
                 global_fill=bool(data.get("global_fill", False)),
                 global_fill_opacity=int(data.get("global_fill_opacity", 35) or 35),
-                show_borders_on_filled=bool(data.get("show_borders_on_filled", False)),
+                # ROIs stored before the fill/border split (issue #132) lack "show_borders";
+                # they always outlined unfilled cells, so they replay with borders on.
+                show_borders=bool(data.get("show_borders", True)),
+                border_opacity=int(data.get("border_opacity", 100) or 100),
                 border_color_mode=str(data.get("border_color_mode") or "mask_type_color"),
+                border_custom_color=str(data.get("border_custom_color") or "#FFFFFF"),
                 mask_type_color=str(data.get("mask_type_color") or "#FFFFFF"),
                 outline_thickness=int(data.get("outline_thickness", getattr(self.main_viewer, "mask_outline_thickness", 1)) or 1),
                 color_mode=str(data.get("color_mode") or "categorical"),

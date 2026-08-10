@@ -60,8 +60,17 @@ COLOR_SET_FILE_SUFFIX = ".maskcolors.json"
 REGISTRY_FILENAME = "mask_color_sets_index.json"
 COLOR_SET_VERSION = "1.2.0"
 FILL_OPACITY_DEFAULT_PERCENT = 35
+# Shared width for every opacity input, so the discrete and continuous panes line up.
+OPACITY_INPUT_WIDTH = "150px"
+BORDER_OPACITY_DEFAULT_PERCENT = 100
 BORDER_COLOR_MODE_MASK_TYPE = "mask_type_color"
 BORDER_COLOR_MODE_SAME_AS_FILL = "same_as_fill"
+BORDER_COLOR_MODE_CUSTOM = "custom"
+BORDER_COLOR_MODES = (
+    BORDER_COLOR_MODE_MASK_TYPE,
+    BORDER_COLOR_MODE_SAME_AS_FILL,
+    BORDER_COLOR_MODE_CUSTOM,
+)
 
 
 def _normalise_opacity_percent(value: object, default: int = FILL_OPACITY_DEFAULT_PERCENT) -> int:
@@ -299,6 +308,7 @@ def build_painter_state_maps_for_fov(
     global_fill: bool = False,
     global_fill_opacity: int,
     border_color_mode: str = BORDER_COLOR_MODE_MASK_TYPE,
+    border_custom_color: str = DEFAULT_COLOR,
     mask_type_color: str = DEFAULT_COLOR,
     continuous: Optional[Mapping[str, object]] = None,
 ) -> Tuple[Dict[int, str], Dict[int, str], Dict[int, str], Dict[int, float]]:
@@ -307,7 +317,22 @@ def build_painter_state_maps_for_fov(
     When ``continuous`` is provided it takes precedence over the categorical
     branch: cells are colored by mapping a numeric column through a colormap
     using the pre-resolved global ``vmin``/``vmax`` carried in the spec.
+
+    ``border_map`` carries a color for **every** painted cell, filled or not, because the border
+    color is its own control now rather than a filled-cell detail (issue #132).
     """
+    resolved_border_mode = str(border_color_mode or BORDER_COLOR_MODE_MASK_TYPE)
+    resolved_mask_type_color = normalize_hex_color(mask_type_color) or mask_type_color or default_color
+    resolved_custom_color = normalize_hex_color(border_custom_color) or DEFAULT_COLOR
+
+    def _border_color_for(cell_color: str) -> str:
+        """Resolve the border color of one cell from the shared border color mode."""
+        if resolved_border_mode == BORDER_COLOR_MODE_SAME_AS_FILL:
+            return cell_color
+        if resolved_border_mode == BORDER_COLOR_MODE_CUSTOM:
+            return resolved_custom_color
+        return resolved_mask_type_color
+
     if continuous is not None:
         column = continuous.get("column")
         if cell_table is None or not fov or not column or column not in cell_table.columns:
@@ -333,7 +358,10 @@ def build_painter_state_maps_for_fov(
             opacity_map = {mid: alpha for mid in color_map}
         else:
             opacity_map = {}
-        return color_map, {}, mode_map, opacity_map
+        # Continuous cells get borders on the same terms as categorical ones (issue #132);
+        # "Painted color" here means the cell's colormap color.
+        border_map = {mid: _border_color_for(colour) for mid, colour in color_map.items()}
+        return color_map, border_map, mode_map, opacity_map
 
     if cell_table is None or not fov or not identifier or identifier not in cell_table.columns:
         return {}, {}, {}, {}
@@ -357,8 +385,6 @@ def build_painter_state_maps_for_fov(
     mode_map: Dict[int, str] = {}
     opacity_map: Dict[int, float] = {}
 
-    resolved_border_mode = str(border_color_mode or BORDER_COLOR_MODE_MASK_TYPE)
-    resolved_mask_type_color = normalize_hex_color(mask_type_color) or mask_type_color or default_color
     default_fill_enabled = bool(global_fill)
 
     for _, row in current_rows.iterrows():
@@ -369,13 +395,9 @@ def build_painter_state_maps_for_fov(
             continue
         if cls_key not in active_set:
             color_map[mask_id] = default_color
+            border_map[mask_id] = _border_color_for(default_color)
             if default_fill_enabled:
                 mode_map[mask_id] = "fill"
-                border_map[mask_id] = (
-                    default_color
-                    if resolved_border_mode == BORDER_COLOR_MODE_SAME_AS_FILL
-                    else resolved_mask_type_color
-                )
                 opacity_map[mask_id] = _opacity_percent_to_alpha(default_percent, default_percent)
             else:
                 mode_map[mask_id] = "outline"
@@ -383,13 +405,9 @@ def build_painter_state_maps_for_fov(
 
         class_color = class_colors.get(cls_key, default_color) or default_color
         color_map[mask_id] = class_color
+        border_map[mask_id] = _border_color_for(class_color)
         if bool(class_fill.get(cls_key, False)):
             mode_map[mask_id] = "fill"
-            border_map[mask_id] = (
-                class_color
-                if resolved_border_mode == BORDER_COLOR_MODE_SAME_AS_FILL
-                else resolved_mask_type_color
-            )
             opacity_map[mask_id] = _opacity_percent_to_alpha(
                 class_opacity.get(cls_key, default_percent),
                 default_percent,
@@ -509,8 +527,10 @@ class MaskPainterDisplay(PluginBase):
         self.ui_component.enabled_checkbox.observe(self._on_enabled_toggle, names="value")
         self.ui_component.global_fill_checkbox.observe(self._on_global_fill_toggle, names="value")
         self.ui_component.global_fill_opacity_input.observe(self._on_global_fill_opacity_change, names="value")
-        self.ui_component.show_fill_borders_checkbox.observe(self._on_fill_border_toggle, names="value")
-        self.ui_component.border_color_mode_dropdown.observe(self._on_fill_border_toggle, names="value")
+        self.ui_component.border_checkbox.observe(self._on_border_change, names="value")
+        self.ui_component.border_opacity_input.observe(self._on_border_change, names="value")
+        self.ui_component.border_color_mode_dropdown.observe(self._on_border_color_mode_change, names="value")
+        self.ui_component.border_color_picker.observe(self._on_border_change, names="value")
 
         # Wire continuous-coloring controls (issue #115)
         self.ui_component.color_mode_toggle.observe(self._on_color_mode_change, names="value")
@@ -776,8 +796,10 @@ class MaskPainterDisplay(PluginBase):
             "linked_opacity_classes": [cls for cls in class_order if cls in self._linked_opacity_classes],
             "global_fill": bool(self.ui_component.global_fill_checkbox.value),
             "global_fill_opacity": _normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
-            "show_fill_borders": bool(self.ui_component.show_fill_borders_checkbox.value),
+            "show_borders": self.get_show_borders(),
+            "border_opacity": self.get_border_opacity(),
             "border_color_mode": self.get_border_color_mode(),
+            "border_custom_color": self.get_border_custom_color(),
             "color_mode": str(self.ui_component.color_mode_toggle.value or "categorical"),
             "continuous": {
                 "column": str(self.ui_component.continuous_column_dropdown.value or ""),
@@ -811,6 +833,7 @@ class MaskPainterDisplay(PluginBase):
             global_fill=bool(self.ui_component.global_fill_checkbox.value),
             global_fill_opacity=_normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
             border_color_mode=self.get_border_color_mode(),
+            border_custom_color=self.get_border_custom_color(),
             mask_type_color=self.get_mask_type_color(),
             continuous=self._active_continuous_spec(),
         )
@@ -834,6 +857,7 @@ class MaskPainterDisplay(PluginBase):
             global_fill=bool(self.ui_component.global_fill_checkbox.value),
             global_fill_opacity=_normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
             border_color_mode=self.get_border_color_mode(),
+            border_custom_color=self.get_border_custom_color(),
             mask_type_color=self.get_mask_type_color(),
             continuous=self._active_continuous_spec(),
         )
@@ -857,6 +881,7 @@ class MaskPainterDisplay(PluginBase):
             global_fill=bool(self.ui_component.global_fill_checkbox.value),
             global_fill_opacity=_normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
             border_color_mode=self.get_border_color_mode(),
+            border_custom_color=self.get_border_custom_color(),
             mask_type_color=self.get_mask_type_color(),
             continuous=self._active_continuous_spec(),
         )
@@ -880,6 +905,7 @@ class MaskPainterDisplay(PluginBase):
             global_fill=bool(self.ui_component.global_fill_checkbox.value),
             global_fill_opacity=_normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
             border_color_mode=self.get_border_color_mode(),
+            border_custom_color=self.get_border_custom_color(),
             mask_type_color=self.get_mask_type_color(),
             continuous=self._active_continuous_spec(),
         )
@@ -916,6 +942,7 @@ class MaskPainterDisplay(PluginBase):
             global_fill=bool(self.ui_component.global_fill_checkbox.value),
             global_fill_opacity=_normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
             border_color_mode=self.get_border_color_mode(),
+            border_custom_color=self.get_border_custom_color(),
             mask_type_color=self.get_mask_type_color(),
             continuous=self._active_continuous_spec(),
         )
@@ -925,14 +952,27 @@ class MaskPainterDisplay(PluginBase):
     def get_opacity_map_for_fov(self, fov: str) -> Dict[int, float]:
         return dict(self._cell_opacity_cache.get(str(fov), {}))
 
-    def get_show_borders_on_filled(self) -> bool:
-        return bool(getattr(self.ui_component.show_fill_borders_checkbox, "value", False))
+    def get_show_borders(self) -> bool:
+        return bool(getattr(self.ui_component.border_checkbox, "value", True))
+
+    def get_border_opacity(self) -> int:
+        return _normalise_opacity_percent(
+            getattr(self.ui_component.border_opacity_input, "value", BORDER_OPACITY_DEFAULT_PERCENT),
+            BORDER_OPACITY_DEFAULT_PERCENT,
+        )
+
+    def get_border_alpha(self) -> float:
+        return self.get_border_opacity() / 100.0
 
     def get_border_color_mode(self) -> str:
         value = getattr(self.ui_component.border_color_mode_dropdown, "value", BORDER_COLOR_MODE_MASK_TYPE)
-        if value == BORDER_COLOR_MODE_SAME_AS_FILL:
-            return BORDER_COLOR_MODE_SAME_AS_FILL
+        if value in BORDER_COLOR_MODES:
+            return str(value)
         return BORDER_COLOR_MODE_MASK_TYPE
+
+    def get_border_custom_color(self) -> str:
+        value = getattr(self.ui_component.border_color_picker, "value", DEFAULT_COLOR)
+        return normalize_hex_color(value) or DEFAULT_COLOR
 
     def get_mask_type_color(self) -> str:
         return _resolve_mask_type_color(
@@ -973,8 +1013,10 @@ class MaskPainterDisplay(PluginBase):
             default_color=self.default_color,
             global_fill=bool(self.ui_component.global_fill_checkbox.value),
             global_fill_opacity=_normalise_opacity_percent(self.ui_component.global_fill_opacity_input.value),
-            show_borders_on_filled=bool(self.ui_component.show_fill_borders_checkbox.value),
+            show_borders=self.get_show_borders(),
+            border_opacity=self.get_border_opacity(),
             border_color_mode=self.get_border_color_mode(),
+            border_custom_color=self.get_border_custom_color(),
             mask_type_color=mask_type_color,
             outline_thickness=int(getattr(self.main_viewer, "mask_outline_thickness", 1)),
             color_mode=str(color_mode),
@@ -987,6 +1029,30 @@ class MaskPainterDisplay(PluginBase):
             continuous_opacity=_normalise_opacity_percent(self.ui_component.continuous_opacity_input.value),
             continuous_fill=bool(self.ui_component.continuous_fill_checkbox.value),
         )
+
+    def _apply_border_snapshot_fields(self, snapshot) -> None:
+        """Restore the shared border controls from a snapshot (issue #132).
+
+        Snapshots predating the split carry ``show_borders_on_filled`` instead; they are read as
+        "borders on", which is what they rendered for every unfilled cell.
+        """
+        show_borders = getattr(snapshot, "show_borders", None)
+        if show_borders is None:
+            show_borders = True
+        self.ui_component.border_checkbox.value = bool(show_borders)
+        self.ui_component.border_opacity_input.value = _normalise_opacity_percent(
+            getattr(snapshot, "border_opacity", BORDER_OPACITY_DEFAULT_PERCENT),
+            BORDER_OPACITY_DEFAULT_PERCENT,
+        )
+        border_mode = str(
+            getattr(snapshot, "border_color_mode", BORDER_COLOR_MODE_MASK_TYPE) or BORDER_COLOR_MODE_MASK_TYPE
+        )
+        if border_mode in BORDER_COLOR_MODES:
+            self.ui_component.border_color_mode_dropdown.value = border_mode
+        custom = normalize_hex_color(getattr(snapshot, "border_custom_color", "") or "")
+        if custom:
+            self.ui_component.border_color_picker.value = custom
+        self._sync_border_color_picker_visibility()
 
     def apply_snapshot(self, snapshot: Optional[MaskPainterSnapshot]) -> bool:
         if snapshot is None:
@@ -1029,12 +1095,7 @@ class MaskPainterDisplay(PluginBase):
             self.ui_component.global_fill_opacity_input.value = _normalise_opacity_percent(
                 getattr(snapshot, "global_fill_opacity", FILL_OPACITY_DEFAULT_PERCENT)
             )
-            self.ui_component.show_fill_borders_checkbox.value = bool(
-                getattr(snapshot, "show_borders_on_filled", False)
-            )
-            self.ui_component.border_color_mode_dropdown.value = str(
-                getattr(snapshot, "border_color_mode", BORDER_COLOR_MODE_MASK_TYPE) or BORDER_COLOR_MODE_MASK_TYPE
-            )
+            self._apply_border_snapshot_fields(snapshot)
 
             mask_name = str(getattr(snapshot, "mask_name", "") or getattr(self.main_viewer, "mask_key", "") or "")
             if mask_name:
@@ -1101,6 +1162,7 @@ class MaskPainterDisplay(PluginBase):
                 getattr(snapshot, "continuous_opacity", 100)
             )
             self.ui_component.continuous_fill_checkbox.value = bool(getattr(snapshot, "continuous_fill", True))
+            self._apply_border_snapshot_fields(snapshot)
         finally:
             self._syncing = False
 
@@ -1359,10 +1421,23 @@ class MaskPainterDisplay(PluginBase):
             self.ui_component.global_fill_opacity_input.value = _normalise_opacity_percent(
                 payload.get("global_fill_opacity", self.ui_component.global_fill_opacity_input.value)
             )
-            self.ui_component.show_fill_borders_checkbox.value = bool(payload.get("show_fill_borders", False))
-            self.ui_component.border_color_mode_dropdown.value = str(
+            # Palettes saved before the fill/border split (issue #132) only carry
+            # "show_fill_borders"; those always drew outlines on unfilled cells, so they load
+            # with borders on.
+            self.ui_component.border_checkbox.value = bool(payload.get("show_borders", True))
+            self.ui_component.border_opacity_input.value = _normalise_opacity_percent(
+                payload.get("border_opacity", BORDER_OPACITY_DEFAULT_PERCENT),
+                BORDER_OPACITY_DEFAULT_PERCENT,
+            )
+            border_mode = str(
                 payload.get("border_color_mode", BORDER_COLOR_MODE_MASK_TYPE) or BORDER_COLOR_MODE_MASK_TYPE
             )
+            if border_mode in BORDER_COLOR_MODES:
+                self.ui_component.border_color_mode_dropdown.value = border_mode
+            custom_border = normalize_hex_color(payload.get("border_custom_color", "") or "")
+            if custom_border:
+                self.ui_component.border_color_picker.value = custom_border
+            self._sync_border_color_picker_visibility()
 
             opacity_payload = payload.get("opacities", {})
             if isinstance(opacity_payload, dict):
@@ -2030,13 +2105,34 @@ class MaskPainterDisplay(PluginBase):
                 register_globally=map_mode,
             )
 
-    def _on_fill_border_toggle(self, _change):
+    def _on_border_change(self, _change):
+        """Re-render after any border control changes (issue #132).
+
+        The border color is baked into the cached per-FOV maps, so the cache has to go before
+        the redraw — otherwise a new border color would not reach the canvas until some
+        unrelated edit happened to invalidate it.
+        """
+        self._invalidate_state_maps_cache()
         if not self.ui_component.enabled_checkbox.value:
             return
         update_display = getattr(self.main_viewer, "update_display", None)
         current_ds = getattr(self.main_viewer, "current_downsample_factor", 1)
         if callable(update_display):
             update_display(current_ds)
+
+    def _on_border_color_mode_change(self, change):
+        """Show the custom color picker only when the custom border mode is selected."""
+        self._sync_border_color_picker_visibility()
+        self._on_border_change(change)
+
+    def _sync_border_color_picker_visibility(self) -> None:
+        picker = getattr(self.ui_component, "border_color_picker", None)
+        if picker is None:
+            return
+        is_custom = self.get_border_color_mode() == BORDER_COLOR_MODE_CUSTOM
+        layout = getattr(picker, "layout", None)
+        if layout is not None:
+            layout.display = "block" if is_custom else "none"
 
     def _on_enabled_toggle(self, change):
         """Refresh the viewer immediately when the mask painter is enabled or disabled."""
@@ -2169,10 +2265,9 @@ class MaskPainterDisplay(PluginBase):
         return dict(self._cell_mode_cache.get(str(fov), {}))
 
     def initiate_ui(self):
-        row1 = HBox([
-            self.ui_component.enabled_checkbox,
-            self.ui_component.identifier_dropdown,
-        ])
+        # The identifier now lives inside the categorical block (issue #132); the shared header
+        # keeps only what applies to both coloring modes.
+        row1 = HBox([self.ui_component.enabled_checkbox])
         row2 = HBox([
             self.ui_component.update_button,
             self.ui_component.apply_saved_button,
@@ -2498,30 +2593,48 @@ class UiComponent:
             max=100,
             step=1,
         )
-        self.global_fill_opacity_input.layout.width = "95px"
-        self.global_fill_opacity_input.layout.min_width = "95px"
+        self.global_fill_opacity_input.layout.width = OPACITY_INPUT_WIDTH
+        self.global_fill_opacity_input.layout.min_width = OPACITY_INPUT_WIDTH
         self.global_fill_checkbox = Checkbox(
             value=False,
-            description="Global fill",
+            description="Fill all classes",
             indent=False,
             layout=Layout(width="auto"),
-            tooltip="Apply fill mode to classes still inheriting the global fill setting",
+            tooltip="Fill every class still inheriting the default fill setting",
         )
+
+        # --- Border group: shared by both coloring modes (issue #132) ---
+        self.border_checkbox = Checkbox(
+            value=True,
+            description="Border",
+            indent=False,
+            layout=Layout(width="auto"),
+            tooltip="Draw a border around painted masks, whether or not they are filled",
+        )
+        self.border_opacity_input = BoundedIntText(
+            description="Opacity (%):",
+            value=BORDER_OPACITY_DEFAULT_PERCENT,
+            min=0,
+            max=100,
+            step=1,
+        )
+        self.border_opacity_input.layout.width = OPACITY_INPUT_WIDTH
+        self.border_opacity_input.layout.min_width = OPACITY_INPUT_WIDTH
+        # Defaults to the painted color so the class colors are visible out of the box: with
+        # "Fill all classes" off, the border *is* the cell's only rendering, and a mask-colored
+        # border would hide exactly what the painter is for.
         self.border_color_mode_dropdown = Dropdown(
             options=[
+                ("Painted color", BORDER_COLOR_MODE_SAME_AS_FILL),
                 ("Mask color", BORDER_COLOR_MODE_MASK_TYPE),
-                ("Same as fill", BORDER_COLOR_MODE_SAME_AS_FILL),
+                ("Custom…", BORDER_COLOR_MODE_CUSTOM),
             ],
-            value=BORDER_COLOR_MODE_MASK_TYPE,
+            value=BORDER_COLOR_MODE_SAME_AS_FILL,
             description="Border color:",
             layout=Layout(width="auto"),
         )
-        self.show_fill_borders_checkbox = Checkbox(
-            value=False,
-            description="Borders on filled",
-            indent=False,
-            layout=Layout(width="auto"),
-            tooltip="Render a border on top of filled masks",
+        self.border_color_picker = ColorPicker(
+            description="", value=DEFAULT_COLOR, layout=Layout(width="auto", display="none"),
         )
         # Kept for compatibility; no longer the primary class-row container.
         self.color_picker_box = VBox([], layout=Layout(overflow_y="auto", max_height="300px"))
@@ -2545,18 +2658,19 @@ class UiComponent:
         )
 
         # Categorical controls (existing UI), grouped so it can be hidden as a unit.
+        # ``identifier_dropdown`` lives here rather than in the shared header because it only
+        # drives the categorical branch of build_painter_state_maps_for_fov (issue #132).
         self.categorical_layout = VBox([
+            self.identifier_dropdown,
             HBox([self.default_color_picker, self.only_specified_checkbox]),
             HBox(
                 [
                     self.global_fill_checkbox,
                     HTML("<div style='width:12px'></div>"),
                     self.global_fill_opacity_input,
-                    self.show_fill_borders_checkbox,
                 ],
                 layout=Layout(align_items="center"),
             ),
-            HBox([self.border_color_mode_dropdown]),
             HTML("<hr style='margin:4px 0'>"),
             self.class_list_widget,
         ])
@@ -2582,10 +2696,11 @@ class UiComponent:
         self.vmax_input = FloatText(description="vmax:", disabled=True, layout=Layout(width="150px"))
         self.autorange_button = Button(description="Recompute range", icon="refresh")
         self.continuous_opacity_input = BoundedIntText(
-            description="Opacity (%):", value=100, min=0, max=100, step=1, layout=Layout(width="130px"),
+            description="Opacity (%):", value=100, min=0, max=100, step=1,
+            layout=Layout(width=OPACITY_INPUT_WIDTH, min_width=OPACITY_INPUT_WIDTH),
         )
         self.continuous_fill_checkbox = Checkbox(
-            value=True, description="Fill (unchecked = outline)", indent=False, layout=Layout(width="auto"),
+            value=True, description="Fill", indent=False, layout=Layout(width="auto"),
         )
         self.colorbar_output = Output(layout=Layout(height="70px"))
 
@@ -2602,10 +2717,27 @@ class UiComponent:
             layout=Layout(display="none"),
         )
 
+        # The border group is mode-independent, so it sits below both mode blocks and stays
+        # visible whichever one is showing (issue #132).
+        self.border_layout = VBox([
+            HTML("<hr style='margin:4px 0'>"),
+            HBox(
+                [
+                    self.border_checkbox,
+                    HTML("<div style='width:12px'></div>"),
+                    self.border_opacity_input,
+                ],
+                layout=Layout(align_items="center"),
+            ),
+            HBox([self.border_color_mode_dropdown, self.border_color_picker],
+                 layout=Layout(align_items="center")),
+        ])
+
         self.colors_layout = VBox([
             HBox([self.color_mode_toggle]),
             self.categorical_layout,
             self.continuous_layout,
+            self.border_layout,
         ])
 
         self.set_name_input = Text(description="Name:", placeholder="My palette")

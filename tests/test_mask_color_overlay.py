@@ -155,6 +155,9 @@ class OverlayFillRenderingTests(unittest.TestCase):
             color_map={1: "#FF0000"},
             mode_map={1: "fill"},
             opacity_map={1: 0.5},
+            # Every pixel of this 2x2 cell is on its own boundary, so borders are switched
+            # off to observe the fill blend on its own.
+            show_borders=False,
         )
 
         self.assertAlmostEqual(float(result[1, 1, 0]), 0.5, places=4)
@@ -204,7 +207,7 @@ class OverlayFillRenderingTests(unittest.TestCase):
         self.assertTrue(np.allclose(result[:, 2], 0.2))  # unregistered id 9
         self.assertTrue(np.allclose(result[:, 1], np.array([1.0, 0.0, 0.0])))
 
-    def test_zero_fill_opacity_falls_back_to_outline_only(self):
+    def test_zero_fill_opacity_leaves_only_the_border(self):
         image = np.zeros((5, 5, 3), dtype=np.float32)
         region = np.array(
             [
@@ -226,11 +229,89 @@ class OverlayFillRenderingTests(unittest.TestCase):
             color_map={1: "#FF0000"},
             mode_map={1: "fill"},
             opacity_map={1: 0.0},
-            show_borders_on_filled=False,
+            show_borders=True,
         )
 
         self.assertAlmostEqual(float(result[2, 2, 0]), 0.0, places=4)
         self.assertTrue(np.any(result[:, :, 0] == 1.0))
+
+    def test_fill_and_border_both_off_paints_nothing(self):
+        """Fill and border are independent, so switching both off leaves the image alone."""
+        image = np.zeros((5, 5, 3), dtype=np.float32)
+        region = np.zeros((5, 5), dtype=np.int32)
+        region[1:4, 1:4] = 1
+
+        result = apply_registry_colors(
+            image,
+            fov="FOV_001",
+            mask_regions={"cell": region},
+            outline_thickness=1,
+            downsample_factor=1,
+            color_map={1: "#FF0000"},
+            mode_map={1: "fill"},
+            opacity_map={1: 0.0},
+            show_borders=False,
+        )
+
+        np.testing.assert_allclose(result, image)
+
+    def test_unfilled_cells_take_the_border_color(self):
+        """The border color control governs outlines too, not just borders on fills."""
+        image = np.zeros((5, 5, 3), dtype=np.float32)
+        region = np.zeros((5, 5), dtype=np.int32)
+        region[1:4, 1:4] = 1
+
+        result = apply_registry_colors(
+            image,
+            fov="FOV_001",
+            mask_regions={"cell": region},
+            outline_thickness=1,
+            downsample_factor=1,
+            color_map={1: "#FF0000"},
+            border_color_map={1: "#00FF00"},
+            mode_map={1: "outline"},
+        )
+
+        # [1, 1] is on the ring → the border color, not the painted color.
+        self.assertAlmostEqual(float(result[1, 1, 0]), 0.0, places=4)
+        self.assertAlmostEqual(float(result[1, 1, 1]), 1.0, places=4)
+
+    def test_border_opacity_blends_border_pixels(self):
+        """Border opacity blends the border against what is already on the canvas."""
+        image = np.zeros((5, 5, 3), dtype=np.float32)
+        region = np.zeros((5, 5), dtype=np.int32)
+        region[1:4, 1:4] = 1
+
+        result = apply_registry_colors(
+            image,
+            fov="FOV_001",
+            mask_regions={"cell": region},
+            outline_thickness=1,
+            downsample_factor=1,
+            color_map={1: "#FF0000"},
+            mode_map={1: "outline"},
+            border_alpha=0.25,
+        )
+
+        self.assertAlmostEqual(float(result[1, 1, 0]), 0.25, places=4)
+
+    def test_zero_border_opacity_draws_no_border(self):
+        image = np.zeros((5, 5, 3), dtype=np.float32)
+        region = np.zeros((5, 5), dtype=np.int32)
+        region[1:4, 1:4] = 1
+
+        result = apply_registry_colors(
+            image,
+            fov="FOV_001",
+            mask_regions={"cell": region},
+            outline_thickness=1,
+            downsample_factor=1,
+            color_map={1: "#FF0000"},
+            mode_map={1: "outline"},
+            border_alpha=0.0,
+        )
+
+        np.testing.assert_allclose(result, image)
 
     def test_fill_with_border_preserves_outline_on_top(self):
         image = np.zeros((5, 5, 3), dtype=np.float32)
@@ -253,7 +334,7 @@ class OverlayFillRenderingTests(unittest.TestCase):
             color_map={1: "#FF0000"},
             mode_map={1: "fill"},
             opacity_map={1: 0.5},
-            show_borders_on_filled=True,
+            show_borders=True,
         )
 
         # [2, 2] is interior → blended fill; [1, 1] is on the ring → solid border.
@@ -282,7 +363,7 @@ class OverlayFillRenderingTests(unittest.TestCase):
             border_color_map={1: "#00FF00"},
             mode_map={1: "fill"},
             opacity_map={1: 0.5},
-            show_borders_on_filled=True,
+            show_borders=True,
         )
 
         self.assertAlmostEqual(float(result[2, 2, 0]), 0.5, places=4)
@@ -311,7 +392,7 @@ class OverlayFillRenderingTests(unittest.TestCase):
             color_map={1: "#FF0000", 2: "#0000FF"},
             mode_map={1: "fill", 2: "fill"},
             opacity_map={1: 0.5, 2: 0.5},
-            show_borders_on_filled=True,
+            show_borders=True,
         )
 
         cell2 = region == 2
@@ -333,13 +414,23 @@ def _reference_apply_region_colors(
     mode_map=None,
     opacity_map=None,
     fill_alpha=0.35,
-    show_borders_on_filled=False,
+    show_borders=True,
+    border_alpha=1.0,
 ):
-    """The pre-#131 per-cell loop, kept as an executable oracle.
+    """A per-cell oracle for the vectorised overlay.
 
-    ``_apply_region_colors`` was rewritten from O(cells x pixels) to O(pixels). This
-    reproduces the original algorithm verbatim so the parity tests below compare the new
-    implementation against what it replaced, rather than against hand-written expectations.
+    ``_apply_region_colors`` was rewritten from O(cells x pixels) to O(pixels) for issue #131.
+    This keeps the straightforward one-cell-at-a-time algorithm around so the parity tests below
+    compare the fast implementation against a readable reference rather than against hand-written
+    expectations. It tracks the semantics, so it also carries issue #132's split of fill and
+    border into independent switches.
+
+    Two details matter for exactness:
+
+    * unfilled and filled cells are painted as **two** passes (spillable outlines first, then
+      borders clipped to their own cell), matching the two ``_paint_border_group`` calls;
+    * within a pass, overlapping pixels are resolved to one owner *before* blending, so a pixel
+      claimed by several cells is blended once — ascending id order means the highest id wins.
     """
     from matplotlib.colors import to_rgb
     from skimage.segmentation import find_boundaries
@@ -350,7 +441,8 @@ def _reference_apply_region_colors(
     opacity_map = opacity_map or {}
 
     canvas = np.array(image, copy=True)
-    pending = []
+    pending_outline = []
+    pending_border = []
     for raw in np.unique(region):
         if not raw:
             continue
@@ -363,29 +455,42 @@ def _reference_apply_region_colors(
         rgb = np.array(to_rgb(colour_hex), dtype=np.float32)
         border_rgb = np.array(to_rgb(border_registry.get(mask_id, colour_hex)), dtype=np.float32)
         mask_bool = region == raw
+        is_fill = mode_map.get(mask_id, "outline") == "fill"
 
-        if mode_map.get(mask_id, "outline") == "fill":
+        if is_fill:
             alpha = max(0.0, min(1.0, float(opacity_map.get(mask_id, fill_alpha))))
             if alpha > 0.0:
                 canvas[mask_bool] = (
                     (1.0 - alpha) * canvas[mask_bool] + alpha * rgb
                 ).astype(canvas.dtype)
-            if show_borders_on_filled or alpha <= 0.0:
-                edges = find_boundaries(mask_bool, mode="inner")
-                if dilation > 0:
-                    edges = thicken_outline(edges, dilation)
-                edges = np.logical_and(edges, mask_bool)
-                if np.any(edges):
-                    pending.append((edges, border_rgb))
-        else:
-            edges = find_boundaries(mask_bool, mode="inner")
-            if dilation > 0:
-                edges = thicken_outline(edges, dilation)
-            if np.any(edges):
-                pending.append((edges, rgb))
 
-    for edges, colour in pending:
-        canvas[edges] = colour.astype(canvas.dtype, copy=False)
+        if not show_borders:
+            continue
+
+        edges = find_boundaries(mask_bool, mode="inner")
+        if dilation > 0:
+            edges = thicken_outline(edges, dilation)
+        if is_fill:
+            edges = np.logical_and(edges, mask_bool)
+        if np.any(edges):
+            (pending_border if is_fill else pending_outline).append((edges, border_rgb))
+
+    resolved_alpha = max(0.0, min(1.0, float(border_alpha)))
+    if resolved_alpha <= 0.0:
+        return canvas
+
+    for pending in (pending_outline, pending_border):
+        if not pending:
+            continue
+        painted = np.zeros(region.shape, dtype=bool)
+        colours = np.zeros(region.shape + (3,), dtype=np.float32)
+        for edges, colour in pending:
+            painted |= edges
+            colours[edges] = colour
+        selected = colours[painted]
+        if resolved_alpha < 1.0:
+            selected = (1.0 - resolved_alpha) * canvas[painted] + resolved_alpha * selected
+        canvas[painted] = selected.astype(canvas.dtype, copy=False)
     return canvas
 
 
@@ -417,7 +522,8 @@ class VectorizedOverlayParityTests(unittest.TestCase):
             exclude_ids=set(kwargs.get("exclude_ids", frozenset())),
             mode_map=kwargs.get("mode_map"),
             opacity_map=kwargs.get("opacity_map"),
-            show_borders_on_filled=kwargs.get("show_borders_on_filled", False),
+            show_borders=kwargs.get("show_borders", True),
+            border_alpha=kwargs.get("border_alpha", 1.0),
         )
         expected = _reference_apply_region_colors(
             image,
@@ -457,7 +563,7 @@ class VectorizedOverlayParityTests(unittest.TestCase):
             border_registry={i: "#00FF00" for i in ids if i % 3 == 0},
             mode_map={i: ("fill" if i % 2 else "outline") for i in ids},
             opacity_map={i: (0.0 if i % 4 == 0 else 0.6) for i in ids},
-            show_borders_on_filled=True,
+            show_borders=True,
         )
         np.testing.assert_allclose(actual, expected, atol=1e-6)
 
@@ -482,7 +588,7 @@ class VectorizedOverlayParityTests(unittest.TestCase):
             border_registry={i: "#0000FF" for i in ids},
             mode_map={i: "fill" for i in ids},
             opacity_map={i: 0.4 for i in ids},
-            show_borders_on_filled=True,
+            show_borders=True,
         )
         np.testing.assert_allclose(actual, expected, atol=1e-6)
 

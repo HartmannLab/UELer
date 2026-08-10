@@ -579,7 +579,7 @@ class ExportFOVsBatchTests(unittest.TestCase):
                 class_opacity={"Tumor": 50},
                 default_color="#ffffff",
                 global_fill_opacity=35,
-                show_borders_on_filled=True,
+                show_borders=True,
                 outline_thickness=1,
             ),
         )
@@ -841,7 +841,7 @@ class ExportFOVsBatchTests(unittest.TestCase):
                 class_opacity={"T": 35},
                 default_color="#ffffff",
                 global_fill_opacity=35,
-                show_borders_on_filled=False,
+                show_borders=False,
                 outline_thickness=1,
             ),
         )
@@ -901,7 +901,7 @@ class ExportFOVsBatchTests(unittest.TestCase):
             "opacities": {"T": 60, "B": 40},
             "global_fill": True,
             "global_fill_opacity": 50,
-            "show_fill_borders": True,
+            "show_borders": True,
             "border_color_mode": "same_as_fill",
             "saved_at": "2026-01-01T00:00:00Z",
         }
@@ -918,7 +918,7 @@ class ExportFOVsBatchTests(unittest.TestCase):
         self.assertFalse(result.class_fill["B"])
         self.assertFalse(result.class_visible["B"])
         self.assertEqual(result.global_fill_opacity, 50)
-        self.assertTrue(result.show_borders_on_filled)
+        self.assertTrue(result.show_borders)
         self.assertEqual(result.border_color_mode, "same_as_fill")
         self.assertEqual(result.outline_thickness, 3)
         self.assertEqual(result.default_color, "#aabbcc")
@@ -949,7 +949,7 @@ class ExportFOVsBatchTests(unittest.TestCase):
                 class_opacity={},
                 default_color="#000000",
                 global_fill_opacity=35,
-                show_borders_on_filled=False,
+                show_borders=False,
                 outline_thickness=1,
             ),
         )
@@ -982,7 +982,7 @@ class ExportFOVsBatchTests(unittest.TestCase):
             class_opacity={"X": 35},
             default_color="#cccccc",
             global_fill_opacity=35,
-            show_borders_on_filled=False,
+            show_borders=False,
             outline_thickness=1,
         )
         viewer_stub.capture_overlay_snapshot = lambda **kwargs: OverlaySnapshot(
@@ -1058,7 +1058,7 @@ class ExportFOVsBatchTests(unittest.TestCase):
                 class_opacity={},
                 default_color="#000000",
                 global_fill_opacity=35,
-                show_borders_on_filled=False,
+                show_borders=False,
                 outline_thickness=1,
                 mask_type_color="#abcdef",
             ),
@@ -1131,7 +1131,7 @@ class ExportFOVsBatchTests(unittest.TestCase):
                 class_opacity={"T": 35},
                 default_color="#ffffff",
                 global_fill_opacity=35,
-                show_borders_on_filled=False,
+                show_borders=False,
                 outline_thickness=1,
             ),
         )
@@ -1290,7 +1290,7 @@ class ExportFOVsBatchTests(unittest.TestCase):
                 class_opacity={},
                 default_color="#ffffff",
                 global_fill_opacity=35,
-                show_borders_on_filled=False,
+                show_borders=False,
                 outline_thickness=1,
             ),
         )

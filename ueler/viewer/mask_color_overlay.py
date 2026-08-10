@@ -109,7 +109,8 @@ def apply_registry_colors(
     mode_map: Optional[Mapping[int, str]] = None,
     opacity_map: Optional[Mapping[int, float]] = None,
     fill_alpha: float = FILL_ALPHA_DEFAULT,
-    show_borders_on_filled: bool = False,
+    show_borders: bool = True,
+    border_alpha: float = 1.0,
 ) -> np.ndarray:
     """Overlay painted mask colors onto an image array.
 
@@ -129,7 +130,10 @@ def apply_registry_colors(
         opacity_map: Optional per-cell fill alpha mapping (mask_id -> 0-1).
             Cells absent from this mapping fall back to ``fill_alpha``.
         fill_alpha: Alpha used when blending filled cells onto the image (0–1).
-        show_borders_on_filled: Whether filled masks should also render an outline.
+        show_borders: Whether to draw borders at all. Fill and border are independent
+            (issue #132): a cell with fill off and borders on renders as an outline,
+            and a cell with both off is not painted.
+        border_alpha: Alpha used when blending border pixels onto the image (0–1).
     """
     if not enable or not mask_regions:
         return image
@@ -157,7 +161,8 @@ def apply_registry_colors(
             resolved_mode_map,
             resolved_opacity_map,
             fill_alpha,
-            show_borders_on_filled,
+            show_borders,
+            border_alpha,
         )
 
     return result
@@ -283,6 +288,7 @@ def _paint_border_group(
     color_lut: np.ndarray,
     dilation: int,
     clip_to_own_cell: bool,
+    alpha: float = 1.0,
 ) -> None:
     """Paint one group of borders in a single vectorised pass.
 
@@ -291,6 +297,9 @@ def _paint_border_group(
     came from. ``clip_to_own_cell`` drops pixels that grew past their owner — required for
     filled cells, whose borders must not dim a neighbour's fill (issue #91), and deliberately
     off for outline mode, which has always allowed thick outlines to spill.
+
+    ``alpha`` is the border opacity (issue #132); at 1.0 the pixels are written directly, so
+    the fully opaque case stays byte-for-byte what it was before border opacity existed.
     """
     seeds = boundaries & active[region_idx]
     if not seeds.any():
@@ -311,7 +320,11 @@ def _paint_border_group(
 
     if not painted.any():
         return
-    canvas[painted] = color_lut[owner[painted]].astype(canvas.dtype, copy=False)
+
+    colors = color_lut[owner[painted]]
+    if alpha < 1.0:
+        colors = (1.0 - alpha) * canvas[painted] + alpha * colors
+    canvas[painted] = colors.astype(canvas.dtype, copy=False)
 
 
 def _apply_region_colors(
@@ -324,7 +337,8 @@ def _apply_region_colors(
     mode_map: Mapping[int, str],
     opacity_map: Mapping[int, float],
     fill_alpha: float,
-    show_borders_on_filled: bool,
+    show_borders: bool,
+    border_alpha: float = 1.0,
 ) -> None:
     """Composite painted cells onto ``canvas`` in O(pixels), independent of cell count.
 
@@ -332,6 +346,12 @@ def _apply_region_colors(
     on the label image: ``find_boundaries(labels, "inner")`` restricted to one cell equals
     ``find_boundaries(labels == cell, "inner")``, so this is an exact rewrite of the former
     per-cell loop rather than an approximation (issue #131).
+
+    Fill and border are independent switches (issue #132). ``mode_map`` still decides whether a
+    cell is filled, but the border no longer rides along with it: ``show_borders`` alone decides
+    whether a border is drawn, for filled and unfilled cells alike. The two still differ in
+    *geometry* — an unfilled cell keeps the spillable outline, a filled one keeps the border
+    clipped to its own pixels so it cannot dim a neighbour's fill (issue #91).
 
     Fills are blended before any border is drawn, preserving the ordering fix from issue #91.
     """
@@ -349,10 +369,10 @@ def _apply_region_colors(
     fill_colors = np.zeros((lut_size, 3), dtype=np.float32)
     fill_alphas = np.zeros((lut_size,), dtype=np.float32)
     fill_active = np.zeros((lut_size,), dtype=bool)
-    # Outline-mode borders: colored with the cell color, free to spill when thickened.
+    # Borders of unfilled cells: free to spill when thickened, as outlines always have been.
     outline_colors = np.zeros((lut_size, 3), dtype=np.float32)
     outline_active = np.zeros((lut_size,), dtype=bool)
-    # Filled-cell borders: colored with the border color, clipped to the owning cell.
+    # Borders of filled cells: clipped to the owning cell.
     border_colors = np.zeros((lut_size, 3), dtype=np.float32)
     border_active = np.zeros((lut_size,), dtype=bool)
 
@@ -364,20 +384,27 @@ def _apply_region_colors(
         if rgb is None:
             continue
 
-        if mode_map.get(mask_id, "outline") != "fill":
-            outline_colors[mask_id] = rgb
-            outline_active[mask_id] = True
+        is_fill = mode_map.get(mask_id, "outline") == "fill"
+        if is_fill:
+            alpha = _resolve_alpha(mask_id, opacity_map, fill_alpha)
+            if alpha > 0.0:
+                fill_colors[mask_id] = rgb
+                fill_alphas[mask_id] = alpha
+                fill_active[mask_id] = True
+
+        if not show_borders:
             continue
 
-        alpha = _resolve_alpha(mask_id, opacity_map, fill_alpha)
-        if alpha > 0.0:
-            fill_colors[mask_id] = rgb
-            fill_alphas[mask_id] = alpha
-            fill_active[mask_id] = True
-        if show_borders_on_filled or alpha <= 0.0:
-            border_rgb = _to_rgb_safe(border_registry.get(mask_id, colour_hex)) or rgb
+        # The border color comes from the border registry for every cell, filled or not, so a
+        # single "Border color" control governs both (issue #132). Cells the caller left out of
+        # that registry keep the historical behaviour of bordering in their own color.
+        border_rgb = _to_rgb_safe(border_registry.get(mask_id, colour_hex)) or rgb
+        if is_fill:
             border_colors[mask_id] = border_rgb
             border_active[mask_id] = True
+        else:
+            outline_colors[mask_id] = border_rgb
+            outline_active[mask_id] = True
 
     fill_px = fill_active[region_idx]
     if fill_px.any():
@@ -391,13 +418,17 @@ def _apply_region_colors(
     # One boundary computation for every cell in the region, instead of one per cell.
     boundaries = np.asarray(find_boundaries(region_idx, mode="inner"), dtype=bool)
 
+    resolved_border_alpha = max(0.0, min(1.0, float(border_alpha)))
+    if resolved_border_alpha <= 0.0:
+        return
+
     _paint_border_group(
         canvas, region_idx, boundaries, outline_active, outline_colors, dilation,
-        clip_to_own_cell=False,
+        clip_to_own_cell=False, alpha=resolved_border_alpha,
     )
     _paint_border_group(
         canvas, region_idx, boundaries, border_active, border_colors, dilation,
-        clip_to_own_cell=True,
+        clip_to_own_cell=True, alpha=resolved_border_alpha,
     )
 
 

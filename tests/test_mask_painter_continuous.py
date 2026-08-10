@@ -139,7 +139,43 @@ class TestBuildStateMapsContinuous(unittest.TestCase):
         self.assertEqual(color_map[2], _cmap_hex("viridis", 1.0))
         self.assertTrue(all(m == "fill" for m in mode_map.values()))
         self.assertTrue(all(abs(a - 1.0) < 1e-9 for a in opacity_map.values()))
-        self.assertEqual(border_map, {})
+        # Issue #132: continuous cells carry a border color too, defaulting to the mask color.
+        from ueler.viewer.plugin.mask_painter import DEFAULT_COLOR
+
+        self.assertEqual(set(border_map), {1, 2})
+        self.assertTrue(
+            all(colour.lower() == DEFAULT_COLOR.lower() for colour in border_map.values())
+        )
+
+    def test_continuous_border_color_follows_the_border_mode(self):
+        """"Painted color" borders a continuous cell in its own colormap color (issue #132)."""
+        from ueler.viewer.plugin.mask_painter import (
+            BORDER_COLOR_MODE_CUSTOM,
+            BORDER_COLOR_MODE_SAME_AS_FILL,
+        )
+
+        spec = {
+            "column": "CD3", "colormap": "viridis", "vmin": 0.0, "vmax": 10.0,
+            "arcsinh": False, "cofactor": 5.0, "opacity": 100, "fill": True,
+        }
+        kwargs = dict(
+            cell_table=self._table(), fov_key="fov", label_key="label", fov="FOV_001",
+            identifier=None, active_classes=(), class_colors={}, class_visible={},
+            class_fill={}, class_opacity={}, default_color="#FFFFFF", global_fill_opacity=35,
+            continuous=spec,
+        )
+
+        color_map, border_map, _, _ = build_painter_state_maps_for_fov(
+            border_color_mode=BORDER_COLOR_MODE_SAME_AS_FILL, **kwargs
+        )
+        self.assertEqual(border_map, color_map)
+
+        _, border_map, _, _ = build_painter_state_maps_for_fov(
+            border_color_mode=BORDER_COLOR_MODE_CUSTOM,
+            border_custom_color="#123456",
+            **kwargs,
+        )
+        self.assertTrue(all(colour == "#123456" for colour in border_map.values()))
 
     def test_outline_mode_has_no_opacity(self):
         spec = {

@@ -122,8 +122,12 @@ class MaskPainterSnapshot:
     default_color: str
     global_fill: bool = False
     global_fill_opacity: int = 35
-    show_borders_on_filled: bool = False
+    # Fill and border are independent switches (issue #132). ``show_borders`` defaults to True so
+    # snapshots written before it existed keep drawing the outlines they always drew.
+    show_borders: bool = True
+    border_opacity: int = 100
     border_color_mode: str = "mask_type_color"
+    border_custom_color: str = "#FFFFFF"
     mask_type_color: str = "#FFFFFF"
     outline_thickness: int = 1
     # Continuous (gradient) coloring — issue #115. Defaults keep existing
