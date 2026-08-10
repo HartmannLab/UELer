@@ -1,9 +1,10 @@
 # Issue #79 — PyPI release readiness plan
 
 > Status: written 2026-08-10 against `develop` @ `377c1bb` + working tree at `v0.5.0-alpha`.
-> **Gate A is complete** (all eight items implemented and verified on 2026-08-10);
-> Gates B–D remain open. Two developer decisions were taken — see
-> [Decisions taken](#decisions-taken).
+> **Gate A is complete** (committed as `88b0e6e`). **Gate B is complete**
+> (2026-08-10, working tree — B2 and B3 consciously declined, plus one item the
+> original list missed). Gates **C** and **D** remain open. Developer decisions
+> taken so far are recorded under [Decisions taken](#decisions-taken).
 > Related: [#79 — Package UELer as a pip package](https://github.com/HartmannLab/UELer/issues/79),
 > [#4 — Packaging plan](https://github.com/HartmannLab/UELer/issues/4),
 > [dev_note/topic_packaging_and_project.md](../topic_packaging_and_project.md),
@@ -64,6 +65,20 @@ imported in two fresh venvs).
 - **A3** → **`requires-python = ">=3.10,<3.13"`**. Note the residual gap: this
   permits **3.12**, which has never been run. Closing it is a **C1** job — add
   3.12 to the matrix, or tighten to `<3.12`.
+- **B4** → **relicensed GPL-3.0-only → BSD-3-Clause** (2026-08-10, before any
+  upload). UELer is imported by other people's code, and copyleft propagates into
+  their distributed work — the wrong shape for a library. Two checks established
+  the change was actually available: copyright sits with a **single** author
+  (`git shortlog -sne --all`: one human, two bot identities committing on the repo
+  owner's behalf), so no contributor round-up was required; and **every** runtime
+  dependency is permissive (BSD-3 / MIT / Apache-2.0), so the GPL was a standalone
+  choice rather than inherited. BSD-3 matches the neighbourhood — scikit-image,
+  dask, bokeh, anndata, napari. **MPL-2.0** was the runner-up and is the right
+  answer if closed-fork protection ever becomes a goal; **LGPL** was rejected
+  because its "linking" model maps badly onto Python `import` and the ambiguity
+  deters adopters as effectively as the GPL. Applies going forward; tags through
+  `v0.4.1` stay GPL as published, and nothing was ever uploaded to PyPI, so there
+  is no released artifact to reconcile.
 
 ### A1. Reconcile the project description and keywords — ✅ done
 
@@ -303,9 +318,16 @@ who clone the repo per **A2**'s development flow.
 
 ---
 
-## Gate B — before the release is public / announced
+## Gate B — before the release is public / announced — ✅ **DONE**
 
-### B1. Fill out PyPI metadata
+Implemented 2026-08-10 in the working tree, on top of Gate A (`88b0e6e`).
+**B2 and B3 were declined rather than implemented** — see their entries; both were
+already carrying a "leave as-is" recommendation, and declining is the action.
+**B6 was added during the work** (the docs-site install page still contradicted
+the README). Verified together: clean `python -m build`, `twine check --strict`
+PASSED on both artifacts, `mkdocs build` exit 0, 913 tests OK.
+
+### B1. Fill out PyPI metadata — ✅ done
 
 Only two classifiers today (`Programming Language :: Python :: 3`,
 `Operating System :: OS Independent`). This is the PyPI landing page's sidebar.
@@ -320,8 +342,26 @@ Only two classifiers today (`Programming Language :: Python :: 3`,
   (`https://github.com/HartmannLab/UELer/issues`), `Changelog`
   (pointing at `doc/log.md` or the docs site).
 - **Verify:** `twine check`, then read the rendered page on **TestPyPI** (**D1**).
+- **Done:** ten classifiers — `Development Status :: 4 - Beta`, `Intended Audience
+  :: Science/Research`, `Framework :: Jupyter`, `Operating System :: OS
+  Independent`, `Programming Language :: Python :: 3` / `3.10` / `3.11`, and
+  `Topic :: Scientific/Engineering ::` `Bio-Informatics` / `Visualization` /
+  `Image Processing` (the last added beyond the plan — UELer is an image tool
+  first). A comment above the block records *why* there is no `License ::`
+  classifier, so it does not get "fixed" back in later. `[project.urls]` now has
+  `Homepage`, `Documentation`, `Repository`, `Issues`, `Changelog`; the two
+  pre-existing keys were capitalised, since PyPI uses the key verbatim as the
+  sidebar label.
+- **On `Development Status :: 4 - Beta` with a `0.5.0-alpha` version:** kept as
+  planned. The `-alpha` token is a pre-release marker *within* the 0.5.0 line, not
+  a claim about project maturity — 913 tests and a working Binder deployment are
+  not "3 - Alpha". Recorded so the apparent mismatch reads as a choice.
+- **Verified:** `twine check --strict` PASSED, which is also what validates
+  classifiers against the trove list — an invalid one fails there rather than at
+  upload. Wheel `METADATA` shows all ten classifiers and all five `Project-URL`
+  lines. The rendered sidebar still needs eyes on it at **D1**.
 
-### B2. Decide on `ipykernel` / `ipympl` as hard runtime dependencies
+### B2. Decide on `ipykernel` / `ipympl` as hard runtime dependencies — ⏸️ declined for `0.5.0`
 
 Both are hard `[project.dependencies]`. A library that force-installs a Jupyter
 kernel into any environment that merely depends on it is unusual, and it makes
@@ -337,8 +377,15 @@ kernel into any environment that merely depends on it is unusual, and it makes
 - **Decision needed:** worth the churn, or leave as-is for the first release?
   Recommend **leaving as-is** for `0.5.0` and revisiting once there is a
   non-notebook user.
+- **Outcome: left as-is, no change made.** The recommendation and the no-op are
+  the same action, so this is closed for `0.5.0` rather than pending. Reopen it
+  when a non-notebook consumer appears — and remember the `.binder/postBuild`
+  coupling has to change in the *same* commit.
+- **Note for whoever reopens it:** `pip install ueler` currently installs a Jupyter
+  kernel into the environment. That is the actual cost, and it is worth revisiting
+  before `1.0`, not because it breaks anything but because it is surprising.
 
-### B3. Consider a `console_scripts` entry point
+### B3. Consider a `console_scripts` entry point — ⏸️ declined for `0.5.0`
 
 There is none, deliberately — UELer is notebook-first and
 `ueler.runner.run_viewer` is the programmatic entry. A `ueler` command that
@@ -347,8 +394,9 @@ it is genuinely optional and adds a support surface.
 
 - **Recommend:** skip for `0.5.0`. Noted so the omission is a decision rather
   than an oversight.
+- **Outcome: skipped, no entry point added.** Nothing to verify.
 
-### B4. State the license in the user-facing docs
+### B4. State the license in the user-facing docs — ✅ done
 
 `LICENSE.txt` is GPL-3.0 and `pyproject.toml` declares `GPL-3.0-only`, but
 neither `README.md` nor the docs site mentions the license. Users evaluating
@@ -358,8 +406,26 @@ whether they can build on UELer should not have to open the repo tree.
   Worth a conscious confirmation that **GPL-3.0-only** is the intended choice
   for a library others will import, since it is copyleft — this is the moment it
   becomes hard to change (every later contributor's work is licensed under it).
+- **Correction:** the docs half was **already done** — [docs/index.md](../../docs/index.md)
+  has carried a "License" section linking `LICENSE.txt` since before this plan.
+  Only the README was missing it. The plan overstated the gap.
+- **Done:** `README.md` gained a "License" section naming GPL-3.0-only, with one
+  plain-language paragraph distinguishing what copyleft binds (a distributed work
+  that incorporates UELer) from what it does not (your data and your results when
+  you merely *use* UELer). That distinction is written out deliberately: it is the
+  question an evaluator in a commercial or clinical setting actually asks, and
+  "released under GPL-3.0" alone does not answer it. An "Issues and contact"
+  section was added alongside, since the README is the PyPI landing page and had
+  no route to the issue tracker.
+- **Resolved 2026-08-10 — relicensed to BSD-3-Clause.** The item above documented
+  the *existing* declaration; the choice itself was the open question, and the
+  answer was to change it. See [Decisions taken](#decisions-taken) for the
+  reasoning and the two facts that made it possible. The README and `docs/index.md`
+  sections written for this item were rewritten accordingly.
+- **Residual, non-code:** confirm with DKFZ that the copyright line naming both the
+  author and the institute matches institutional policy.
 
-### B5. Move `ueler/graphify-out/` out of the package directory
+### B5. Move `ueler/graphify-out/` out of the package directory — ✅ done
 
 The graphify cache/output lives *inside* `ueler/`. It is gitignored and verified
 absent from the wheel (no `__init__.py`, so `packages.find` skips it), so this
@@ -367,6 +433,40 @@ is hygiene, not a bug — but a build tool that globs package data is one
 `package-data` change away from shipping ~2 MB of graph JSON.
 
 - **Action:** relocate to the repo-root `graphify-out/` that already exists.
+- **What it actually was:** a **stale, separate** graph, not a stray copy of the
+  root one — `ueler/graphify-out/.graphify_root` pointed at `…/UELer_public/ueler`,
+  i.e. someone had once run graphify scoped to the package directory. Last written
+  2026-07-31 (11 MB); the repo-root graph is from 2026-08-10 (48 MB) and covers a
+  superset. So the two could not be *merged*, only one kept.
+- **Done:** moved to `graphify-out/legacy-ueler-scoped-2026-07-31/`. Nesting it
+  inside the existing `graphify-out/` keeps it covered by the same `.gitignore`
+  directory rule with no new pattern, and the date-stamped name says what it is.
+  It is regenerable and superseded — **safe to delete** whenever.
+- **Verified:** `ueler/graphify-out` no longer exists; `git check-ignore -v`
+  attributes the new path to the same `.gitignore:43` rule; `graphify query` still
+  resolves against the root graph from the new layout; and no path containing
+  `graphify` appears in either the rebuilt wheel or sdist.
+
+### B6. Align the docs-site installation page with the README — ✅ done
+
+**Not in the original Gate B list** — found while checking B4. [docs/installation.md](../../docs/installation.md)
+was still the pre-PyPI page: env → `git clone` → `pip install -e .`, with
+"Requirements: Python ≥ 3.10". A reader arriving from the PyPI project page (whose
+`Documentation` URL now points straight at the docs site, per **B1**) would have
+been told to clone the repository anyway, and given a Python bound that
+`requires-python` no longer permits.
+
+- **Done:** an "Option A — Install from PyPI" section now leads the page (`pip
+  install ueler`, the `--pre` form, the `[ark]`/`[docs]` extras, `pip install
+  --upgrade`), followed by "Option B — Install from Source" introducing the
+  existing steps. "Requirements" reads 3.10 or 3.11. "Updating UELer" covers both
+  paths. The development section lists `build`/`twine` in the `dev` extra and
+  documents the opt-in `UELER_TEST_BOOTSTRAP=1` bootstrap from Gate A's **A8**.
+- **Also stated explicitly:** the starter notebook is **not** part of the package,
+  with a link to it in the repository. This is the one thing a pip user cannot
+  discover on their own, and the same note was added to the README in **A2**.
+- **Verified:** `mkdocs build` exits 0 (only the Material insiders banner on
+  stderr).
 
 ---
 
@@ -474,26 +574,39 @@ reasonable:
 3. **`docs(packaging): PyPI-facing metadata and install instructions`** —
    A1, A2, A3, the README link fixes.
 
+Gate A landed as `88b0e6e`. Gate B is likewise one working-tree change set;
+split at commit time if you prefer:
+
+4. **`chore(packaging): finish PyPI metadata`** — B1 (classifiers, `[project.urls]`),
+   B5 (`graphify-out` relocation).
+5. **`docs: state the license and the PyPI install path`** — B4, B6, plus the
+   `doc/log.md` and README summary entries.
+
 Remaining:
 
-4. **`chore(packaging): finish PyPI metadata`** — B1, B4, B5 (+ B2/B3 if decided).
-5. **`ci: add test and release workflows`** — C1, C2, C3.
+6. **`ci: add test and release workflows`** — C1, C2, C3.
 
 Then Gate D by hand.
 
 ### Open decisions for the developer
 
-*(A1 and A3 are resolved — see [Decisions taken](#decisions-taken).)*
+*(A1, A3 and B4 are resolved — see [Decisions taken](#decisions-taken). B2 and B3
+are closed as "declined for `0.5.0`", which needed no code change.)*
 
-1. **B2** — move `ipykernel`/`ipympl` to a `notebook` extra (and update
-   `.binder/postBuild`), or leave for now?
-2. **B4** — confirm GPL-3.0-only is intended for a library.
-3. **C1** — add **3.12** to the CI matrix, or tighten `requires-python` to
-   `<3.12`? The current `<3.13` bound permits an untested minor.
-4. **C3** — backfill `v0.4.2`–`v0.4.4` tags, or start clean at `v0.5.0`?
-5. **D3** — is `0.5.0-alpha` the version that goes to PyPI, or should the first
+1. **B4 leftover (non-code)** — confirm with **DKFZ** that the BSD copyright line
+   naming both the author and the institute matches institutional policy. The
+   licensing decision itself is made; this is the institutional half of it.
+2. **C1** — add **3.12** to the CI matrix, or tighten `requires-python` to
+   `<3.12`? The current `<3.13` bound permits an untested minor. Note the
+   per-minor classifiers added in **B1** list only 3.10 and 3.11, so whichever way
+   this goes, `classifiers` and `requires-python` must move together.
+3. **C3** — backfill `v0.4.2`–`v0.4.4` tags, or start clean at `v0.5.0`?
+4. **D3** — is `0.5.0-alpha` the version that goes to PyPI, or should the first
    public upload be a final `0.5.0`? (An `-alpha` upload is a normal way to
    validate the pipeline, and pip will not install it without `--pre`. The README
    documents both forms, so either choice is already covered.)
-6. **A1 leftover** — the **GitHub repo description** still needs updating in the
+5. **A1 leftover** — the **GitHub repo description** still needs updating in the
    GitHub UI; it is not a tracked file.
+6. **B5 leftover (trivial)** — `graphify-out/legacy-ueler-scoped-2026-07-31/` is
+   kept only because deleting someone else's generated data unasked is rude. It is
+   stale and regenerable; delete it when you notice it.

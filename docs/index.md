@@ -71,4 +71,4 @@ You can launch UELer in your browser via Binder — no local setup required:
 
 ## License
 
-UELer is released under the [GPL-3.0 license](https://github.com/HartmannLab/UELer/blob/main/LICENSE.txt).
+UELer is released under the [BSD 3-Clause License](https://github.com/HartmannLab/UELer/blob/main/LICENSE.txt) — permissive, and the same license as `scikit-image`, `dask`, `bokeh`, `anndata` and `napari`. Keep the copyright notice and you may use, modify and redistribute UELer freely, including in commercial and closed-source work.

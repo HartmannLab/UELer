@@ -1,16 +1,52 @@
 # Installation
 
-This page covers the full installation of UELer. Follow the steps below to set up a working environment.
+There are two ways to install UELer. Pick the first unless you intend to modify UELer itself.
 
 ---
 
 ## Requirements
 
-- **Python** ≥ 3.10
-- [micromamba](https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html) (recommended) or conda/mamba
-- Git
+- **Python** 3.10 or 3.11
+- [micromamba](https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html) (recommended) or conda/mamba — needed for the development install, and still the easiest way to get the binary stack (HDF5, OpenCV) on an HPC system
+- Git — development install only
 
 ---
+
+## Option A — Install from PyPI
+
+```shell
+pip install ueler
+```
+
+While UELer is on a pre-release version, ask pip for it explicitly:
+
+```shell
+pip install --pre ueler
+```
+
+That pulls in every runtime dependency. Two optional extras are available:
+
+```shell
+pip install "ueler[ark]"    # adds ark-analysis (pinned) for ark-based workflows
+pip install "ueler[docs]"   # adds the mkdocs toolchain for building these docs
+```
+
+To upgrade later:
+
+```shell
+pip install --upgrade ueler
+```
+
+The starter notebook is not part of the package — download
+[`script/run_ueler.ipynb`](https://github.com/HartmannLab/UELer/blob/main/script/run_ueler.ipynb)
+from the repository, or write your own cell calling `ueler.runner.run_viewer`.
+
+---
+
+## Option B — Install from Source
+
+Use this if you want to modify UELer, run the test suite, or track the `develop` branch. The
+remaining steps on this page describe that path.
 
 ## Step 1 — Set Up the Environment
 
@@ -65,14 +101,16 @@ pip install -e .
 
 ## Updating UELer
 
-To update to the latest version, navigate to your UELer directory and pull the latest changes:
+For a source install, navigate to your UELer directory and pull the latest changes:
 
 ```shell
 cd <path-to-UELer-folder>
 git pull
 ```
 
-No reinstall is needed when using editable mode.
+No reinstall is needed when using editable mode, unless `environment.yml` or `pyproject.toml`
+changed — then re-run `pip install -e .`. For a PyPI install, use `pip install --upgrade ueler`
+instead.
 
 ---
 
@@ -96,13 +134,20 @@ If you plan to contribute to UELer or run the test suite, install the `dev` extr
 pip install -e ".[dev]"
 ```
 
-This adds `pytest` and `pytest-cov` to your environment.
+This adds `pytest`, `pytest-cov`, `build` and `twine` to your environment.
 
 To run the test suite:
 
 ```shell
+make test-fast                      # or, equivalently:
 python -m unittest discover tests
 ```
+
+The suite runs against lightweight stubs for `pandas`, `matplotlib` and `ipywidgets`
+(`tests/bootstrap.py`), which is why it finishes in seconds. `make test-fast` also sets
+`UELER_TEST_BOOTSTRAP=1`, which lets `sitecustomize.py` install those stubs at interpreter
+startup. That is **opt-in** — without the variable a plain interpreter always gets the real
+libraries, so nothing you run outside the tests is affected.
 
 ---
 

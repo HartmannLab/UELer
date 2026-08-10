@@ -8,7 +8,7 @@ version = "0.5.0-alpha"
 description = "Unified Exploratory Linked Viewer for spatial proteomics and multiplexed imaging"
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
-license = "GPL-3.0-only"
+license = "BSD-3-Clause"
 license-files = ["LICENSE.txt"]
 authors = [
     { name = "Yu-Le Wu (Hartmann Lab, DKFZ)" }
@@ -23,9 +23,20 @@ keywords = [
     "IMC",
     "bioimage analysis",
 ]
+# No "License ::" classifier here on purpose: PEP 639 forbids combining one with
+# the `license` SPDX expression above, and setuptools warns if both are present.
+# The Python classifiers must stay in step with `requires-python`.
 classifiers = [
-    "Programming Language :: Python :: 3",
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Framework :: Jupyter",
     "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Visualization",
+    "Topic :: Scientific/Engineering :: Image Processing",
 ]
 dependencies = [
     "scikit-image>=0.19",
@@ -65,9 +76,14 @@ docs = [
     "mike>=2.1",
 ]
 
+# These become the "Project links" sidebar on the PyPI page. Absolute URLs only —
+# a release is browsed outside the repository, so nothing repo-relative works here.
 [project.urls]
-homepage = "https://github.com/HartmannLab/UELer"
-documentation = "https://hartmannlab.github.io/UELer/"
+Homepage = "https://github.com/HartmannLab/UELer"
+Documentation = "https://hartmannlab.github.io/UELer/"
+Repository = "https://github.com/HartmannLab/UELer"
+Issues = "https://github.com/HartmannLab/UELer/issues"
+Changelog = "https://github.com/HartmannLab/UELer/blob/main/doc/log.md"
 
 [tool.setuptools.packages.find]
 include = ["ueler", "ueler.*"]

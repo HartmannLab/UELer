@@ -153,7 +153,8 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### **UELer v0.5.0-alpha Summary**
-- **UELer is being prepared for release on PyPI (`pip install ueler`).** Installation now leads with a pip install rather than a `git clone`, and "Upgrade UELer" covers both paths. The supported Python versions are stated explicitly (**3.10 and 3.11**) instead of implied — the previous open-ended range would have let pip install UELer on interpreters it has never been tested against. Packaging fixes behind the scenes: bundled image assets can no longer be dropped from a build by an over-broad `.gitignore` rule, the source distribution no longer carries unusable test files, and `make build` / `make publish` targets always start from a clean `dist/`. The tool's one-line description is now consistent across the README, the docs site and the package metadata.
+- **UELer is now BSD 3-Clause licensed (was GPL-3.0).** Changed before the first PyPI upload, deliberately: UELer is a package you *import*, and under the GPL any analysis code that imported it and was then distributed would have had to be GPL too. BSD-3 removes that — use, modify and redistribute UELer freely, including in commercial and closed-source work, as long as the copyright notice stays. It is the same license as `scikit-image`, `dask`, `bokeh`, `anndata` and `napari`, so UELer no longer imposes anything your existing scientific Python stack does not. **Nothing changes for existing users**, who gain permissions rather than lose them.
+- **UELer is being prepared for release on PyPI (`pip install ueler`).** Installation now leads with a pip install rather than a `git clone`, and "Upgrade UELer" covers both paths — on the [documentation site](https://hartmannlab.github.io/UELer/) too, which until now told everyone to clone. The PyPI page will carry proper classifiers and links to the issue tracker and changelog. The supported Python versions are stated explicitly (**3.10 and 3.11**) instead of implied — the previous open-ended range would have let pip install UELer on interpreters it has never been tested against. Packaging fixes behind the scenes: bundled image assets can no longer be dropped from a build by an over-broad `.gitignore` rule, the source distribution no longer carries unusable test files, and `make build` / `make publish` targets always start from a clean `dist/`. The tool's one-line description is now consistent across the README, the docs site and the package metadata.
 - **For developers working from a clone:** the test dependency stubs installed by `sitecustomize.py` / `usercustomize.py` are now **opt-in** via `UELER_TEST_BOOTSTRAP=1` (which `make test-fast` sets for you). Previously they were on by default, so any interpreter that had the repo root on `PYTHONPATH` could silently get stubbed versions of `pandas`, `matplotlib` and `ipywidgets`.
 - **⚠️ Legacy `viewer` / `constants` / `data_loader` / `image_utils` imports have been removed (packaging cleanup).** Until now, `import ueler` also made the *old* pre-v0.2 module names importable, so a notebook could still say `from viewer.main_viewer import ImageMaskViewer`. That shim worked by claiming those four names for UELer across your whole Python session, which is not safe once UELer is installed from PyPI — a file of your own called `constants.py` or `data_loader.py` could be quietly shadowed by UELer's. The shim is gone. **If you have an old notebook using those names, change the import to the `ueler.` version** — `from ueler.viewer.main_viewer import ImageMaskViewer`, `import ueler.constants`, and so on. The modules themselves are unchanged; only the old spelling is no longer accepted. The `ensure_aliases=` argument of `run_viewer()` / `run_viewer_bia()` and the `ueler.ensure_compat_aliases()` helper are removed too; passing `ensure_aliases=` now prints a warning and is ignored rather than failing.
 
@@ -162,3 +163,18 @@ _Earlier changes (v0.4.4 and before) are in the [update log](https://github.com/
 ## Earlier Updates  
 
 You can find previous update logs [here](https://github.com/HartmannLab/UELer/blob/main/doc/log.md).
+
+## License
+UELer is released under the **BSD 3-Clause License** — see
+[LICENSE.txt](https://github.com/HartmannLab/UELer/blob/main/LICENSE.txt).
+
+You are free to use, modify and redistribute UELer, including in commercial and closed-source
+work, provided you keep the copyright notice and do not use the authors' names to endorse a
+derived product. This is the same license as `scikit-image`, `dask`, `bokeh`, `anndata` and
+`napari`, so UELer imposes no constraints your existing scientific Python stack does not.
+
+If you use UELer in published work, a citation is appreciated but not required.
+
+## Issues and contact
+Bug reports and feature requests: [GitHub Issues](https://github.com/HartmannLab/UELer/issues).
+Maintained by Yu-Le Wu, Hartmann Lab, DKFZ Heidelberg.
