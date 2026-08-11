@@ -140,6 +140,50 @@ class GridChannelDisplay:
         ax = self.axes[0]
         return ax.get_xlim(), ax.get_ylim()
 
+    def set_viewport(self, xlim, ylim) -> None:
+        """Apply an externally computed viewport to every pane (Issue #134).
+
+        Programmatic navigation (locate a cell, centre on an ROI) computes its
+        target window against ``image_display.ax``, which is hidden while grid
+        mode is active.  This pushes the same limits onto the shared grid axes
+        — ``sharex``/``sharey`` propagates them to every pane — mirrors them
+        back into ``image_display.ax`` so ``get_axis_limits_with_padding``
+        agrees, and re-renders the panes at the matching downsample factor.
+
+        Parameters
+        ----------
+        xlim, ylim:
+            Axis limits in full-resolution pixel coordinates, in the same
+            (possibly inverted) order used by ``image_display.ax``.
+        """
+        if not self.axes:
+            return
+
+        xlim = (float(xlim[0]), float(xlim[1]))
+        ylim = (float(ylim[0]), float(ylim[1]))
+
+        ax = self.axes[0]
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+
+        # Record the new centre up front: the redraw scheduled below fires a
+        # draw_event, and _on_draw must treat it as already handled rather than
+        # re-entering the render path.
+        self._prev_cx = (xlim[0] + xlim[1]) / 2
+        self._prev_cy = (ylim[0] + ylim[1]) / 2
+
+        viewer = self.main_viewer
+        if not getattr(viewer, "initialized", False):
+            self.fig.canvas.draw_idle()
+            return
+
+        viewer.image_display.ax.set_xlim(xlim)
+        viewer.image_display.ax.set_ylim(ylim)
+
+        self._sync_downsample_factor(xlim, ylim)
+        viewer._update_grid_display(viewer.current_downsample_factor)
+        self.fig.canvas.draw_idle()
+
     def update_panes(self, arrays_by_channel: dict, region_xy) -> None:
         """Push freshly rendered arrays into each pane's imshow artist.
 
@@ -414,6 +458,20 @@ class GridChannelDisplay:
     # Internal: draw-event handler
     # ------------------------------------------------------------------
 
+    def _sync_downsample_factor(self, xlim, ylim) -> None:
+        """Recompute the viewer's downsample factor for the given axis limits."""
+        range_x = abs(xlim[1] - xlim[0])
+        range_y = abs(ylim[1] - ylim[0])
+        disable_ds = not getattr(
+            self.main_viewer.ui_component, "enable_downsample_checkbox", None
+        ) or not self.main_viewer.ui_component.enable_downsample_checkbox.value
+        new_factor = calculate_downsample_factor(
+            range_x, range_y, disable_ds, max_dimension=DOWNSAMPLE_MAX_DIMENSION
+        )
+
+        if new_factor != self.main_viewer.current_downsample_factor:
+            self.main_viewer.on_downsample_factor_changed(new_factor)
+
     def _on_draw(self, event):
         """Triggered after each matplotlib draw (pan/zoom/resize).
 
@@ -443,17 +501,7 @@ class GridChannelDisplay:
         self.main_viewer.image_display.ax.set_ylim(ylim)
 
         # Compute new downsample factor from the visible range
-        range_x = abs(xlim[1] - xlim[0])
-        range_y = abs(ylim[1] - ylim[0])
-        disable_ds = not getattr(
-            self.main_viewer.ui_component, "enable_downsample_checkbox", None
-        ) or not self.main_viewer.ui_component.enable_downsample_checkbox.value
-        new_factor = calculate_downsample_factor(
-            range_x, range_y, disable_ds, max_dimension=DOWNSAMPLE_MAX_DIMENSION
-        )
-
-        if new_factor != self.main_viewer.current_downsample_factor:
-            self.main_viewer.on_downsample_factor_changed(new_factor)
+        self._sync_downsample_factor(xlim, ylim)
 
         self.main_viewer._update_grid_display(self.main_viewer.current_downsample_factor)
 
