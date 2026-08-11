@@ -711,16 +711,24 @@ Trusted Publishers.** PyPI's pending-publisher form rejects the project name wit
      should not matter, but eliminate it in ten seconds.
   2. Submit a control name (e.g. `ueler-viewer`) on the same form. If that is
      accepted, the block is specific to `ueler`; delete the control publisher after.
-  3. **Ask PyPI to release the name — by email to `admin@pypi.org`, not via
-     `pypi/support`.** Established 2026-08-10:
-     - `pypi/support` sets `blank_issues_enabled: false`, and its seven templates are
-       network access, account recovery, two size limits, mass name squatting, and
-       PEP 541. **None covers a prohibited name**, and no free-form issue is possible.
-     - **PEP 541 is the wrong instrument.** It governs claiming a name **away from an
-       existing owner** (abandoned or squatted projects). `ueler` has no owner and no
-       project object at all.
-     - `admin@pypi.org` is one of only two addresses published on
-       [pypi.org/help](https://pypi.org/help/) (the other is `security@pypi.org`).
+  3. **Ask PyPI to release the name.** Start by email to `admin@pypi.org` — one of
+     only two addresses published on [pypi.org/help](https://pypi.org/help/) (the
+     other is `security@pypi.org`).
+     **↳ Superseded in practice (2026-08-10): the admins replied and asked for a
+     `pypi/support` issue, so that is now the route.** File it under the
+     **PEP 541 template**, which is the only way in — `pypi/support` sets
+     `blank_issues_enabled: false` and its seven templates are network access,
+     account recovery, two size limits, mass name squatting, and PEP 541, none of
+     which covers a prohibited name. Two things make it survive triage:
+     - **State in the first line that this is not a PEP 541 claim**, and name the
+       admin who referred you plus the date of their mail. PEP 541 governs claiming
+       a name **away from an existing owner**; `ueler` has no owner and no project
+       object at all, so without the referral quoted up front the issue reads as a
+       malformed claim and gets closed.
+     - **Leave the "Maintenance or replacement?" dropdown unset** — it carries no
+       `required` validation and neither option is true. Fill "Project to be
+       claimed" with the 404ing URL and say it 404s, rather than omitting it.
+     Post the issue link back on the email thread so the two records do not drift.
      **Which of PyPI's four documented reasons applies**, per its own
      [`#project-name`](https://pypi.org/help/#project-name) answer — three eliminated
      empirically, so the fourth holds by elimination:
@@ -1006,8 +1014,10 @@ Gate C built the mechanism; nothing has exercised it. The remaining sequence:
 
 1. 🚨 **C4 — `ueler` vs `ueler-viewer` on PyPI.** `ueler` is unregistered but
    administratively **prohibited**; `ueler-viewer` registers fine (control test), so
-   the block is name-specific. Ask PyPI to release `ueler` via
-   [pypi/support](https://github.com/pypi/support/issues), and fall back to
+   the block is name-specific. `admin@pypi.org` was mailed and **the admins replied
+   asking for a `pypi/support` issue** — file it under the **PEP 541 template** (the
+   only way in; blank issues are disabled), leading with "not a PEP 541 claim" and
+   the referring admin's name and date, or triage will close it. Fall back to
    `ueler-viewer` — whose pending publisher already exists — if they decline or go
    quiet. Renaming needs no code changes, only `pyproject.toml` and every
    `pip install ueler` in the README and the docs. **Not blocking D1/D2** (TestPyPI

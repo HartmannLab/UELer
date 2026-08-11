@@ -304,14 +304,18 @@ class ChartDisplay(PluginBase):
 
         if self._scatter_backend == "static":
             # The static fallback renders a single Matplotlib axes; plot the
-            # first pair so the environment still gets a usable figure.
-            x_col, y_col = channels[0], channels[1]
+            # first pair so the environment still gets a usable figure. Axes
+            # follow the matrix convention below: row channel on y (#133).
+            x_col, y_col = channels[1], channels[0]
             self._render_scatter_matplotlib(data, x_col, y_col, c_col)
             return
 
         last_id = None
-        for x_col, y_col in itertools.combinations(channels, 2):
-            last_id = self._add_scatter_view(data, x_col, y_col, c_col)
+        # Standard scatter-matrix convention (#133): the plot at row ``i``,
+        # column ``j`` shows ``channels[i]`` on y and ``channels[j]`` on x, so a
+        # row shares its y-axis and a column shares its x-axis.
+        for row_col, col_col in itertools.combinations(channels, 2):
+            last_id = self._add_scatter_view(data, col_col, row_col, c_col)
         if last_id is not None:
             self._update_scatter_controls(selected_id=last_id)
         self._render_scatter_area()
@@ -509,7 +513,10 @@ class ChartDisplay(PluginBase):
         the ``1fr`` columns give ``width='auto'`` a definite cell to measure
         (#118). Cells are laid out row-major: row ``i`` has ``i`` leading blanks
         (lower triangle) then the plots for ``(i, j)``, ``j > i``; the CSS grid
-        places them left→right, top→bottom.
+        places them left→right, top→bottom. Following the standard scatter-matrix
+        convention (#133), the plot at ``(i, j)`` carries ``channels[i]`` on its
+        y-axis and ``channels[j]`` on its x-axis — so every plot in a row shares
+        the same y-axis and every plot in a column shares the same x-axis.
 
         Returns the ``GridBox`` when a full pairwise matrix for
         ``self._multipair_channels_last`` is present — with any extra
@@ -520,7 +527,12 @@ class ChartDisplay(PluginBase):
         channels = self._multipair_channels_last
         if len(channels) < 2:
             return None
-        matrix_pairs = list(itertools.combinations(channels, 2))
+        # ``_scatter_pairs`` stores ``(x, y)``; the matrix puts the row channel
+        # on y and the column channel on x, so the stored pair is reversed (#133).
+        matrix_pairs = [
+            (col_col, row_col)
+            for row_col, col_col in itertools.combinations(channels, 2)
+        ]
         present = set(self._scatter_pairs.values())
         # The matrix is only "active" while all of its pairs are still shown.
         if not all(pair in present for pair in matrix_pairs):
@@ -539,7 +551,8 @@ class ChartDisplay(PluginBase):
         for i in range(n - 1):
             cells.extend(self._blank_cell() for _ in range(i))
             for j in range(i + 1, n):
-                cells.append(self._plot_cell(view_by_pair[(channels[i], channels[j])]))
+                # (x, y) == (column channel, row channel) — see #133.
+                cells.append(self._plot_cell(view_by_pair[(channels[j], channels[i])]))
 
         # Extra views (e.g. single-pair plots added after the matrix): append as
         # new full rows below, flowing left→right, padded with blanks to N-1.
