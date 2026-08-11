@@ -37,11 +37,12 @@ class _DummyAxes:
     def get_ylim(self):
         return self._ylim
 
-    def set_xlim(self, xlim):
-        self._xlim = xlim
+    def set_xlim(self, xlim, xmax=None):
+        # Accepts both matplotlib call styles: set_xlim((a, b)) and set_xlim(a, b)
+        self._xlim = (xlim, xmax) if xmax is not None else tuple(xlim)
 
-    def set_ylim(self, ylim):
-        self._ylim = ylim
+    def set_ylim(self, ylim, ymax=None):
+        self._ylim = (ylim, ymax) if ymax is not None else tuple(ylim)
 
 
 class _DummyImageDisplay:
@@ -486,6 +487,139 @@ class GridChannelInteractivityTests(unittest.TestCase):
         grid._update_grid_patches()
         restored = grid.img_artists[0].get_array()
         np.testing.assert_allclose(restored[:, :, 0], 0.2, atol=1e-5)
+
+
+# ---------------------------------------------------------------------------
+# Issue #134: programmatic navigation must move the grid panes
+# ---------------------------------------------------------------------------
+
+
+class GridSetViewportTests(unittest.TestCase):
+    """GridChannelDisplay.set_viewport applies an externally computed window."""
+
+    def setUp(self):
+        plt.close("all")
+        self.viewer = _DummyViewer(width=100, height=80)
+        self.grid = GridChannelDisplay(self.viewer, ["A", "B"], (0.0, 100.0), (80.0, 0.0))
+
+    def tearDown(self):
+        plt.close("all")
+
+    def test_applies_limits_to_primary_axes(self):
+        self.grid.set_viewport((40.0, 60.0), (50.0, 30.0))
+        xlim, ylim = self.grid.get_viewport()
+        self.assertAlmostEqual(xlim[0], 40.0)
+        self.assertAlmostEqual(xlim[1], 60.0)
+        self.assertAlmostEqual(ylim[0], 50.0)
+        self.assertAlmostEqual(ylim[1], 30.0)
+
+    def test_limits_propagate_to_every_pane(self):
+        """sharex/sharey means all panes must follow the primary axes."""
+        self.grid.set_viewport((40.0, 60.0), (50.0, 30.0))
+        for ax in self.grid.axes[: len(self.grid.channels)]:
+            self.assertAlmostEqual(ax.get_xlim()[0], 40.0)
+            self.assertAlmostEqual(ax.get_xlim()[1], 60.0)
+
+    def test_mirrors_limits_into_image_display_ax(self):
+        self.grid.set_viewport((40.0, 60.0), (50.0, 30.0))
+        self.assertEqual(self.viewer.image_display.ax.get_xlim(), (40.0, 60.0))
+        self.assertEqual(self.viewer.image_display.ax.get_ylim(), (50.0, 30.0))
+
+    def test_rerenders_panes(self):
+        self.viewer._update_grid_calls.clear()
+        self.grid.set_viewport((40.0, 60.0), (50.0, 30.0))
+        self.assertGreater(len(self.viewer._update_grid_calls), 0)
+
+    def test_recomputes_downsample_factor(self):
+        # A 3000 px window downsamples by 2 under DOWNSAMPLE_MAX_DIMENSION (2048).
+        self.grid.set_viewport((0.0, 3000.0), (3000.0, 0.0))
+        self.assertEqual(self.viewer.current_downsample_factor, 2)
+
+    def test_subsequent_draw_event_does_not_reenter(self):
+        """The draw scheduled by set_viewport must not trigger a second render."""
+        self.grid.set_viewport((40.0, 60.0), (50.0, 30.0))
+        calls_after_set = len(self.viewer._update_grid_calls)
+        self.grid._on_draw(None)
+        self.assertEqual(len(self.viewer._update_grid_calls), calls_after_set)
+
+    def test_noop_when_viewer_not_initialized(self):
+        self.viewer.initialized = False
+        self.viewer._update_grid_calls.clear()
+        self.grid.set_viewport((40.0, 60.0), (50.0, 30.0))
+        self.assertEqual(self.viewer._update_grid_calls, [])
+        # The axes are still moved so the panes are not left behind
+        self.assertAlmostEqual(self.grid.get_viewport()[0][0], 40.0)
+
+
+class FocusOnCellGridTests(ToggleViewerMixin, unittest.TestCase):
+    """focus_on_cell / center_on_roi must move the grid, not just the hidden axes."""
+
+    def setUp(self):
+        from ueler.viewer.main_viewer import ImageMaskViewer
+
+        plt.close("all")
+        self.viewer = self._make_toggle_viewer()
+        self.viewer._debug = False
+        self.viewer._map_mode_enabled = False
+        self.viewer._map_mode_active = False
+        self.viewer._active_map_id = None
+        self.viewer._sync_grid_viewport = lambda: ImageMaskViewer._sync_grid_viewport(
+            self.viewer
+        )
+
+    def tearDown(self):
+        plt.close("all")
+
+    def _focus(self, **kwargs):
+        from ueler.viewer.main_viewer import ImageMaskViewer
+
+        ImageMaskViewer.focus_on_cell(self.viewer, "fov1", 50.0, 40.0, **kwargs)
+
+    def test_focus_on_cell_moves_grid_panes(self):
+        self._fire_toggle(self.viewer, True)
+        self._focus(radius=10.0)
+
+        xlim, ylim = self.viewer._grid_display.get_viewport()
+        self.assertAlmostEqual(xlim[0], 40.0)
+        self.assertAlmostEqual(xlim[1], 60.0)
+        # image_display.ax is inverted (ymax first), so the grid must be too
+        self.assertAlmostEqual(ylim[0], 50.0)
+        self.assertAlmostEqual(ylim[1], 30.0)
+
+    def test_focus_on_cell_rerenders_grid_panes(self):
+        self._fire_toggle(self.viewer, True)
+        self.viewer._updates.clear()
+        self._focus(radius=10.0)
+        self.assertGreater(len(self.viewer._updates), 0)
+
+    def test_focus_on_cell_still_moves_image_display_ax(self):
+        """Grid mode off: behaviour is unchanged and no grid sync is attempted."""
+        self._focus(radius=10.0)
+        self.assertEqual(self.viewer.image_display.ax.get_xlim(), (40.0, 60.0))
+        self.assertEqual(self.viewer.image_display.ax.get_ylim(), (50.0, 30.0))
+
+    def test_center_on_roi_moves_grid_panes(self):
+        from ueler.viewer.main_viewer import ImageMaskViewer
+
+        self._fire_toggle(self.viewer, True)
+        ImageMaskViewer.center_on_roi(
+            self.viewer,
+            {"fov": "fov1", "x_min": 10.0, "x_max": 30.0, "y_min": 15.0, "y_max": 35.0},
+        )
+
+        xlim, ylim = self.viewer._grid_display.get_viewport()
+        self.assertAlmostEqual(xlim[0], 10.0)
+        self.assertAlmostEqual(xlim[1], 30.0)
+        self.assertAlmostEqual(ylim[0], 35.0)
+        self.assertAlmostEqual(ylim[1], 15.0)
+
+    def test_sync_grid_viewport_is_noop_without_grid(self):
+        from ueler.viewer.main_viewer import ImageMaskViewer
+
+        self.viewer.image_display.ax.set_xlim((1.0, 2.0))
+        ImageMaskViewer._sync_grid_viewport(self.viewer)
+        # No grid display → nothing to do, and no exception
+        self.assertIsNone(self.viewer._grid_display)
 
 
 if __name__ == "__main__":

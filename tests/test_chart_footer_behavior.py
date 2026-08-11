@@ -662,6 +662,32 @@ class MultiPairScatterTests(unittest.TestCase):
         # Row 1 (channel b): a leading blank, then the (b,c) plot.
         self.assertEqual([self._is_plot_cell(c) for c in rows[1]], [False, True])
 
+    def test_matrix_rows_share_y_axis_and_columns_share_x_axis(self):
+        """Standard scatter-matrix convention: row → shared y, column → shared x (#133)."""
+        chart = self._make_chart(["a", "b", "c"])
+        chart.ui_component.multipair_channels.value = ("a", "b", "c")
+        chart.plot_all_pairs(None)
+
+        grid = chart._plot_host.children[0]
+        rows = self._grid_rows(grid, cols=2)
+        # ``widget()`` returns a fresh container around the *same* canvas widget,
+        # so key the lookup on that inner canvas to map a cell back to its view.
+        pair_by_canvas = {
+            id(view.widget().children[0]): chart._scatter_pairs[sid]
+            for sid, view in chart._scatter_views.items()
+        }
+
+        def axes(cell):
+            return pair_by_canvas[id(cell.children[0])]
+
+        # Row 0 is channel "a": both plots carry "a" on y, with x = b then c.
+        self.assertEqual([axes(c) for c in rows[0]], [("b", "a"), ("c", "a")])
+        # Row 1 is channel "b": a leading blank, then (x=c, y=b).
+        self.assertFalse(self._is_plot_cell(rows[1][0]))
+        self.assertEqual(axes(rows[1][1]), ("c", "b"))
+        # Column 1 shares its x-axis ("c") across both rows.
+        self.assertEqual({axes(rows[0][1])[0], axes(rows[1][1])[0]}, {"c"})
+
     def test_single_pair_after_matrix_goes_to_new_row(self):
         chart = self._make_chart(["a", "b", "c", "d"])
         chart.ui_component.multipair_channels.value = ("a", "b", "c")

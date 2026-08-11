@@ -3826,6 +3826,28 @@ class ImageMaskViewer:
             "y_max": y_limits[1],
         }
 
+    def _sync_grid_viewport(self) -> None:
+        """Mirror the ``image_display`` viewport into the channel grid, if active.
+
+        Programmatic navigation writes its target window into
+        ``image_display.ax``, which is hidden while grid mode is active — the
+        grid owns a separate figure.  This forwards the same limits to the grid
+        so the panes actually move (Issue #134); it is a no-op otherwise.
+        """
+        grid = getattr(self, "_grid_display", None)
+        if grid is None:
+            return
+
+        ax = getattr(self.image_display, "ax", None)
+        if ax is None:
+            return
+
+        try:
+            grid.set_viewport(ax.get_xlim(), ax.get_ylim())
+        except Exception:
+            if self._debug:
+                logger.debug("[viewer] Failed to sync the grid viewport")
+
     def center_on_roi(self, record):
         target_fov = record.get("fov") or ""
         map_id = str(record.get("map_id") or "").strip()
@@ -3869,6 +3891,7 @@ class ImageMaskViewer:
 
         ax.set_xlim(x_min, x_max)
         ax.set_ylim(y_max, y_min)
+        self._sync_grid_viewport()
         self.image_display.fig.canvas.draw_idle()
         self.update_display(self.current_downsample_factor)
 
@@ -3951,6 +3974,7 @@ class ImageMaskViewer:
                     ax.set_ylim(center_y + half, center_y - half)
                 else:
                     ax.set_ylim(center_y - half, center_y + half)
+                self._sync_grid_viewport()
                 if nav_stack is not None and previous_view is not None:
                     try:
                         nav_stack.push(previous_view)
@@ -3979,6 +4003,8 @@ class ImageMaskViewer:
             ax.set_ylim(center_y + half, center_y - half)
         else:
             ax.set_ylim(center_y - half, center_y + half)
+
+        self._sync_grid_viewport()
 
         if nav_stack is not None and previous_view is not None:
             try:

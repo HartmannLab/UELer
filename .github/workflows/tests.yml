@@ -1,0 +1,135 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - nightly
+      - pre-release
+  pull_request:
+  # Called by release.yml so a release is gated on this exact suite, run at the
+  # release commit — and so the `dist` artifact built here is the one published.
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The suite imports matplotlib; a headless runner has no display.
+  MPLBACKEND: Agg
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  unit:
+    name: unit (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11"]
+        experimental: [false]
+        include:
+          # 3.12 is permitted by `requires-python = ">=3.10,<3.13"` but has never
+          # been run anywhere. This leg exists to produce that measurement rather
+          # than keep guessing: it does not gate anything yet. Once it has passed
+          # a few times, add `Programming Language :: Python :: 3.12` and drop
+          # `experimental` — the classifiers and `requires-python` move together.
+          - python-version: "3.12"
+            experimental: true
+    continue-on-error: ${{ matrix.experimental }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # Two tests parse the anywidget ESM bundle with node and skip without it.
+      # ubuntu-latest happens to ship node, but the skip gate below is only
+      # honest if every optional tool is actually present on purpose.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # The full runtime stack, not the fast stubs. `tests/__init__.py` always
+      # initialises tests/bootstrap.py, but every stub installs only when the
+      # real module is missing — so with the real dependencies present this
+      # exercises what a user actually gets from `pip install ueler`.
+      - name: Install UELer with its full runtime stack
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Show the resolved environment
+        run: pip list
+
+      # --max-skips 0 is a measurement, not an aspiration: a complete
+      # environment skips nothing. A skip here means a dependency silently
+      # failed to install, which is exactly how the 3.11 bokeh gap hid.
+      - name: Run the unit suite, tolerating no skips
+        run: python tools/run_test_suite.py --max-skips 0
+
+  package:
+    name: build + verify the distribution
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install the build tooling
+        run: python -m pip install --upgrade pip build twine packaging
+
+      - name: Build the sdist and the wheel
+        run: python -m build
+
+      - name: Validate the metadata
+        run: python -m twine check --strict dist/*
+
+      - name: Cross-check every version declaration
+        run: python tools/check_release_tag.py --no-tag --require-dist
+
+      # A clean-checkout build is the case a developer never sees: setuptools
+      # builds from the working tree, so an asset that .gitignore swallows is
+      # present locally and missing here. Importing from outside the repository
+      # is what proves the package, not the source directory, is complete.
+      - name: Install the wheel in a clean venv and import it from outside the repo
+        run: |
+          python -m venv /tmp/wheel-check
+          /tmp/wheel-check/bin/python -m pip install --quiet --upgrade pip
+          /tmp/wheel-check/bin/python -m pip install --quiet dist/*.whl
+          cd /tmp
+          /tmp/wheel-check/bin/python - <<'PY'
+          import sys
+
+          import ueler
+          import ueler.viewer.main_viewer  # noqa: F401  - heaviest import path
+          from ueler.viewer.images import load_asset_bytes
+
+          # Bundled package data: ships via [tool.setuptools.package-data].
+          assert load_asset_bytes("ready.png"), "ready.png is empty or missing"
+
+          # import ueler must not claim generic top-level names (see A8/#79).
+          for leaked in ("viewer", "constants", "data_loader", "image_utils"):
+              assert leaked not in sys.modules, f"import ueler leaked {leaked!r}"
+
+          print("installed wheel imports cleanly:", ueler.__version__)
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error

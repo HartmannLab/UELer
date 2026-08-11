@@ -1,0 +1,38 @@
+# Controls the sdist only; the wheel is driven by [tool.setuptools] in
+# pyproject.toml. An sdist is a build input, so it must carry everything needed
+# to rebuild the wheel — and nothing else.
+
+include LICENSE.txt
+include README.md
+include pyproject.toml
+
+# Packaged runtime assets (also declared as package-data for the wheel).
+recursive-include ueler/viewer/images *
+
+# Development scaffolding that is not needed to build or run the package.
+prune tests
+prune tests_tmp
+prune dev_note
+prune doc
+prune docs
+prune script
+prune tools
+prune site
+prune env
+prune .binder
+prune .github
+prune .claude
+prune .specify
+prune specs
+prune graphify-out
+prune ueler/graphify-out
+
+exclude Makefile
+exclude mkdocs.yml
+exclude CLAUDE.md
+exclude sitecustomize.py
+exclude usercustomize.py
+
+global-exclude *.py[cod]
+global-exclude __pycache__/*
+global-exclude .DS_Store

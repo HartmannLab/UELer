@@ -1,6 +1,6 @@
 # UELer
 
-**Usability Enhanced Linked Viewer** — a Jupyter Notebook-integrated viewer for MIBI images with linked interactive plots and enhanced usability.
+**Unified Exploratory Linked Viewer** — a Jupyter Notebook-integrated viewer for spatial proteomics and multiplexed imaging data, with linked interactive plots and enhanced usability.
 
 [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/HartmannLab/UELer/main?urlpath=%2Fdoc%2Ftree%2Fscript%2Frun_ueler_binder.ipynb)
 [![GitHub](https://img.shields.io/badge/GitHub-HartmannLab%2FUELer-blue?logo=github)](https://github.com/HartmannLab/UELer)
@@ -71,4 +71,4 @@ You can launch UELer in your browser via Binder — no local setup required:
 
 ## License
 
-UELer is released under the [GPL-3.0 license](https://github.com/HartmannLab/UELer/blob/main/LICENSE.txt).
+UELer is released under the [BSD 3-Clause License](https://github.com/HartmannLab/UELer/blob/main/LICENSE.txt) — permissive, and the same license as `scikit-image`, `dask`, `bokeh`, `anndata` and `napari`. Keep the copyright notice and you may use, modify and redistribute UELer freely, including in commercial and closed-source work.

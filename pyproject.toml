@@ -1,22 +1,42 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "ueler"
-version = "0.5.0-alpha"
-description = "Usability Enhanced Linked Viewer for MIBI imaging"
+version = "0.5.0-alpha1"
+description = "Unified Exploratory Linked Viewer for spatial proteomics and multiplexed imaging"
 readme = "README.md"
-requires-python = ">=3.10"
-license = "GPL-3.0-only"
+requires-python = ">=3.10,<3.13"
+license = "BSD-3-Clause"
 license-files = ["LICENSE.txt"]
 authors = [
     { name = "Yu-Le Wu (Hartmann Lab, DKFZ)" }
 ]
-keywords = ["imaging", "viewer", "notebook", "MIBI"]
+keywords = [
+    "spatial proteomics",
+    "multiplexed imaging",
+    "image viewer",
+    "jupyter",
+    "napari-alternative",
+    "MIBI",
+    "IMC",
+    "bioimage analysis",
+]
+# No "License ::" classifier here on purpose: PEP 639 forbids combining one with
+# the `license` SPDX expression above, and setuptools warns if both are present.
+# The Python classifiers must stay in step with `requires-python`.
 classifiers = [
-    "Programming Language :: Python :: 3",
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Framework :: Jupyter",
     "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Visualization",
+    "Topic :: Scientific/Engineering :: Image Processing",
 ]
 dependencies = [
     "scikit-image>=0.19",
@@ -33,6 +53,13 @@ dependencies = [
     "ipywidgets>=8.1",
     "anywidget>=0.9",
     "numpy",
+    # Declared explicitly although seaborn/anndata would drag it in anyway: the
+    # viewer imports pandas directly in ~14 modules, and leaving it transitive is
+    # what let pip resolve a different major version per Python minor (pandas 3
+    # needs >=3.11, so the CI 3.12 leg got the new string dtype and 3.10/3.11 did
+    # not). The floor is conservative rather than measured -- the suite is only
+    # exercised against 2.3 and, via `future.infer_string`, pandas-3 semantics.
+    "pandas>=2.0",
     "ipykernel",
     "ipympl",
     "anndata>=0.10",
@@ -48,15 +75,22 @@ ark = ["ark-analysis==0.7.0"]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    "build>=1.0",
+    "twine>=5.0",
 ]
 docs = [
     "mkdocs-material>=9.5",
     "mike>=2.1",
 ]
 
+# These become the "Project links" sidebar on the PyPI page. Absolute URLs only —
+# a release is browsed outside the repository, so nothing repo-relative works here.
 [project.urls]
-homepage = "https://github.com/HartmannLab/UELer"
-documentation = "https://hartmannlab.github.io/UELer/"
+Homepage = "https://github.com/HartmannLab/UELer"
+Documentation = "https://hartmannlab.github.io/UELer/"
+Repository = "https://github.com/HartmannLab/UELer"
+Issues = "https://github.com/HartmannLab/UELer/issues"
+Changelog = "https://github.com/HartmannLab/UELer/blob/main/doc/log.md"
 
 [tool.setuptools.packages.find]
 include = ["ueler", "ueler.*"]

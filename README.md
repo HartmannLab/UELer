@@ -7,38 +7,46 @@ You can try UELer without installation by launching it on [Binder](https://mybin
 
 ## Installation
 
-### 1. Set up the environment
+### Option A — install from PyPI (recommended)
 
-You can create a compatible environment using the `env/environment.yml` file provided in this repository.
+```shell
+pip install ueler
+```
 
-1. Download the `environment.yml` file to your preferred folder.
-2. Change your current directory to that folder.
-3. Create the environment by running:
+While UELer is still on a pre-release version, ask pip for it explicitly:
+
+```shell
+pip install --pre ueler
+```
+
+This pulls in every runtime dependency. Two optional extras are available:
+
+```shell
+pip install "ueler[ark]"    # adds ark-analysis (pinned) for ark-based workflows
+pip install "ueler[docs]"   # adds the mkdocs toolchain for building the docs
+```
+
+Requires Python 3.10 or 3.11.
+
+### Option B — install from source (for development)
+
+Use this if you want to modify UELer or track the `develop` branch.
+
+1. Create a compatible environment from the `env/environment.yml` file in this repository:
 
    ```shell
    micromamba env create --name ark-analysis-ueler --file environment.yml
    ```
-
-### 2. Install UELer
-
-1. Navigate to the directory where you want to install the tool, then clone the repository:
+2. Clone the repository and activate the environment:
 
    ```shell
    git clone https://github.com/HartmannLab/UELer.git
-   ```
-2. Activate your environment:
-
-   ```shell
    micromamba activate ark-analysis-ueler
    ```
-3. Change into the cloned UELer directory:
+3. Install in editable mode from the cloned directory:
 
    ```shell
-   cd <path-to-UELer-folder>
-   ```
-4. Install the package in editable mode:
-
-   ```shell
+   cd UELer
    pip install -e .
    ```
 
@@ -59,14 +67,22 @@ micromamba install dask-image
 After completing these steps, your environment should be ready to go!
 
 ### Upgrade UELer
-To update UELer, navigate to your UELer directory and run:
+If you installed from PyPI:
+```shell
+pip install --upgrade ueler
+```
+If you installed from source, pull the latest commits in your UELer directory. Re-run the install
+only when the dependencies changed — an editable install picks up code changes on its own:
 ```shell
 git pull
+pip install -e .   # only needed if env/environment.yml or pyproject.toml changed
 ```
 
 ## Getting started
 1. Open your favorite editor that supports Jupyter notebook.
-2. Navigate to the cloned UELer repository, then open the notebook `/script/run_ueler.ipynb`.
+2. Open the starter notebook `script/run_ueler.ipynb`. If you installed from PyPI rather than
+   cloning, download it from
+   [the repository](https://github.com/HartmannLab/UELer/blob/main/script/run_ueler.ipynb).
 3. Select the kernel for an ark-analysis compatible conda/micromamba env.
 4. Change the lines according to the instructions in the notebook: when configuring the `/script/run_ueler.ipynb`, ensure that you specify the following directory paths:
   - **`base_folder`**: The directory containing the FOV (Field of View) folders with image data (e.g., `.../image_data`).
@@ -113,7 +129,7 @@ Examples for three real studies — `S-BIAD2557` (single-dir masks), `S-BIAD2864
 folders), and `S-BIAD2708` (zipped FOVs + per-FOV masks) — are in `script/run_ueler_BIA.ipynb`.
 
 ## User interface
-![GUI_preview](/doc/GUI_preview.png)
+![GUI_preview](https://raw.githubusercontent.com/HartmannLab/UELer/main/doc/GUI_preview.png)
 The GUI can be split into four main regions (wide plugins toggle the optional footer automatically):
 - left: overall settings (channel, annotation, and mask accordions)
 - middle: main viewer with overlay controls and image navigation
@@ -136,11 +152,33 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 - **Wide Plugins**: Enable "Horizontal layout" (for example, in the heatmap plugin) to undock the tool into the footer while keeping the accordion available for other controls.
 
 ## New Update  
-### **UELer v0.5.0-alpha Summary**
+### **UELer v0.5.0-alpha1 Summary**
+- **Fixed: locating a single cell now works in the channel grid view.** With the grid view on, sending the viewer to a cell — from Go-To, a cell-gallery tile, or a point in a scatter or heatmap plot — did nothing and said nothing: the panes stayed where they were. Centring on a saved ROI from the ROI manager was affected in the same way. The grid draws in its own figure and was never told about the move; it now follows, re-renders at the zoom level the jump asks for, and works on stitched maps as well as single FOVs.
+- **Fixed: the "Plot all pairs" scatter matrix now follows the standard axis convention.** All plots in the same **row** share a y-axis and all plots in the same **column** share an x-axis, so you can compare across a row or down a column the way you would in any scatter-plot matrix. The grid previously did the opposite, which made the layout hard to read.
+- **Fixed: painting masks by a cluster or cell-type column could fail with `Cannot interpret ... as a data type`.** It affected any identifier column that pandas keeps in one of its own dtypes rather than as plain Python objects — most importantly a **`category` column, which is what you get when the cell table comes from an AnnData / `.h5ad` file**, but also nullable-integer columns and, on pandas 3, ordinary text columns. Colouring by such a column raised an error instead of painting. Categorical columns of numbers are now matched by their underlying value, so selecting class `1` finds the cells in cluster `1` rather than silently finding none.
+- **UELer is now BSD 3-Clause licensed (was GPL-3.0).** Changed before the first PyPI upload, deliberately: UELer is a package you *import*, and under the GPL any analysis code that imported it and was then distributed would have had to be GPL too. BSD-3 removes that — use, modify and redistribute UELer freely, including in commercial and closed-source work, as long as the copyright notice stays. It is the same license as `scikit-image`, `dask`, `bokeh`, `anndata` and `napari`, so UELer no longer imposes anything your existing scientific Python stack does not. **Nothing changes for existing users**, who gain permissions rather than lose them.
+- **Every change is now tested automatically on Python 3.10 and 3.11 before it can be released.** UELer previously had no test workflow at all, so each release was validated on a single developer machine. Continuous integration now runs the full 922-test suite against the real dependency stack on both supported Python versions, and also builds the package, installs it into a clean environment and imports it there — the check that catches a missing bundled file, which is invisible when you build from your own working copy. A test that is *skipped* because an optional dependency is missing now fails the build rather than being counted as a pass; that had previously hidden a whole untested code path. Releases are published through an automated workflow that can only upload the exact artifact CI tested.
+- **UELer is being prepared for release on PyPI (`pip install ueler`).** Installation now leads with a pip install rather than a `git clone`, and "Upgrade UELer" covers both paths — on the [documentation site](https://hartmannlab.github.io/UELer/) too, which until now told everyone to clone. The PyPI page will carry proper classifiers and links to the issue tracker and changelog. The supported Python versions are stated explicitly (**3.10 and 3.11**) instead of implied — the previous open-ended range would have let pip install UELer on interpreters it has never been tested against. Packaging fixes behind the scenes: bundled image assets can no longer be dropped from a build by an over-broad `.gitignore` rule, the source distribution no longer carries unusable test files, and `make build` / `make publish` targets always start from a clean `dist/`. The tool's one-line description is now consistent across the README, the docs site and the package metadata.
+- **For developers working from a clone:** the test dependency stubs installed by `sitecustomize.py` / `usercustomize.py` are now **opt-in** via `UELER_TEST_BOOTSTRAP=1` (which `make test-fast` sets for you). Previously they were on by default, so any interpreter that had the repo root on `PYTHONPATH` could silently get stubbed versions of `pandas`, `matplotlib` and `ipywidgets`.
 - **⚠️ Legacy `viewer` / `constants` / `data_loader` / `image_utils` imports have been removed (packaging cleanup).** Until now, `import ueler` also made the *old* pre-v0.2 module names importable, so a notebook could still say `from viewer.main_viewer import ImageMaskViewer`. That shim worked by claiming those four names for UELer across your whole Python session, which is not safe once UELer is installed from PyPI — a file of your own called `constants.py` or `data_loader.py` could be quietly shadowed by UELer's. The shim is gone. **If you have an old notebook using those names, change the import to the `ueler.` version** — `from ueler.viewer.main_viewer import ImageMaskViewer`, `import ueler.constants`, and so on. The modules themselves are unchanged; only the old spelling is no longer accepted. The `ensure_aliases=` argument of `run_viewer()` / `run_viewer_bia()` and the `ueler.ensure_compat_aliases()` helper are removed too; passing `ensure_aliases=` now prints a warning and is ignored rather than failing.
 
-_Earlier changes (v0.4.4 and before) are in the [update log](/doc/log.md)._
+_Earlier changes (v0.4.4 and before) are in the [update log](https://github.com/HartmannLab/UELer/blob/main/doc/log.md)._
 
 ## Earlier Updates  
 
-You can find previous update logs [here](/doc/log.md).
+You can find previous update logs [here](https://github.com/HartmannLab/UELer/blob/main/doc/log.md).
+
+## License
+UELer is released under the **BSD 3-Clause License** — see
+[LICENSE.txt](https://github.com/HartmannLab/UELer/blob/main/LICENSE.txt).
+
+You are free to use, modify and redistribute UELer, including in commercial and closed-source
+work, provided you keep the copyright notice and do not use the authors' names to endorse a
+derived product. This is the same license as `scikit-image`, `dask`, `bokeh`, `anndata` and
+`napari`, so UELer imposes no constraints your existing scientific Python stack does not.
+
+If you use UELer in published work, a citation is appreciated but not required.
+
+## Issues and contact
+Bug reports and feature requests: [GitHub Issues](https://github.com/HartmannLab/UELer/issues).
+Maintained by Yu-Le Wu, Hartmann Lab, DKFZ Heidelberg.
