@@ -1126,6 +1126,45 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Current Status">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#continuous-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Continuous integration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#release-process" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release process
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#release-targets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release targets
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1402,6 +1441,45 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Current Status">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#continuous-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Continuous integration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#release-process" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release process
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#release-targets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release targets
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1459,8 +1537,46 @@
 <li><strong>Notebooks as primary entrypoint.</strong> <code>ueler.runner.run_viewer</code> provides a programmatic entrypoint, but the main audience uses <code>script/run_ueler.ipynb</code>.</li>
 <li><strong>No import-time side effects.</strong> <code>import ueler</code> registers no <code>sys.meta_path</code> finders and claims no top-level module names, so it cannot change how any other import in the session resolves — a hard requirement for a PyPI-distributed package. Enforced by <code>tests/test_import_namespace_hygiene.py</code>.</li>
 <li><strong>Compatibility shims removed.</strong> The <code>_AliasModuleFinder</code> / <code>_PrefixAliasFinder</code> layer in <code>ueler/_compat.py</code> that kept legacy <code>viewer.*</code>, <code>constants</code>, <code>data_loader</code> and <code>image_utils</code> imports working through the migration has been deleted; those four names were claimed at <code>sys.meta_path[0]</code> for every session that imported UELer. Import from <code>ueler.*</code>.</li>
-<li><strong>Editable install.</strong> <code>pip install -e .</code> is the recommended install mode; it makes <code>git pull</code> upgrades instant.</li>
-<li><strong>Fast-stub test bootstrap.</strong> <code>tests/bootstrap.py</code> stubs out heavy dependencies (<code>pandas</code>, <code>ipywidgets</code>, <code>matplotlib</code>) so the test suite runs quickly without a full environment.</li>
+<li><strong><code>pip install ueler</code> for users, editable install for developers.</strong> PyPI is the documented install path; <code>pip install -e .</code> from a clone is for working on UELer itself, where it makes <code>git pull</code> upgrades instant.</li>
+<li><strong>Fast-stub test bootstrap, opt-in.</strong> <code>tests/bootstrap.py</code> stubs out heavy dependencies (<code>pandas</code>, <code>ipywidgets</code>, <code>matplotlib</code>) so the test suite runs quickly without a full environment. The <code>sitecustomize.py</code> / <code>usercustomize.py</code> startup hooks initialise it <strong>only</strong> when <code>UELER_TEST_BOOTSTRAP=1</code> is set — <code>make test-fast</code> and <code>make test-integration</code> set it for you. Defaulting it on meant any interpreter with the repo root on <code>PYTHONPATH</code> could silently run against fake scientific libraries; a bootstrap that was requested and then failed now emits a <code>RuntimeWarning</code> instead of being swallowed.</li>
+<li><strong>Packaged assets — and workflow files — must be visible to git.</strong> <code>.gitignore</code> has blanket <code>*.txt</code> / <code>*.png</code> rules, so assets are re-included explicitly (<code>!LICENSE.txt</code>, <code>!ueler/**/*.png</code>, <code>!doc/**/*.png</code>, <code>!docs/**/*.png</code>). setuptools builds from the working tree, so an ignored asset ships from a developer's machine and vanishes from a clean-checkout build — add new asset types to those negations. CI hit the same rule from the other side: <code>.github/</code> was ignored as a whole directory, so a new workflow file simply never reached GitHub. <strong>A negation cannot re-include anything under an ignored directory</strong>, so the directory rule was narrowed to the local-only assistant scaffolding instead, leaving <code>.github/workflows/</code> tracked.</li>
+<li><strong><code>MANIFEST.in</code> keeps the sdist to build inputs only.</strong> No tests are shipped: making them runnable would require shipping <code>bootstrap.py</code>'s dev-only stub machinery.</li>
+<li><strong>Supported Python: 3.10–3.11</strong> (<code>requires-python = "&gt;=3.10,&lt;3.13"</code>). The bound is deliberately narrow — widen it only once CI has proven the newer minor. The per-minor <code>Programming Language :: Python ::</code> classifiers list the same two versions, so both have to change together.</li>
+<li><strong>BSD-3-Clause, relicensed from GPL-3.0-only before the first PyPI upload.</strong> UELer is a library other people import, and copyleft there propagates into the importer's distributed work — the opposite of what a lab tool wants. Every runtime dependency is already permissive (BSD-3 / MIT / Apache-2.0), so nothing obliged the GPL; and copyright sits with a single author, so the change needed no contributor round-up. BSD-3 matches <code>scikit-image</code>, <code>dask</code>, <code>bokeh</code>, <code>anndata</code> and <code>napari</code>.</li>
+<li><strong>No <code>License ::</code> classifier.</strong> PEP 639 forbids combining one with the <code>license</code> SPDX expression that <code>pyproject.toml</code> declares; setuptools warns if both are present. The license reaches the metadata as <code>License-Expression: BSD-3-Clause</code>.</li>
+<li><strong>A skipped test is a failure, not a pass.</strong> CI runs the suite through
+  <code>tools/run_test_suite.py --max-skips 0</code>, which prints every skip with its reason
+  before deciding the exit code. Plain <code>unittest</code> prints <code>OK</code> for a run that
+  silently dropped 14 bokeh-gated tests — that is how the Python 3.11 coverage gap
+  stayed invisible until the release audit. A complete environment skips 0 of 913
+  tests, so zero is a measurement, not an aspiration. <code>make test-ci</code> runs the same
+  gate locally.</li>
+<li><strong>CI installs the real dependency stack; the fast stubs are not a substitute for
+  one.</strong> A stub-only run collects 671 of 913 tests and errors on 68:
+  <code>_ensure_matplotlib_stub()</code> replaces real matplotlib whenever <code>matplotlib.pyplot</code>
+  is not already imported, and the stub has no <code>matplotlib.path</code> and no
+  <code>colors.Normalize</code>. The stubs make an already-complete environment fast; the
+  planned "CI fast-stub job" was dropped because it would report green over a third
+  of the suite never running.</li>
+<li><strong>Every directly-imported dependency is declared, even when it would arrive
+  transitively.</strong> <code>pandas</code> was imported by fourteen modules and named nowhere in
+  <code>pyproject.toml</code>, arriving only via seaborn and anndata — which is how pip came
+  to resolve a different pandas <em>major</em> per Python minor (pandas 3 requires
+  ≥ 3.11, so the CI 3.12 leg got the new default <code>StringDtype</code> and the 3.10/3.11
+  legs did not). Now <code>pandas&gt;=2.0</code>.</li>
+<li><strong>Column dtypes are classified through <code>pandas.api.types</code>, never
+  <code>np.issubdtype</code>.</strong> <code>np.issubdtype</code> raises <code>TypeError</code> on every pandas
+  <em>extension</em> dtype — nullable <code>Int64</code>/<code>Float64</code>, <code>category</code>, and pandas 3's
+  default <code>StringDtype</code> — and <code>flatten_anndata</code> produces all of them.
+  <code>ueler.cell_table.is_integer_column_dtype</code> / <code>is_float_column_dtype</code> handle both
+  families and unwrap categoricals to <code>.categories.dtype</code>, because a <code>category</code>
+  column of integers still needs its labels converted (<code>series == "1"</code> matches no
+  rows where <code>series == 1</code> matches).</li>
+<li><strong>A tag push can reach TestPyPI but never PyPI.</strong> The real upload takes an
+  explicit <code>workflow_dispatch</code> from a tag ref, behind a GitHub environment
+  reviewer. A PyPI version can be yanked but never reused, so <code>git push --tags</code>
+  must not be an irreversible public act.</li>
+<li><strong>Generated caches stay out of <code>ueler/</code>.</strong> The graphify output belongs at the repo root; a build tool that globs package data is one <code>package-data</code> change away from shipping it, and the <code>.gitignore</code> negation trick above cannot rescue a directory rule.</li>
 </ul>
 <hr />
 <h2 id="package-layout">Package Layout<a class="headerlink" href="#package-layout" title="Permanent link">&para;</a></h2>
@@ -1486,12 +1602,82 @@
 <li>The legacy import shims are removed; <code>import ueler</code> is side-effect free and asserted so by <code>tests/test_import_namespace_hygiene.py</code>.</li>
 <li>All module moves from <code>viewer.*</code> → <code>ueler.viewer.*</code> are complete.</li>
 <li><code>ueler.image_utils</code> is restored as a real packaged module (post-cleanup regression fix).</li>
+<li><strong>Gate A of the PyPI release plan is complete.</strong> The build is reproducible and safe to publish: <code>python -m build</code> is clean, <code>twine check --strict</code> passes on both artifacts, and wheel and sdist have each been installed into a fresh venv and imported from outside the repository.</li>
+<li><strong>Gate B is complete</strong> (2026-08-10). The release now describes itself: ten PyPI classifiers, <code>[project.urls]</code> covering repository / issues / changelog, the license stated in the README, the docs-site install page realigned with the PyPI-first flow, and the stale graphify cache moved out of <code>ueler/</code>.</li>
+<li><strong>Gate C is complete</strong> (2026-08-10). Two workflows: <code>tests.yml</code> (unit matrix + a build-and-import-the-wheel job) and <code>release.yml</code> (Trusted Publishing). See <em>Continuous integration</em> and <em>Release process</em> below.</li>
+<li><strong>CI paid for itself on its first run</strong> (2026-08-10): 3.10, 3.11 and <code>package</code> green, and the non-blocking 3.12 leg surfaced 19 errors that were a live pandas bug rather than a 3.12 one — mask painting was broken for any AnnData-derived <code>category</code> identifier column on <em>current</em> pandas too. Suite now <strong>922 tests, 0 skips</strong>.</li>
+<li><strong>Remaining: Gate D</strong> — configure the Trusted Publishers, rehearse on TestPyPI, run the notebook end to end from an installed wheel, then publish <code>0.5.0-alpha</code>.</li>
 </ul>
+<h3 id="continuous-integration">Continuous integration<a class="headerlink" href="#continuous-integration" title="Permanent link">&para;</a></h3>
+<p><code>.github/workflows/tests.yml</code> runs on pushes to <code>main</code> / <code>develop</code> / <code>nightly</code> /
+<code>pre-release</code>, on every pull request, on manual dispatch, and as a reusable
+workflow called by <code>release.yml</code>. Two jobs:</p>
+<ul>
+<li><strong><code>unit</code></strong> — matrix over Python <strong>3.10</strong> and <strong>3.11</strong>, plus a <strong>3.12</strong> leg marked
+  <code>continue-on-error</code> because <code>requires-python</code> permits 3.12 and nothing has ever
+  run there. It installs the full runtime stack and runs
+  <code>tools/run_test_suite.py --max-skips 0</code>. <code>actions/setup-node</code> is there on purpose:
+  two tests parse the anywidget ESM bundle with node and would otherwise skip.</li>
+<li><strong><code>package</code></strong> — builds the sdist and wheel, runs <code>twine check --strict</code>,
+  cross-checks every version declaration, then installs the wheel into a clean venv
+  and imports it <strong>from outside the repository</strong>. That last step is the
+  clean-checkout case a developer never sees locally, where a <code>.gitignore</code>-swallowed
+  asset goes missing. Its artifacts are what <code>release.yml</code> publishes.</li>
+</ul>
+<h3 id="release-process">Release process<a class="headerlink" href="#release-process" title="Permanent link">&para;</a></h3>
+<p>Uploads use <strong>PyPI Trusted Publishing</strong> (OIDC): there is no API token in the
+repository's secrets. One-time setup before the first release:</p>
+<ol>
+<li>On <strong>TestPyPI</strong> → <em>Account settings</em> → <em>Publishing</em>, add a <strong>pending publisher</strong>:
+   owner <code>HartmannLab</code>, repository <code>UELer</code>, workflow <code>release.yml</code>, environment
+   <code>testpypi</code>.</li>
+<li>The same on <strong>PyPI</strong>, with environment <code>pypi</code>. "Pending" exists for projects that
+   are not on the index yet.</li>
+<li>On GitHub → <em>Settings</em> → <em>Environments</em> → <code>pypi</code>, add a <strong>required reviewer</strong>.</li>
+</ol>
+<p>After that there are exactly two paths:</p>
+<table>
+<thead>
+<tr>
+<th>What you do</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>push a <code>v*</code> tag</td>
+<td>tests → build → verify the tag against the artifacts → upload to <strong>TestPyPI</strong></td>
+</tr>
+<tr>
+<td>Actions → <em>Release</em> → <em>Run workflow</em>, ref = <strong>the tag</strong>, <code>publish_to: pypi</code></td>
+<td>the same gates, then upload to <strong>PyPI</strong></td>
+</tr>
+</tbody>
+</table>
+<p>A tag push cannot reach PyPI. <code>release.yml</code> publishes what <code>tests.yml</code> built in the
+same run, so the uploaded artifact is the tested one.</p>
+<h3 id="release-targets">Release targets<a class="headerlink" href="#release-targets" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>make<span class="w"> </span>test-ci<span class="w">                          </span><span class="c1"># the suite with no skips tolerated</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>make<span class="w"> </span>build<span class="w">                            </span><span class="c1"># clean dist/ first, then build sdist + wheel</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>make<span class="w"> </span>check-dist<span class="w">                       </span><span class="c1"># twine check --strict</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>make<span class="w"> </span>check-release<span class="w"> </span><span class="nv">TAG</span><span class="o">=</span>v0.5.0-alpha<span class="w">   </span><span class="c1"># tag == pyproject == __version__ == dist/</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>make<span class="w"> </span>publish-test<span class="w">                     </span><span class="c1"># upload to TestPyPI</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>make<span class="w"> </span>publish<span class="w">                          </span><span class="c1"># upload to PyPI — append-only, rehearse first</span>
+</code></pre></div>
+<p><code>publish*</code> depend on <code>check-dist</code>, not on <code>build</code>, so an upload sends exactly the
+artifacts that were built and inspected. <code>check-release</code> compares PEP 440-normalised
+versions, so the repo's SemVer tag spelling (<code>v0.5.0-alpha</code>) matches the packaging
+spelling (<code>0.5.0a0</code>) — <code>v0.5.0-a0</code> works too.</p>
 <hr />
 <h2 id="open-items">Open Items<a class="headerlink" href="#open-items" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Define and add a CI fast-stub job.</li>
-<li>Add an integration test workflow for heavier dependencies and GUI paths.</li>
+<li>~~Define and add a CI fast-stub job~~ — <strong>closed as superseded</strong>; the skip threshold it asked for exists, but on the real dependency stack (see the key decisions above).</li>
+<li>Add an integration test workflow for the <strong>GUI</strong> paths. The full dependency stack is now covered by <code>tests.yml</code>; the widget layer still needs a browser, so it stays manual.</li>
+<li>Rehearse on TestPyPI before the first real upload, and configure the Trusted Publishers described under <em>Release process</em>.</li>
+<li>Act on the 3.12 result. The leg has run <strong>once</strong>, and its first reading was not about 3.12: 19 errors, all one <code>np.issubdtype</code> call meeting pandas 3's default string dtype — now fixed. Tightening <code>requires-python</code> to <code>&lt;3.12</code> would have concealed it, since pandas 3 installs on 3.11 too. Re-read after the fix lands; the evidence argues for <em>widening</em> (add <code>Programming Language :: Python :: 3.12</code>, drop <code>continue-on-error</code>), and the classifiers and the bound move together. Keep the leg regardless — it is the only coverage of pandas-3 semantics.</li>
+<li>Revisit the <strong>3.10 floor</strong> before it costs coverage: pandas 3 and anndata 0.12 both require ≥ 3.11, and anndata 0.13 requires ≥ 3.12, so a 3.10 install is pinned to the older half of the stack. Nothing is broken today — pandas 3 cannot be installed on 3.10 at all, so the bad pandas-3-with-anndata-0.11 pairing is unreachable.</li>
+<li>Confirm with DKFZ that naming both the author and the institute in the BSD copyright line matches institutional policy — the only part of the relicense that is not purely a code change.</li>
+<li>Revisit <code>ipykernel</code> / <code>ipympl</code> as hard runtime dependencies before <code>1.0</code>: <code>pip install ueler</code> currently installs a Jupyter kernel. Moving them to a <code>notebook</code> extra also requires updating <code>.binder/postBuild</code>, which runs a bare <code>pip install .</code>.</li>
 </ul>
 <hr />
 <h2 id="related-issues">Related Issues<a class="headerlink" href="#related-issues" title="Permanent link">&para;</a></h2>

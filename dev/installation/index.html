@@ -493,6 +493,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#option-a-install-from-pypi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option A — Install from PyPI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#option-b-install-from-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option B — Install from Source
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#step-1-set-up-the-environment" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1413,6 +1435,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#option-a-install-from-pypi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option A — Install from PyPI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#option-b-install-from-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option B — Install from Source
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#step-1-set-up-the-environment" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1532,27 +1576,47 @@
 
 
 <h1 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h1>
-<p>This page covers the full installation of UELer. Follow the steps below to set up a working environment.</p>
+<p>There are two ways to install UELer. Pick the first unless you intend to modify UELer itself.</p>
 <hr />
 <h2 id="requirements">Requirements<a class="headerlink" href="#requirements" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Python</strong> ≥ 3.10</li>
-<li><a href="https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html">micromamba</a> (recommended) or conda/mamba</li>
-<li>Git</li>
+<li><strong>Python</strong> 3.10 or 3.11</li>
+<li><a href="https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html">micromamba</a> (recommended) or conda/mamba — needed for the development install, and still the easiest way to get the binary stack (HDF5, OpenCV) on an HPC system</li>
+<li>Git — development install only</li>
 </ul>
 <hr />
+<h2 id="option-a-install-from-pypi">Option A — Install from PyPI<a class="headerlink" href="#option-a-install-from-pypi" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pip<span class="w"> </span>install<span class="w"> </span>ueler
+</code></pre></div>
+<p>While UELer is on a pre-release version, ask pip for it explicitly:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>pip<span class="w"> </span>install<span class="w"> </span>--pre<span class="w"> </span>ueler
+</code></pre></div>
+<p>That pulls in every runtime dependency. Two optional extras are available:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;ueler[ark]&quot;</span><span class="w">    </span><span class="c1"># adds ark-analysis (pinned) for ark-based workflows</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;ueler[docs]&quot;</span><span class="w">   </span><span class="c1"># adds the mkdocs toolchain for building these docs</span>
+</code></pre></div>
+<p>To upgrade later:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>pip<span class="w"> </span>install<span class="w"> </span>--upgrade<span class="w"> </span>ueler
+</code></pre></div>
+<p>The starter notebook is not part of the package — download
+<a href="https://github.com/HartmannLab/UELer/blob/main/script/run_ueler.ipynb"><code>script/run_ueler.ipynb</code></a>
+from the repository, or write your own cell calling <code>ueler.runner.run_viewer</code>.</p>
+<hr />
+<h2 id="option-b-install-from-source">Option B — Install from Source<a class="headerlink" href="#option-b-install-from-source" title="Permanent link">&para;</a></h2>
+<p>Use this if you want to modify UELer, run the test suite, or track the <code>develop</code> branch. The
+remaining steps on this page describe that path.</p>
 <h2 id="step-1-set-up-the-environment">Step 1 — Set Up the Environment<a class="headerlink" href="#step-1-set-up-the-environment" title="Permanent link">&para;</a></h2>
 <p>The easiest way to create a compatible environment is using the provided <code>environment.yml</code> file.</p>
 <div class="tabbed-set tabbed-alternate" data-tabs="1:2"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">micromamba (recommended)</label><label for="__tabbed_1_2">conda</label></div>
 <div class="tabbed-content">
 <div class="tabbed-block">
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Download the environment file from the repository</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="c1"># Then create the environment:</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>micromamba<span class="w"> </span>env<span class="w"> </span>create<span class="w"> </span>--name<span class="w"> </span>ark-analysis-ueler<span class="w"> </span>--file<span class="w"> </span>environment.yml
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># Download the environment file from the repository</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="c1"># Then create the environment:</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>micromamba<span class="w"> </span>env<span class="w"> </span>create<span class="w"> </span>--name<span class="w"> </span>ark-analysis-ueler<span class="w"> </span>--file<span class="w"> </span>environment.yml
 </code></pre></div>
 </div>
 <div class="tabbed-block">
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>conda<span class="w"> </span>env<span class="w"> </span>create<span class="w"> </span>--name<span class="w"> </span>ark-analysis-ueler<span class="w"> </span>--file<span class="w"> </span>environment.yml
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>conda<span class="w"> </span>env<span class="w"> </span>create<span class="w"> </span>--name<span class="w"> </span>ark-analysis-ueler<span class="w"> </span>--file<span class="w"> </span>environment.yml
 </code></pre></div>
 </div>
 </div>
@@ -1561,46 +1625,63 @@
 <hr />
 <h2 id="step-2-clone-the-repository">Step 2 — Clone the Repository<a class="headerlink" href="#step-2-clone-the-repository" title="Permanent link">&para;</a></h2>
 <p>Navigate to the directory where you want to install UELer and clone the repository:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/HartmannLab/UELer.git
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nb">cd</span><span class="w"> </span>UELer
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/HartmannLab/UELer.git
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nb">cd</span><span class="w"> </span>UELer
 </code></pre></div>
 <hr />
 <h2 id="step-3-activate-the-environment">Step 3 — Activate the Environment<a class="headerlink" href="#step-3-activate-the-environment" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>micromamba<span class="w"> </span>activate<span class="w"> </span>ark-analysis-ueler
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>micromamba<span class="w"> </span>activate<span class="w"> </span>ark-analysis-ueler
 </code></pre></div>
 <hr />
 <h2 id="step-4-install-ueler">Step 4 — Install UELer<a class="headerlink" href="#step-4-install-ueler" title="Permanent link">&para;</a></h2>
 <p>Install the package in editable mode so that you can update it with <code>git pull</code> without reinstalling:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.
 </code></pre></div>
 <hr />
 <h2 id="updating-ueler">Updating UELer<a class="headerlink" href="#updating-ueler" title="Permanent link">&para;</a></h2>
-<p>To update to the latest version, navigate to your UELer directory and pull the latest changes:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nb">cd</span><span class="w"> </span>&lt;path-to-UELer-folder&gt;
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>git<span class="w"> </span>pull
+<p>For a source install, navigate to your UELer directory and pull the latest changes:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nb">cd</span><span class="w"> </span>&lt;path-to-UELer-folder&gt;
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>git<span class="w"> </span>pull
 </code></pre></div>
-<p>No reinstall is needed when using editable mode.</p>
+<p>No reinstall is needed when using editable mode, unless <code>environment.yml</code> or <code>pyproject.toml</code>
+changed — then re-run <code>pip install -e .</code>. For a PyPI install, use <code>pip install --upgrade ueler</code>
+instead.</p>
 <hr />
 <h2 id="updating-your-environment">Updating Your Environment<a class="headerlink" href="#updating-your-environment" title="Permanent link">&para;</a></h2>
 <p>If you are upgrading from <strong>v0.1.7-alpha or earlier</strong>, you need to install additional packages:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>micromamba<span class="w"> </span>activate<span class="w"> </span>ark-analysis-ueler
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>micromamba<span class="w"> </span>install<span class="w"> </span>dask
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>micromamba<span class="w"> </span>install<span class="w"> </span>dask-image
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>micromamba<span class="w"> </span>activate<span class="w"> </span>ark-analysis-ueler
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>micromamba<span class="w"> </span>install<span class="w"> </span>dask
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>micromamba<span class="w"> </span>install<span class="w"> </span>dask-image
 </code></pre></div>
 <hr />
 <h2 id="installing-for-development">Installing for Development<a class="headerlink" href="#installing-for-development" title="Permanent link">&para;</a></h2>
 <p>If you plan to contribute to UELer or run the test suite, install the <code>dev</code> extras:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s2">&quot;.[dev]&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s2">&quot;.[dev]&quot;</span>
 </code></pre></div>
-<p>This adds <code>pytest</code> and <code>pytest-cov</code> to your environment.</p>
+<p>This adds <code>pytest</code>, <code>pytest-cov</code>, <code>build</code> and <code>twine</code> to your environment.</p>
 <p>To run the test suite:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>python<span class="w"> </span>-m<span class="w"> </span>unittest<span class="w"> </span>discover<span class="w"> </span>tests
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>make<span class="w"> </span>test-fast<span class="w">                      </span><span class="c1"># or, equivalently:</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>python<span class="w"> </span>-m<span class="w"> </span>unittest<span class="w"> </span>discover<span class="w"> </span>tests
 </code></pre></div>
+<p><code>tests/bootstrap.py</code> carries lightweight stubs for <code>pandas</code>, <code>matplotlib</code> and
+<code>ipywidgets</code>, but each one installs only when the real library is missing — in a complete
+<code>dev</code> environment they are inert and the suite runs against the real stack in about six
+seconds. <code>make test-fast</code> also sets <code>UELER_TEST_BOOTSTRAP=1</code>, which lets
+<code>sitecustomize.py</code> install the stubs at interpreter startup. That is <strong>opt-in</strong> — without
+the variable a plain interpreter always gets the real libraries, so nothing you run outside
+the tests is affected.</p>
+<p>To run the suite the way CI does, which fails on the first <strong>skipped</strong> test:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>make<span class="w"> </span>test-ci<span class="w">                        </span><span class="c1"># or, equivalently:</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>python<span class="w"> </span>tools/run_test_suite.py<span class="w"> </span>--max-skips<span class="w"> </span><span class="m">0</span>
+</code></pre></div>
+<p>A skipped test means an optional dependency is missing, and plain <code>unittest</code> still prints
+<code>OK</code> in that case — so a partially installed environment can look green while a whole
+code path goes untested. This target prints every skip with its reason instead.</p>
 <hr />
 <h2 id="installing-mkdocs-for-documentation-contributors">Installing MkDocs (for documentation contributors)<a class="headerlink" href="#installing-mkdocs-for-documentation-contributors" title="Permanent link">&para;</a></h2>
 <p>To build and preview the documentation locally:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>pip<span class="w"> </span>install<span class="w"> </span>mkdocs-material
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>mkdocs<span class="w"> </span>serve
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>pip<span class="w"> </span>install<span class="w"> </span>mkdocs-material
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>mkdocs<span class="w"> </span>serve
 </code></pre></div>
 <p>The documentation site is then available at <code>http://127.0.0.1:8000</code>.</p>
 <hr />
