@@ -1227,6 +1227,52 @@ class InteractionLayer:
 
         self.highlight_cells()
 
+    # ------------------------------------------------------------------
+    # Follow the main viewer's own selection (#135)
+    # ------------------------------------------------------------------
+    def on_selection_change(self):
+        """Highlight the clusters of the cells the user picked in the image.
+
+        Broadcast by ``ImageDisplay`` after a click, ctrl-click, lasso or clear, and
+        acted on only while "Follow main viewer" is ticked. It reuses the machinery
+        the scatter link already goes through (``_map_indices_to_cluster_positions``
+        → ``_apply_cluster_highlights``), so a multi-cell selection spanning several
+        clusters highlights all of them — the continuous, multi-cell counterpart of
+        the **Trace cluster** button.
+
+        Unlike that button it deliberately does *not* call ``highlight_cells()``:
+        pushing mask ids back would replace the user's own image selection with its
+        cluster-wide, current-FOV projection.
+        """
+        checkbox = getattr(self.ui_component, 'follow_mv_checkbox', None)
+        if checkbox is None or not checkbox.value:
+            return
+        if getattr(self, 'heatmap_data', None) is None:
+            return
+
+        indices = _chart_common.viewer_selection_indices(self.main_viewer)
+        if not indices:
+            self._apply_cluster_highlights([])
+            return
+
+        # ``None`` means the heatmap has no cluster ordering yet — leave whatever is
+        # highlighted alone; an empty list means the selection matched no cluster,
+        # which is a real (empty) result and clears the highlight.
+        positions = self._map_indices_to_cluster_positions(indices)
+        if positions is None:
+            return
+        self._apply_cluster_highlights(positions)
+
+    def _on_follow_mv_change(self, _change):
+        """Apply the selection already on screen when the link is switched on.
+
+        Only on the way *in*, matching the scatter and histogram plugins: the
+        cluster highlight is also driven by clicks on the heatmap itself, and
+        clearing it on untick would wipe those too.
+        """
+        if self.ui_component.follow_mv_checkbox.value:
+            self.on_selection_change()
+
     def trace_metacluster(self, *args):
         """Placeholder for future metacluster tracing workflow.
 
@@ -1499,6 +1545,7 @@ class DisplayLayer:
             HBox([self.ui_component.main_viewer_checkbox]),
             HBox([self.ui_component.chart_checkbox, self.ui_component.histogram_checkbox]),
             HBox([self.ui_component.cell_gallery_checkbox, self.ui_component.current_fov_checkbox]),
+            HBox([self.ui_component.follow_mv_checkbox]),
         ])
 
         trace = VBox([

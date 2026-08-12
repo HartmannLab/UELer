@@ -115,6 +115,23 @@ def build_link_checkboxes():
     return mv_linked_checkbox, cell_gallery_linked_checkbox
 
 
+def build_follow_selection_checkbox():
+    """Create the ``Follow main viewer`` checkbox shared by the plots (#135).
+
+    The counterpart of ``mv_linked_checkbox``: that one pushes *this* plot's
+    selection into the image, this one pulls the image's own selection (click,
+    ctrl-click, lasso) into this plot.  "Follow" rather than "Receive selection"
+    because it is continuous — the one-shot version of the same thing is the
+    **Trace** button sitting a tab away.
+    """
+    return Checkbox(
+        value=False,
+        description="Follow main viewer",
+        tooltip="Highlight the cells selected in the main viewer in this plot",
+        style={"description_width": "auto"},
+    )
+
+
 def subset_options_for(viewer, selected_column) -> list:
     """Return the sorted unique values of ``selected_column`` (for the subset selector)."""
     if not selected_column or selected_column not in viewer.cell_table.columns:
@@ -185,6 +202,58 @@ def sync_mask_highlights_from_selection(
             import traceback
 
             traceback.print_exc()
+
+
+def viewer_selection_indices(viewer) -> Set[Union[int, str]]:
+    """Return the cell-table row indices of the cells selected *in the image* (#135).
+
+    The inverse of :func:`sync_mask_highlights_from_selection`: it translates
+    ``image_display.selected_masks_label`` — the ``(fov, mask, mask_id)`` triples a
+    click, ctrl-click or lasso produces — back into the FOV-independent row-index
+    form every plot plugin speaks.  Map-mode selections spanning several FOVs
+    resolve correctly because the match is done per FOV.
+
+    Matching is on ``(fov, label)`` only, the same pair the cell-table editor uses:
+    the triple records the mask the pixel was hit in, while the cell table keys on
+    the label id alone.  Label ids are offered as both ``int`` and ``str`` so a
+    string-typed label column still matches.
+
+    Never raises — ``inform_plugins`` swallows ``AttributeError``, so a hook that
+    threw one would fail invisibly.  Anything missing yields an empty set.
+    """
+    try:
+        image_display = getattr(viewer, "image_display", None)
+        selections = getattr(image_display, "selected_masks_label", None) or ()
+        cell_table = getattr(viewer, "cell_table", None)
+        if not len(selections) or cell_table is None:
+            return set()
+
+        fov_col = getattr(viewer, "fov_key", None)
+        lbl_col = getattr(viewer, "label_key", None)
+        columns = getattr(cell_table, "columns", ())
+        if fov_col not in columns or lbl_col not in columns:
+            return set()
+
+        by_fov: dict = {}
+        for selection in selections:
+            fov = getattr(selection, "fov", None)
+            mask_id = getattr(selection, "mask_id", None)
+            if fov is None or mask_id is None:
+                continue
+            by_fov.setdefault(str(fov), set()).add(int(mask_id))
+
+        fov_series = cell_table[fov_col].astype(str)
+        indices: Set[Union[int, str]] = set()
+        for fov, mask_ids in by_fov.items():
+            wanted = set(mask_ids) | {str(mask_id) for mask_id in mask_ids}
+            rows = cell_table.index[
+                (fov_series == fov) & cell_table[lbl_col].isin(wanted)
+            ]
+            indices.update(rows.tolist())
+        return normalize_indices(indices)
+    except Exception:
+        _logger.debug("Could not read the main viewer's cell selection.", exc_info=True)
+        return set()
 
 
 def normalize_indices(indices: Iterable[Union[int, str]]) -> Set[Union[int, str]]:
@@ -346,8 +415,10 @@ __all__ = [
     "prepare_dataframe",
     "build_subset_controls",
     "build_link_checkboxes",
+    "build_follow_selection_checkbox",
     "subset_options_for",
     "sync_mask_highlights_from_selection",
+    "viewer_selection_indices",
     "normalize_indices",
     "numeric_columns",
     "ChannelSelector",

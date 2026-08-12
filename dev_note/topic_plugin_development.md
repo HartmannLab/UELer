@@ -293,6 +293,8 @@ Events currently broadcast by the viewer:
 | `on_mv_update_display` | End of every `update_display()` call |
 | `on_map_mode_activate` | Map mode enabled or active map swapped |
 | `on_map_mode_deactivate` | Map mode disabled |
+| `on_selection_change` | The cells selected **in the image** changed — a click, a ctrl-click, a lasso or a clear (fired by `ImageDisplay`, not the viewer) |
+| `on_no_image_toggle` | Image-layer rendering was toggled |
 
 ```mermaid
 sequenceDiagram
@@ -394,6 +396,27 @@ color = get_cell_color(fov_name, mask_id)
 
 Use this pattern only for truly global data (class colors, export configs)
 that every rendering path needs.
+
+### Pattern 5 — Follow the image's own selection (#135)
+
+The reverse of pushing a plot selection into the viewer. `image_display.selected_masks_label`
+holds `(fov, mask, mask_id)` triples; `_chart_common.viewer_selection_indices(viewer)` turns
+them into cell-table row indices (matching per FOV, so a map-mode selection spanning several
+FOVs survives), and the `on_selection_change` hook is when to ask:
+
+```python
+def on_selection_change(self):
+    if not self.ui_component.follow_mv_checkbox.value:   # "Follow main viewer"
+        return
+    indices = _chart_common.viewer_selection_indices(self.main_viewer)
+    self._apply_selection(indices, push_highlight=False)
+```
+
+Two rules make this safe. **Gate it on a checkbox** — the *Linked plugins* tab holds one per
+plugin, built by `_chart_common.build_follow_selection_checkbox()`. And **never push the
+highlight back**: `set_mask_ids` *replaces* `selected_masks_label` with the current-FOV
+projection of what it was given, so echoing a received selection would overwrite the user's
+own — which is why the scatter and histogram entry points carry a `push_highlight` flag.
 
 ---
 

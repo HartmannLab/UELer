@@ -145,6 +145,11 @@ class ChartDisplay(PluginBase):
         self.ui_component.scatter_set_selector.observe(
             self._on_scatter_selector_change, names="value"
         )
+        # Ticking the box must act on the selection already in the image (#135),
+        # not only on the next click.
+        self.ui_component.follow_mv_checkbox.observe(
+            self._on_follow_mv_change, names="value"
+        )
 
     def _build_layout(self) -> None:
         # Multi-pair selector is now the always-visible picker on top (#113).
@@ -211,6 +216,7 @@ class ChartDisplay(PluginBase):
             children=[
                 self.ui_component.mv_linked_checkbox,
                 self.ui_component.cell_gallery_linked_checkbox,
+                self.ui_component.follow_mv_checkbox,
             ],
             layout=Layout(width="100%", gap="8px"),
         )
@@ -368,7 +374,15 @@ class ChartDisplay(PluginBase):
         indices: Iterable[Union[int, str]],
         *,
         focus_single: bool = False,
+        push_highlight: bool = True,
     ) -> Set[Union[int, str]]:
+        """Apply *indices* to every scatter view and publish them.
+
+        ``push_highlight=False`` keeps the selection inside this plugin: it is what
+        the "Follow main viewer" path passes (#135), where the indices *came from*
+        the image and pushing them back would replace the user's own selection with
+        its current-FOV projection.
+        """
         normalized = {
             int(idx) if isinstance(idx, np.integer) else idx for idx in indices
         }
@@ -376,7 +390,7 @@ class ChartDisplay(PluginBase):
         for scatter in self._scatter_views.values():
             scatter.apply_selection(normalized, announce=False)
         self.selected_indices.value = normalized
-        if self.ui_component.mv_linked_checkbox.value:
+        if push_highlight and self.ui_component.mv_linked_checkbox.value:
             if focus_single and len(normalized) == 1:
                 self._focus_main_viewer(next(iter(normalized)))
             self._sync_mask_highlights_from_selection(normalized)
@@ -414,6 +428,32 @@ class ChartDisplay(PluginBase):
         link is active.  Works in both single-FOV and map mode.
         """
         _chart_common.sync_mask_highlights_from_selection(self.main_viewer, indices)
+
+    # ------------------------------------------------------------------
+    # Follow the main viewer's own selection (#135)
+    # ------------------------------------------------------------------
+    def on_selection_change(self) -> None:
+        """Select the cells the user picked in the image, in every scatter view.
+
+        Broadcast by ``ImageDisplay`` after a click, ctrl-click, lasso or clear, and
+        acted on only while "Follow main viewer" is ticked.  This is the continuous
+        counterpart of the **Trace** button, which does the same thing once, for the
+        active FOV only.
+        """
+        if not self.ui_component.follow_mv_checkbox.value:
+            return
+        indices = _chart_common.viewer_selection_indices(self.main_viewer)
+        self._commit_scatter_selection(indices, push_highlight=False)
+
+    def _on_follow_mv_change(self, _change) -> None:
+        """Apply the selection already on screen when the link is switched on.
+
+        Only on the way *in*: a plot selection is normal, user-clearable plot state
+        (unlike the outline the viewer draws for #129), and dropping it on untick
+        would also drop a selection made in this plot itself.
+        """
+        if self.ui_component.follow_mv_checkbox.value:
+            self.on_selection_change()
 
     # ------------------------------------------------------------------
     # Trace + highlight
@@ -806,6 +846,7 @@ class UiComponent:
             self.mv_linked_checkbox,
             self.cell_gallery_linked_checkbox,
         ) = _chart_common.build_link_checkboxes()
+        self.follow_mv_checkbox = _chart_common.build_follow_selection_checkbox()
         self.scatter_set_selector = Dropdown(
             options=[],
             description="Plots:",

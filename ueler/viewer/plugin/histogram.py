@@ -225,6 +225,11 @@ class HistogramDisplay(PluginBase):
         self.ui_component.mv_linked_checkbox.observe(
             self._on_mv_link_change, names="value"
         )
+        # Ticking the box must act on the selection already in the image (#135),
+        # not only on the next click.
+        self.ui_component.follow_mv_checkbox.observe(
+            self._on_follow_mv_change, names="value"
+        )
         self.ui_component.subset_on_dropdown.observe(
             self.on_subset_on_dropdown_change, names="value"
         )
@@ -284,6 +289,7 @@ class HistogramDisplay(PluginBase):
             children=[
                 self.ui_component.mv_linked_checkbox,
                 self.ui_component.cell_gallery_linked_checkbox,
+                self.ui_component.follow_mv_checkbox,
             ],
             layout=Layout(width="100%", gap="8px"),
         )
@@ -793,7 +799,12 @@ class HistogramDisplay(PluginBase):
         self._refresh_overlays()
         self._refresh_gate_markers()
 
-    def show_external_selection(self, row_indices: Iterable[Union[int, str]]) -> None:
+    def show_external_selection(
+        self,
+        row_indices: Iterable[Union[int, str]],
+        *,
+        push_highlight: bool = True,
+    ) -> None:
         """Overlay an externally-supplied selection as the "Selected" distribution.
 
         Entry point for *other* plugins (e.g. the heatmap "Histogram" link) to
@@ -807,6 +818,11 @@ class HistogramDisplay(PluginBase):
         An external selection replaces the local gate rather than intersecting with
         it (#127) — the incoming indices come from another plugin's own criteria, so
         leaving stale gate terms drawn would misrepresent what is selected.
+
+        ``push_highlight=False`` keeps the selection inside this plugin: it is what
+        the "Follow main viewer" path passes (#135), where the indices *came from*
+        the image and pushing them back would replace the user's own selection with
+        its current-FOV projection.
         """
         # A programmatic push is never a single-point viewer focus.
         self.single_point_click_state = 0
@@ -814,7 +830,7 @@ class HistogramDisplay(PluginBase):
         self.cutoff = None
         self._active_histogram_column = None
         self.selected_indices.value = _chart_common.normalize_indices(row_indices)
-        if self.ui_component.mv_linked_checkbox.value:
+        if push_highlight and self.ui_component.mv_linked_checkbox.value:
             _chart_common.sync_mask_highlights_from_selection(
                 self.main_viewer, self.selected_indices.value
             )
@@ -869,6 +885,33 @@ class HistogramDisplay(PluginBase):
 
     def _on_mv_link_change(self, _change) -> None:
         self.sync_main_viewer_link()
+
+    # ------------------------------------------------------------------
+    # Follow the main viewer's own selection (#135)
+    # ------------------------------------------------------------------
+    def on_selection_change(self) -> None:
+        """Overlay the cells the user picked in the image on every histogram.
+
+        Broadcast by ``ImageDisplay`` after a click, ctrl-click, lasso or clear, and
+        acted on only while "Follow main viewer" is ticked. It goes through
+        ``show_external_selection``, so — like any other externally supplied
+        selection — it replaces the local gate terms rather than intersecting with
+        them, and it never pushes the highlight back into the viewer.
+        """
+        if not self.ui_component.follow_mv_checkbox.value:
+            return
+        indices = _chart_common.viewer_selection_indices(self.main_viewer)
+        self.show_external_selection(indices, push_highlight=False)
+
+    def _on_follow_mv_change(self, _change) -> None:
+        """Apply the selection already on screen when the link is switched on.
+
+        Only on the way *in*: a plot selection is normal, user-clearable plot state
+        (unlike the outline the viewer draws for #129), and dropping it on untick
+        would also drop a gate made in this plot itself.
+        """
+        if self.ui_component.follow_mv_checkbox.value:
+            self.on_selection_change()
 
     def sync_main_viewer_link(self) -> None:
         """Push or withdraw this plugin's mask highlights for the current link state (#129).
@@ -971,3 +1014,4 @@ class UiComponent:
             self.mv_linked_checkbox,
             self.cell_gallery_linked_checkbox,
         ) = _chart_common.build_link_checkboxes()
+        self.follow_mv_checkbox = _chart_common.build_follow_selection_checkbox()

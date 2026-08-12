@@ -290,6 +290,11 @@ class UiComponent:
             disabled=False,
             indent=False
         )
+        # Pulls the image's own cell selection into the heatmap (#135) — the
+        # opposite direction of ``main_viewer_checkbox`` above.
+        self.follow_mv_checkbox = _chart_common.build_follow_selection_checkbox()
+        self.follow_mv_checkbox.indent = False
+        self.follow_mv_checkbox.observe(parent._on_follow_mv_change, names='value')
         
         self.column_name_text = Text(
             value='new_cluster',

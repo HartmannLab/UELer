@@ -75,6 +75,16 @@ class PluginBase:
 
         pass
 
+    def on_selection_change(self):
+        """Hook invoked when the cells selected in the main viewer image change.
+
+        Broadcast by ``ImageDisplay`` after a click, ctrl-click, lasso or clear.
+        Plugins that mirror the image selection into their own plot override this
+        (#135); the no-op keeps the hook discoverable next to the others.
+        """
+
+        pass
+
     def on_no_image_toggle(self):
         """Hook invoked when the viewer toggles image-layer rendering."""
 
