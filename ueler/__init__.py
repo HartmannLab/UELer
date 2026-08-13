@@ -25,7 +25,7 @@ __all__ = [
 	"load_cell_table",
 ]
 
-__version__ = "0.5.0a1"
+__version__ = "0.5.0a2"
 
 
 def __getattr__(name: str) -> Any:
