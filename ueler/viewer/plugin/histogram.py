@@ -23,6 +23,11 @@ Bokeh gives native, kernel-backed interactivity:
   histogram to drop just that channel's term.  Switching between Cutoff and
   Brush does not replot either: both gestures are wired on every figure and the
   toggle only re-points ``toolbar.active_drag`` (#127 reply).
+* **Faint selections stay visible (#135 reply)** — a selection made by clicking a
+  few cells in the image draws a sub-pixel bar next to a full-height one, so when
+  its tallest bar would fall under 5% of the tallest bar on that channel, the bins
+  it lands in are tinted over their whole height instead.  The proportional
+  overlay is still drawn on top, so no bar height stops meaning what it says.
 
 Python owns all binning (so the logic stays unit-testable); Bokeh only draws the
 bars + brush and routes its events back to Python callbacks in the kernel.  When
@@ -41,6 +46,7 @@ import pandas as pd
 import ipywidgets as _ipywidgets
 
 Button = getattr(_ipywidgets, "Button")
+Checkbox = getattr(_ipywidgets, "Checkbox")
 Dropdown = getattr(_ipywidgets, "Dropdown")
 HBox = getattr(_ipywidgets, "HBox")
 HTML = getattr(_ipywidgets, "HTML")
@@ -135,6 +141,11 @@ _BOKEH_MISSING_NOTICE = (
 _BASE_COLOR = "#1f77b4"        # matplotlib tab:blue
 _OVERLAY_COLOR = "#ff7f0e"     # matplotlib tab:orange
 _BAND_COLOR = "#2ca02c"        # matplotlib tab:green — persistent gate band
+_HIT_ALPHA = 0.45              # tint of a bin holding a faint selection (#135 reply)
+# A selected-subset bar shorter than this fraction of the tallest bar is too small
+# to read, so the bins it falls in are tinted whole instead (#135 reply). Measured
+# on bar heights rather than cell counts — see _faint_selection_tops.
+_FAINT_FRACTION = 0.05
 _FIGURE_HEIGHT = 220
 _ROW_OVERHEAD = 40             # approx. per-figure title + axis label DOM height
 _MAX_PLOT_HEIGHT = 560         # scroll the stack once it exceeds this many px
@@ -156,6 +167,34 @@ def bin_counts(values, edges) -> np.ndarray:
     arr = np.asarray(list(values), dtype=float)
     counts, _ = np.histogram(arr, bins=edges)
     return counts
+
+
+def _faint_selection_tops(counts, full) -> np.ndarray:
+    """Bar tops that mark *which* bins a barely-visible selection landed in (#135 reply).
+
+    ``counts`` is the selected subset's per-bin counts and ``full`` the whole
+    channel's. When the tallest selected bar is under ``_FAINT_FRACTION`` of the
+    tallest bar overall it occupies less than 5% of the figure height — a couple of
+    pixels for a handful of cells clicked in the image, which reads as "nothing
+    happened". In that regime the answer worth drawing is *where* the cells are,
+    not how many, so every bin holding at least one of them is returned at its
+    **full** height and gets tinted; the true (tiny) counts stay drawn on top.
+
+    Returns an all-zero vector when the selection is empty or already tall enough
+    to read on its own, i.e. when the proportional overlay needs no help.
+
+    The threshold is deliberately a ratio of *bar heights*, not of cell counts: it
+    is the fraction of the plot height the selection actually gets. A selection
+    that is 3% of the cells but concentrated in one bin is perfectly visible, and a
+    selection that is 8% of them spread over 200 bins is not.
+    """
+    counts = np.asarray(counts)
+    full = np.asarray(full)
+    peak = counts.max() if counts.size else 0
+    tallest = full.max() if full.size else 0
+    if peak <= 0 or tallest <= 0 or peak >= _FAINT_FRACTION * tallest:
+        return np.zeros(len(full), dtype=full.dtype if full.size else int)
+    return np.where(counts > 0, full, 0)
 
 
 class HistogramDisplay(PluginBase):
@@ -220,6 +259,10 @@ class HistogramDisplay(PluginBase):
         self.ui_component.interaction_mode.observe(
             self._on_interaction_mode_change, names="value"
         )
+        # Redraws the tint on the figures already on screen (#135 reply).
+        self.ui_component.faint_highlight_checkbox.observe(
+            self._on_faint_highlight_change, names="value"
+        )
         # Toggling the link must act on the highlight immediately (#129), not
         # only on the next selection.
         self.ui_component.mv_linked_checkbox.observe(
@@ -271,6 +314,7 @@ class HistogramDisplay(PluginBase):
                     ],
                     layout=Layout(gap="12px", align_items="center"),
                 ),
+                self.ui_component.faint_highlight_checkbox,
                 self.ui_component.gate_summary,
             ],
             layout=Layout(width="100%", gap="8px"),
@@ -424,6 +468,10 @@ class HistogramDisplay(PluginBase):
             sel_src = ColumnDataSource(
                 dict(left=left, right=right, top=[0] * len(full))
             )
+            # Whole-bin tint for a selection too small to see as a bar (#135 reply).
+            hit_src = ColumnDataSource(
+                dict(left=left, right=right, top=[0] * len(full))
+            )
 
             p = _bk_figure(
                 height=_FIGURE_HEIGHT,
@@ -436,6 +484,14 @@ class HistogramDisplay(PluginBase):
                 source=full_src, fill_color=_BASE_COLOR, line_color="white",
                 fill_alpha=0.6, legend_label="All",
             )
+            # Drawn *between* the two so the whole bar reads as "holds selected
+            # cells" while the true count stays legible on top of it (#135 reply).
+            hit_r = p.quad(
+                left="left", right="right", bottom=0, top="top",
+                source=hit_src, fill_color=_OVERLAY_COLOR, line_color=_OVERLAY_COLOR,
+                fill_alpha=_HIT_ALPHA, line_alpha=0.7,
+                legend_label="Bins with selection",
+            )
             sel_r = p.quad(
                 left="left", right="right", bottom=0, top="top",
                 source=sel_src, fill_color=_OVERLAY_COLOR, line_color="white",
@@ -444,7 +500,7 @@ class HistogramDisplay(PluginBase):
             # Pin the selection glyphs to the base glyph so a box-select gesture
             # never mutes the bars: what the user reads is our own band + overlay,
             # which survives acting on another histogram (#127).
-            for renderer in (full_r, sel_r):
+            for renderer in (full_r, hit_r, sel_r):
                 renderer.selection_glyph = renderer.glyph
                 renderer.nonselection_glyph = renderer.glyph
 
@@ -478,7 +534,15 @@ class HistogramDisplay(PluginBase):
             p.on_event(Tap, self._make_tap_handler(channel))
 
             figures.append(p)
-            sources[channel] = {"selected": sel_src, "edges": edges, "band": band}
+            # ``full`` is cached so _refresh_overlays can decide the faint-selection
+            # tint without re-binning the whole column on every selection (#135 reply).
+            sources[channel] = {
+                "selected": sel_src,
+                "hits": hit_src,
+                "edges": edges,
+                "band": band,
+                "full": np.asarray(full),
+            }
             spans[channel] = span
             self._figures[channel] = p
             self._box_tools[channel] = box
@@ -566,25 +630,38 @@ class HistogramDisplay(PluginBase):
     def _refresh_overlays(self, indices: Optional[Set[Union[int, str]]] = None) -> None:
         """Recompute the selected-subset bar counts for every built figure.
 
-        Touches only the ``selected`` ColumnDataSource of each figure — never the
-        figures, axes or bin edges — so refreshing the overlay cannot disturb a
-        zoom/pan or another channel's gate marker (#127).
+        Touches only the ``selected`` and ``hits`` ColumnDataSources of each figure
+        — never the figures, axes or bin edges — so refreshing the overlay cannot
+        disturb a zoom/pan or another channel's gate marker (#127).
+
+        Each channel also decides on its own whether the selection is too faint to
+        read as a bar and should have its bins tinted instead (#135 reply): a
+        selection can be sharp on the marker that defines it and diffuse on every
+        other one, so the decision belongs per figure, not per plugin.
         """
         if not self._sources or self._plot_data is None:
             return
         selected = (self.selected_indices.value if indices is None else indices) or set()
         valid = [i for i in selected if i in self._plot_data.index]
+        mark_faint = getattr(self.ui_component, "faint_highlight_checkbox", None)
+        mark_faint = True if mark_faint is None else bool(mark_faint.value)
         for channel, info in self._sources.items():
             edges = info["edges"]
             if valid:
                 counts = bin_counts(self._plot_data.loc[valid, channel], edges)
             else:
                 counts = np.zeros(len(edges) - 1, dtype=int)
-            info["selected"].data = dict(
-                left=edges[:-1].tolist(),
-                right=edges[1:].tolist(),
-                top=counts.tolist(),
-            )
+            left, right = edges[:-1].tolist(), edges[1:].tolist()
+            info["selected"].data = dict(left=left, right=right, top=counts.tolist())
+            hits = info.get("hits")
+            if hits is None:
+                continue
+            full = info.get("full")
+            if mark_faint and full is not None:
+                tops = _faint_selection_tops(counts, full)
+            else:
+                tops = np.zeros(len(edges) - 1, dtype=int)
+            hits.data = dict(left=left, right=right, top=tops.tolist())
 
     def _refresh_gate_markers(self) -> None:
         """Draw every gated channel's own marker — range band or cutoff line.
@@ -883,6 +960,14 @@ class HistogramDisplay(PluginBase):
         """
         self._apply_interaction_mode()
 
+    def _on_faint_highlight_change(self, _change) -> None:
+        """Add or drop the whole-bin tint on the figures already on screen (#135 reply).
+
+        Only the ``hits`` data source is rewritten — like every other selection-side
+        update in this plugin, toggling it must not replot (#127).
+        """
+        self._refresh_overlays()
+
     def _on_mv_link_change(self, _change) -> None:
         self.sync_main_viewer_link()
 
@@ -995,6 +1080,19 @@ class UiComponent:
             description="Highlight:",
             style={"description_width": "auto"},
             layout=Layout(width="250px"),
+        )
+        # On by default: without it a selection of a few cells clicked in the image
+        # is a sub-pixel bar and reads as nothing happening (#135 reply). Unticking
+        # restores the strictly proportional overlay.
+        self.faint_highlight_checkbox = Checkbox(
+            value=True,
+            description="Mark faint selections",
+            indent=False,
+            tooltip=(
+                "Tint a whole bin when it holds selected cells but their bar would "
+                "be under 5% of the tallest bar"
+            ),
+            style={"description_width": "auto"},
         )
         self.clear_selection_button = Button(
             description="Clear selection",

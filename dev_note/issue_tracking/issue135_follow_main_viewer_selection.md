@@ -93,3 +93,57 @@ python -m unittest tests.test_issue135_follow_main_viewer_selection tests.test_c
     tests.test_histogram_plugin tests.test_heatmap_selection tests.test_issue119_selection_across_fov
 python tools/run_test_suite.py --max-skips 0
 ```
+
+---
+
+# Reply 1 — a small selection is invisible in the histogram
+
+## Problem
+
+`Follow main viewer` works in the histogram, but what it draws is easy to miss. The selection is rendered as its own distribution: a second `quad` on the *same* y-axis as the "All" bars (`_build_figures`, `sources[channel]["selected"]`). That encoding is honest, and it is the right one when the selection is a gate covering a good fraction of the cells — which is what it was built for (#112 linked brushing, #127 gating).
+
+It is the wrong encoding for the case #135 introduced. Clicking cells in the image selects a handful of them: 5 cells out of 80 000 puts a 0.006 %-tall orange bar under a full-height blue one. The bar is drawn correctly and is a fraction of a pixel high, so the user sees nothing change and reads the feature as broken.
+
+## Suggested behaviour (from the reply)
+
+> The histogram should highlight the selected cells in a more visible way, such as by changing the color of the bins that contain the selected cells when selected cells are less than 5% of the total.
+
+## Solution
+
+Keep the proportional overlay, and add a second, *categorical* encoding that switches on when the proportional one stops being readable: **tint the whole bin** wherever at least one selected cell landed. The tinted bar answers "where are my cells", which is the only question a five-cell selection can answer anyway — the shape of a five-cell distribution is noise.
+
+Three properties made this the shape to build:
+
+* **The two encodings do not fight.** The tint is drawn between the base bars and the "Selected" overlay: the full bar goes orange, and the true (tiny) count still sits on top of it in the stronger colour. Nothing about the "All" bars or the y-axis changes, so no number on screen becomes a lie — the tint means *this bin contains selected cells*, and the legend says so.
+* **It is immune to zoom.** The alternative — scaling the overlay onto a secondary y-axis so the selected distribution fills the frame — was rejected: the two ranges desynchronise the moment the user wheel-zooms in y (the main range is a `DataRange1d` the kernel does not track), and it silently changes what the bar heights mean.
+* **It is a data write, not a rebuild.** The tint is a third `ColumnDataSource` written by `_refresh_overlays`, so it costs one more `.data` assignment per channel and cannot disturb a zoom, a pan or another channel's gate marker — the invariant #127 established.
+
+### When it turns on
+
+Per figure, not per plugin: the tint is applied to channel *c* when
+
+```
+max(selected counts on c)  <  _FAINT_FRACTION * max(all counts on c)      (_FAINT_FRACTION = 0.05)
+```
+
+The reply says "less than 5% of the total [cells]". The rule above keeps the 5 % but measures it on the **peak bar heights of that channel** rather than on the cell count, because that ratio *is* the visibility: it is literally the fraction of the plot height the tallest orange bar gets. Counting cells instead would misfire in both directions — 3 % of the cells concentrated in one bin is perfectly visible and would be tinted for nothing, while 8 % of the cells spread thinly over 200 bins is invisible and would not be tinted. Deciding per channel matters for the same reason: one selection can be sharp on a marker it is defined by and diffuse on every other.
+
+### Control
+
+A `Mark faint selections` checkbox in the *Histogram* tab, on by default, so the automatic behaviour can be switched off by anyone who wants the strictly proportional reading. Toggling it re-runs `_refresh_overlays()` — it never replots. It persists with every other widget state.
+
+## Implementation
+
+* `ueler/viewer/plugin/histogram.py`
+  * `_FAINT_FRACTION` and `_HIT_ALPHA` constants next to the existing colours.
+  * `_build_figures` — a third `quad` per figure fed by `sources[channel]["hits"]`, drawn between the base and the overlay, legend `Bins with selection`; the per-channel full counts cached in `sources[channel]["full"]` so the refresh does not have to re-bin the column; the new renderer joins the `selection_glyph`/`nonselection_glyph` pinning loop (#127).
+  * `_faint_selection_tops(counts, full)` — pure helper returning the tint tops, so the threshold rule is unit-testable without Bokeh.
+  * `_refresh_overlays` — writes the `hits` source alongside `selected`.
+  * `UiComponent.faint_highlight_checkbox` + `_on_faint_highlight_change` wired in `_wire_events` and placed in `_build_layout`.
+
+## Tests
+
+`tests/test_issue135_faint_selection_highlight.py`
+
+* **`FaintSelectionRuleTestCase`** — the pure helper: below the threshold tints exactly the occupied bins, at/above it tints nothing, an empty selection tints nothing, an all-zero base is safe, and a bin with a single selected cell is tinted to the *full* bar height.
+* **`FaintSelectionOverlayTestCase`** — through real Bokeh figures: a one-cell selection fills the `hits` source and leaves `selected` at its true counts; a large selection leaves `hits` empty; the decision is taken per channel; unticking the checkbox clears the tint without replotting; the tint follows a `show_external_selection` push (the `Follow main viewer` path).
