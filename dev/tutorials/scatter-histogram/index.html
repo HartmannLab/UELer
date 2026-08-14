@@ -674,6 +674,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../display-settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Display Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../roi-manager/" class="md-nav__link">
         
   
@@ -1550,9 +1578,8 @@ highlights the cells in the image and gallery. <strong>Clear selection</strong> 
 has some. Zooming and panning keep the outlines too — including while a finer resolution level is
 being loaded.</p>
 <div class="admonition note">
-<p class="admonition-title">Scatter in VS Code</p>
-<p>In VS Code the scatter defaults to a static Matplotlib fallback. To force the interactive widget,
-set the environment variable <code>UELER_SCATTER_BACKEND=widget</code> before launching.</p>
+<p class="admonition-title">Static scatter fallback</p>
+<p>The interactive <code>jupyter-scatter</code> widget is the default everywhere, VS Code included — no environment variable needed. If you want the static Matplotlib scatter instead, set <code>UELER_SCATTER_BACKEND=static</code> before launching; the plot then carries an inline notice saying so.</p>
 </div>
 <hr />
 <h2 id="linked-brushing-in-practice">Linked Brushing in Practice<a class="headerlink" href="#linked-brushing-in-practice" title="Permanent link">&para;</a></h2>

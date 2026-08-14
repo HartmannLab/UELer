@@ -12,13 +12,13 @@
         <meta name="author" content="Yu-Le Wu (Hartmann Lab, DKFZ)">
       
       
-        <link rel="canonical" href="https://hartmannlab.github.io/UELer/latest/tutorials/map-mode/">
+        <link rel="canonical" href="https://hartmannlab.github.io/UELer/latest/tutorials/display-settings/">
       
       
-        <link rel="prev" href="../roi-manager/">
+        <link rel="prev" href="../user-interface/">
       
       
-        <link rel="next" href="../export/">
+        <link rel="next" href="../roi-manager/">
       
       
         
@@ -29,7 +29,7 @@
     
     
       
-        <title>Map Mode - UELer</title>
+        <title>Display Settings - UELer</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#map-mode" class="md-skip">
+        <a href="#display-settings" class="md-skip">
           Skip to content
         </a>
       
@@ -119,7 +119,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Map Mode
+              Display Settings
             
           </span>
         </div>
@@ -671,10 +671,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../display-settings/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Display Settings
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -690,6 +717,153 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#before-you-launch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Before You Launch
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-four-things-to-set-first" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Four Things to Set First
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The Four Things to Set First">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-pixel-size-set-it-or-the-scale-bar-lies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Pixel size — set it, or the scale bar lies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-cache-size-match-it-to-your-memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Cache size — match it to your memory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-downsample-leave-it-on-unless-you-know-why-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Downsample — leave it on unless you know why not
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-channels-pick-them-then-order-them" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Channels — pick them, then order them
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#getting-contrast-right" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Getting Contrast Right
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#overlays" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overlays
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#saving-and-reusing-a-view" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Saving and Reusing a View
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-it-feels-slow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When It Feels Slow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next Steps
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -727,37 +901,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Map Mode
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../map-mode/" class="md-nav__link">
         
   
   
@@ -773,92 +920,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#what-is-map-mode" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What Is Map Mode?
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#enabling-map-mode" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Enabling Map Mode
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#navigating-in-map-mode" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Navigating in Map Mode
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#capturing-rois-in-map-mode" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Capturing ROIs in Map Mode
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#exporting-rois-in-map-mode" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Exporting ROIs in Map Mode
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#deactivating-map-mode" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Deactivating Map Mode
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1395,10 +1456,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#what-is-map-mode" class="md-nav__link">
+  <a href="#before-you-launch" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What Is Map Mode?
+        Before You Launch
       
     </span>
   </a>
@@ -1406,10 +1467,71 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#enabling-map-mode" class="md-nav__link">
+  <a href="#the-four-things-to-set-first" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Enabling Map Mode
+        The Four Things to Set First
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The Four Things to Set First">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-pixel-size-set-it-or-the-scale-bar-lies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Pixel size — set it, or the scale bar lies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-cache-size-match-it-to-your-memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Cache size — match it to your memory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-downsample-leave-it-on-unless-you-know-why-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Downsample — leave it on unless you know why not
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-channels-pick-them-then-order-them" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Channels — pick them, then order them
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#getting-contrast-right" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Getting Contrast Right
       
     </span>
   </a>
@@ -1417,10 +1539,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#navigating-in-map-mode" class="md-nav__link">
+  <a href="#overlays" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Navigating in Map Mode
+        Overlays
       
     </span>
   </a>
@@ -1428,10 +1550,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#capturing-rois-in-map-mode" class="md-nav__link">
+  <a href="#saving-and-reusing-a-view" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Capturing ROIs in Map Mode
+        Saving and Reusing a View
       
     </span>
   </a>
@@ -1439,10 +1561,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#exporting-rois-in-map-mode" class="md-nav__link">
+  <a href="#when-it-feels-slow" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Exporting ROIs in Map Mode
+        When It Feels Slow
       
     </span>
   </a>
@@ -1450,10 +1572,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#deactivating-map-mode" class="md-nav__link">
+  <a href="#next-steps" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Deactivating Map Mode
+        Next Steps
       
     </span>
   </a>
@@ -1480,65 +1602,129 @@
   
 
 
-<h1 id="map-mode">Map Mode<a class="headerlink" href="#map-mode" title="Permanent link">&para;</a></h1>
-<p>Map mode stitches multiple FOVs into a single spatial overview, letting you navigate a full tissue
-section as one continuous canvas. It works on images alone (no cell table required).</p>
+<h1 id="display-settings">Display Settings<a class="headerlink" href="#display-settings" title="Permanent link">&para;</a></h1>
+<p>UELer opens with defaults that suit a MIBI dataset on a wide screen. If your data comes from somewhere else, a few of those defaults are quietly wrong for you — most notably the pixel size, which drives the scale bar in the viewer <em>and</em> in every exported image.</p>
+<p>This page is a setup walkthrough, not a reference: it tells you what to set, in what order, and why. For the control-by-control map of the left panel, see <a href="../user-interface/">User Interface</a>.</p>
+<hr />
+<h2 id="before-you-launch">Before You Launch<a class="headerlink" href="#before-you-launch" title="Permanent link">&para;</a></h2>
+<p>Three things about the environment, settled once and then forgotten.</p>
+<p><strong>1. Run <code>%matplotlib widget</code> once per kernel session</strong>, before you build the viewer:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">ueler</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="o">%</span><span class="n">matplotlib</span> <span class="n">widget</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">viewer</span> <span class="o">=</span> <span class="n">ueler</span><span class="o">.</span><span class="n">run_viewer</span><span class="p">(</span><span class="n">base_folder</span><span class="p">)</span>
+</code></pre></div>
+<p>Without it the canvas renders as a static PNG — no zoom, no pan, no lasso. If you restart the kernel, run it again.</p>
+<p><strong>2. Any Jupyter front end works.</strong> JupyterLab, the classic Notebook, and VS Code all render the full UI, interactive scatter included. You do not need to set <code>UELER_SCATTER_BACKEND</code> — the interactive <code>jupyter-scatter</code> widget is the default everywhere.</p>
 <div class="admonition note">
-<p class="admonition-title">Opt-in feature</p>
-<p>Map mode is off by default. It only appears when <strong>both</strong> conditions are met:</p>
-<ol>
-<li>The <code>ENABLE_MAP_MODE</code> environment variable is set to a truthy value (<code>1</code>, <code>true</code>, <code>yes</code>,
-   <code>on</code>) before launching the viewer, and</li>
-<li>At least one map descriptor is found under <code>&lt;base_folder&gt;/.UELer/maps/</code> (UELer scans that
-   folder for <code>*.json</code> descriptors).</li>
-</ol>
-<p>When either is missing, the map controls stay hidden.</p>
+<p class="admonition-title">Old notebooks may still set <code>UELER_SCATTER_BACKEND=widget</code></p>
+<p>Earlier versions of UELer dropped to a static Matplotlib scatter under VS Code, and the variable was the way to force the interactive one. That fallback is gone. Delete the line — it does nothing now. The static renderer survives as an opt-out (<code>UELER_SCATTER_BACKEND=static</code>), which you are unlikely to want.</p>
+</div>
+<p><strong>3. Give the notebook some width.</strong> The left control panel is a fixed 350 px column. On a narrow window, or at high browser zoom, the image canvas gets whatever is left over and can end up uncomfortably small. Zooming the browser <em>out</em> one step (<code>Ctrl</code>/<code>Cmd</code> + <code>-</code>) buys the canvas real estate without shrinking the controls' legibility much.</p>
+<hr />
+<h2 id="the-four-things-to-set-first">The Four Things to Set First<a class="headerlink" href="#the-four-things-to-set-first" title="Permanent link">&para;</a></h2>
+<p>Do these in order the first time you open a dataset. Two of the four are wrong by default for most non-MIBI data.</p>
+<h3 id="1-pixel-size-set-it-or-the-scale-bar-lies">1. Pixel size — set it, or the scale bar lies<a class="headerlink" href="#1-pixel-size-set-it-or-the-scale-bar-lies" title="Permanent link">&para;</a></h3>
+<p><strong>Advanced Settings → Pixel Size (nm):</strong> defaults to <strong>390</strong>, the MIBI pixel pitch. It is applied to <em>every</em> dataset, whatever the source, with no warning. The scale bar in the viewer and in every batch-exported image is computed from this number, so if it is wrong, every figure you export carries a wrong scale bar.</p>
+<table>
+<thead>
+<tr>
+<th>Platform</th>
+<th>Typical pixel size</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>MIBI</td>
+<td>390 nm (the default)</td>
+</tr>
+<tr>
+<td>IMC</td>
+<td>1000 nm (1 µm)</td>
+</tr>
+<tr>
+<td>Anything else</td>
+<td>Read it off your acquisition metadata</td>
+</tr>
+</tbody>
+</table>
+<p>If you don't know the value, set it to <strong>0</strong> — the scale bar is then omitted entirely, which is honest. A wrong scale bar is worse than none.</p>
+<h3 id="2-cache-size-match-it-to-your-memory">2. Cache size — match it to your memory<a class="headerlink" href="#2-cache-size-match-it-to-your-memory" title="Permanent link">&para;</a></h3>
+<p><strong>Cache Size:</strong> (top of the left panel, default <strong>100</strong>) is the number of FOVs kept in memory at once. Each cached FOV holds the channels you have actually opened, so the cost is roughly:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>FOV pixels × channels opened × bytes per pixel × cached FOVs
+</code></pre></div>
+<p>A 1024 × 1024 uint16 FOV with 6 channels is about 12 MB, so 100 of them is ~1.2 GB — fine on a workstation. The same arithmetic on 4000 × 4000 tiles gives ~190 MB per FOV, and the default cache will exhaust most machines. Lower it to 10–20 for large images; raise it if you flip back and forth between the same handful of FOVs and have memory to spare.</p>
+<h3 id="3-downsample-leave-it-on-unless-you-know-why-not">3. Downsample — leave it on unless you know why not<a class="headerlink" href="#3-downsample-leave-it-on-unless-you-know-why-not" title="Permanent link">&para;</a></h3>
+<p><strong>Advanced Settings → Downsample</strong> is <strong>on</strong> by default. With it on, UELer decimates the image so the drawn view never exceeds <strong>2048 px</strong> on its longest side, picking the smallest power-of-two factor that achieves this. As you zoom in the visible region shrinks, the factor drops back toward 1, and you get full-resolution pixels again — so you lose nothing but the detail you could not have resolved on screen anyway.</p>
+<p>Two consequences worth knowing:</p>
+<ul>
+<li>On images at or below 2048 px (a standard 1024² MIBI FOV, say) the factor is 1 and the toggle changes nothing.</li>
+<li>Turning it <strong>off</strong> forces native resolution at every zoom level. On large OME-TIFFs and in <a href="../map-mode/">map mode</a> this is the single fastest way to make the viewer feel sluggish.</li>
+</ul>
+<p>Turn it off only when you need to be certain that what you are looking at is not an artefact of decimation.</p>
+<h3 id="4-channels-pick-them-then-order-them">4. Channels — pick them, then order them<a class="headerlink" href="#4-channels-pick-them-then-order-them" title="Permanent link">&para;</a></h3>
+<p>Add channels in the <strong>Channels:</strong> field; each becomes a chip. Drag a chip by its <code>⋮⋮</code> grip, or click it and press ← / →, to reorder.</p>
+<div class="admonition info">
+<p class="admonition-title">Ordering is for you, not for the renderer</p>
+<p>Channels are composited <strong>additively</strong> — each channel's colour is scaled by its normalised intensity and summed, then clipped. The result does not depend on the order, so no channel "covers" another. What the chip order <em>does</em> control is the order of the per-channel control rows below, the channel legend, and the panes in the <a href="../basic-usage/#7-use-the-channel-grid-view">channel grid view</a>. Put the channels you keep adjusting at the top.</p>
+<p>Because the blend is additive, several bright channels in similar colours saturate to white where they overlap. If a composite looks washed out, that is usually the reason — lower a <strong>Max</strong> or two rather than reaching for the visibility checkboxes.</p>
 </div>
 <hr />
-<h2 id="what-is-map-mode">What Is Map Mode?<a class="headerlink" href="#what-is-map-mode" title="Permanent link">&para;</a></h2>
-<p>In standard view, UELer loads one FOV at a time. In map mode, FOVs are stitched together using a
-spatial layout descriptor. This lets you:</p>
+<h2 id="getting-contrast-right">Getting Contrast Right<a class="headerlink" href="#getting-contrast-right" title="Permanent link">&para;</a></h2>
+<p>When a channel is first shown, UELer computes its display range from the data: <strong>Min</strong> starts at 0, and <strong>Max</strong> starts at the channel's <strong>99.9th percentile</strong>, not its maximum. That is a deliberate auto-contrast — the brightest 0.1 % of pixels (hot pixels, aggregates, detector artefacts) are allowed to saturate so the rest of the dynamic range is visible.</p>
+<p>Knowing that, the two common complaints have specific fixes:</p>
 <ul>
-<li>See the spatial relationship between FOVs at a glance.</li>
-<li>Pan and zoom across the whole tissue without switching FOVs manually.</li>
-<li>Capture and export ROIs that span the stitched map.</li>
+<li><strong>The channel looks all-black.</strong> The percentile is being dragged up by a bright artefact, or the marker is genuinely dim. Lower <strong>Max</strong>. This is by far the more common case.</li>
+<li><strong>The channel looks all-white.</strong> Real signal fills most of the frame and the percentile sits near the top of it. Raise <strong>Min</strong> to push the background down, then lower <strong>Max</strong> to taste.</li>
+</ul>
+<div class="admonition warning">
+<p class="admonition-title">The Max slider stops at the auto value</p>
+<p>The slider's upper bound <em>is</em> the percentile-derived maximum, so you cannot raise <strong>Max</strong> above it to un-saturate that top 0.1 %. The bound is per channel and only ever grows (see below) — it is not a per-FOV reset.</p>
+</div>
+<p><strong>The range grows as you look around.</strong> The stored maximum for a channel is the running maximum over everything UELer has computed so far. Open a brighter FOV, or pan into a brighter tile in map mode — where per-tile statistics are computed lazily, on first render — and the slider's upper bound can grow mid-session. Your <strong>Min</strong> / <strong>Max</strong> values are preserved; only the room above them changes. This is expected, and it is why contrast set on the first FOV of a map is worth re-checking after you have panned across it.</p>
+<p>Once a channel/colour/contrast combination works, save it as a <strong>marker set</strong> (below) — that is the only way to get it back exactly.</p>
+<hr />
+<h2 id="overlays">Overlays<a class="headerlink" href="#overlays" title="Permanent link">&para;</a></h2>
+<p>Overlays are drawn over the finished channel composite, in this order: annotations first, then masks.</p>
+<ul>
+<li><strong>Masks</strong> — enable a mask with its checkbox in the <strong>Channels</strong> section and pick a colour from the <strong>Mask &lt;name&gt;</strong> dropdown. <strong>Mask outline px:</strong> sets the outline thickness. This is the quick look.</li>
+<li><strong>Mask painter</strong> (right panel) — per-class colours, fill versus outline, per-class opacity, and saved <code>.maskcolors.json</code> palettes. Use this when a single mask colour is not enough. Requires a cell table.</li>
+<li><strong>Pixel annotations</strong> — <strong>Show annotation</strong>, pick one from <strong>Annotation:</strong>, and set <strong>Fill alpha:</strong> for transparency. <strong>Edit palette…</strong> customises per-class colours and labels.</li>
+<li><strong>No image (masks only)</strong> — hides the channel composite and draws overlays on black. Good for checking segmentation boundaries, and cheaper to render since no channel compositing happens.</li>
+<li><strong>Channel grid view</strong> — one labelled, synchronised pane per visible channel instead of one composite. The honest way to judge whether a marker is really co-expressed or just additively blended into the same white.</li>
 </ul>
 <hr />
-<h2 id="enabling-map-mode">Enabling Map Mode<a class="headerlink" href="#enabling-map-mode" title="Permanent link">&para;</a></h2>
+<h2 id="saving-and-reusing-a-view">Saving and Reusing a View<a class="headerlink" href="#saving-and-reusing-a-view" title="Permanent link">&para;</a></h2>
+<p>Two mechanisms, with different jobs.</p>
+<p><strong>Marker sets</strong> are the deliberate, portable unit: a named combination of channels, their colours, and their contrast ranges. Type a name in <strong>Set Name:</strong>, click <strong>Save Marker Set</strong>, and reload it later from the <strong>Marker Set:</strong> dropdown. Use these for the views you want to reproduce — a figure panel, a QC pass, a set of markers you always check first.</p>
+<p><strong>Widget state</strong> is the automatic one. UELer writes <code>&lt;base_folder&gt;/.UELer/widget_states.json</code> whenever a control changes, and reloads it when you next open the same <code>base_folder</code>, restoring the FOV, channel selection, contrast, overlays, advanced settings, and accordion positions. Plugins keep their own state alongside it, one file each, named <code>&lt;Plugin Name&gt;_widget_states.json</code>.</p>
+<div class="admonition tip">
+<p class="admonition-title">Resetting a bad restored state</p>
+<p>Because restoration is automatic and covers nearly everything, a session that ended in a strange state comes back in that same strange state. To start clean, close the viewer and delete <code>&lt;base_folder&gt;/.UELer/widget_states.json</code>. Your ROIs, palettes, marker sets, and export configs live in separate files under <code>.UELer/</code> and are not affected — see <a href="../../faq/#where-does-ueler-store-my-work">Where does UELer store my work?</a>.</p>
+</div>
+<hr />
+<h2 id="when-it-feels-slow">When It Feels Slow<a class="headerlink" href="#when-it-feels-slow" title="Permanent link">&para;</a></h2>
+<p>In rough order of effect:</p>
 <ol>
-<li>Launch the viewer with <code>ENABLE_MAP_MODE=1</code> set in the environment, with map descriptor JSON files
-   present under <code>&lt;base_folder&gt;/.UELer/maps/</code>.</li>
-<li>In the left panel, tick the <strong>Map mode</strong> checkbox.</li>
-<li>Choose a map from the <strong>Select map:</strong> dropdown (options are labelled with the map id and its tile
-   count).</li>
-</ol>
-<p>Once active, the canvas switches to the stitched composite and the <strong>Select Image:</strong> FOV selector is
-disabled — you navigate by panning. The channel grid view is also disabled while map mode is on.</p>
-<hr />
-<h2 id="navigating-in-map-mode">Navigating in Map Mode<a class="headerlink" href="#navigating-in-map-mode" title="Permanent link">&para;</a></h2>
-<ul>
-<li><strong>Pan</strong> — click and drag the canvas.</li>
-<li><strong>Zoom</strong> — scroll to zoom in and out.</li>
-<li><strong>Tile rendering</strong> — only tiles near the viewport are drawn. Already-cached tiles always render;
-  when too many <em>uncached</em> tiles would be needed at once, the viewer keeps the ones nearest the
-  viewport center to stay responsive (the budget scales with the downsample factor).</li>
-</ul>
-<hr />
-<h2 id="capturing-rois-in-map-mode">Capturing ROIs in Map Mode<a class="headerlink" href="#capturing-rois-in-map-mode" title="Permanent link">&para;</a></h2>
-<p>Capture ROIs exactly as in standard mode (see <a href="../roi-manager/">Regions of Interest</a>). Map-mode ROIs
-are stored with an empty <code>fov</code> and a populated <code>map_id</code>, and display a <code>[MAP:&lt;id&gt;]</code> location label so
-you can tell them apart from single-FOV ROIs. The FOV-scope filters in the ROI manager are disabled
-while map mode is active.</p>
-<hr />
-<h2 id="exporting-rois-in-map-mode">Exporting ROIs in Map Mode<a class="headerlink" href="#exporting-rois-in-map-mode" title="Permanent link">&para;</a></h2>
-<p><a href="../export/">Batch Export</a> fully supports map-mode ROIs. A map ROI (empty <code>fov</code>, non-empty <code>map_id</code>)
-is rendered from the stitched map layer and saved with the filename pattern:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>map_&lt;map_id&gt;_roi_&lt;name-or-id&gt;.&lt;format&gt;
+<li><strong>Check Downsample is on.</strong> Off plus a large image means every pan re-reads full-resolution data.</li>
+<li><strong>Lower Cache Size.</strong> If the kernel is swapping, nothing else you do will help. Use the arithmetic above to sanity-check the cache against your RAM.</li>
+<li><strong>Open fewer channels.</strong> Compositing cost is linear in the number of visible channels, and every channel you open is held in memory for each cached FOV. Note that unchecking a channel's visibility skips its compositing but does not release it: loaded channel data stays with its cached FOV until that FOV is evicted from the cache.</li>
+<li>
+<p><strong>In map mode, lower the tile limit.</strong> UELer draws at most 80 uncached tiles per frame, nearest the viewport first. On a slow machine, fewer is smoother:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">viewer</span><span class="o">.</span><span class="n">_map_render_tile_limit</span> <span class="o">=</span> <span class="mi">40</span>
 </code></pre></div>
+</li>
+<li>
+<p><strong>Expect the first pan across a map to be slower.</strong> Channel statistics are computed per tile on first render, deliberately, rather than up front — computing them for the whole map at launch is what would otherwise exhaust memory on large datasets. It settles once you have covered the ground.</p>
+</li>
+</ol>
 <hr />
-<h2 id="deactivating-map-mode">Deactivating Map Mode<a class="headerlink" href="#deactivating-map-mode" title="Permanent link">&para;</a></h2>
-<p>Untick the <strong>Map mode</strong> checkbox to return to single-FOV mode. The FOV selector and per-FOV behaviors
-are restored automatically.</p>
+<h2 id="next-steps">Next Steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Capture what you are looking at as a <a href="../roi-manager/">Region of Interest</a>.</li>
+<li>Push the same settings across many FOVs with <a href="../export/">Batch Export</a>.</li>
+<li>Stitch FOVs into one canvas with <a href="../map-mode/">Map Mode</a>.</li>
+</ul>
 
 
 

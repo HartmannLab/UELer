@@ -668,6 +668,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../tutorials/display-settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Display Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../tutorials/roi-manager/" class="md-nav__link">
         
   
@@ -1168,10 +1196,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#vs-code-fallback" class="md-nav__link">
+  <a href="#static-scatter-fallback" class="md-nav__link">
     <span class="md-ellipsis">
       
-        VS Code Fallback
+        Static Scatter Fallback
       
     </span>
   </a>
@@ -1438,10 +1466,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#vs-code-fallback" class="md-nav__link">
+  <a href="#static-scatter-fallback" class="md-nav__link">
     <span class="md-ellipsis">
       
-        VS Code Fallback
+        Static Scatter Fallback
       
     </span>
   </a>
@@ -1527,8 +1555,9 @@
 <li>Resolved rows are cached to avoid repeated DataFrame lookups on hover.</li>
 </ul>
 <hr />
-<h2 id="vs-code-fallback">VS Code Fallback<a class="headerlink" href="#vs-code-fallback" title="Permanent link">&para;</a></h2>
-<p>When <code>jupyter-scatter</code> widget rendering fails in VS Code, UELer automatically replaces the scatter widget with a static Matplotlib figure. The chart plugin controls remain functional.</p>
+<h2 id="static-scatter-fallback">Static Scatter Fallback<a class="headerlink" href="#static-scatter-fallback" title="Permanent link">&para;</a></h2>
+<p><code>ChartDisplay.__init__</code> resolves <code>_scatter_backend</code> from <code>UELER_SCATTER_BACKEND</code>, defaulting to <code>widget</code> in every environment. An unrecognised value falls back to <code>widget</code> as well, and the comparison is case-insensitive.</p>
+<p>Setting <code>UELER_SCATTER_BACKEND=static</code> replaces the <code>jupyter-scatter</code> widget with a static Matplotlib figure plus an inline notice; the chart plugin controls remain functional either way. This used to be selected automatically when <code>VSCODE_PID</code> was present, because <code>jupyter-scatter</code> did not render reliably in the VS Code webview. It does now, so the fallback is opt-in only (#122).</p>
 <hr />
 <h2 id="render-suppression-at-startup">Render Suppression at Startup<a class="headerlink" href="#render-suppression-at-startup" title="Permanent link">&para;</a></h2>
 <p>To prevent kernel timeouts on large maps, renders triggered by widget state restoration at startup (<code>load_widget_states</code>) are suppressed via a <code>_suspend_display_updates</code> flag. The first real render happens on the first user interaction.</p>

@@ -668,6 +668,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../tutorials/display-settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Display Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../tutorials/roi-manager/" class="md-nav__link">
         
   
@@ -1135,10 +1163,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#the-scatter-plot-is-not-shown-in-vs-code" class="md-nav__link">
+  <a href="#do-i-need-to-set-ueler_scatter_backend" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The scatter plot is not shown in VS Code
+        Do I need to set UELER_SCATTER_BACKEND?
       
     </span>
   </a>
@@ -1765,10 +1793,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#the-scatter-plot-is-not-shown-in-vs-code" class="md-nav__link">
+  <a href="#do-i-need-to-set-ueler_scatter_backend" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The scatter plot is not shown in VS Code
+        Do I need to set UELER_SCATTER_BACKEND?
       
     </span>
   </a>
@@ -1999,15 +2027,19 @@ or <code>pip install ".[dev]"</code>.</p>
 <h3 id="nothing-renders-the-widgets-dont-show-up">Nothing renders / the widgets don't show up<a class="headerlink" href="#nothing-renders-the-widgets-dont-show-up" title="Permanent link">&para;</a></h3>
 <p>Run <code>%matplotlib widget</code> once per kernel session before launching the viewer — it enables the
 interactive backend UELer relies on. If widgets still don't appear, restart the kernel and re-run the
-cells.</p>
-<h3 id="the-scatter-plot-is-not-shown-in-vs-code">The scatter plot is not shown in VS Code<a class="headerlink" href="#the-scatter-plot-is-not-shown-in-vs-code" title="Permanent link">&para;</a></h3>
-<p>In VS Code the scatter plugin defaults to a <strong>static Matplotlib fallback</strong> (interactive
-<code>jupyter-scatter</code> widgets don't always render there). To force the interactive widget, set the
-environment variable before launching:</p>
+cells. See <a href="../tutorials/display-settings/#before-you-launch">Display Settings</a> for the rest of the
+launch checklist.</p>
+<h3 id="do-i-need-to-set-ueler_scatter_backend">Do I need to set <code>UELER_SCATTER_BACKEND</code>?<a class="headerlink" href="#do-i-need-to-set-ueler_scatter_backend" title="Permanent link">&para;</a></h3>
+<p>No. The interactive <code>jupyter-scatter</code> widget is the default in <strong>every</strong> environment — JupyterLab, the
+classic Notebook, and VS Code alike. Earlier versions dropped to a static Matplotlib scatter under VS
+Code automatically, which is why you may have seen <code>UELER_SCATTER_BACKEND=widget</code> in older notebooks;
+that is no longer needed and can be removed.</p>
+<p>The static scatter is still available as an opt-in fallback:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;UELER_SCATTER_BACKEND&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;widget&quot;</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;UELER_SCATTER_BACKEND&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;static&quot;</span>
 </code></pre></div>
-<p>JupyterLab and the classic Notebook use the interactive backend by default.</p>
+<p>Set it before launching the viewer. The plot then carries an inline notice saying the static backend
+is active.</p>
 <h3 id="the-histogram-says-it-requires-bokeh">The histogram says it requires Bokeh<a class="headerlink" href="#the-histogram-says-it-requires-bokeh" title="Permanent link">&para;</a></h3>
 <p>The Histogram plugin renders with Bokeh. Install <code>bokeh</code> and <code>jupyter_bokeh</code> (both are UELer
 dependencies) and restart the kernel. UELer auto-loads BokehJS on first plot, so it renders in VS Code
@@ -2019,8 +2051,10 @@ without a priming cell.</p>
 <li>Check that your data paths are correct.</li>
 </ol>
 <h3 id="channel-images-appear-all-white-or-all-black">Channel images appear all-white or all-black<a class="headerlink" href="#channel-images-appear-all-white-or-all-black" title="Permanent link">&para;</a></h3>
-<p>This is usually a contrast issue. Expand the <strong>Channels</strong> accordion and adjust the <strong>Min</strong> / <strong>Max</strong>
-contrast sliders for the affected channel.</p>
+<p>This is a contrast issue. Each channel's display range starts at the 99.9th percentile of its data,
+not its maximum — so a single bright artefact can push the whole image dark. Expand the <strong>Channels</strong>
+accordion and lower <strong>Max</strong> (for an all-black channel) or raise <strong>Min</strong> (for an all-white one). See
+<a href="../tutorials/display-settings/#getting-contrast-right">Getting contrast right</a>.</p>
 <h3 id="how-do-i-enable-map-mode">How do I enable Map Mode?<a class="headerlink" href="#how-do-i-enable-map-mode" title="Permanent link">&para;</a></h3>
 <p>Map mode is opt-in. Set the <code>ENABLE_MAP_MODE</code> environment variable to a truthy value (<code>1</code>, <code>true</code>,
 <code>yes</code>, <code>on</code>) before launching, and place map descriptor JSON files under <code>&lt;base_folder&gt;/.UELer/maps/</code>.
