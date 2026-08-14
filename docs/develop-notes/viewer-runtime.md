@@ -43,9 +43,11 @@ These notes cover the main viewer runtime, downsampling behavior, channel contro
 
 ---
 
-## VS Code Fallback
+## Static Scatter Fallback
 
-When `jupyter-scatter` widget rendering fails in VS Code, UELer automatically replaces the scatter widget with a static Matplotlib figure. The chart plugin controls remain functional.
+`ChartDisplay.__init__` resolves `_scatter_backend` from `UELER_SCATTER_BACKEND`, defaulting to `widget` in every environment. An unrecognised value falls back to `widget` as well, and the comparison is case-insensitive.
+
+Setting `UELER_SCATTER_BACKEND=static` replaces the `jupyter-scatter` widget with a static Matplotlib figure plus an inline notice; the chart plugin controls remain functional either way. This used to be selected automatically when `VSCODE_PID` was present, because `jupyter-scatter` did not render reliably in the VS Code webview. It does now, so the fallback is opt-in only (#122).
 
 ---
 

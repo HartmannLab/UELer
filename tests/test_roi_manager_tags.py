@@ -287,6 +287,15 @@ class DummyROIManager:
         self.last_added = record
         return record
 
+    def get_roi(self, roi_id):
+        """No records are stored, so nothing is ever found.
+
+        ``_update_selected_roi`` reads the record back to decide whether it is
+        editing a shape ROI (whose bounds it must not overwrite with the
+        viewport); returning ``None`` keeps it on the viewport path.
+        """
+        return None
+
     def update_roi(self, roi_id, updates):
         self.last_updated = {"roi_id": roi_id, **updates}
         return True
@@ -332,8 +341,8 @@ class DummyMainViewer:
         self.last_center = record
 
 
-def make_plugin():
-    viewer = DummyMainViewer()
+def make_plugin(viewer=None):
+    viewer = viewer if viewer is not None else DummyMainViewer()
     plugin = object.__new__(ROIManagerPlugin)
     plugin.displayed_name = "ROI manager"
     plugin.SidePlots_id = "roi_manager_output"
@@ -355,6 +364,9 @@ def make_plugin():
     plugin._browser_expression_error = None
     plugin._browser_tag_buttons = {}
     plugin._thumbnail_downsample_cache = {}
+    plugin._shape_points = []
+    plugin._shape_editing = False
+    plugin._shape_edit_roi_id = None
     plugin.THUMBNAIL_MAX_EDGE = ROIManagerPlugin.THUMBNAIL_MAX_EDGE
     plugin.width = 6
     plugin.height = 3
@@ -653,36 +665,11 @@ class ROIManagerMapModeTests(unittest.TestCase):
     """Tests for ROI Manager map-mode lifecycle hooks and FOV attribution."""
 
     def _make_plugin(self, *, map_mode_active: bool = False):
+        # Delegates to the module-level factory so plugin state has to be
+        # declared in exactly one place.
         viewer = DummyMainViewer()
         viewer._map_mode_active = map_mode_active
-        plugin = make_plugin.__wrapped__(viewer) if hasattr(make_plugin, "__wrapped__") else None
-        # Rebuild plugin with the custom viewer
-        p = object.__new__(ROIManagerPlugin)
-        p.displayed_name = "ROI manager"
-        p.SidePlots_id = "roi_manager_output"
-        p.main_viewer = viewer
-        p.ui_component = SimpleNamespace()
-        p._selected_roi_id = None
-        p._suspend_ui_events = False
-        p.initialized = False
-        p.STATUS_COLORS = ROIManagerPlugin.STATUS_COLORS
-        p.CURRENT_MARKER_VALUE = ROIManagerPlugin.CURRENT_MARKER_VALUE
-        p._suspend_browser_events = False
-        p._browser_axis_to_roi = {}
-        p._browser_click_cid = None
-        p._browser_figure = None
-        p._browser_current_page = 1
-        p._browser_total_pages = 1
-        p._browser_last_signature = None
-        p._browser_expression_cache = None
-        p._browser_expression_error = None
-        p._browser_tag_buttons = {}
-        p._thumbnail_downsample_cache = {}
-        p.THUMBNAIL_MAX_EDGE = ROIManagerPlugin.THUMBNAIL_MAX_EDGE
-        p.width = 6
-        p.height = 3
-        p._build_widgets()
-        return p
+        return make_plugin(viewer)
 
     def test_capture_stores_fov_name_in_single_fov_mode(self):
         plugin = self._make_plugin(map_mode_active=False)

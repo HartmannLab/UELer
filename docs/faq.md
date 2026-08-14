@@ -99,18 +99,22 @@ Run `%matplotlib widget` once per kernel session before launching the viewer —
 interactive backend UELer relies on. If widgets still don't appear, restart the kernel and re-run the
 cells.
 
-### The scatter plot is not shown in VS Code
+### Do I need to set `UELER_SCATTER_BACKEND`?
 
-In VS Code the scatter plugin defaults to a **static Matplotlib fallback** (interactive
-`jupyter-scatter` widgets don't always render there). To force the interactive widget, set the
-environment variable before launching:
+No. The interactive `jupyter-scatter` widget is the default in **every** environment — JupyterLab, the
+classic Notebook, and VS Code alike. Earlier versions dropped to a static Matplotlib scatter under VS
+Code automatically, which is why you may have seen `UELER_SCATTER_BACKEND=widget` in older notebooks;
+that is no longer needed and can be removed.
+
+The static scatter is still available as an opt-in fallback:
 
 ```python
 import os
-os.environ["UELER_SCATTER_BACKEND"] = "widget"
+os.environ["UELER_SCATTER_BACKEND"] = "static"
 ```
 
-JupyterLab and the classic Notebook use the interactive backend by default.
+Set it before launching the viewer. The plot then carries an inline notice saying the static backend
+is active.
 
 ### The histogram says it requires Bokeh
 

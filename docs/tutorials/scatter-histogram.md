@@ -65,9 +65,8 @@ The selection is a set of cells, not a set of pixels, so it **survives a FOV cha
 has some. Zooming and panning keep the outlines too — including while a finer resolution level is
 being loaded.
 
-!!! note "Scatter in VS Code"
-    In VS Code the scatter defaults to a static Matplotlib fallback. To force the interactive widget,
-    set the environment variable `UELER_SCATTER_BACKEND=widget` before launching.
+!!! note "Static scatter fallback"
+    The interactive `jupyter-scatter` widget is the default everywhere, VS Code included — no environment variable needed. If you want the static Matplotlib scatter instead, set `UELER_SCATTER_BACKEND=static` before launching; the plot then carries an inline notice saying so.
 
 ---
 

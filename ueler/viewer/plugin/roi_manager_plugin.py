@@ -60,7 +60,14 @@ from .tile_gallery_widget import (
     text_placeholder_uri,
 )
 from ..layout_utils import column_block_layout, content_widget_layout, flex_fill_layout
-from ..roi_manager import format_roi_label
+from ..roi_manager import (
+    build_shape_fields,
+    format_roi_label,
+    is_shape_record,
+    parse_geometry,
+    polyline_length,
+    shape_display_kind,
+)
 from ..tag_expression import TagExpressionError, compile_tag_expression
 
 
@@ -82,6 +89,12 @@ class ROIManagerPlugin(PluginBase):
         "warning": "#f9a825",
         "error": "#c62828",
     }
+
+    #: Colour of the shape path stamped onto browser thumbnails.
+    SHAPE_TILE_COLOR = "#00e5ff"
+
+    _SHAPE_IDLE_TEXT = "No shape in the editor."
+    _SHAPE_DRAWING_TEXT = "Drawing — click on the image to place vertices."
 
     BROWSER_COLUMNS = 3
     BROWSER_ROWS = 4
@@ -107,6 +120,10 @@ class ROIManagerPlugin(PluginBase):
         self._browser_expression_error = None
         self._browser_tag_buttons = {}
         self._thumbnail_downsample_cache: Dict[str, int] = {}
+        # Shape (line/polygon) editing state.
+        self._shape_points: List[List[float]] = []
+        self._shape_editing = False
+        self._shape_edit_roi_id: Optional[str] = None
 
         self._build_widgets()
         self._build_layout()
@@ -126,6 +143,8 @@ class ROIManagerPlugin(PluginBase):
     # UI construction
     # ------------------------------------------------------------------
     def _build_widgets(self) -> None:
+        # Shapes first: the editor layout embeds the shape block.
+        self._build_shape_widgets()
         self._build_editor_widgets()
         self._build_browser_widgets()
 
@@ -325,10 +344,107 @@ class ROIManagerPlugin(PluginBase):
                 ),
                 actions_primary,
                 metadata_box,
+                self.ui_component.shape_root,
                 file_box,
                 self.ui_component.status,
             ],
             layout=column_block_layout(gap="10px"),
+        )
+
+    def _build_shape_widgets(self) -> None:
+        """Build the line/polygon ROI block hosted inside the editor tab."""
+        button_layout = Layout(width="auto", flex="1 1 auto")
+
+        self.ui_component.shape_draw_button = Button(
+            description="Draw",
+            icon="pencil",
+            button_style="primary",
+            tooltip="Click on the image to place vertices",
+            layout=button_layout,
+        )
+        self.ui_component.shape_edit_button = Button(
+            description="Edit",
+            icon="edit",
+            tooltip="Load the selected shape ROI back into the editor",
+            layout=button_layout,
+        )
+        self.ui_component.shape_finish_button = Button(
+            description="Finish",
+            icon="check",
+            disabled=True,
+            layout=button_layout,
+        )
+        self.ui_component.shape_cancel_button = Button(
+            description="Cancel",
+            icon="times",
+            disabled=True,
+            layout=button_layout,
+        )
+        self.ui_component.shape_undo_button = Button(
+            description="Undo",
+            icon="undo",
+            disabled=True,
+            layout=button_layout,
+        )
+        self.ui_component.shape_redo_button = Button(
+            description="Redo",
+            icon="repeat",
+            disabled=True,
+            layout=button_layout,
+        )
+        self.ui_component.shape_save_button = Button(
+            description="Save shape",
+            icon="save",
+            button_style="success",
+            disabled=True,
+            layout=button_layout,
+        )
+
+        self.ui_component.shape_closed_checkbox = Checkbox(
+            value=False,
+            description="Closed shape (polygon)",
+            indent=False,
+            layout=Layout(width="auto"),
+        )
+        self.ui_component.shape_show_checkbox = Checkbox(
+            value=True,
+            description="Show shapes on canvas",
+            indent=False,
+            layout=Layout(width="auto"),
+        )
+
+        self.ui_component.shape_summary = HTML(f"<em>{self._SHAPE_IDLE_TEXT}</em>")
+
+        self.ui_component.shape_root = VBox(
+            [
+                HTML("<strong>Line / polygon ROI</strong>"),
+                HBox(
+                    [
+                        self.ui_component.shape_draw_button,
+                        self.ui_component.shape_edit_button,
+                        self.ui_component.shape_finish_button,
+                        self.ui_component.shape_cancel_button,
+                    ],
+                    layout=Layout(gap="6px", flex_flow="row wrap"),
+                ),
+                HBox(
+                    [
+                        self.ui_component.shape_undo_button,
+                        self.ui_component.shape_redo_button,
+                        self.ui_component.shape_save_button,
+                    ],
+                    layout=Layout(gap="6px", flex_flow="row wrap"),
+                ),
+                HBox(
+                    [
+                        self.ui_component.shape_closed_checkbox,
+                        self.ui_component.shape_show_checkbox,
+                    ],
+                    layout=Layout(gap="16px", flex_flow="row wrap", align_items="center"),
+                ),
+                self.ui_component.shape_summary,
+            ],
+            layout=column_block_layout(gap="6px"),
         )
 
     def _build_browser_widgets(self) -> None:
@@ -508,6 +624,18 @@ class ROIManagerPlugin(PluginBase):
         self.ui_component.tags.observe(self._on_tags_value_change, names="value")
         self.ui_component.tag_entry.observe(self._on_tag_entry_change, names="value")
 
+        self.ui_component.shape_draw_button.on_click(self._on_shape_draw)
+        self.ui_component.shape_edit_button.on_click(self._on_shape_edit)
+        self.ui_component.shape_finish_button.on_click(self._on_shape_finish)
+        self.ui_component.shape_cancel_button.on_click(self._on_shape_cancel)
+        self.ui_component.shape_undo_button.on_click(self._on_shape_undo)
+        self.ui_component.shape_redo_button.on_click(self._on_shape_redo)
+        self.ui_component.shape_save_button.on_click(self._on_shape_save)
+        self.ui_component.shape_closed_checkbox.observe(self._on_shape_closed_change, names="value")
+        self.ui_component.shape_show_checkbox.observe(
+            lambda *_: self.refresh_shape_overlay(), names="value"
+        )
+
         self.ui_component.browser_tags_filter.observe(
             self._on_browser_filter_change, names="value"
         )
@@ -537,6 +665,10 @@ class ROIManagerPlugin(PluginBase):
     def _on_roi_table_change(self, df):  # pragma: no cover - observer callback
         try:
             self.refresh_roi_table(df, force_refresh=True)
+        except Exception:  # pragma: no cover - best-effort UI update
+            pass
+        try:
+            self.refresh_shape_overlay()
         except Exception:  # pragma: no cover - best-effort UI update
             pass
 
@@ -1114,7 +1246,65 @@ class ROIManagerPlugin(PluginBase):
                     region_ds=derive_downsampled_region(region_xy, factor),
                 )
 
-        return np.clip(array, 0.0, 1.0)
+        array = np.clip(array, 0.0, 1.0)
+        return self._draw_shape_on_tile(array, record, factor)
+
+    def _draw_shape_on_tile(
+        self,
+        array: np.ndarray,
+        record: Mapping[str, object],
+        downsample_factor: float,
+    ) -> np.ndarray:
+        """Stamp a shape ROI's path onto its rendered thumbnail.
+
+        Without this a shape tile is indistinguishable from a viewport bookmark
+        of the same region, since both render the same bounding box.
+        """
+        geometry = parse_geometry(record.get("geometry")) if is_shape_record(record) else None
+        if geometry is None or array is None or array.ndim < 2:
+            return array
+
+        try:
+            factor = max(1.0, float(downsample_factor))
+            x_origin = float(record.get("x_min") or 0.0)
+            y_origin = float(record.get("y_min") or 0.0)
+        except (TypeError, ValueError):
+            return array
+
+        height, width = array.shape[0], array.shape[1]
+        points = [
+            ((x - x_origin) / factor, (y - y_origin) / factor)
+            for x, y in geometry["points"]
+        ]
+        if geometry["closed"] and len(points) > 2:
+            points.append(points[0])
+
+        color = np.array(to_rgb(self.SHAPE_TILE_COLOR), dtype=array.dtype)
+        canvas = np.array(array, copy=True)
+        if len(points) == 1:
+            self._plot_tile_pixel(canvas, points[0][0], points[0][1], color, width, height)
+            return canvas
+
+        for (x0, y0), (x1, y1) in zip(points, points[1:]):
+            steps = int(max(abs(x1 - x0), abs(y1 - y0))) + 1
+            for step in range(steps + 1):
+                ratio = step / steps
+                self._plot_tile_pixel(
+                    canvas,
+                    x0 + (x1 - x0) * ratio,
+                    y0 + (y1 - y0) * ratio,
+                    color,
+                    width,
+                    height,
+                )
+        return canvas
+
+    @staticmethod
+    def _plot_tile_pixel(canvas, x: float, y: float, color, width: int, height: int) -> None:
+        col = int(round(x))
+        row = int(round(y))
+        if 0 <= row < height and 0 <= col < width:
+            canvas[row, col, : color.shape[0]] = color
 
     def _render_map_roi_tile(
         self,
@@ -1197,7 +1387,8 @@ class ROIManagerPlugin(PluginBase):
                 downsample_factor=ds,
                 snapshot=snapshot,
             )
-        return np.clip(image.astype(np.float32), 0.0, 1.0)
+        image = np.clip(image.astype(np.float32), 0.0, 1.0)
+        return self._draw_shape_on_tile(image, record, ds)
 
     def _resolve_roi_overlays(
         self,
@@ -1630,6 +1821,8 @@ class ROIManagerPlugin(PluginBase):
             self._suspend_ui_events = False
 
         self._populate_fields(record)
+        # Centring may have switched FOV or map, so the visible shapes change.
+        self.refresh_shape_overlay()
 
         if not apply_presets:
             self.set_status("Centered on ROI without applying the saved preset.", level="info")
@@ -1837,20 +2030,20 @@ class ROIManagerPlugin(PluginBase):
         except Exception:  # pragma: no cover - downstream errors
             return False
 
-    def _capture_current_view(self, _):
-        viewport = self.main_viewer.capture_viewport_bounds()
-        if viewport is None:
-            self.set_status("Unable to read viewport bounds.", level="error")
-            return
+    def _common_metadata_fields(self) -> Dict[str, object]:
+        """Return the location and preset fields every saved ROI carries.
 
-        record = {
+        Shared by view capture, view update and shape saving so a shape ROI
+        stores the same presets, and therefore renders the same thumbnail, as a
+        viewport bookmark.
+        """
+        return {
             "fov": self.main_viewer.get_active_fov() or "",
             "map_id": (
                 getattr(self.main_viewer, "_active_map_id", None) or ""
                 if getattr(self.main_viewer, "_map_mode_active", False)
                 else ""
             ),
-            **viewport,
             "marker_set": self._resolve_marker_set_choice(),
             "name": self.ui_component.name_input.value.strip(),
             "tags": list(self.ui_component.tags.value),
@@ -1859,6 +2052,19 @@ class ROIManagerPlugin(PluginBase):
             "mask_color_set": self._get_active_mask_color_set(),
             "mask_visibility": self._get_mask_visibility_payload(),
             "mask_painter_state": self._get_mask_painter_payload(),
+        }
+
+    def _capture_current_view(self, _):
+        viewport = self.main_viewer.capture_viewport_bounds()
+        if viewport is None:
+            self.set_status("Unable to read viewport bounds.", level="error")
+            return
+
+        record = {
+            **self._common_metadata_fields(),
+            **viewport,
+            "roi_kind": "",
+            "geometry": "",
         }
 
         result = self.main_viewer.roi_manager.add_roi(record)
@@ -1872,33 +2078,29 @@ class ROIManagerPlugin(PluginBase):
             self.set_status("Select an ROI to update.", level="warning")
             return
 
-        viewport = self.main_viewer.capture_viewport_bounds()
-        if viewport is None:
-            self.set_status("Unable to read viewport bounds.", level="error")
-            return
+        record = self.main_viewer.roi_manager.get_roi(self._selected_roi_id)
+        shape = bool(record) and is_shape_record(record)
 
-        updates = {
-            **viewport,
-            "fov": self.main_viewer.get_active_fov() or "",
-            "map_id": (
-                getattr(self.main_viewer, "_active_map_id", None) or ""
-                if getattr(self.main_viewer, "_map_mode_active", False)
-                else ""
-            ),
-            "marker_set": self._resolve_marker_set_choice(),
-            "name": self.ui_component.name_input.value.strip(),
-            "tags": list(self.ui_component.tags.value),
-            "comment": self.ui_component.comment.value.strip(),
-            "annotation_palette": self._get_active_annotation_palette(),
-            "mask_color_set": self._get_active_mask_color_set(),
-            "mask_visibility": self._get_mask_visibility_payload(),
-            "mask_painter_state": self._get_mask_painter_payload(),
-        }
+        updates = dict(self._common_metadata_fields())
+        if shape:
+            # A shape owns its bounds; overwriting them with the viewport would
+            # detach the stored box from the vertices.  Use Edit → Save shape to
+            # change the geometry itself.
+            updates.pop("fov", None)
+            updates.pop("map_id", None)
+        else:
+            viewport = self.main_viewer.capture_viewport_bounds()
+            if viewport is None:
+                self.set_status("Unable to read viewport bounds.", level="error")
+                return
+            updates.update(viewport)
 
         updated = self.main_viewer.roi_manager.update_roi(self._selected_roi_id, updates)
         if updated:
             self.refresh_roi_table(force_refresh=True)
-            self.set_status("ROI updated.", level="success")
+            self.set_status(
+                "Shape ROI metadata updated." if shape else "ROI updated.", level="success"
+            )
         else:
             self.set_status("Failed to update ROI.", level="error")
 
@@ -1969,6 +2171,331 @@ class ROIManagerPlugin(PluginBase):
                 f"Centered on ROI; missing preset(s): {missing_text}.",
                 level="warning",
             )
+
+    # ------------------------------------------------------------------
+    # Line / polygon ROI editing
+    # ------------------------------------------------------------------
+    def _image_display(self):
+        return getattr(self.main_viewer, "image_display", None)
+
+    def _canvas_limit(self) -> Optional[Tuple[float, float]]:
+        """Return the ``(width, height)`` the shape bounding box is clamped to."""
+        display = self._image_display()
+        try:
+            width = float(getattr(display, "width", 0.0))
+            height = float(getattr(display, "height", 0.0))
+        except (TypeError, ValueError):
+            return None
+        if width <= 0.0 or height <= 0.0:
+            return None
+        return (width, height)
+
+    def _pixel_size_nm(self) -> float:
+        """Return the physical size of one full-resolution pixel, in nanometres."""
+        if getattr(self.main_viewer, "_map_mode_active", False):
+            map_size = getattr(self.main_viewer, "_map_pixel_size_nm", None)
+            if map_size:
+                try:
+                    return float(map_size)
+                except (TypeError, ValueError):
+                    pass
+        try:
+            return float(getattr(self.main_viewer, "pixel_size_nm", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _shape_points_valid(self) -> bool:
+        """A line needs two vertices, a closed polygon needs three."""
+        minimum = 3 if self.ui_component.shape_closed_checkbox.value else 2
+        return len(self._shape_points) >= minimum
+
+    def _on_shape_draw(self, _) -> None:
+        self._start_shape_edit([], bool(self.ui_component.shape_closed_checkbox.value), None)
+
+    def _on_shape_edit(self, _) -> None:
+        if not self._selected_roi_id:
+            self.set_status("Select a shape ROI to edit.", level="warning")
+            return
+        record = self.main_viewer.roi_manager.get_roi(self._selected_roi_id)
+        if not record:
+            self.set_status("Selected ROI no longer exists.", level="error")
+            self.refresh_roi_table(force_refresh=True)
+            return
+        geometry = parse_geometry(record.get("geometry")) if is_shape_record(record) else None
+        if geometry is None:
+            self.set_status("The selected ROI has no shape to edit.", level="warning")
+            return
+
+        # Vertices are stored in the coordinate space of their own FOV or map,
+        # so the right one has to be on screen before they can be edited.
+        try:
+            self.main_viewer.center_on_roi(record)
+        except Exception:  # pragma: no cover - navigation is best effort
+            _logger.debug("Failed to centre before editing a shape ROI", exc_info=True)
+
+        self._start_shape_edit(
+            geometry["points"], bool(geometry["closed"]), str(record.get("roi_id") or "")
+        )
+
+    def _start_shape_edit(
+        self, points: Sequence[Sequence[float]], closed: bool, roi_id: Optional[str]
+    ) -> None:
+        display = self._image_display()
+        if display is None or not hasattr(display, "enable_polyline_editor"):
+            self.set_status("The image canvas is not available for drawing.", level="error")
+            return
+
+        self._shape_points = [[float(x), float(y)] for x, y in points]
+        self._shape_edit_roi_id = roi_id or None
+        self._shape_editing = True
+
+        self._suspend_ui_events = True
+        try:
+            self.ui_component.shape_closed_checkbox.value = bool(closed)
+        finally:
+            self._suspend_ui_events = False
+
+        try:
+            display.enable_polyline_editor(
+                self._shape_points,
+                bool(closed),
+                self._on_shape_points_change,
+                self._on_shape_edit_finished,
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            self._shape_editing = False
+            self.set_status(f"Could not start drawing: {exc}", level="error")
+            self._update_shape_controls()
+            return
+
+        self._update_shape_controls()
+        # Hide the saved copy of the record now being edited, so the canvas does
+        # not carry a stale duplicate underneath the editor's own artists.
+        self.refresh_shape_overlay()
+        self.set_status(
+            "Drawing: left-click adds a vertex, drag moves one, right-click deletes it.",
+            level="info",
+        )
+
+    def _on_shape_points_change(self, points: Sequence[Sequence[float]]) -> None:
+        self._shape_points = [[float(x), float(y)] for x, y in points]
+        self._update_shape_controls()
+
+    def _on_shape_edit_finished(self, points: Optional[Sequence[Sequence[float]]]) -> None:
+        self._shape_editing = False
+        if points is None:
+            self._shape_points = []
+            self._shape_edit_roi_id = None
+            self.set_status("Shape drawing cancelled.", level="info")
+        else:
+            self._shape_points = [[float(x), float(y)] for x, y in points]
+            if self._shape_points_valid():
+                self.set_status("Shape ready — click Save shape to store it.", level="success")
+            else:
+                self.set_status("Not enough vertices to save this shape.", level="warning")
+        self._update_shape_controls()
+        self.refresh_shape_overlay()
+
+    def _on_shape_finish(self, _) -> None:
+        display = self._image_display()
+        if display is not None and hasattr(display, "finish_polyline"):
+            display.finish_polyline()
+
+    def _on_shape_cancel(self, _) -> None:
+        display = self._image_display()
+        if display is not None and hasattr(display, "finish_polyline"):
+            display.finish_polyline(cancel=True)
+        else:  # pragma: no cover - defensive
+            self._on_shape_edit_finished(None)
+
+    def _on_shape_undo(self, _) -> None:
+        display = self._image_display()
+        if display is not None and hasattr(display, "undo_polyline") and not display.undo_polyline():
+            self.set_status("Nothing to undo.", level="info")
+
+    def _on_shape_redo(self, _) -> None:
+        display = self._image_display()
+        if display is not None and hasattr(display, "redo_polyline") and not display.redo_polyline():
+            self.set_status("Nothing to redo.", level="info")
+
+    def _on_shape_closed_change(self, change) -> None:
+        if self._suspend_ui_events or change.get("name") != "value":
+            return
+        display = self._image_display()
+        if self._shape_editing and display is not None and hasattr(display, "set_polyline_closed"):
+            display.set_polyline_closed(bool(change.get("new")))
+        self._update_shape_controls()
+
+    def _on_shape_save(self, _) -> None:
+        # Saving mid-draw implies finishing: requiring Finish first is a trap
+        # that silently does nothing when the user forgets it.
+        if self._shape_editing:
+            self._on_shape_finish(None)
+        if not self._shape_points:
+            self.set_status("Draw a shape before saving.", level="warning")
+            return
+        closed = bool(self.ui_component.shape_closed_checkbox.value)
+        if not self._shape_points_valid():
+            needed = "three" if closed else "two"
+            self.set_status(f"A shape needs at least {needed} vertices.", level="warning")
+            return
+
+        fields = build_shape_fields(self._shape_points, closed, limit=self._canvas_limit())
+        if fields is None:  # pragma: no cover - guarded by _shape_points_valid
+            self.set_status("Could not derive bounds for this shape.", level="error")
+            return
+
+        record = dict(self._common_metadata_fields())
+        record.update(fields)
+        record["zoom"] = float(getattr(self.main_viewer, "current_downsample_factor", 1) or 1)
+
+        manager = self.main_viewer.roi_manager
+        if self._shape_edit_roi_id and manager.get_roi(self._shape_edit_roi_id):
+            saved = manager.update_roi(self._shape_edit_roi_id, record)
+            action = "updated"
+        else:
+            saved = manager.add_roi(record)
+            action = "saved"
+
+        if not saved:
+            self.set_status("Failed to save the shape.", level="error")
+            return
+
+        self._selected_roi_id = str(saved.get("roi_id") or "") or None
+        self._shape_edit_roi_id = self._selected_roi_id
+        kind = "Polygon" if closed else "Line"
+
+        # The shape now lives in the table and is drawn from there, so the
+        # working copy is released rather than kept as a second source of truth.
+        points = self._shape_points
+        self._shape_points = []
+
+        # preserve_page=False: navigate to page 1 so the new shape is visible.
+        self.refresh_roi_table(force_refresh=True, preserve_page=False)
+        self.refresh_shape_overlay()
+        self._update_shape_controls()
+        self._set_shape_summary(points, closed, prefix="Saved ")
+        self.set_status(f"{kind} ROI {action}.", level="success")
+
+    def _update_shape_controls(self) -> None:
+        editing = self._shape_editing
+        components = self.ui_component
+        components.shape_draw_button.disabled = editing
+        components.shape_edit_button.disabled = editing
+        components.shape_finish_button.disabled = not editing
+        components.shape_cancel_button.disabled = not editing
+        components.shape_undo_button.disabled = not editing
+        components.shape_redo_button.disabled = not editing
+        components.shape_save_button.disabled = not self._shape_points_valid()
+        self._set_shape_summary(
+            self._shape_points, bool(components.shape_closed_checkbox.value)
+        )
+
+    def _set_shape_summary(
+        self,
+        points: Sequence[Sequence[float]],
+        closed: bool,
+        prefix: str = "",
+    ) -> None:
+        if not points:
+            text = self._SHAPE_DRAWING_TEXT if self._shape_editing else self._SHAPE_IDLE_TEXT
+            self.ui_component.shape_summary.value = f"<em>{html.escape(text)}</em>"
+            return
+
+        kind = "Polygon" if closed else "Line"
+        measure = "perimeter" if closed else "length"
+        length_px = polyline_length(points, closed)
+        detail = f"{len(points)} vertices · {measure} {length_px:.1f} px"
+
+        pixel_size_nm = self._pixel_size_nm()
+        if pixel_size_nm > 0:
+            detail += f" ({length_px * pixel_size_nm / 1000.0:.2f} µm)"
+
+        label = f"{prefix}{kind}: {detail}"
+        self.ui_component.shape_summary.value = f"<em>{html.escape(label)}</em>"
+
+    def refresh_shape_overlay(self) -> None:
+        """Redraw the shapes that belong to whatever is currently on screen.
+
+        Draws the saved shapes of the active FOV or map **plus** the working
+        copy held in the editor.  Without the working copy a shape vanishes the
+        moment ``Finish`` removes the editing artists and only reappears once it
+        has been saved and read back from the table.
+        """
+        display = self._image_display()
+        if display is None or not hasattr(display, "draw_shape_rois"):
+            return
+
+        if not bool(getattr(self.ui_component.shape_show_checkbox, "value", True)):
+            try:
+                display.clear_shape_rois()
+            except Exception:  # pragma: no cover - defensive
+                _logger.debug("Failed to clear the shape overlay", exc_info=True)
+            return
+
+        shapes = [
+            (geometry["points"], bool(geometry["closed"]))
+            for geometry in self._visible_shape_geometries()
+        ]
+        # While drawing, the editor's own artists already show the working copy.
+        if self._shape_points and not self._shape_editing:
+            shapes.append(
+                (
+                    [list(point) for point in self._shape_points],
+                    bool(self.ui_component.shape_closed_checkbox.value),
+                )
+            )
+        try:
+            display.draw_shape_rois(shapes)
+        except Exception:  # pragma: no cover - defensive
+            _logger.debug("Failed to draw the shape overlay", exc_info=True)
+
+    def _visible_shape_geometries(self) -> List[Dict[str, object]]:
+        """Return the parsed geometry of every shape ROI in the current view.
+
+        The record currently loaded in the editor is skipped while a working
+        copy exists, so an edited shape is not drawn twice — once stale from the
+        table and once live from the editor.
+        """
+        try:
+            table = self.main_viewer.roi_manager.table
+        except Exception:  # pragma: no cover - defensive
+            return []
+        if table is None or table.empty:
+            return []
+
+        map_mode = bool(getattr(self.main_viewer, "_map_mode_active", False))
+        active_map = str(getattr(self.main_viewer, "_active_map_id", "") or "")
+        active_fov = self.main_viewer.get_active_fov() or ""
+        superseded = self._shape_edit_roi_id if self._shape_points else None
+
+        geometries: List[Dict[str, object]] = []
+        for _, row in table.iterrows():
+            record = row.to_dict()
+            if not is_shape_record(record):
+                continue
+            if superseded and str(record.get("roi_id") or "") == superseded:
+                continue
+            if map_mode:
+                if str(record.get("map_id") or "") != active_map:
+                    continue
+            elif str(record.get("fov") or "") != active_fov:
+                continue
+            geometry = parse_geometry(record.get("geometry"))
+            if geometry is not None:
+                geometries.append(geometry)
+        return geometries
+
+    def _cancel_shape_edit_for_view_change(self) -> None:
+        """Abort an in-progress shape when the coordinate space changes underneath it."""
+        if not self._shape_editing:
+            return
+        display = self._image_display()
+        if display is not None and hasattr(display, "finish_polyline"):
+            display.finish_polyline(cancel=True)
+        else:  # pragma: no cover - defensive
+            self._on_shape_edit_finished(None)
+        self.set_status("Shape drawing cancelled — the view changed.", level="warning")
 
     def _on_tags_value_change(self, change) -> None:
         if self._suspend_ui_events or change.get("name") != "value":
@@ -2132,8 +2659,20 @@ class ROIManagerPlugin(PluginBase):
                 str(record.get("mask_color_set") or ""),
                 str(record.get("mask_visibility") or ""),
             )
+            self._show_saved_shape_summary(record)
         finally:
             self._suspend_ui_events = False
+
+    def _show_saved_shape_summary(self, record) -> None:
+        """Describe the selected ROI's stored shape without entering edit mode."""
+        if self._shape_editing:
+            return
+        geometry = parse_geometry(record.get("geometry")) if is_shape_record(record) else None
+        if geometry is None:
+            self._set_shape_summary([], False)
+            return
+        self.ui_component.shape_closed_checkbox.value = bool(geometry["closed"])
+        self._set_shape_summary(geometry["points"], bool(geometry["closed"]), prefix="Saved ")
 
     def _clear_fields(self) -> None:
         self._suspend_ui_events = True
@@ -2143,6 +2682,8 @@ class ROIManagerPlugin(PluginBase):
             self.ui_component.tags.value = ()
             self.ui_component.comment.value = ""
             self._update_metadata_summaries("", "", "")
+            if not self._shape_editing:
+                self._set_shape_summary([], False)
         finally:
             self._suspend_ui_events = False
 
@@ -2172,6 +2713,8 @@ class ROIManagerPlugin(PluginBase):
     # Lifecycle hooks
     # ------------------------------------------------------------------
     def on_fov_change(self) -> None:  # type: ignore[override]
+        self._cancel_shape_edit_for_view_change()
+        self.refresh_shape_overlay()
         limit_editor = bool(getattr(self.ui_component.limit_to_fov_checkbox, "value", False))
         limit_browser = bool(getattr(self.ui_component.browser_limit_to_current, "value", False))
         if not (limit_editor or limit_browser):
@@ -2180,20 +2723,24 @@ class ROIManagerPlugin(PluginBase):
 
     def on_map_mode_activate(self) -> None:  # type: ignore[override]
         """Disable FOV-scope controls and show all ROIs when map mode activates."""
+        self._cancel_shape_edit_for_view_change()
         for attr in ("limit_to_fov_checkbox", "browser_limit_to_current"):
             widget = getattr(self.ui_component, attr, None)
             if widget is not None:
                 widget.value = False
                 widget.disabled = True
         self.refresh_roi_table(force_refresh=True, preserve_page=False)
+        self.refresh_shape_overlay()
 
     def on_map_mode_deactivate(self) -> None:  # type: ignore[override]
         """Re-enable FOV-scope controls when map mode deactivates."""
+        self._cancel_shape_edit_for_view_change()
         for attr in ("limit_to_fov_checkbox", "browser_limit_to_current"):
             widget = getattr(self.ui_component, attr, None)
             if widget is not None:
                 widget.disabled = False
         self.refresh_roi_table(force_refresh=True, preserve_page=False)
+        self.refresh_shape_overlay()
 
     def on_marker_sets_changed(self) -> None:
         self.refresh_marker_options()
@@ -2201,4 +2748,5 @@ class ROIManagerPlugin(PluginBase):
     def after_all_plugins_loaded(self) -> None:  # type: ignore[override]
         super().after_all_plugins_loaded()
         self.refresh_marker_options()
+        self.refresh_shape_overlay()
         self.refresh_roi_table(force_refresh=True, preserve_page=False)

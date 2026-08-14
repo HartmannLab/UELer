@@ -1,3 +1,4 @@
+import os
 import sys
 import types
 import unittest
@@ -754,6 +755,39 @@ class HeatmapFooterPersistenceTests(unittest.TestCase):
         self.assertIn(heatmap.plot_output, getattr(heatmap.plot_section, "children", ()))
         self.assertGreaterEqual(heatmap.restore_footer_canvas_calls, 3)
         self.assertEqual(len(viewer.wide_plugin_tab.children), 2)
+
+
+class ScatterBackendDefaultTests(unittest.TestCase):
+    """The interactive scatter is the default in every environment, VS Code included."""
+
+    def _backend(self, environ):
+        viewer = _StubViewer()
+        viewer.fov_key = "fov"
+        viewer.label_key = "label"
+        with patch.dict(os.environ, environ, clear=True):
+            return ChartDisplay(viewer, width=6, height=4)._scatter_backend
+
+    def test_default_is_widget(self):
+        self.assertEqual(self._backend({}), "widget")
+
+    def test_vscode_no_longer_forces_the_static_fallback(self):
+        # VSCODE_PID used to select "static"; jupyter-scatter renders in the
+        # VS Code webview now, so the interactive backend is used there too.
+        self.assertEqual(self._backend({"VSCODE_PID": "1234"}), "widget")
+
+    def test_static_is_opt_in(self):
+        self.assertEqual(self._backend({"UELER_SCATTER_BACKEND": "static"}), "static")
+        # ...and still opt-in under VS Code, where it is no longer automatic.
+        self.assertEqual(
+            self._backend({"UELER_SCATTER_BACKEND": "static", "VSCODE_PID": "1234"}),
+            "static",
+        )
+
+    def test_unrecognised_value_falls_back_to_widget(self):
+        self.assertEqual(self._backend({"UELER_SCATTER_BACKEND": "nonsense"}), "widget")
+
+    def test_value_is_case_insensitive(self):
+        self.assertEqual(self._backend({"UELER_SCATTER_BACKEND": "STATIC"}), "static")
 
 
 if __name__ == "__main__":  # pragma: no cover

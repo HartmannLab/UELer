@@ -2331,6 +2331,7 @@ class BatchExportMapROIItemsTests(unittest.TestCase):
             cell_apply_filter=SimpleNamespace(on_click=lambda *a: None),
             cell_preview_button=SimpleNamespace(on_click=lambda *a: None),
             roi_limit_to_fov=SimpleNamespace(value=False, observe=lambda *a, **kw: None),
+            roi_include_shapes=SimpleNamespace(value=True, observe=lambda *a, **kw: None),
             roi_selection=SimpleNamespace(options=[], value=()),
             include_masks=SimpleNamespace(observe=lambda *a, **kw: None),
             mask_outline_thickness=SimpleNamespace(observe=lambda *a, **kw: None),

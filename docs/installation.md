@@ -179,8 +179,8 @@ The documentation site is then available at `http://127.0.0.1:8000`.
 
 ## Troubleshooting
 
-!!! tip "Widget not rendering in VS Code"
-    If the interactive scatter plots are not shown in VS Code, UELer automatically falls back to a static Matplotlib figure. See the [FAQ](faq.md) for details.
+!!! tip "Widget not rendering"
+    The interactive scatter is the default in every environment, VS Code included. If widgets do not render at all, check that `%matplotlib widget` ran in the kernel; a static Matplotlib scatter is available as an opt-in fallback. See the [FAQ](faq.md) for details.
 
 !!! tip "ModuleNotFoundError on import"
     Make sure you have activated the correct environment and that `pip install -e .` completed without errors.

@@ -57,7 +57,7 @@ from ..scale_bar import (
     effective_pixel_size_nm,
 )
 from .plugin_base import PluginBase
-from ..roi_manager import format_roi_label
+from ..roi_manager import format_roi_label, is_shape_record
 from ..layout_utils import column_block_layout, content_widget_layout, flex_fill_layout
 
 _logger = logging.getLogger(__name__)
@@ -541,6 +541,13 @@ class BatchExportPlugin(PluginBase):
             indent=False,
             layout=Layout(width="auto"),
         )
+        self.ui_component.roi_include_shapes = Checkbox(
+            value=True,
+            description="Include line/polygon ROIs",
+            indent=False,
+            tooltip="Shape ROIs export as their bounding-box region",
+            layout=Layout(width="auto"),
+        )
         self.ui_component.roi_selection = SelectMultiple(
             options=[],
             description="ROIs:",
@@ -549,7 +556,16 @@ class BatchExportPlugin(PluginBase):
         )
 
         self.ui_component.roi_box = VBox(
-            [self.ui_component.roi_limit_to_fov, self.ui_component.roi_selection],
+            [
+                HBox(
+                    [
+                        self.ui_component.roi_limit_to_fov,
+                        self.ui_component.roi_include_shapes,
+                    ],
+                    layout=Layout(gap="16px", flex_flow="row wrap", align_items="center"),
+                ),
+                self.ui_component.roi_selection,
+            ],
             layout=column_block_layout(gap="6px"),
         )
 
@@ -639,6 +655,9 @@ class BatchExportPlugin(PluginBase):
         self.ui_component.cell_apply_filter.on_click(lambda _: self.refresh_cell_options())
         self.ui_component.cell_preview_button.on_click(lambda _: self._preview_single_cell())
         self.ui_component.roi_limit_to_fov.observe(lambda _: self.refresh_roi_options(), names="value")
+        self.ui_component.roi_include_shapes.observe(
+            lambda _: self.refresh_roi_options(), names="value"
+        )
         roi_mgr = getattr(self.main_viewer, "roi_manager", None)
         if roi_mgr is not None:
             roi_mgr._table.add_observer(lambda _df: self.refresh_roi_options())
@@ -764,9 +783,16 @@ class BatchExportPlugin(PluginBase):
             if current_fov:
                 df = df[df["fov"] == current_fov]
 
+        shapes_toggle = getattr(self.ui_component, "roi_include_shapes", None)
+        include_shapes = bool(getattr(shapes_toggle, "value", True))
+
         options = []
         for _, row in df.iterrows():
             record = row.to_dict()
+            # A shape ROI exports as its bounding-box region, which the job
+            # builder already derives from x_min/x_max/y_min/y_max.
+            if not include_shapes and is_shape_record(record):
+                continue
             roi_id = str(record.get("roi_id"))
             label = format_roi_label(record)
             options.append((label, roi_id))

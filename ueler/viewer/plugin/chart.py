@@ -96,17 +96,22 @@ class ChartDisplay(PluginBase):
 
         self.single_point_click_state = 0
         backend_env = os.environ.get("UELER_SCATTER_BACKEND")
-        default_backend = "static" if os.environ.get("VSCODE_PID") else "widget"
+        # Interactive everywhere by default. This used to fall back to "static"
+        # under VS Code (detected via VSCODE_PID) because jupyter-scatter widgets
+        # did not render reliably in its webview; they do now, and the static
+        # fallback cost VS Code users linked brushing for no reason. Set
+        # UELER_SCATTER_BACKEND=static to opt back into the Matplotlib fallback.
+        default_backend = "widget"
         backend = (backend_env or default_backend).lower()
         if backend not in {"widget", "static"}:
             backend = default_backend
         self._scatter_backend = backend
         self._scatter_fallback_notice = HTML(
             value=(
-                "<b>Scatter fallback active.</b> Interactive scatter widgets are disabled in this "
-                "environment; showing a static Matplotlib plot instead. Set "
-                "<code>UELER_SCATTER_BACKEND=widget</code> (after enabling widget support) to "
-                "force the interactive scatter backend."
+                "<b>Static scatter backend active.</b> Showing a static Matplotlib plot instead "
+                "of the interactive scatter. This is opt-in: unset "
+                "<code>UELER_SCATTER_BACKEND</code> (or set it to <code>widget</code>) and restart "
+                "the kernel to get the interactive scatter back."
             ),
             layout=Layout(width="100%"),
         )

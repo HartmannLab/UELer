@@ -69,6 +69,21 @@ class ImageDisplay:
         self._lasso_selector = None
         self._lasso_active = False
         self._lasso_on_complete = None
+        # Polyline/polygon editing state (see enable_polyline_editor).
+        self._polyline_active = False
+        self._polyline_points: list[list[float]] = []
+        self._polyline_closed = False
+        self._polyline_cids: list[int] = []
+        self._polyline_artists: list = []
+        self._polyline_undo: list = []
+        self._polyline_redo: list = []
+        self._polyline_on_change = None
+        self._polyline_on_finish = None
+        self._polyline_drag_index = None
+        self._polyline_press = None
+        self._polyline_dragged = False
+        # Persistent artists for saved shape ROIs.
+        self._shape_roi_artists: list = []
         # Viewport size trackers used by on_draw to detect zoom changes even
         # when the center is unchanged (e.g., scroll-wheel zoom).
         self.prev_viewport_width: float = 0.0
@@ -365,6 +380,10 @@ class ImageDisplay:
             return
 
         if self._lasso_active:
+            return
+
+        # Drawing a shape must not also select the cells under the vertices.
+        if getattr(self, "_polyline_active", False):
             return
 
         # Check if any navigation tool is active
@@ -727,16 +746,7 @@ class ImageDisplay:
         # Release any active navigation tool so the LassoSelector can acquire
         # the canvas widget lock.  Without this, zoom/pan mode silently blocks
         # all LassoSelector events via canvas.widgetlock.
-        try:
-            toolbar = self.fig.canvas.toolbar
-            if toolbar is not None and getattr(toolbar, 'mode', '') != '':
-                mode = str(toolbar.mode).lower()
-                if 'zoom' in mode and hasattr(toolbar, 'zoom'):
-                    toolbar.zoom()
-                elif 'pan' in mode and hasattr(toolbar, 'pan'):
-                    toolbar.pan()
-        except Exception:
-            pass
+        self._release_navigation_tool()
         self._lasso_active = True
         self._lasso_on_complete = on_complete
         self._lasso_selector = LassoSelector(
@@ -806,6 +816,380 @@ class ImageDisplay:
             timer.start()
         except Exception:
             self._lasso_selector = None
+
+    # ------------------------------------------------------------------
+    # Polyline / polygon editing helpers
+    # ------------------------------------------------------------------
+    # Shapes are drawn as Matplotlib artists rather than painted into the RGB
+    # array the way ``update_patches`` draws mask highlights.  ``update_patches``
+    # bakes its pixels into the image and any later ``set_data`` erases them;
+    # artists live on their own layer, no code path clears these axes, so a
+    # shape survives zoom, pan, FOV switches and every mask repaint.
+
+    EDIT_PATH_COLOR = "#ff9800"
+    EDIT_VERTEX_COLOR = "#ff1744"
+    SHAPE_ROI_COLOR = "#00e5ff"
+
+    def enable_polyline_editor(
+        self,
+        points=None,
+        closed: bool = False,
+        on_change=None,
+        on_finish=None,
+    ):
+        """Start interactive polyline/polygon editing on the main canvas.
+
+        Left-click appends a vertex, left-drag moves the vertex under the
+        cursor, right-click deletes the nearest one, ``enter`` finishes and
+        ``escape`` cancels.  ``on_change`` is called after every edit with the
+        current point list; ``on_finish`` is called with the final point list
+        (or ``None`` when the gesture was cancelled).
+        """
+        self.disable_polyline_editor()
+
+        # An active zoom/pan tool holds canvas.widgetlock and silently swallows
+        # every event — the same trap enable_lasso_selector has to sidestep.
+        self._release_navigation_tool()
+
+        self._polyline_active = True
+        self._polyline_closed = bool(closed)
+        self._polyline_points = [[float(x), float(y)] for x, y in (points or [])]
+        self._polyline_on_change = on_change
+        self._polyline_on_finish = on_finish
+        self._polyline_undo = []
+        self._polyline_redo = []
+        self._polyline_drag_index = None
+        self._polyline_press = None
+        self._polyline_dragged = False
+
+        canvas = self.fig.canvas
+        self._polyline_cids = [
+            canvas.mpl_connect("button_press_event", self._on_polyline_press),
+            canvas.mpl_connect("motion_notify_event", self._on_polyline_motion),
+            canvas.mpl_connect("button_release_event", self._on_polyline_release),
+            canvas.mpl_connect("key_press_event", self._on_polyline_key),
+        ]
+        self._refresh_polyline_artists()
+
+    def disable_polyline_editor(self):
+        """Leave editing mode and remove the in-progress artists."""
+        for cid in getattr(self, "_polyline_cids", ()) or ():
+            try:
+                self.fig.canvas.mpl_disconnect(cid)
+            except Exception:
+                pass
+        self._polyline_cids = []
+        self._polyline_active = False
+        self._polyline_on_change = None
+        self._polyline_on_finish = None
+        self._polyline_drag_index = None
+        self._polyline_press = None
+        self._polyline_dragged = False
+        self._remove_artists(getattr(self, "_polyline_artists", None))
+        self._polyline_artists = []
+        self._request_draw()
+
+    @property
+    def polyline_points(self):
+        """Return a copy of the vertices currently being edited."""
+        return [list(point) for point in getattr(self, "_polyline_points", ())]
+
+    def set_polyline_closed(self, closed: bool):
+        """Switch the shape being edited between polyline and closed polygon."""
+        self._polyline_closed = bool(closed)
+        self._refresh_polyline_artists()
+        self._notify_polyline_change()
+
+    def finish_polyline(self, cancel: bool = False):
+        """End the editing session, reporting the result to ``on_finish``."""
+        on_finish = getattr(self, "_polyline_on_finish", None)
+        points = None if cancel else self.polyline_points
+        self.disable_polyline_editor()
+        self._polyline_points = []
+        if on_finish is not None:
+            on_finish(points)
+
+    def undo_polyline(self):
+        """Restore the vertex list from before the last edit."""
+        if not getattr(self, "_polyline_undo", None):
+            return False
+        self._polyline_redo.append(self.polyline_points)
+        self._polyline_points = self._polyline_undo.pop()
+        self._refresh_polyline_artists()
+        self._notify_polyline_change()
+        return True
+
+    def redo_polyline(self):
+        """Re-apply the edit most recently undone."""
+        if not getattr(self, "_polyline_redo", None):
+            return False
+        self._polyline_undo.append(self.polyline_points)
+        self._polyline_points = self._polyline_redo.pop()
+        self._refresh_polyline_artists()
+        self._notify_polyline_change()
+        return True
+
+    def _save_polyline_state(self):
+        """Push the current vertices onto the undo stack and drop the redo stack."""
+        self._polyline_undo.append(self.polyline_points)
+        self._polyline_redo.clear()
+
+    def _polyline_hit_radius(self) -> float:
+        """Return the vertex grab radius in data units, scaled to the zoom level."""
+        try:
+            x_min, x_max = sorted(self.ax.get_xlim())
+            span = abs(x_max - x_min)
+        except Exception:
+            span = 0.0
+        return max(2.0, span * 0.01)
+
+    def _nearest_vertex(self, x: float, y: float):
+        """Return the index of the vertex within grab range of ``(x, y)``."""
+        radius = self._polyline_hit_radius()
+        best_index = None
+        best_distance = radius
+        for index, (px, py) in enumerate(getattr(self, "_polyline_points", ())):
+            distance = math.hypot(px - x, py - y)
+            if distance <= best_distance:
+                best_index = index
+                best_distance = distance
+        return best_index
+
+    def _on_polyline_press(self, event):
+        if not getattr(self, "_polyline_active", False) or event.inaxes != self.ax:
+            return
+        if self._navigation_tool_active():
+            return
+        x, y = event.xdata, event.ydata
+        if x is None or y is None:
+            return
+
+        if event.button == MouseButton.RIGHT:
+            index = self._nearest_vertex(x, y)
+            if index is not None:
+                self._save_polyline_state()
+                self._polyline_points.pop(index)
+                self._refresh_polyline_artists()
+                self._notify_polyline_change()
+            return
+
+        if event.button != MouseButton.LEFT:
+            return
+
+        self._polyline_dragged = False
+        self._polyline_press = (x, y)
+        index = self._nearest_vertex(x, y)
+        if index is not None:
+            self._polyline_drag_index = index
+            # Recorded before the drag so one undo restores the pre-drag position.
+            self._save_polyline_state()
+
+    def _on_polyline_motion(self, event):
+        if not getattr(self, "_polyline_active", False) or event.inaxes != self.ax:
+            return
+        if self._polyline_press is None:
+            return
+        x, y = event.xdata, event.ydata
+        if x is None or y is None:
+            return
+
+        if math.hypot(x - self._polyline_press[0], y - self._polyline_press[1]) > self._polyline_hit_radius() / 4.0:
+            self._polyline_dragged = True
+
+        if self._polyline_drag_index is not None:
+            self._polyline_points[self._polyline_drag_index] = [float(x), float(y)]
+            self._refresh_polyline_artists()
+
+    def _on_polyline_release(self, event):
+        if not getattr(self, "_polyline_active", False):
+            return
+        press = self._polyline_press
+        drag_index = self._polyline_drag_index
+        dragged = self._polyline_dragged
+        self._polyline_press = None
+        self._polyline_drag_index = None
+        self._polyline_dragged = False
+
+        if press is None or event.button != MouseButton.LEFT:
+            return
+
+        if drag_index is not None:
+            if not dragged:
+                # A click that landed on a vertex without moving it: the undo
+                # entry pushed on press would otherwise be a no-op step.
+                self._polyline_undo.pop()
+            else:
+                self._notify_polyline_change()
+            return
+
+        if dragged:
+            # A drag that started on empty canvas is a pan gesture, not a vertex.
+            return
+
+        x = event.xdata if event.xdata is not None else press[0]
+        y = event.ydata if event.ydata is not None else press[1]
+        self._save_polyline_state()
+        self._polyline_points.append([float(x), float(y)])
+        self._refresh_polyline_artists()
+        self._notify_polyline_change()
+
+    def _on_polyline_key(self, event):
+        if not getattr(self, "_polyline_active", False):
+            return
+        key = (getattr(event, "key", "") or "").lower()
+        if key == "enter":
+            self.finish_polyline()
+        elif key == "escape":
+            self.finish_polyline(cancel=True)
+        elif key in ("ctrl+z", "cmd+z"):
+            self.undo_polyline()
+        elif key in ("ctrl+y", "ctrl+shift+z", "cmd+shift+z"):
+            self.redo_polyline()
+        elif key in ("delete", "backspace") and self._polyline_points:
+            self._save_polyline_state()
+            self._polyline_points.pop()
+            self._refresh_polyline_artists()
+            self._notify_polyline_change()
+
+    def _notify_polyline_change(self):
+        callback = getattr(self, "_polyline_on_change", None)
+        if callback is not None:
+            callback(self.polyline_points)
+
+    def _refresh_polyline_artists(self):
+        """Redraw the in-progress shape from the current vertex list."""
+        self._remove_artists(getattr(self, "_polyline_artists", None))
+        self._polyline_artists = []
+
+        points = getattr(self, "_polyline_points", ())
+        if not points:
+            self._request_draw()
+            return
+
+        path = self._closed_path(points) if self._polyline_closed else list(points)
+        artists = []
+        try:
+            if len(path) > 1:
+                artists.extend(
+                    self.ax.plot(
+                        [p[0] for p in path],
+                        [p[1] for p in path],
+                        color=self.EDIT_PATH_COLOR,
+                        linewidth=1.5,
+                        zorder=10,
+                    )
+                )
+            artists.extend(
+                self.ax.plot(
+                    [p[0] for p in points],
+                    [p[1] for p in points],
+                    linestyle="none",
+                    marker="o",
+                    markersize=4,
+                    color=self.EDIT_VERTEX_COLOR,
+                    zorder=11,
+                )
+            )
+        except Exception:  # pragma: no cover - defensive for headless stubs
+            artists = []
+
+        self._polyline_artists = artists
+        self._request_draw()
+
+    # ------------------------------------------------------------------
+    # Saved shape ROI overlay
+    # ------------------------------------------------------------------
+    def draw_shape_rois(self, shapes):
+        """Draw saved shape ROIs as persistent artists.
+
+        ``shapes`` is an iterable of ``(points, closed)`` pairs in the same
+        coordinate space as the image.  Replaces whatever was drawn before.
+        """
+        self.clear_shape_rois()
+        artists = []
+        for entry in shapes or ():
+            try:
+                points, closed = entry[0], bool(entry[1])
+            except (TypeError, IndexError):
+                continue
+            if not points:
+                continue
+            path = self._closed_path(points) if closed else list(points)
+            try:
+                if len(path) > 1:
+                    artists.extend(
+                        self.ax.plot(
+                            [p[0] for p in path],
+                            [p[1] for p in path],
+                            color=self.SHAPE_ROI_COLOR,
+                            linewidth=1.2,
+                            zorder=9,
+                        )
+                    )
+                else:
+                    artists.extend(
+                        self.ax.plot(
+                            [path[0][0]],
+                            [path[0][1]],
+                            linestyle="none",
+                            marker="o",
+                            markersize=3,
+                            color=self.SHAPE_ROI_COLOR,
+                            zorder=9,
+                        )
+                    )
+            except Exception:  # pragma: no cover - defensive for headless stubs
+                continue
+        self._shape_roi_artists = artists
+        self._request_draw()
+
+    def clear_shape_rois(self):
+        """Remove the saved-shape overlay from the canvas."""
+        self._remove_artists(getattr(self, "_shape_roi_artists", None))
+        self._shape_roi_artists = []
+        self._request_draw()
+
+    # ------------------------------------------------------------------
+    # Shared helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _closed_path(points):
+        """Return ``points`` with the first vertex repeated to close the loop."""
+        path = list(points)
+        if len(path) > 2:
+            path.append(path[0])
+        return path
+
+    @staticmethod
+    def _remove_artists(artists):
+        for artist in artists or ():
+            try:
+                artist.remove()
+            except Exception:
+                pass
+
+    def _navigation_tool_active(self) -> bool:
+        toolbar = getattr(self.fig.canvas, "toolbar", None)
+        return toolbar is not None and bool(getattr(toolbar, "mode", ""))
+
+    def _release_navigation_tool(self):
+        """Deactivate zoom/pan so a selector can acquire the canvas widgetlock."""
+        try:
+            toolbar = self.fig.canvas.toolbar
+            if toolbar is not None and getattr(toolbar, "mode", "") != "":
+                mode = str(toolbar.mode).lower()
+                if "zoom" in mode and hasattr(toolbar, "zoom"):
+                    toolbar.zoom()
+                elif "pan" in mode and hasattr(toolbar, "pan"):
+                    toolbar.pan()
+        except Exception:
+            pass
+
+    def _request_draw(self):
+        try:
+            self.fig.canvas.draw_idle()
+        except Exception:  # pragma: no cover - defensive for headless stubs
+            pass
 
     def _deferred_lasso_cleanup(self):
         """Clean up the lasso selector reference after the event handler has returned."""
