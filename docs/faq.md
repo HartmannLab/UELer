@@ -97,7 +97,8 @@ or `pip install ".[dev]"`.
 
 Run `%matplotlib widget` once per kernel session before launching the viewer — it enables the
 interactive backend UELer relies on. If widgets still don't appear, restart the kernel and re-run the
-cells.
+cells. See [Display Settings](tutorials/display-settings.md#before-you-launch) for the rest of the
+launch checklist.
 
 ### Do I need to set `UELER_SCATTER_BACKEND`?
 
@@ -130,8 +131,10 @@ without a priming cell.
 
 ### Channel images appear all-white or all-black
 
-This is usually a contrast issue. Expand the **Channels** accordion and adjust the **Min** / **Max**
-contrast sliders for the affected channel.
+This is a contrast issue. Each channel's display range starts at the 99.9th percentile of its data,
+not its maximum — so a single bright artefact can push the whole image dark. Expand the **Channels**
+accordion and lower **Max** (for an all-black channel) or raise **Min** (for an all-white one). See
+[Getting contrast right](tutorials/display-settings.md#getting-contrast-right).
 
 ### How do I enable Map Mode?
 

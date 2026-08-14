@@ -58,6 +58,8 @@ Expand the **Channels** accordion in the left panel. Each selected channel expos
 
 These settings are per-session — save them as a marker set to reuse them.
 
+Contrast starts at an automatic range rather than the raw data range, which is what makes a channel look all-black or all-white when the default does not suit it. [Display Settings](display-settings.md#getting-contrast-right) explains where that range comes from and how to correct it.
+
 Enable **Show channel legend** to display a color key for the visible channels.
 
 ---
@@ -92,5 +94,6 @@ toggling selections.
 ## Next Steps
 
 - Explore the full [User Interface](user-interface.md) reference.
+- Set the viewer up properly for your dataset — [Display Settings](display-settings.md).
 - Capture [Regions of Interest](roi-manager.md).
 - Load a cell table to unlock [single-cell analysis](cell-table.md).

@@ -29,6 +29,7 @@ Everything here works on images alone — no cell table required.
 |---|---|
 | [Basic Usage](basic-usage.md) | Launch the viewer, pick an FOV, select channels, and navigate |
 | [User Interface](user-interface.md) | A reference map of the four regions and every left-panel control |
+| [Display Settings](display-settings.md) | Set the viewer up so it shows your data correctly — pixel size, cache, downsampling, contrast |
 | [Regions of Interest](roi-manager.md) | Capture, tag, and browse ROIs that persist across sessions |
 | [Map Mode](map-mode.md) | Stitch multiple FOVs into one spatial canvas *(opt-in feature)* |
 | [Batch Export](export.md) | Export full FOVs, ROIs, and single-cell crops to image files |
@@ -49,5 +50,6 @@ These features require a **cell table** (a per-cell feature CSV, e.g. from `ark-
 
 !!! tip "New here?"
     Start with [Basic Usage](basic-usage.md), then skim the [User Interface](user-interface.md)
-    reference. Once you have a cell table, move on to
+    reference. Before you trust what you see — or export it — walk through
+    [Display Settings](display-settings.md) once for the dataset. Then, with a cell table, move on to
     [Working with a Cell Table](cell-table.md).

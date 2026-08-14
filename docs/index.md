@@ -1,3 +1,7 @@
+<p align="center" markdown>
+![UELer — Unified Exploratory Linked Viewer](img/UELer_icon_wide.png){ width="620" style="max-width:100%; background:#ffffff; border-radius:12px; padding:14px;" }
+</p>
+
 # UELer
 
 **Unified Exploratory Linked Viewer** — a Jupyter Notebook-integrated viewer for spatial proteomics and multiplexed imaging data, with linked interactive plots and enhanced usability.

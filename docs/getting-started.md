@@ -171,5 +171,6 @@ base_folder/
 ## Next Steps
 
 - Learn the [User Interface](tutorials/user-interface.md) layout.
+- Walk through [Display Settings](tutorials/display-settings.md) — the pixel size, cache size, downsampling, and contrast defaults are tuned for MIBI data and are worth checking once per dataset.
 - Explore the [Tutorials](tutorials/index.md) for individual features.
 - Check the [FAQ](faq.md) if you run into issues.

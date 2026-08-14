@@ -69,6 +69,7 @@ nav:
       - Essentials:
           - Basic Usage: tutorials/basic-usage.md
           - User Interface: tutorials/user-interface.md
+          - Display Settings: tutorials/display-settings.md
           - Regions of Interest: tutorials/roi-manager.md
           - Map Mode: tutorials/map-mode.md
           - Batch Export: tutorials/export.md
