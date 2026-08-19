@@ -55,6 +55,8 @@
       
     
     
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
     <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
@@ -2003,12 +2005,12 @@ and no local data required.</p>
 <h3 id="how-do-i-stream-a-study-from-the-bioimage-archive">How do I stream a study from the BioImage Archive?<a class="headerlink" href="#how-do-i-stream-a-study-from-the-bioimage-archive" title="Permanent link">&para;</a></h3>
 <p>Use <code>run_viewer_bia</code> with an accession id (or a direct HTTPS URL) and an optional layout descriptor:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">viewer</span> <span class="o">=</span> <span class="n">ueler</span><span class="o">.</span><span class="n">run_viewer_bia</span><span class="p">(</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="s2">&quot;S-BIAD2557&quot;</span><span class="p">,</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="s2">"S-BIAD2557"</span><span class="p">,</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="n">descriptor</span><span class="o">=</span><span class="p">{</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>        <span class="s2">&quot;mode&quot;</span><span class="p">:</span> <span class="s2">&quot;folder&quot;</span><span class="p">,</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>        <span class="s2">&quot;base&quot;</span><span class="p">:</span> <span class="s2">&quot;Files/spatial_murine_iCCAvsHCC/image_data&quot;</span><span class="p">,</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>        <span class="s2">&quot;mask_dir&quot;</span><span class="p">:</span> <span class="s2">&quot;Files/spatial_murine_iCCAvsHCC/segmentation/cleaned_mask&quot;</span><span class="p">,</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>        <span class="s2">&quot;mask_glob&quot;</span><span class="p">:</span> <span class="s2">&quot;</span><span class="si">{fov}</span><span class="s2">_*.tiff&quot;</span><span class="p">,</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>        <span class="s2">"mode"</span><span class="p">:</span> <span class="s2">"folder"</span><span class="p">,</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>        <span class="s2">"base"</span><span class="p">:</span> <span class="s2">"Files/spatial_murine_iCCAvsHCC/image_data"</span><span class="p">,</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>        <span class="s2">"mask_dir"</span><span class="p">:</span> <span class="s2">"Files/spatial_murine_iCCAvsHCC/segmentation/cleaned_mask"</span><span class="p">,</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>        <span class="s2">"mask_glob"</span><span class="p">:</span> <span class="s2">"</span><span class="si">{fov}</span><span class="s2">_*.tiff"</span><span class="p">,</span>
 <a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    <span class="p">},</span>
 <a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="p">)</span>
 </code></pre></div>
@@ -2036,7 +2038,7 @@ Code automatically, which is why you may have seen <code>UELER_SCATTER_BACKEND=w
 that is no longer needed and can be removed.</p>
 <p>The static scatter is still available as an opt-in fallback:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;UELER_SCATTER_BACKEND&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;static&quot;</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">"UELER_SCATTER_BACKEND"</span><span class="p">]</span> <span class="o">=</span> <span class="s2">"static"</span>
 </code></pre></div>
 <p>Set it before launching the viewer. The plot then carries an inline notice saying the static backend
 is active.</p>

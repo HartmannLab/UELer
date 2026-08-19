@@ -1,0 +1,9 @@
+/* Home-page banner.
+   UELer_icon_wide.png is a transparent PNG whose wordmark is mostly black, so it
+   is illegible against the slate (dark) scheme.  The transparency is kept as-is
+   in light mode; only in dark mode does the logo get a light panel behind it. */
+[data-md-color-scheme="slate"] .ueler-banner img {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 14px;
+}

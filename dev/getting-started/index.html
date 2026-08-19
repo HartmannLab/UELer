@@ -55,6 +55,8 @@
       
     
     
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
     <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
@@ -1583,10 +1585,10 @@ UELer repository, and open:</p>
 <p>Edit the paths cell near the top of the notebook. Only <code>base_folder</code> is required — masks,
 annotations, and the cell table are all optional, and the viewer simply skips those features when a
 path is not provided.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">base_folder</span> <span class="o">=</span> <span class="s2">&quot;/path/to/your/image_data&quot;</span>                     <span class="c1"># Required</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">masks_folder</span> <span class="o">=</span> <span class="s2">&quot;/path/to/segmentation/output&quot;</span>                <span class="c1"># Optional</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">annotations_folder</span> <span class="o">=</span> <span class="s2">&quot;/path/to/annotations&quot;</span>                  <span class="c1"># Optional</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">cell_table_path</span> <span class="o">=</span> <span class="s2">&quot;/path/to/cell_table.csv&quot;</span>                  <span class="c1"># Optional (.csv or .h5ad)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">base_folder</span> <span class="o">=</span> <span class="s2">"/path/to/your/image_data"</span>                     <span class="c1"># Required</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">masks_folder</span> <span class="o">=</span> <span class="s2">"/path/to/segmentation/output"</span>                <span class="c1"># Optional</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">annotations_folder</span> <span class="o">=</span> <span class="s2">"/path/to/annotations"</span>                  <span class="c1"># Optional</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">cell_table_path</span> <span class="o">=</span> <span class="s2">"/path/to/cell_table.csv"</span>                  <span class="c1"># Optional (.csv or .h5ad)</span>
 </code></pre></div>
 <table>
 <thead>
@@ -1651,7 +1653,7 @@ and annotation overlays without a cell table.</p>
 <a href="../tutorials/cell-table/#anndata-input">Working with a Cell Table</a>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">anndata</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ad</span>
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">load_cell_table</span><span class="p">(</span><span class="n">viewer</span><span class="p">,</span> <span class="n">cell_table</span><span class="o">=</span><span class="n">ad</span><span class="o">.</span><span class="n">read_h5ad</span><span class="p">(</span><span class="s2">&quot;cells.h5ad&quot;</span><span class="p">),</span> <span class="n">auto_display</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">load_cell_table</span><span class="p">(</span><span class="n">viewer</span><span class="p">,</span> <span class="n">cell_table</span><span class="o">=</span><span class="n">ad</span><span class="o">.</span><span class="n">read_h5ad</span><span class="p">(</span><span class="s2">"cells.h5ad"</span><span class="p">),</span> <span class="n">auto_display</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 </code></pre></div>
 <div class="admonition note">
 <p class="admonition-title">Why two steps?</p>
@@ -1674,12 +1676,12 @@ an optional layout descriptor:</p>
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="o">%</span><span class="n">matplotlib</span> <span class="n">widget</span>
 <a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
 <a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="n">viewer</span> <span class="o">=</span> <span class="n">ueler</span><span class="o">.</span><span class="n">run_viewer_bia</span><span class="p">(</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    <span class="s2">&quot;S-BIAD2557&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    <span class="s2">"S-BIAD2557"</span><span class="p">,</span>
 <a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>    <span class="n">descriptor</span><span class="o">=</span><span class="p">{</span>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>        <span class="s2">&quot;mode&quot;</span><span class="p">:</span> <span class="s2">&quot;folder&quot;</span><span class="p">,</span>
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>        <span class="s2">&quot;base&quot;</span><span class="p">:</span> <span class="s2">&quot;Files/spatial_murine_iCCAvsHCC/image_data&quot;</span><span class="p">,</span>
-<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>        <span class="s2">&quot;mask_dir&quot;</span><span class="p">:</span> <span class="s2">&quot;Files/spatial_murine_iCCAvsHCC/segmentation/cleaned_mask&quot;</span><span class="p">,</span>
-<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>        <span class="s2">&quot;mask_glob&quot;</span><span class="p">:</span> <span class="s2">&quot;</span><span class="si">{fov}</span><span class="s2">_*.tiff&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>        <span class="s2">"mode"</span><span class="p">:</span> <span class="s2">"folder"</span><span class="p">,</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>        <span class="s2">"base"</span><span class="p">:</span> <span class="s2">"Files/spatial_murine_iCCAvsHCC/image_data"</span><span class="p">,</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>        <span class="s2">"mask_dir"</span><span class="p">:</span> <span class="s2">"Files/spatial_murine_iCCAvsHCC/segmentation/cleaned_mask"</span><span class="p">,</span>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>        <span class="s2">"mask_glob"</span><span class="p">:</span> <span class="s2">"</span><span class="si">{fov}</span><span class="s2">_*.tiff"</span><span class="p">,</span>
 <a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>    <span class="p">},</span>
 <a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="p">)</span>
 </code></pre></div>

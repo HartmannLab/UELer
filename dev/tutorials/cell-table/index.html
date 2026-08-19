@@ -55,6 +55,8 @@
       
     
     
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
     <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
@@ -1561,10 +1563,10 @@ analytical plugins appear in the right panel (<strong>Scatter plot</strong>, <st
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">anndata</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ad</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">ueler</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_cell_table</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="n">load_cell_table</span><span class="p">(</span><span class="n">viewer</span><span class="p">,</span> <span class="n">cell_table</span><span class="o">=</span><span class="n">ad</span><span class="o">.</span><span class="n">read_h5ad</span><span class="p">(</span><span class="s2">&quot;cells.h5ad&quot;</span><span class="p">),</span> <span class="n">auto_display</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="n">load_cell_table</span><span class="p">(</span><span class="n">viewer</span><span class="p">,</span> <span class="n">cell_table</span><span class="o">=</span><span class="n">ad</span><span class="o">.</span><span class="n">read_h5ad</span><span class="p">(</span><span class="s2">"cells.h5ad"</span><span class="p">),</span> <span class="n">auto_display</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 <a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
 <a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="c1"># equivalent, straight from disk:</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="n">load_cell_table</span><span class="p">(</span><span class="n">viewer</span><span class="p">,</span> <span class="n">cell_table_path</span><span class="o">=</span><span class="s2">&quot;cells.h5ad&quot;</span><span class="p">,</span> <span class="n">auto_display</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="n">load_cell_table</span><span class="p">(</span><span class="n">viewer</span><span class="p">,</span> <span class="n">cell_table_path</span><span class="o">=</span><span class="s2">"cells.h5ad"</span><span class="p">,</span> <span class="n">auto_display</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 </code></pre></div>
 <p><strong>What becomes selectable.</strong> AnnData keeps metadata and measurements apart; UELer offers both:</p>
 <table>
@@ -1612,8 +1614,8 @@ fields in the left panel (or rename the columns in <code>obs</code> beforehand).
 <p>The object you passed in is kept, and anything the plugins add to the table — FlowSOM clusters,
 heatmap meta-clusters, manual labels from the <strong>Cell Table Editor</strong> — is written back into its <code>obs</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">adata</span> <span class="o">=</span> <span class="n">viewer</span><span class="o">.</span><span class="n">get_cell_table_adata</span><span class="p">()</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">adata</span><span class="o">.</span><span class="n">obs</span><span class="o">.</span><span class="n">columns</span>          <span class="c1"># now includes e.g. &#39;FlowSOM_cluster&#39;</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">adata</span><span class="o">.</span><span class="n">write_h5ad</span><span class="p">(</span><span class="s2">&quot;cells_annotated.h5ad&quot;</span><span class="p">)</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">adata</span><span class="o">.</span><span class="n">obs</span><span class="o">.</span><span class="n">columns</span>          <span class="c1"># now includes e.g. 'FlowSOM_cluster'</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">adata</span><span class="o">.</span><span class="n">write_h5ad</span><span class="p">(</span><span class="s2">"cells_annotated.h5ad"</span><span class="p">)</span>
 </code></pre></div>
 <p>This also works for a CSV/DataFrame table: <code>get_cell_table_adata()</code> then builds an AnnData for you,
 using the numeric non-key columns as <code>X</code>.</p>
