@@ -1,17 +1,32 @@
 name: Release
 
 # PyPI is append-only: a version can be yanked but never replaced or reused.
-# So this workflow is deliberately asymmetric —
+# So a tag routes itself, and the route depends only on the version it declares —
 #
-#   pushing a `v*` tag  -> test, build, verify, upload to **TestPyPI**
-#   uploading to PyPI   -> only ever a manual workflow_dispatch from the tag
+#   pre-release tag (v0.5.0-alpha2, v0.6.0-rc1)  -> TestPyPI, unattended
+#   stable tag      (v0.6.0)                     -> TestPyPI, then PyPI
 #
-# There is no path where a `git push --tags` reaches the real index by itself.
-# Uploads use PyPI Trusted Publishing (OIDC): no API token lives in this
-# repository's secrets. Both indexes need a publisher configured *before* the
+# The stable leg is not unattended. Three things stand between a `git push --tags`
+# and the real index:
+#
+#   1. `tools/check_stable_rehearsal.py` — the stable tag must be the promotion of
+#      the highest `rc` tag for the same version, that rc must actually be served
+#      by TestPyPI, and everything that ships in the wheel must be unchanged
+#      between the two tags apart from the version declarations. So the exact code
+#      about to reach PyPI has already been built, uploaded and installable.
+#   2. The TestPyPI upload runs first and `pypi` needs it — the cheapest possible
+#      pre-flight, and the failure direction is the safe one.
+#   3. The `pypi` environment carries a required reviewer, so the run pauses with
+#      the artifacts built and verified and uploads only on approval.
+#
+# `workflow_dispatch` is kept as the way to re-drive an upload; it cannot skip any
+# of the three. Uploads use PyPI Trusted Publishing (OIDC): no API token lives in
+# this repository's secrets. Both indexes need a publisher configured *before* the
 # first upload — PyPI supports "pending" publishers for a project that does not
 # exist yet. Configure them against this repository, workflow `release.yml`, and
 # environment `pypi` / `testpypi` respectively.
+#
+# See dev_note/issue_tracking/issue79_release_channel_routing.md.
 
 on:
   push:
@@ -36,6 +51,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # No `needs`, so a malformed or unreleasable tag fails in seconds rather than
+  # after the full test matrix. `channel` names the *final* index for the run:
+  # `pypi` means "TestPyPI, then PyPI", never "PyPI instead".
+  route:
+    name: decide the target index
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      channel: ${{ steps.decide.outputs.channel }}
+      version: ${{ steps.decide.outputs.version }}
+      prerelease: ${{ steps.decide.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install the checking tools
+        run: python -m pip install --upgrade pip packaging
+
+      - name: Route the tag to an index
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          TAG: ${{ github.ref_name }}
+          CHOICE: ${{ inputs.publish_to }}
+        run: python tools/release_channel.py
+
   # The same suite that guards the branches, run at this commit. Its `package`
   # job builds and uploads the `dist` artifact that the jobs below publish, so
   # what reaches an index is literally what was tested — the same reason the
@@ -45,11 +90,15 @@ jobs:
 
   verify:
     name: verify the artifacts against the tag
-    needs: tests
+    needs: [tests, route]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The rehearsal check diffs two tags, which the default shallow
+          # single-ref checkout cannot see.
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -80,10 +129,24 @@ jobs:
         if: github.ref_type != 'tag'
         run: python tools/check_release_tag.py --no-tag --require-dist
 
+      # Only for a release heading to PyPI, and covering the manual path too: a
+      # stable version may only be the promotion of a candidate TestPyPI already
+      # serves. See the script's docstring for why "identical" cannot mean the
+      # same commit.
+      - name: The stable tag must promote a published release candidate
+        if: needs.route.outputs.channel == 'pypi'
+        run: python tools/check_stable_rehearsal.py "${{ github.ref_name }}"
+
   testpypi:
     name: publish to TestPyPI
-    needs: verify
-    if: github.event_name == 'push' || inputs.publish_to == 'testpypi'
+    needs: [route, verify]
+    # Every publishing run passes through here, stable releases included: it
+    # keeps TestPyPI a complete mirror of release history and makes the rehearsal
+    # of the next stable release automatic.
+    if: >-
+      github.event_name == 'push'
+      || inputs.publish_to == 'testpypi'
+      || inputs.publish_to == 'pypi'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: testpypi
@@ -98,21 +161,23 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
-          # A rehearsal may already have uploaded this version by hand; a
-          # re-run of the workflow should not fail on that.
+          # A rehearsal may already have uploaded this version by hand, and a
+          # stable release re-uploads nothing new here. Neither should fail.
           skip-existing: true
 
   pypi:
-    name: publish to PyPI (manual, irreversible)
-    needs: verify
-    # Three conditions, all required: an explicit dispatch, an explicit choice
-    # of PyPI, and a tag as the ref — so the upload is always tied to a tagged
-    # commit that `verify` has matched against the artifacts. Put a required
-    # reviewer on the `pypi` environment for a fourth.
+    name: publish to PyPI (irreversible)
+    needs: [route, verify, testpypi]
+    # A stable tag reaches this automatically; `verify` has matched the artifacts
+    # against the tag and against the published candidate, and the TestPyPI leg
+    # has already accepted them. The `pypi` environment's required reviewer is the
+    # last gate — no `skip-existing` here on purpose, so a duplicate upload fails
+    # loudly rather than passing quietly.
     if: >-
-      github.event_name == 'workflow_dispatch'
-      && inputs.publish_to == 'pypi'
-      && github.ref_type == 'tag'
+      (github.event_name == 'push' && needs.route.outputs.channel == 'pypi')
+      || (github.event_name == 'workflow_dispatch'
+          && inputs.publish_to == 'pypi'
+          && github.ref_type == 'tag')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: pypi

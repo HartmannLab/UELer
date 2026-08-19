@@ -1,6 +1,6 @@
 # Default developer targets for the UELer packaging skeleton
 
-.PHONY: help venv install test-fast test-integration test-ci scan scan-package scan-project docs docs-serve clean clean-dist build check-dist check-release publish-test publish
+.PHONY: help venv install test-fast test-integration test-ci scan scan-package scan-project docs docs-serve clean clean-dist build check-dist check-release check-rehearsal publish-test publish
 
 VENV ?= .venv
 BIN_DIR := $(if $(filter Windows_NT,$(OS)),Scripts,bin)
@@ -23,6 +23,7 @@ help:
 	@echo "  make build             # build a fresh sdist + wheel into dist/"
 	@echo "  make check-dist        # validate the built artefacts with twine"
 	@echo "  make check-release     # cross-check every version declaration (TAG=v0.5.0-alpha)"
+	@echo "  make check-rehearsal   # a stable tag must promote a published rc (TAG=v0.6.0)"
 	@echo "  make publish-test      # upload dist/* to TestPyPI"
 	@echo "  make publish           # upload dist/* to PyPI (irreversible)"
 	@echo "  make clean             # remove the virtual environment"
@@ -83,6 +84,14 @@ check-dist:
 # declarations and dist/ are cross-checked; with it, the tag joins the comparison.
 check-release:
 	python tools/check_release_tag.py $(if $(TAG),$(TAG),--no-tag)
+
+# Answers "may this stable tag go to PyPI?" the same way release.yml does: the
+# highest rc for the same version must be served by TestPyPI, and nothing that
+# ships in the wheel may have changed since it. Run it before tagging a stable
+# release, not after.
+check-rehearsal:
+	@$(if $(TAG),,echo "give a stable tag: make check-rehearsal TAG=v0.6.0" >&2; exit 1)
+	python tools/check_stable_rehearsal.py $(TAG)
 
 publish-test: check-dist
 	python -m twine upload --repository testpypi dist/*

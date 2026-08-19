@@ -52,10 +52,9 @@ UELer has been refactored from a notebook-first script layout into a proper Pyth
   families and unwrap categoricals to `.categories.dtype`, because a `category`
   column of integers still needs its labels converted (`series == "1"` matches no
   rows where `series == 1` matches).
-- **A tag push can reach TestPyPI but never PyPI.** The real upload takes an
-  explicit `workflow_dispatch` from a tag ref, behind a GitHub environment
-  reviewer. A PyPI version can be yanked but never reused, so `git push --tags`
-  must not be an irreversible public act.
+- **The tag routes itself: a pre-release goes to TestPyPI, a stable release goes to TestPyPI and then PyPI.** The routing predicate is `packaging.version.Version(tag).is_prerelease`, computed by `tools/release_channel.py` and tested against every tag in the repository's history. It needs no special-casing, because the repo's SemVer spellings (`-alpha`, `-alphaN`, `-rcN`) normalise to PEP 440 pre-release segments while a plain `vX.Y.Z` does not — and `v1.0.0.post1`, correctly, is not a pre-release. This **supersedes** the earlier rule that a tag push could never reach PyPI: that rule made `git push --tags` safe by requiring a second manual act, which proved only that a human clicked. The replacement is a stronger claim about the artifact (the rehearsal gate below) plus a required reviewer on the `pypi` environment, so a stable tag still cannot upload without a human, but the human is approving a run that is already built, verified and rehearsed rather than filling in a form.
+- **A stable release must be the promotion of a release candidate TestPyPI already serves.** `tools/check_stable_rehearsal.py` refuses `vX.Y.Z` unless an `rc` tag exists for the same version, the **highest** such rc is served by TestPyPI (asked of the index, since a tag proves nothing about whether its upload succeeded), and everything that ships in the wheel is unchanged between the two tags. "Unchanged" cannot mean the same commit or identical artifacts: `check_release_tag.py` requires the tag, `pyproject.toml`, `ueler.__version__` and both filenames to describe one release, so the rc necessarily declares `0.5.0rc1` where the stable declares `0.5.0`. The comparison is therefore scoped to `ueler/**` and `pyproject.toml`, permitting only the `__version__` and `version` lines to move — and checking that they move from exactly the rc version to exactly the stable one. Freezing `pyproject.toml` matters as much as freezing the code: a dependency floor edited after the rc changes the wheel's metadata and invalidates the rehearsal even though no Python moved. Docs, `doc/log.md` and `tests/**` stay free, which is exactly what the version-bump skill touches on an rc → stable bump. Ancestry is *reported*, not enforced: the content comparison already proves the shipped bytes match, while `git merge-base` can fail on a rebase or a shallow fetch without saying anything about the artifact. The rule applies to the next stable tag onward; nothing already released is revisited.
+- **Every publishing run passes through TestPyPI, stable releases included.** `pypi` has `needs: testpypi`, so the cheapest possible pre-flight always runs first and the failure direction is the safe one. It also keeps TestPyPI a complete mirror of release history, which is what makes the *next* release's rehearsal check meaningful.
 - **Generated caches stay out of `ueler/`.** The graphify output belongs at the repo root; a build tool that globs package data is one `package-data` change away from shipping it, and the `.gitignore` negation trick above cannot rescue a directory rule.
 
 ---
@@ -120,17 +119,29 @@ repository's secrets. One-time setup before the first release:
    `testpypi`.
 2. The same on **PyPI**, with environment `pypi`. "Pending" exists for projects that
    are not on the index yet.
-3. On GitHub → *Settings* → *Environments* → `pypi`, add a **required reviewer**.
+3. On GitHub → *Settings* → *Environments* → `pypi`, add a **required reviewer**. This
+   one is not optional: it is what keeps a human between a stable tag and an
+   irreversible upload now that the tag routes itself.
+4. Optionally, a **tag ruleset** (*Settings* → *Rules* → *Rulesets*, target *Tags*,
+   pattern `v*`) restricting who may create release tags.
 
-After that there are exactly two paths:
+After that the tag decides the route:
 
-| What you do | What happens |
+| What you push | What happens |
 |---|---|
-| push a `v*` tag | tests → build → verify the tag against the artifacts → upload to **TestPyPI** |
-| Actions → *Release* → *Run workflow*, ref = **the tag**, `publish_to: pypi` | the same gates, then upload to **PyPI** |
+| a pre-release tag (`v0.6.0-alpha1`, `v0.6.0-rc1`) | tests → build → verify → upload to **TestPyPI**, unattended |
+| a stable tag (`v0.6.0`) | the same, **plus** the rehearsal check against the highest published `rc`, then TestPyPI, then **PyPI** once the `pypi` environment's reviewer approves |
 
-A tag push cannot reach PyPI. `release.yml` publishes what `tests.yml` built in the
-same run, so the uploaded artifact is the tested one.
+So a stable release is a two-step act. First tag `v0.6.0-rc1` and let it publish; then,
+changing nothing but the version declarations and the documentation, tag `v0.6.0`. If
+anything that ships in the wheel changed since the candidate, `check_stable_rehearsal.py`
+fails the run and asks for `rc2` — that is the mechanism working, not friction to route
+around.
+
+`workflow_dispatch` survives as the way to re-drive an upload (ref = **the tag**,
+`publish_to: pypi`). It cannot skip anything: the rehearsal check runs in `verify`, which
+both paths share. `release.yml` publishes what `tests.yml` built in the same run, so the
+uploaded artifact is the tested one.
 
 ### Release targets
 
@@ -139,6 +150,7 @@ make test-ci                          # the suite with no skips tolerated
 make build                            # clean dist/ first, then build sdist + wheel
 make check-dist                       # twine check --strict
 make check-release TAG=v0.5.0-alpha   # tag == pyproject == __version__ == dist/
+make check-rehearsal TAG=v0.6.0       # a stable tag must promote a published rc
 make publish-test                     # upload to TestPyPI
 make publish                          # upload to PyPI — append-only, rehearse first
 ```
@@ -154,7 +166,8 @@ spelling (`0.5.0a0`) — `v0.5.0-a0` works too.
 
 - ~~Define and add a CI fast-stub job~~ — **closed as superseded**; the skip threshold it asked for exists, but on the real dependency stack (see the key decisions above).
 - Add an integration test workflow for the **GUI** paths. The full dependency stack is now covered by `tests.yml`; the widget layer still needs a browser, so it stays manual.
-- Rehearse on TestPyPI before the first real upload, and configure the Trusted Publishers described under *Release process*.
+- ~~Rehearse on TestPyPI before the first real upload~~ — **done** (2026-08-19). `v0.5.0-alpha2` published `ueler-viewer 0.5.0a2` to TestPyPI from a tag push, which also created and claimed the project there. The rehearsal is no longer a manual habit: `check_stable_rehearsal.py` now makes it a precondition of every stable release.
+- Configure the **PyPI** Trusted Publisher and the `pypi` environment reviewer. `https://pypi.org/simple/ueler-viewer/` still returns 404, so the project does not exist on PyPI and the publisher must be a *pending* one. Both are preconditions of the first stable tag: without the publisher the upload fails, and without the reviewer nothing stands between a stable tag and an irreversible upload.
 - Act on the 3.12 result. The leg has run **once**, and its first reading was not about 3.12: 19 errors, all one `np.issubdtype` call meeting pandas 3's default string dtype — now fixed. Tightening `requires-python` to `<3.12` would have concealed it, since pandas 3 installs on 3.11 too. Re-read after the fix lands; the evidence argues for *widening* (add `Programming Language :: Python :: 3.12`, drop `continue-on-error`), and the classifiers and the bound move together. Keep the leg regardless — it is the only coverage of pandas-3 semantics.
 - Revisit the **3.10 floor** before it costs coverage: pandas 3 and anndata 0.12 both require ≥ 3.11, and anndata 0.13 requires ≥ 3.12, so a 3.10 install is pinned to the older half of the stack. Nothing is broken today — pandas 3 cannot be installed on 3.10 at all, so the bad pandas-3-with-anndata-0.11 pairing is unreachable.
 - Confirm with DKFZ that naming both the author and the institute in the BSD copyright line matches institutional policy — the only part of the relicense that is not purely a code change.
