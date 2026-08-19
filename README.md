@@ -9,25 +9,38 @@ You can try UELer without installation by launching it on [Binder](https://mybin
 
 ### Option A — install from TestPyPI (recommended)
 
-UELer is not on PyPI yet: the project name is still being sorted out with the PyPI admins, so for now the releases live on **TestPyPI**. Install from there — `--extra-index-url` is required, because TestPyPI does not mirror UELer's runtime dependencies:
+**The install name is `ueler-viewer`; the import name is `ueler`.** PyPI administratively prohibits the name `ueler`, so the distribution ships as `ueler-viewer` — but nothing about using it changes, and `import ueler` stays exactly as it is. The same split as `scikit-image`/`skimage` and `opencv-python`/`cv2`.
+
+Releases currently live on **TestPyPI** while UELer is in pre-release. Install from there, on one line — `--extra-index-url` is required, because TestPyPI does not mirror UELer's runtime dependencies:
 
 ```shell
-pip install --pre \
-  --index-url https://test.pypi.org/simple/ \
-  --extra-index-url https://pypi.org/simple/ \
-  ueler
+pip install --pre --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ ueler-viewer
 ```
 
 `--pre` is needed while UELer is on a pre-release version. This pulls in every runtime dependency. Two optional extras are available:
 
 ```shell
 # adds ark-analysis (pinned) for ark-based workflows
-pip install --pre --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "ueler[ark]"
+pip install --pre --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "ueler-viewer[ark]"
 # adds the mkdocs toolchain for building the docs
-pip install --pre --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "ueler[docs]"
+pip install --pre --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "ueler-viewer[docs]"
 ```
 
-Requires Python 3.10 or 3.11. Once the name question is resolved, this becomes a plain `pip install ueler` from PyPI.
+Requires Python 3.10 or 3.11. Then, in Python:
+
+```python
+import ueler
+```
+
+#### If the install fails
+
+- **`No matching distribution found for scikit-image>=0.19`** (or for any other dependency) — the resolver is only seeing TestPyPI, which hosts an empty `scikit-image` project. Keep the command on **one line**: the `--extra-index-url https://pypi.org/simple/` part is what lets the dependencies come from real PyPI, and it is easy to lose when a multi-line command is pasted.
+- **Installing with `uv`** — uv's default `--index-strategy first-index` stops at the first index that lists a package at all, so it never falls back to PyPI for the dependencies. It needs an extra flag:
+
+  ```shell
+  uv pip install --prerelease=allow --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ --index-strategy unsafe-best-match ueler-viewer
+  ```
+- **You installed an earlier release under the old `ueler` distribution name** — run `pip uninstall ueler` first. Both distributions install the same `ueler/` package, and pip does not know they are the same project, so having both leaves two installs fighting over the same files.
 
 ### Option B — install from source (for development)
 
@@ -54,11 +67,9 @@ Use this if you want to modify UELer or track the `develop` branch.
 ### Upgrade UELer
 If you installed from TestPyPI:
 ```shell
-pip install --upgrade --pre \
-  --index-url https://test.pypi.org/simple/ \
-  --extra-index-url https://pypi.org/simple/ \
-  ueler
+pip install --upgrade --pre --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ ueler-viewer
 ```
+Coming from a release installed as `ueler` rather than `ueler-viewer`? Run `pip uninstall ueler` first — see [If the install fails](#if-the-install-fails).
 If you installed from source, pull the latest commits in your UELer directory. Re-run the install only when the dependencies changed — an editable install picks up code changes on its own:
 ```shell
 git pull
@@ -138,6 +149,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### **UELer v0.5.0-alpha2 Summary**
+- **Changed: install UELer as `ueler-viewer` — but keep importing it as `ueler`.** PyPI does not allow the project name `ueler` (most likely because it is one letter-swap away from the existing `euler` package), so releases are published as **`ueler-viewer`**. Only the `pip install` line changes: `import ueler` and every API, notebook and script stay exactly as they are, the same way you install `scikit-image` but import `skimage`. If you already installed an earlier release, run `pip uninstall ueler` before installing `ueler-viewer` — both provide the same `ueler` package, and pip cannot tell they are the same project. See [Installation](#installation) for the full command, including a fix for the `No matching distribution found for scikit-image>=0.19` error some installs hit.
 - **New: a [Display Settings](https://github.com/HartmannLab/UELer/blob/main/docs/tutorials/display-settings.md) page in the documentation.** The viewer opens with defaults that suit a MIBI dataset, and one of them is worth checking before you export anything: **Pixel Size (nm)** defaults to 390, the MIBI pixel pitch, and it drives the scale bar in the viewer *and* in every exported image — so on IMC or any other platform, every figure you export carries a wrong scale bar unless you change it. The new page is a setup walkthrough rather than another control reference: what to set first and why, where the automatic contrast range comes from (the 99.9th percentile, which is why a channel with one bright artefact looks all-black), what **Downsample** actually does, how to size the cache against your memory, and how to reset a session that came back in a strange state.
 - **Changed: the interactive scatter plot is now the default in every environment, VS Code included.** The Scatter plot plugin used to fall back to a static Matplotlib figure whenever it detected VS Code, so VS Code users lost linked brushing unless they knew to set `UELER_SCATTER_BACKEND=widget` before launching. You no longer need that line — delete it from your notebooks. The static renderer is still there if you want it, now as an opt-out: set `UELER_SCATTER_BACKEND=static` before launching the viewer.
 - **New: you can draw line and polygon ROIs again, and they live in the ROI manager.** Open the *ROI editor* tab and use the **Line / polygon ROI** block: **Draw**, then click on the image to place vertices, drag one to move it, right-click to delete it, and **Save shape** when you are done — **Finish** ends the drawing without saving if you want to look at it first, and the shape stays on the canvas either way. Tick **Closed shape (polygon)** for a closed outline, and read the vertex count and the length or perimeter — in pixels and µm — under the buttons. Shapes are ordinary ROIs, so they take names, tags and comments, appear in the ROI browser with their path drawn on the thumbnail, and travel through ROI CSV import and export. In batch export they render as their bounding-box region, and a new **Include line/polygon ROIs** checkbox leaves them out when you only want your saved views. **Show shapes on canvas** draws every saved shape of the current FOV or map over the image. This restores the old *Region annotation* plugin, which was dropped by the package restructure that shipped in v0.4.0.

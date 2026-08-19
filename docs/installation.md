@@ -12,30 +12,53 @@ There are two ways to install UELer. Pick the first unless you intend to modify 
 
 ---
 
-## Option A — Install from PyPI
+## Option A — Install from TestPyPI
+
+!!! info "The install name is `ueler-viewer`, the import name is `ueler`"
+
+    PyPI administratively prohibits the project name `ueler`, so the distribution is published as
+    **`ueler-viewer`**. Only `pip install` is affected — `import ueler` is unchanged, and so is every
+    API and notebook. This is the same split as `scikit-image`/`skimage` and `opencv-python`/`cv2`.
+
+While UELer is in pre-release, the releases live on **TestPyPI** rather than PyPI. TestPyPI does not
+mirror UELer's runtime dependencies, so the install needs a second index to resolve them — keep the
+command on one line:
 
 ```shell
-pip install ueler
+pip install --pre --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ ueler-viewer
 ```
 
-While UELer is on a pre-release version, ask pip for it explicitly:
+`--pre` is required while the version is a pre-release. That pulls in every runtime dependency. Two
+optional extras are available:
 
 ```shell
-pip install --pre ueler
+# adds ark-analysis (pinned) for ark-based workflows
+pip install --pre --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "ueler-viewer[ark]"
+# adds the mkdocs toolchain for building these docs
+pip install --pre --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "ueler-viewer[docs]"
 ```
 
-That pulls in every runtime dependency. Two optional extras are available:
+To upgrade later, add `--upgrade` to the same command.
 
-```shell
-pip install "ueler[ark]"    # adds ark-analysis (pinned) for ark-based workflows
-pip install "ueler[docs]"   # adds the mkdocs toolchain for building these docs
-```
+!!! warning "`No matching distribution found for scikit-image>=0.19`"
 
-To upgrade later:
+    This means the resolver only consulted TestPyPI, which hosts an empty `scikit-image` project, so
+    it found no candidates for the first dependency in the list. Two causes:
 
-```shell
-pip install --upgrade ueler
-```
+    - **`--extra-index-url https://pypi.org/simple/` is missing.** It is what allows the
+      dependencies to come from real PyPI, and it is easily lost when a multi-line command is pasted.
+    - **You are using `uv`.** Its default `--index-strategy first-index` stops at the first index
+      that lists a package at all and never falls back to PyPI:
+
+      ```shell
+      uv pip install --prerelease=allow --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ --index-strategy unsafe-best-match ueler-viewer
+      ```
+
+!!! warning "Upgrading from a release installed as `ueler`"
+
+    Run `pip uninstall ueler` before installing `ueler-viewer`. Both distributions install the same
+    `ueler/` package and pip does not know they are the same project, so keeping both leaves two
+    installs claiming the same files.
 
 The starter notebook is not part of the package — download
 [`script/run_ueler.ipynb`](https://github.com/HartmannLab/UELer/blob/main/script/run_ueler.ipynb)
@@ -109,8 +132,8 @@ git pull
 ```
 
 No reinstall is needed when using editable mode, unless `environment.yml` or `pyproject.toml`
-changed — then re-run `pip install -e .`. For a PyPI install, use `pip install --upgrade ueler`
-instead.
+changed — then re-run `pip install -e .`. For an index install, re-run the
+[Option A](#option-a-install-from-testpypi) command with `--upgrade` added.
 
 ---
 

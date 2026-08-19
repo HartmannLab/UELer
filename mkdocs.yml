@@ -87,6 +87,9 @@ nav:
       - ROI Workflows: develop-notes/roi-gallery.md
       - Heatmap & Cell Annotation: develop-notes/heatmap.md
       - OME-TIFF Loading: develop-notes/ome-tiff.md
+extra_css:
+  - stylesheets/extra.css
+
 extra:
   version:
     provider: mike

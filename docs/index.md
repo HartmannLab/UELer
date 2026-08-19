@@ -1,5 +1,5 @@
-<p align="center" markdown>
-![UELer — Unified Exploratory Linked Viewer](img/UELer_icon_wide.png){ width="620" style="max-width:100%; background:#ffffff; border-radius:12px; padding:14px;" }
+<p class="ueler-banner" align="center" markdown>
+![UELer — Unified Exploratory Linked Viewer](img/UELer_icon_wide.png){ width="620" style="max-width:100%;" }
 </p>
 
 # UELer

@@ -3,7 +3,12 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ueler"
+# The *distribution* name only — what `pip install` asks for. The import name is
+# `ueler` and is unaffected: it comes from the package directory, not from here.
+# `ueler` is administratively prohibited on PyPI (most likely as typo-squat
+# protection for the live `euler` project), so the distribution ships under
+# `ueler-viewer` on both indexes. See dev_note/issue_tracking/issue79_dist_name_rename.md.
+name = "ueler-viewer"
 version = "0.5.0-alpha2"
 description = "Unified Exploratory Linked Viewer for spatial proteomics and multiplexed imaging"
 readme = "README.md"
