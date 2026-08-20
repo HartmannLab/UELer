@@ -21,12 +21,25 @@ These notes document the heatmap plugin evolution, meta-cluster management, and 
 
 ## Heatmap Plugin
 
-The heatmap displays a cell-by-marker matrix, optionally grouped by meta-cluster. Key features:
+The heatmap displays a **cluster × marker** matrix, not a cell × marker one: `DataLayer` groups the
+cell table by the chosen class column and reduces each group to a median per marker
+(`df.groupby(cluster_column)[marker_columns].median()`), then z-scores the result. One row is one
+cluster, however many cells it contains — which is what makes the plugin usable on a million-cell
+table.
 
-- Interactive row (cell) selection linked to the scatter plot and cell gallery.
+Key features:
+
+- Interactive row (cluster) selection linked to the scatter plot and cell gallery.
 - FlowSOM meta-cluster assignment with a dedicated management tab.
-- Z-score normalization toggled per-session.
-- Wide layout mode for the footer panel.
+- Z-score normalization toggled per-session, across markers or across classes.
+- **Permanently allocated to the wide-footer panel** (`footer_only = True`, #121). The plugin is
+  skipped when the side accordion is assembled and always renders in the wide orientation; the earlier
+  footer/side placement toggle and the separate horizontal-layout toggle are both gone. The adapter is
+  constructed as `HeatmapModeAdapter(mode="wide")` and never switched.
+- Remembers a user-resized figure size across a tree re-cut.
+
+The plugin class composes four bases — `DataLayer`, `InteractionLayer`, `DisplayLayer`, `PluginBase` —
+which is why the implementation is spread across `heatmap.py` and `heatmap_layers.py`.
 
 ---
 
@@ -42,13 +55,25 @@ Color mappings are applied at render time and extend beyond the visible dendrogr
 
 ---
 
-## Cell Annotation Workflow (Planned)
+## Cell Annotation Workflow
 
-A cell annotation orchestrator is specified but not yet implemented as a plugin. The planned design:
+Shipped as `CellAnnotationPlugin` (`ueler/viewer/plugin/cell_annotation.py`), displayed as **Cell
+Annotation**. The design that was planned here is the design that landed:
 
-- AnnData-based checkpoint format with DAG-style lineage.
-- Marker set semantics for annotation snapshots.
-- Checkpoint browser UI for navigating annotation history.
+- **AnnData checkpoint format.** `CheckpointStore` (`ueler/viewer/checkpoint_store.py`) writes each
+  checkpoint as an `.h5ad` under `<dataset_root>/.UELer/dataset_<sha1>/checkpoints/`, with an
+  atomically-rewritten `manifest.json` beside it. The dataset hash scopes the history to one dataset,
+  so several under a shared base folder do not collide.
+- **DAG-style lineage.** Each record carries a `parent_id` (empty string when absent) and an `op` —
+  `initial`, `subset`, `recluster` or `finalize` — which is what lets the browser render the history as
+  a tree rather than a list.
+- **Checkpoint browser UI.** `CheckpointTreeWidget`, an anywidget tree renderer with an ipywidgets
+  fallback for environments without anywidget.
+- **Coupled to the Heatmap and FlowSOM plugins.** A checkpoint captures the heatmap state (z-scored
+  medians, meta-cluster palette, UI settings) *and* the FlowSOM parameters, so loading one restores
+  both at once.
+
+Unlike the Heatmap it links to, this plugin lives in the side accordion, not the footer.
 
 ---
 

@@ -11,6 +11,7 @@ This index maps all existing dev notes to the new topic-oriented summaries. The 
 - [dev_note/topic_heatmap_flowsom_cell_annotation.md](dev_note/topic_heatmap_flowsom_cell_annotation.md)
 - [dev_note/topic_roi_gallery_expression.md](dev_note/topic_roi_gallery_expression.md)
 - [dev_note/topic_export_pipeline.md](dev_note/topic_export_pipeline.md)
+- [dev_note/topic_mask_rendering_highlighting_coloring.md](dev_note/topic_mask_rendering_highlighting_coloring.md)
 
 ## Source note mapping
 
@@ -41,3 +42,14 @@ See the topic summary for consolidated map-mode notes and issue references.
 
 ### Export pipeline and scale bar
 See the topic summary for consolidated export notes and issue references.
+
+### Mask rendering, highlighting and coloring
+See the topic summary for the three overlay layers, their compositing order and the cell-colour registry.
+
+## Documentation site
+
+Every topic summary above has a published counterpart under `docs/develop-notes/`, and the two are kept in step by hand — the topic note is the source, the docs page is the distillation, and each page links its source at the top.
+
+`tools/check_docs_consistency.py` (run by `make check-docs`, `tests/test_docs_consistency.py`, and the docs workflow) enforces the *checkable* half of that relationship: a docs page naming a module, symbol, extra, Make target, environment variable or UI label that no longer exists fails the build. It has already caught an error in a topic note itself, so run it after editing either side.
+
+- [dev_note/issue_tracking/docs_consistency_audit.md](dev_note/issue_tracking/docs_consistency_audit.md) — the 2026-08-20 audit that introduced the checker: what had drifted, why the checks are scoped the way they are, and what was deliberately left alone

@@ -24,15 +24,27 @@ memory is tight; raise it for faster back-and-forth navigation.
 
 ## 3. Select Channels
 
-Channels are chosen with the **Channels:** field — a tag input. Click the field and pick (or type) a
-channel name; each channel you add appears as a removable chip. Remove a channel by deleting its chip.
+Channels are chosen with the **Channels:** field. Click it to open a scrollable list of every channel
+in the dataset, and type to filter that list (case-insensitive). A counter shows how much you are
+looking at — "12 of 148 shown · 2 selected".
+
+- **Select all shown** takes the whole filtered group at once, which is the quick way to grab a family
+  of markers: type `CD`, then click it.
+- **Clear** drops the entire selection.
+- Keyboard: ↑/↓ move, Enter toggles the highlighted channel, Esc closes the list, and Backspace on an
+  empty filter box removes the last channel you added.
+
+Each selected channel then appears as a **chip** below the field. Drag a chip by its `⋮⋮` grip to
+reorder it — a blue bar marks where it will land — or click a chip and press ← / → to move it, or
+Delete to remove it. The chip order sets the order of the per-channel control rows, the channel
+legend, and the panes of the [channel grid view](#7-use-the-channel-grid-view).
 
 The displayed image composites all selected channels using their assigned colors and contrast ranges.
 
-!!! note
-    The channel picker is a tag/token field, not a scrolling list — there is no Shift- or
-    Ctrl-click range selection. Add and remove channels one chip at a time, or load a saved
-    **marker set** (below) to apply a whole combination at once.
+!!! tip "Reordering does not change the image"
+    Channels are composited **additively**, so the result does not depend on their order and no
+    channel covers another. Reorder for your own convenience — see
+    [Display Settings](display-settings.md#4-channels-pick-them-then-order-them).
 
 ---
 
@@ -68,14 +80,20 @@ Enable **Show channel legend** to display a color key for the visible channels.
 
 If `masks_folder` and/or `annotations_folder` were provided:
 
-- In the **Channels** panel, enable a mask via its checkbox and pick a color from its **Mask
+…the left panel grows an accordion section for each:
+
+- In the **Masks** section, enable a mask via its checkbox and pick a color from its **Mask
   &lt;name&gt;** dropdown. Adjust **Mask outline px:** to change the outline thickness.
-- Under **Pixel annotations**, enable **Show annotation**, choose an annotation from the
+- In the **Pixel annotations** section, enable **Show annotation**, choose an annotation from the
   **Annotation:** dropdown, and adjust **Fill alpha:** for overlay transparency. Use **Edit
   palette…** to customize per-class colors.
 
-For richer per-class mask coloring (fill vs. outline, per-class opacity, and saved palettes), use the
-**Mask painter** plugin — see the [User Interface](user-interface.md) reference.
+If a section is missing, that folder did not yield readable rasters — the sections are created from
+the data, not toggled on.
+
+For richer per-class mask coloring (fill vs. outline, per-class opacity, continuous colour scales, and
+saved palettes), use the **Mask painter** plugin — see the [User Interface](user-interface.md)
+reference. That one needs a cell table.
 
 !!! tip "Masks-only view"
     Enable **No image (masks only)** to hide the channel image and inspect mask/annotation overlays

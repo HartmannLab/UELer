@@ -1,10 +1,22 @@
 # Regions of Interest
 
-The **ROI manager** plugin lets you capture, tag, and revisit regions of interest. ROIs persist
+The **ROI manager** plugin lets you capture, draw, tag, and revisit regions of interest. ROIs persist
 across sessions and work **without a cell table**, so this is part of the essentials.
 
 The plugin has two tabs: **ROI browser** (find and revisit ROIs) and **ROI editor** (capture and
 edit them).
+
+!!! info "Two kinds of ROI"
+    UELer stores two different things under one name, and the difference matters when you filter or
+    export:
+
+    - a **view** ROI is a saved viewport — a bookmark of where you were looking, at what zoom, with
+      which markers and overlays;
+    - a **shape** ROI is a polyline or polygon you drew on the image, which also carries its
+      geometry and a physical length.
+
+    Both live in the same table and the same browser. Everything below about tags, comments,
+    filtering and export applies to both.
 
 ---
 
@@ -31,6 +43,33 @@ saved marker/mask/annotation presets).
 !!! tip "Only current FOV"
     The editor's **Only current FOV** checkbox (on by default) filters the saved-ROI dropdown to the
     active FOV.
+
+---
+
+## Drawing a shape ROI
+
+The editor tab also has a shape block for drawing directly on the image — use it to mark a boundary,
+trace a structure, or measure a distance.
+
+1. Click **Draw**, then click on the image to place vertices. The summary line under the buttons
+   tracks the shape as you go.
+2. Tick **Closed shape (polygon)** before finishing if you want the shape closed; leave it clear for
+   an open polyline.
+3. Correct as you go with **Undo** / **Redo**, or abandon the whole shape with **Cancel**.
+4. Click **Finish** to end the shape, then **Save shape** to store it.
+
+A saved shape is an ROI like any other: give it a **Name:**, **Tags:** and a **Comment:**, and it
+appears in the browser gallery alongside your captured views.
+
+- **Show shapes on canvas** (on by default) draws the saved shapes over the image. Untick it to get
+  an unobstructed view without deleting anything.
+- **Edit** loads the selected shape ROI back into the editor so you can move or add vertices and save
+  it again.
+
+!!! tip "Shapes measure themselves"
+    The summary line reports the shape's length in µm as well as pixels, computed from the **Pixel
+    Size (nm):** value in Advanced Settings. If that value is wrong, so is the length — see
+    [Display Settings](display-settings.md#1-pixel-size-set-it-or-the-scale-bar-lies).
 
 ---
 

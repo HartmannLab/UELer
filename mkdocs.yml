@@ -46,7 +46,21 @@ plugins:
 markdown_extensions:
   - admonition
   - pymdownx.details
-  - pymdownx.superfences
+  # Routing the `mermaid` fence to superfences is all Material needs to render
+  # diagrams: it ships the integration itself (>= 8.2), emits only a
+  # `<div class="mermaid">` at build time, activates it only on pages that
+  # contain a diagram, and re-renders on the light/dark toggle so the diagram
+  # follows the palette. Do not add a CDN script tag or a third-party mermaid
+  # plugin — either one fights the built-in integration.
+  #
+  # Caveat: Material's loader fetches mermaid 11 from unpkg.com at *runtime*, so
+  # a diagram is blank for a reader with no network access to that host. Keep
+  # diagrams for explanation, never as the only place a fact is stated.
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite
@@ -81,7 +95,9 @@ nav:
   - Developer Notes:
       - Overview: develop-notes/index.md
       - Packaging & Project: develop-notes/packaging.md
+      - Plugin Development: develop-notes/plugin-development.md
       - Viewer Runtime & UI: develop-notes/viewer-runtime.md
+      - Mask Rendering & Coloring: develop-notes/mask-rendering.md
       - Map Mode Internals: develop-notes/map-mode.md
       - Export Pipeline: develop-notes/export-pipeline.md
       - ROI Workflows: develop-notes/roi-gallery.md

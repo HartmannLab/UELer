@@ -45,6 +45,19 @@ jobs:
       - name: Install MkDocs Material and mike
         run: pip install mkdocs-material "mike>=2.1"
 
+      # `mike deploy` does not build strictly, so a broken nav entry or a dead
+      # internal link would publish silently. Building first also fails the job
+      # before anything is pushed to gh-pages, which is the only point at which
+      # a bad docs build is still cheap to fix.
+      - name: Build the site strictly
+        run: mkdocs build --strict --site-dir /tmp/docs-strict
+
+      # The strict build proves the site is well formed; this proves it is true.
+      # No extra dependency: the checker parses pyproject.toml and the package
+      # with `ast` and regexes precisely so it runs on a bare interpreter.
+      - name: Check the docs describe the real software
+        run: python tools/check_docs_consistency.py
+
       - name: Resolve docs version and alias
         id: target
         run: |

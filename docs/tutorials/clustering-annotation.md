@@ -1,7 +1,8 @@
 # Clustering & Annotation
 
 These three plugins — **Heatmap**, **FlowSOM**, and **Cell Annotation** — turn per-cell marker values
-into named cell populations. They form a pipeline:
+into named cell populations. **FlowSOM** and **Cell Annotation** are in the right-panel accordion; the
+**Heatmap** is in the wide footer below the viewer. They form a pipeline:
 
 ```
 FlowSOM  ──▶  cluster labels in the cell table
@@ -46,8 +47,7 @@ Choose **Channels:**, the **Class:** column (the cluster column to summarize —
 output), and the clustering **Linkage:** and **Metric:**. Toggle **Z-score across markers** to
 normalize per class instead of per marker. Click **Plot**.
 
-Enable **Horizontal layout** to move the heatmap into the footer panel. The heatmap remembers a
-figure size you set by dragging its resize handle, even after re-cutting the tree.
+The heatmap is drawn in the wide footer panel below the viewer, always in its horizontal orientation — there is no layout or placement toggle. It remembers a figure size you set by dragging its resize handle, even after re-cutting the tree.
 
 ### Assign meta-clusters (Assign tab)
 
@@ -65,6 +65,17 @@ meta-cluster colors are used in the heatmap's color strip and can color the scat
 Enter a **Column Name:** (default `new_cluster`) and click **Save to Cell Table** to write the
 meta-cluster labels back to the table (**Overwrite** if the column exists).
 
+### Linking the heatmap to the image
+
+The heatmap participates in the same [linked selection](cell-table.md#the-idea-linked-selection) as
+the plots, in both directions:
+
+- **Follow main viewer** — tick it and the cells you select in the image are highlighted in the
+  heatmap continuously.
+- **Trace** — the one-shot version. Two buttons trace the *cluster* or the *meta-cluster* of the
+  currently selected cell, which is the fast way to answer "what population is this cell in?" without
+  leaving a link switched on.
+
 ---
 
 ## Cell Annotation: checkpoints
@@ -78,7 +89,9 @@ The **Cell Annotation** plugin saves and restores your clustering/annotation sta
 - The **Checkpoint browser** shows the checkpoints as a tree (color-coded by op). Select one and use
   **Load selected** to restore it, or **Delete selected** to remove it.
 
-Checkpoints are stored under `<base_folder>/.UELer/` (per-dataset), so they travel with your data.
+Checkpoints are stored under `<base_folder>/.UELer/dataset_<id>/checkpoints/`, where `<id>` is a hash
+of the dataset path — so several datasets under one base folder keep separate histories, and the
+checkpoints travel with the data.
 
 !!! note
     Cell Annotation wires itself to the Heatmap and FlowSOM plugins, so saving/loading a checkpoint

@@ -23,6 +23,12 @@ Exports cropped thumbnails centered on individual cells. Requires a cell table.
 - **Filter (query):** — a pandas-style query (e.g. `marker > 0`); click **Apply**.
 - Pick cells from **Cells:**, set **Crop size (px):** (default 128), and use **Preview** to check.
 
+!!! warning "The **Cells:** list shows at most 500 cells"
+    After **Apply**, only the first 500 matching rows are offered in the picker. The list gives no
+    indication that it was truncated, so on a large table treat **Filter (query):** as the way to
+    choose *which* cells you get — not as a pre-filter you then scroll through. Narrow the query until
+    the population you want fits.
+
 !!! note "Simple viewer mode"
     Without a cell table, the Single Cells tab shows a notice and is unavailable. Full FOV and ROI
     export still work.

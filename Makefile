@@ -1,6 +1,6 @@
 # Default developer targets for the UELer packaging skeleton
 
-.PHONY: help venv install test-fast test-integration test-ci scan scan-package scan-project docs docs-serve clean clean-dist build check-dist check-release check-rehearsal publish-test publish
+.PHONY: help venv install test-fast test-integration test-ci scan scan-package scan-project docs docs-serve check-docs clean clean-dist build check-dist check-release check-rehearsal publish-test publish
 
 VENV ?= .venv
 BIN_DIR := $(if $(filter Windows_NT,$(OS)),Scripts,bin)
@@ -19,6 +19,7 @@ help:
 	@echo "  make scan-project      # scan the whole repository"
 	@echo "  make docs              # build the docs once into site/"
 	@echo "  make docs-serve        # serve all published doc versions locally"
+	@echo "  make check-docs        # the docs must build strictly and describe the real software"
 	@echo "  make clean-dist        # remove stale build artefacts from dist/"
 	@echo "  make build             # build a fresh sdist + wheel into dist/"
 	@echo "  make check-dist        # validate the built artefacts with twine"
@@ -68,6 +69,16 @@ docs:
 # Serves the gh-pages version store, so the version dropdown works locally.
 docs-serve:
 	mike serve
+
+# Two different questions, both of which have to be "yes" before docs deploy.
+# `--strict` asks whether the site is well formed: every nav entry resolves,
+# every internal link lands. The checker asks whether it is *true*: the plugin
+# names, module paths, extras and Python range it asserts still match the code.
+# Neither subsumes the other — the audit that motivated the checker found a
+# strict-clean site asserting a module path that had not existed for months.
+check-docs:
+	mkdocs build --strict --site-dir $(if $(SITE_DIR),$(SITE_DIR),site)
+	python tools/check_docs_consistency.py
 
 # A stale artefact in dist/ is the main way a wrong version reaches PyPI, since
 # `twine upload dist/*` globs whatever is there. Every build starts from empty.

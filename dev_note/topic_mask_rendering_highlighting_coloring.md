@@ -143,7 +143,7 @@ In map mode, `update_patches` delegates to `_update_map_mask_highlights` (main_v
 
 ### Plugin-triggered highlights
 
-The chart and heatmap plugins call `highlight_cells()` on the viewer, which updates `selected_masks_label` and calls `update_patches()`. In the grid-view variant, `GridChannelDisplay.update_mask_highlights` mirrors the same logic across all channel panes.
+The chart and heatmap plugins call `highlight_cells()` on the viewer, which updates `selected_masks_label` and calls `update_patches()`. In the grid-view variant, `GridChannelDisplay._update_grid_patches()` mirrors the same logic across all channel panes, and `clear_patches()` removes them (#134). *(Corrected 2026-08-20: this section previously named a `GridChannelDisplay.update_mask_highlights` that has never existed.)*
 
 ---
 

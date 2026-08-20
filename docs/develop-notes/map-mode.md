@@ -41,7 +41,14 @@ Conversion helpers:
 2. `_collect_visible_tiles()` returns tiles whose bounding boxes intersect the viewport.
 3. Each tile is rendered via `render_fov_to_array()` using `channel_settings` from the marker profile (no UI widget reads).
 4. Tiles are stitched onto the canvas via `_allocate_canvas()` + `_blit_tile()`.
-5. If the number of visible tiles exceeds `_RENDER_TILE_LIMIT`, only the nearest tiles to the viewport center are rendered.
+
+### The uncached-tile budget
+
+The cap is on *uncached* tiles only — already-cached tiles always render, however many there are, because drawing them costs nothing but a memcpy. The budget exists to stop a single frame pulling hundreds of TIFFs off a slow network filesystem at once.
+
+- The base budget is read from the viewer as `_map_render_tile_limit` (default **80**), so it can be lowered at runtime on a slow machine: `viewer._map_render_tile_limit = 40`.
+- The effective budget is `_map_render_tile_limit × max(1, downsample_factor)`. It scales with the downsample factor deliberately: a fully zoomed-out view (ds ≥ 8) is cheap per tile and needs to show every FOV rather than cut off the edges of the map.
+- When the uncached set exceeds the budget, tiles are sorted by squared distance from the viewport centre and truncated, so what survives is the region the user is actually looking at.
 
 ---
 

@@ -9,14 +9,19 @@ For a hands-on first run, see [Basic Usage](basic-usage.md).
 
 ## Layout Overview
 
+The left panel's accordion is **built from your data**: the **Channels** section is always there,
+**Masks** appears only if `masks_folder` yielded readable masks, and **Pixel annotations** only if
+`annotations_folder` did. A section you cannot find is usually a path that did not load rather than a
+setting to switch on.
+
 | Region | Location | Contents |
 |---|---|---|
 | **Left panel** | Left column | FOV selector, channel / mask / annotation controls, marker sets, advanced settings |
 | **Main viewer** | Center | Image canvas, lasso toggle, zoom/pan, scale bar |
 | **Right panel** | Right column | Plugin tools (accordion) |
-| **Footer** (optional) | Bottom | Wide plugin tabs (e.g. heatmap, multi-scatter) |
+| **Footer** | Bottom | The wide plugins — **Scatter plot** and **Heatmap** |
 
-Some plugins move themselves into the footer automatically when they need the extra width.
+Plugin placement is fixed, not adaptive: each plugin lives in either the right-panel accordion or the footer, and never moves between them. The **Scatter plot** and **Heatmap** are footer-only because both need the full window width to be readable, so they are absent from the accordion entirely — look for them at the bottom of the viewer, not on the right.
 
 ---
 
@@ -42,9 +47,17 @@ Some plugins move themselves into the footer automatically when they need the ex
   these rows and keeps each channel's colour and contrast settings.
 - **Show channel legend** — display a color key for the visible channels.
 - **Channel grid view** — render each visible channel as its own labelled pane in a synchronized grid.
-- **Mask &lt;name&gt;** dropdowns + enable checkboxes, and **Mask outline px:** — control segmentation
-  mask overlays. (For per-class fill/outline, opacity, and saved palettes, use the **Mask painter**
-  plugin below.)
+
+### Masks
+
+A separate accordion section, present **only when `masks_folder` contained readable masks**:
+
+- **Mask &lt;name&gt;** dropdowns + enable checkboxes — one row per mask layer, each with a single
+  uniform colour.
+- **Mask outline px:** — outline thickness, applied to every mask layer.
+
+For per-class fill/outline, opacity, continuous colour scales, and saved palettes, use the
+**Mask painter** plugin instead.
 
 ### Marker Sets
 
@@ -52,9 +65,9 @@ Save and restore named channel/color/contrast combinations: **Marker Set:** drop
 input, and **Load / Save / Update / Delete Marker Set** buttons (deletion is gated by a **Confirm
 Deletion** checkbox).
 
-### Pixel Annotations
+### Pixel annotations
 
-Visible when `annotations_folder` contains valid rasters:
+Also its own accordion section, visible when `annotations_folder` contains valid rasters:
 
 - **Show annotation** — toggle the annotation overlay.
 - **Annotation:** — choose which annotation to display.
@@ -87,16 +100,20 @@ Data-mapping keys (**X key:**, **Y key:**, **Label key:**, **Mask key:**, **Fov 
 Plugins appear as an accordion. **Which plugins load depends on whether a cell table is present:**
 
 - **Without a cell table**, only these two load — both work on images alone:
-    - **ROI manager** — capture, tag, and browse regions of interest. See [Regions of Interest](roi-manager.md).
+    - **ROI manager** — capture, tag, draw, and browse regions of interest. See [Regions of Interest](roi-manager.md).
     - **Batch export** — export FOVs, ROIs, and single-cell crops. See [Batch Export](export.md).
 - **With a cell table loaded**, the analytical plugins also appear:
-    - **Scatter plot** and **Histogram** — linked distribution plots. See [Scatter & Histogram](scatter-histogram.md).
+    - **Histogram** — linked per-channel distributions. See [Scatter & Histogram](scatter-histogram.md).
     - **Gallery** — thumbnails of the currently selected cells.
-    - **Heatmap**, **FlowSOM**, **Cell Annotation** — clustering and annotation. See [Clustering & Annotation](clustering-annotation.md).
+    - **FlowSOM** and **Cell Annotation** — clustering and checkpoints. See [Clustering & Annotation](clustering-annotation.md).
     - **Mask painter** — per-class mask colors, fill/outline modes, opacity, and saved palettes.
     - **Go to** — jump and zoom to a specific cell.
     - **Cell Table Editor** — write a value onto the selected cells.
     - **Cell tooltip label** — choose which cell-table columns appear in the hover tooltip.
+
+!!! note "Two plugins are not in this list"
+    **Scatter plot** and **Heatmap** also require a cell table, but they live in the
+    [footer](#footer-wide-plugins) rather than the accordion. Do not go looking for them on the right.
 
 !!! note "Panel order"
     The right-panel accordion order is not curated — locate a plugin by its name rather than its
@@ -106,7 +123,9 @@ Plugins appear as an accordion. **Which plugins load depends on whether a cell t
 
 ## Footer (Wide Plugins)
 
-Some plugins expand into a horizontal footer panel so the main viewer stays visible alongside them:
+Two plugins are allocated permanently to the horizontal footer panel, so the main viewer stays visible above them. Neither appears in the right-panel accordion, and neither has a toggle for moving it — the placement is not a preference:
 
-- **Heatmap** — enable **Horizontal layout** in the plugin to move it to the footer.
-- **Scatter plot** — moves to the footer automatically when more than one scatter is active.
+- **Scatter plot** — single-pair and all-pairs scatter matrices. A triangular matrix of scatters is unreadable at side-panel width, which is why the plugin lives here whether one scatter is active or twenty. See [Scatter & Histogram](scatter-histogram.md).
+- **Heatmap** — the cluster × marker heatmap, always drawn in its wide (horizontal) orientation. See [Clustering & Annotation](clustering-annotation.md).
+
+Both require a cell table, so the footer is empty until one is loaded.

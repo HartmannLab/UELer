@@ -20,9 +20,10 @@ load_cell_table(viewer, cell_table=cell_table, auto_display=True, after_plugins=
 ```
 
 See [Get Started](../getting-started.md) for the full launch flow. Once the table is loaded, the
-analytical plugins appear in the right panel (**Scatter plot**, **Histogram**, **Gallery**,
-**Heatmap**, **FlowSOM**, **Cell Annotation**, **Mask painter**, **Go to**, **Cell Table Editor**,
-**Cell tooltip label**).
+analytical plugins appear — most in the right-panel accordion (**Histogram**, **Gallery**,
+**FlowSOM**, **Cell Annotation**, **Mask painter**, **Go to**, **Cell Table Editor**, **Cell tooltip
+label**), and two in the wide footer below the viewer (**Scatter plot** and **Heatmap**, which need
+the full window width). See the [User Interface](user-interface.md#right-panel-plugins) reference.
 
 ---
 
@@ -84,15 +85,24 @@ Most single-cell features in UELer revolve around one shared concept — a **cur
 cells. Whenever you select cells in one place, every linked view updates:
 
 ```
-Scatter / Histogram / Lasso  ─┐
-                              ├──▶  selected cells  ──▶  highlighted in the image
-                              │                     └─▶  shown in the Cell Gallery
+Scatter / Histogram / Heatmap ──▶  selected cells  ──▶  highlighted in the image
+       ▲                      └────────────────────▶  shown in the Gallery
+       │
+       └── "Follow main viewer"  ◀──  click / ctrl-click / lasso in the image
 ```
 
-Plots such as the scatter and histogram publish their selection; when their **Main viewer** and
-**Cell gallery** link checkboxes are enabled, that selection highlights the corresponding masks in
-the image and populates the gallery. This is what makes "gate on a marker, see those cells light up
-in the tissue" work.
+The link is opt-in in both directions, and each direction has its own checkbox on the plot's
+**Linked plugins** tab:
+
+- **Outward** (plot → rest of the UI): tick **Main viewer** to highlight the selected cells' masks in
+  the image, and **Cell gallery** to populate the gallery. This is what makes "gate on a marker, see
+  those cells light up in the tissue" work.
+- **Inward** (image → plot): tick **Follow main viewer** so that cells you pick in the image appear
+  highlighted in the plot instead. Useful in reverse — click an odd-looking cell in the tissue and see
+  where it falls in the marker distribution.
+
+All of these start **off**, so a freshly loaded viewer shows no linking until you ask for it. See
+[Scatter & Histogram](scatter-histogram.md#linking-a-plot-to-the-rest-of-the-ui) for the full table.
 
 The selection spans the whole cell table, not just the FOV on screen, so **switching FOV keeps it**:
 the image re-highlights the selected cells belonging to the FOV you moved to. Zooming and panning

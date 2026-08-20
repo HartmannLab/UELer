@@ -139,9 +139,13 @@ accordion and lower **Max** (for an all-black channel) or raise **Min** (for an 
 ### How do I enable Map Mode?
 
 Map mode is opt-in. Set the `ENABLE_MAP_MODE` environment variable to a truthy value (`1`, `true`,
-`yes`, `on`) before launching, and place map descriptor JSON files under `<base_folder>/.UELer/maps/`.
-When both are present, the **Map mode** toggle and **Select map:** dropdown appear. See
+`yes`, `on`) and place map descriptor JSON files under `<base_folder>/.UELer/maps/`. When both are
+present, the **Map mode** toggle and **Select map:** dropdown appear. See
 [Map Mode](tutorials/map-mode.md).
+
+**Set it before `import ueler`.** The flag is read once at import time, so setting it after UELer is
+imported has no effect — even if you set it before calling `run_viewer`. Set it in the shell before
+starting the kernel, or restart the kernel after setting it.
 
 ### Map mode renders slowly for large datasets
 

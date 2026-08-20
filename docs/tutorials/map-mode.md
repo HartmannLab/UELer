@@ -7,11 +7,24 @@ section as one continuous canvas. It works on images alone (no cell table requir
     Map mode is off by default. It only appears when **both** conditions are met:
 
     1. The `ENABLE_MAP_MODE` environment variable is set to a truthy value (`1`, `true`, `yes`,
-       `on`) before launching the viewer, and
+       `on` — case-insensitive) **before UELer is imported**, and
     2. At least one map descriptor is found under `<base_folder>/.UELer/maps/` (UELer scans that
        folder for `*.json` descriptors).
 
     When either is missing, the map controls stay hidden.
+
+!!! warning "Set the variable before `import ueler`, not just before `run_viewer`"
+    The flag is read **once, when the module is imported**, and captured on every viewer built
+    afterwards. So this does *not* work:
+
+    ```python
+    import ueler                              # flag already read as False
+    os.environ["ENABLE_MAP_MODE"] = "1"        # too late
+    viewer = ueler.run_viewer(base_folder)     # no map controls
+    ```
+
+    Either set it in the shell before starting the kernel, or set it in the very first cell and
+    **restart the kernel** if you have already imported UELer.
 
 ---
 

@@ -48,9 +48,10 @@ for each item:
 
 ## Scale Bar
 
-- Computed in `scale_bar_helper.py`.
-- Physical length is rounded to a "nice" value and capped to 10% of the image width.
+- Computed in `ueler/viewer/scale_bar.py`: `compute_scale_bar_spec()` returns a `ScaleBarSpec`, and `add_scale_bar()` draws it onto an axes.
+- Physical length is rounded to a "nice" value from a `1, 2, 5` engineering sequence and capped to `max_fraction` of the image width (default `0.1`, i.e. 10%).
 - Shared between the live viewer display and all export paths.
+- `effective_pixel_size_nm()` folds the downsample factor into the pixel size, so a decimated render measures correctly.
 - `pixel_size_nm` for map-mode exports: `base_pixel_size_um × 1000 × downsample`.
 
 ---

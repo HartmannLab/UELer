@@ -152,6 +152,7 @@ day one is the kind of thing that is awkward to walk back.
   in the GitHub UI, not in the tree — the developer must update it there.
 - **Verified:** wheel `METADATA` reads
   `Summary: Unified Exploratory Linked Viewer for spatial proteomics and multiplexed imaging`.
+- **Revised (2026-08-20):** `napari-alternative` dropped from `keywords`. It is not a term anyone searches PyPI for, and it defines UELer by what it is not — a positioning claim, in a field whose only job is matching the words a user actually types. The remaining seven keywords are all things the tool *is* or *reads*. Keyword list is now `spatial proteomics, multiplexed imaging, image viewer, jupyter, MIBI, IMC, bioimage analysis`.
 
 ### A2. Give the README a `pip install ueler` path — ✅ done
 
@@ -396,6 +397,7 @@ Only two classifiers today (`Programming Language :: Python :: 3`,
   `Homepage`, `Documentation`, `Repository`, `Issues`, `Changelog`; the two
   pre-existing keys were capitalised, since PyPI uses the key verbatim as the
   sidebar label.
+- **Revised (2026-08-20):** `Topic :: Scientific/Engineering :: Image Processing` removed, so the release now carries **nine** classifiers. The trove `Image Processing` topic is where users look for libraries that *transform* pixels — filtering, segmentation, registration, morphology — and UELer offers none of that: it loads, links and displays images and cell tables that other tools produced. `Visualization` and `Bio-Informatics` describe it without over-claiming, and the comment above the block now records this alongside the `License ::` note so it does not get added back.
 - **On `Development Status :: 4 - Beta` with a `0.5.0-alpha` version:** kept as
   planned. The `-alpha` token is a pre-release marker *within* the 0.5.0 line, not
   a claim about project maturity — 913 tests and a working Binder deployment are

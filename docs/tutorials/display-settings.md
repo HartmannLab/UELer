@@ -100,7 +100,7 @@ Once a channel/colour/contrast combination works, save it as a **marker set** (b
 
 Overlays are drawn over the finished channel composite, in this order: annotations first, then masks.
 
-- **Masks** — enable a mask with its checkbox in the **Channels** section and pick a colour from the **Mask &lt;name&gt;** dropdown. **Mask outline px:** sets the outline thickness. This is the quick look.
+- **Masks** — enable a mask with its checkbox in the left panel's **Masks** section and pick a colour from the **Mask &lt;name&gt;** dropdown. **Mask outline px:** sets the outline thickness. This is the quick look.
 - **Mask painter** (right panel) — per-class colours, fill versus outline, per-class opacity, and saved `.maskcolors.json` palettes. Use this when a single mask colour is not enough. Requires a cell table.
 - **Pixel annotations** — **Show annotation**, pick one from **Annotation:**, and set **Fill alpha:** for transparency. **Edit palette…** customises per-class colours and labels.
 - **No image (masks only)** — hides the channel composite and draws overlays on black. Good for checking segmentation boundaries, and cheaper to render since no channel compositing happens.

@@ -21,16 +21,17 @@ UELer has been refactored from a notebook-first script layout into a proper Pyth
 - **Fast-stub test bootstrap, opt-in.** `tests/bootstrap.py` stubs out heavy dependencies (`pandas`, `ipywidgets`, `matplotlib`) so the test suite runs quickly without a full environment. The `sitecustomize.py` / `usercustomize.py` startup hooks initialise it **only** when `UELER_TEST_BOOTSTRAP=1` is set — `make test-fast` and `make test-integration` set it for you. Defaulting it on meant any interpreter with the repo root on `PYTHONPATH` could silently run against fake scientific libraries; a bootstrap that was requested and then failed now emits a `RuntimeWarning` instead of being swallowed.
 - **Packaged assets — and workflow files — must be visible to git.** `.gitignore` has blanket `*.txt` / `*.png` rules, so assets are re-included explicitly (`!LICENSE.txt`, `!ueler/**/*.png`, `!doc/**/*.png`, `!docs/**/*.png`). setuptools builds from the working tree, so an ignored asset ships from a developer's machine and vanishes from a clean-checkout build — add new asset types to those negations. CI hit the same rule from the other side: `.github/` was ignored as a whole directory, so a new workflow file simply never reached GitHub. **A negation cannot re-include anything under an ignored directory**, so the directory rule was narrowed to the local-only assistant scaffolding instead, leaving `.github/workflows/` tracked.
 - **`MANIFEST.in` keeps the sdist to build inputs only.** No tests are shipped: making them runnable would require shipping `bootstrap.py`'s dev-only stub machinery.
-- **Supported Python: 3.10–3.11** (`requires-python = ">=3.10,<3.13"`). The bound is deliberately narrow — widen it only once CI has proven the newer minor. The per-minor `Programming Language :: Python ::` classifiers list the same two versions, so both have to change together.
+- **Supported Python: 3.10–3.12** (`requires-python = ">=3.10,<3.13"`), with three per-minor `Programming Language :: Python ::` classifiers matching. `requires-python` and the classifiers are the same claim stated twice, so they move together — a bound that permits a minor the classifiers omit tells an installer and a human two different things. **CI does not yet back the claim symmetrically:** `tests.yml` runs 3.10 and 3.11 as blocking legs and 3.12 as `continue-on-error`, so 3.12 is declared supported but cannot fail the build. Closing that gap means dropping `experimental` from the 3.12 leg, which is a policy call, not a docs one — see the open item below.
 - **BSD-3-Clause, relicensed from GPL-3.0-only before the first PyPI upload.** UELer is a library other people import, and copyleft there propagates into the importer's distributed work — the opposite of what a lab tool wants. Every runtime dependency is already permissive (BSD-3 / MIT / Apache-2.0), so nothing obliged the GPL; and copyright sits with a single author, so the change needed no contributor round-up. BSD-3 matches `scikit-image`, `dask`, `bokeh`, `anndata` and `napari`.
 - **No `License ::` classifier.** PEP 639 forbids combining one with the `license` SPDX expression that `pyproject.toml` declares; setuptools warns if both are present. The license reaches the metadata as `License-Expression: BSD-3-Clause`.
+- **The PyPI metadata says what UELer *is*, not what it competes with or nearly does.** Two entries were dropped on 2026-08-20. `napari-alternative` left `keywords`: nobody searches PyPI for that string, and the field exists to match the words a user actually types rather than to stake out a position against another project — the remaining seven keywords are all things UELer is or reads (`spatial proteomics`, `multiplexed imaging`, `image viewer`, `jupyter`, `MIBI`, `IMC`, `bioimage analysis`). `Topic :: Scientific/Engineering :: Image Processing` left `classifiers`, taking the block from ten entries to nine: that trove topic is where people look for libraries that *transform* pixels — filtering, segmentation, registration, morphology — and UELer offers none of that; it loads, links and displays images and cell tables other tools produced. `Visualization` and `Bio-Informatics` describe it without over-claiming, and the reason is recorded in a comment above the classifier block beside the `License ::` note so neither entry gets added back as a "fix".
 - **A skipped test is a failure, not a pass.** CI runs the suite through
   `tools/run_test_suite.py --max-skips 0`, which prints every skip with its reason
   before deciding the exit code. Plain `unittest` prints `OK` for a run that
   silently dropped 14 bokeh-gated tests — that is how the Python 3.11 coverage gap
-  stayed invisible until the release audit. A complete environment skips 0 of 913
-  tests, so zero is a measurement, not an aspiration. `make test-ci` runs the same
-  gate locally.
+  stayed invisible until the release audit. A complete environment skips 0 of the
+  1109 tests currently in the suite, so zero is a measurement, not an aspiration.
+  `make test-ci` runs the same gate locally.
 - **CI installs the real dependency stack; the fast stubs are not a substitute for
   one.** A stub-only run collects 671 of 913 tests and errors on 68:
   `_ensure_matplotlib_stub()` replaces real matplotlib whenever `matplotlib.pyplot`
@@ -64,19 +65,33 @@ UELer has been refactored from a notebook-first script layout into a proper Pyth
 ```
 ueler/
 ├── __init__.py          # Public API surface
+├── runner.py            # Programmatic entrypoint (run_viewer, run_viewer_bia)
+├── constants.py         # Shared defaults
+├── data_loader.py       # TIFF-folder and OME-TIFF ingestion
+├── bia_loader.py        # BioImage Archive streaming
+├── cell_table.py        # Cell table / AnnData handling
 ├── image_utils.py       # Image helper functions
-├── runner.py            # Programmatic entrypoint
+├── rendering/
+│   └── engine.py        # UI-independent compositor (render_fov_to_array)
+├── export/
+│   └── job.py           # Job runner for batch export
 └── viewer/
-    ├── __init__.py
-    ├── main_viewer.py
+    ├── main_viewer.py   # ImageMaskViewer — the god object
     ├── ui_components.py
-    ├── plugin/
+    ├── virtual_map_layer.py
+    ├── roi_manager.py
+    ├── checkpoint_store.py
+    ├── scale_bar.py
+    ├── plugin/          # Auto-discovered PluginBase subclasses
     │   ├── export_fovs.py
     │   ├── chart.py
     │   ├── heatmap.py
     │   └── ...
     └── images/          # Bundled UI icons
 ```
+
+`ueler/rendering/` and `ueler/export/` exist so that batch export never reads a widget: the compositor
+and the job runner are importable without a live viewer, which is what makes export testable.
 
 ---
 
@@ -87,10 +102,10 @@ ueler/
 - All module moves from `viewer.*` → `ueler.viewer.*` are complete.
 - `ueler.image_utils` is restored as a real packaged module (post-cleanup regression fix).
 - **Gate A of the PyPI release plan is complete.** The build is reproducible and safe to publish: `python -m build` is clean, `twine check --strict` passes on both artifacts, and wheel and sdist have each been installed into a fresh venv and imported from outside the repository.
-- **Gate B is complete** (2026-08-10). The release now describes itself: ten PyPI classifiers, `[project.urls]` covering repository / issues / changelog, the license stated in the README, the docs-site install page realigned with the PyPI-first flow, and the stale graphify cache moved out of `ueler/`.
+- **Gate B is complete** (2026-08-10). The release now describes itself: the PyPI classifier block (ten entries then, nine since the 2026-08-20 metadata trim), `[project.urls]` covering repository / issues / changelog, the license stated in the README, the docs-site install page realigned with the PyPI-first flow, and the stale graphify cache moved out of `ueler/`.
 - **Gate C is complete** (2026-08-10). Two workflows: `tests.yml` (unit matrix + a build-and-import-the-wheel job) and `release.yml` (Trusted Publishing). See *Continuous integration* and *Release process* below.
 - **CI paid for itself on its first run** (2026-08-10): 3.10, 3.11 and `package` green, and the non-blocking 3.12 leg surfaced 19 errors that were a live pandas bug rather than a 3.12 one — mask painting was broken for any AnnData-derived `category` identifier column on *current* pandas too. Suite now **922 tests, 0 skips**.
-- **Remaining: Gate D** — configure the Trusted Publishers, rehearse on TestPyPI, run the notebook end to end from an installed wheel, then publish `0.5.0-alpha`.
+- **Gate D is under way.** The TestPyPI rehearsal is done — `v0.5.0-alpha2` published `ueler-viewer 0.5.0a2` there from a tag push on 2026-08-19, claiming the project name on that index, and `0.5.0rc1` followed. What remains before a stable tag is the **PyPI** Trusted Publisher and the `pypi` environment reviewer, neither of which exists yet; see the open items below.
 
 ### Continuous integration
 
@@ -168,7 +183,7 @@ spelling (`0.5.0a0`) — `v0.5.0-a0` works too.
 - Add an integration test workflow for the **GUI** paths. The full dependency stack is now covered by `tests.yml`; the widget layer still needs a browser, so it stays manual.
 - ~~Rehearse on TestPyPI before the first real upload~~ — **done** (2026-08-19). `v0.5.0-alpha2` published `ueler-viewer 0.5.0a2` to TestPyPI from a tag push, which also created and claimed the project there. The rehearsal is no longer a manual habit: `check_stable_rehearsal.py` now makes it a precondition of every stable release.
 - Configure the **PyPI** Trusted Publisher and the `pypi` environment reviewer. `https://pypi.org/simple/ueler-viewer/` still returns 404, so the project does not exist on PyPI and the publisher must be a *pending* one. Both are preconditions of the first stable tag: without the publisher the upload fails, and without the reviewer nothing stands between a stable tag and an irreversible upload.
-- Act on the 3.12 result. The leg has run **once**, and its first reading was not about 3.12: 19 errors, all one `np.issubdtype` call meeting pandas 3's default string dtype — now fixed. Tightening `requires-python` to `<3.12` would have concealed it, since pandas 3 installs on 3.11 too. Re-read after the fix lands; the evidence argues for *widening* (add `Programming Language :: Python :: 3.12`, drop `continue-on-error`), and the classifiers and the bound move together. Keep the leg regardless — it is the only coverage of pandas-3 semantics.
+- **Finish acting on the 3.12 result — the widening is half-applied.** The leg's first reading was not about 3.12 at all: 19 errors, all one `np.issubdtype` call meeting pandas 3's default string dtype, now fixed. Tightening `requires-python` to `<3.12` would have concealed it, since pandas 3 installs on 3.11 too, so the evidence argued for widening instead. `Programming Language :: Python :: 3.12` **has** been added; the 3.12 leg in `tests.yml` is **still** `experimental: true` / `continue-on-error`, and the comment above it still reads as though the classifier were pending. So UELer currently advertises 3.12 support that no blocking CI leg defends. Either drop `experimental` (and that stale comment) or drop the classifier — the two must say the same thing. Keep the leg either way: it is the only coverage of pandas-3 semantics.
 - Revisit the **3.10 floor** before it costs coverage: pandas 3 and anndata 0.12 both require ≥ 3.11, and anndata 0.13 requires ≥ 3.12, so a 3.10 install is pinned to the older half of the stack. Nothing is broken today — pandas 3 cannot be installed on 3.10 at all, so the bad pandas-3-with-anndata-0.11 pairing is unreachable.
 - Confirm with DKFZ that naming both the author and the institute in the BSD copyright line matches institutional policy — the only part of the relicense that is not purely a code change.
 - Revisit `ipykernel` / `ipympl` as hard runtime dependencies before `1.0`: `pip install ueler-viewer` currently installs a Jupyter kernel. Moving them to a `notebook` extra also requires updating `.binder/postBuild`, which runs a bare `pip install .`.

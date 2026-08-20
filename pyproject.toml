@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 # protection for the live `euler` project), so the distribution ships under
 # `ueler-viewer` on both indexes. See dev_note/issue_tracking/issue79_dist_name_rename.md.
 name = "ueler-viewer"
-version = "0.5.0-rc2"
+version = "0.5.0-rc3"
 description = "Unified Exploratory Linked Viewer for spatial proteomics and multiplexed imaging"
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
@@ -23,13 +23,15 @@ keywords = [
     "multiplexed imaging",
     "image viewer",
     "jupyter",
-    "napari-alternative",
     "MIBI",
     "IMC",
     "bioimage analysis",
 ]
 # No "License ::" classifier here on purpose: PEP 639 forbids combining one with
 # the `license` SPDX expression above, and setuptools warns if both are present.
+# No "Topic :: Scientific/Engineering :: Image Processing" either: UELer displays
+# and links images, it does not offer filtering, segmentation or registration, so
+# Visualization + Bio-Informatics is the honest pair.
 # The Python classifiers must stay in step with `requires-python`.
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -39,16 +41,15 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
     "Topic :: Scientific/Engineering :: Visualization",
-    "Topic :: Scientific/Engineering :: Image Processing",
 ]
 dependencies = [
     "scikit-image>=0.19",
     "dask",
     "dask-image",
     "ipydatagrid",
-    "panel",
     "bqplot",
     "seaborn",
     "seaborn-image",

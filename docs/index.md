@@ -18,7 +18,7 @@ UELer is an interactive image viewer designed for **multiplexed imaging** data (
 - **Linked, interactive visualizations** — scatter plots, heatmaps, and gallery views are synchronized with the spatial image display.
 - **Multi-channel rendering** — visualize and compare channels with per-channel color and contrast controls.
 - **Segmentation overlays** — view and paint cell segmentation masks, annotation overlays, and custom color sets.
-- **ROI Manager** — capture, label, and export regions of interest with persistent storage.
+- **ROI manager** — capture, label, and export regions of interest with persistent storage.
 - **Batch export** — export full FOVs, ROIs, and single-cell crops to PNG or PDF, with optional scale bars and overlays.
 - **Map mode** — stitch multiple FOVs into a single spatial overview with full interactive navigation.
 - **OME-TIFF support** — load and render OME-TIFF files alongside standard TIFF directories.
