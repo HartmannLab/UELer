@@ -7,34 +7,42 @@ You can try UELer without installation by launching it on [Binder](https://mybin
 
 ## Installation
 
-### Option A — install from TestPyPI (recommended)
+### Option A — install with pip (recommended)
 
 **The install name is `ueler-viewer`; the import name is `ueler`.** PyPI administratively prohibits the name `ueler`, so the distribution ships as `ueler-viewer` — but nothing about using it changes, and `import ueler` stays exactly as it is. The same split as `scikit-image`/`skimage` and `opencv-python`/`cv2`.
 
-Releases currently live on **TestPyPI** while UELer is in pre-release. Install from there, on one line — `--extra-index-url` is required, because TestPyPI does not mirror UELer's runtime dependencies:
+The **stable** release is on PyPI:
 
 ```shell
-pip install --pre --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ ueler-viewer
+pip install ueler-viewer
 ```
 
-`--pre` is needed while UELer is on a pre-release version. This pulls in every runtime dependency. Two optional extras are available:
+This pulls in every runtime dependency. Two optional extras are available:
 
 ```shell
-# adds ark-analysis (pinned) for ark-based workflows
-pip install --pre --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "ueler-viewer[ark]"
-# adds the mkdocs toolchain for building the docs
-pip install --pre --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "ueler-viewer[docs]"
+pip install "ueler-viewer[ark]"     # adds ark-analysis (pinned) for ark-based workflows
+pip install "ueler-viewer[docs]"    # adds the mkdocs toolchain for building the docs
 ```
 
-Requires Python 3.10 or 3.11. Then, in Python:
+Requires Python 3.10, 3.11, or 3.12. Then, in Python:
 
 ```python
 import ueler
 ```
 
+#### Pre-releases (TestPyPI)
+
+Every release also goes to **TestPyPI**, and pre-releases (`alpha`, `beta`, `rc`) go there *only* — so use this if you want a preview of a version that is not out yet. Keep the command on one line: `--extra-index-url` is required, because TestPyPI does not mirror UELer's runtime dependencies, and `--pre` is what lets pip pick a pre-release at all.
+
+```shell
+pip install --pre --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ ueler-viewer
+```
+
+Extras work the same way — `"ueler-viewer[ark]"`, `"ueler-viewer[docs]"` — and appending `==0.6.0rc1` pins one specific preview. Full details, including how to get back to the stable channel: [the installation page](https://hartmannlab.github.io/UELer/installation/).
+
 #### If the install fails
 
-- **`No matching distribution found for scikit-image>=0.19`** (or for any other dependency) — the resolver is only seeing TestPyPI, which hosts an empty `scikit-image` project. Keep the command on **one line**: the `--extra-index-url https://pypi.org/simple/` part is what lets the dependencies come from real PyPI, and it is easy to lose when a multi-line command is pasted.
+- **`No matching distribution found for scikit-image>=0.19`** (or for any other dependency) — specific to the TestPyPI command: the resolver is only seeing TestPyPI, which hosts an empty `scikit-image` project. Keep the command on **one line**: the `--extra-index-url https://pypi.org/simple/` part is what lets the dependencies come from real PyPI, and it is easy to lose when a multi-line command is pasted.
 - **Installing with `uv`** — uv's default `--index-strategy first-index` stops at the first index that lists a package at all, so it never falls back to PyPI for the dependencies. It needs an extra flag:
 
   ```shell
@@ -65,7 +73,11 @@ Use this if you want to modify UELer or track the `develop` branch.
    ```
 
 ### Upgrade UELer
-If you installed from TestPyPI:
+If you installed the stable release from PyPI:
+```shell
+pip install --upgrade ueler-viewer
+```
+If you installed a pre-release from TestPyPI:
 ```shell
 pip install --upgrade --pre --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ ueler-viewer
 ```
@@ -149,6 +161,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 
 ## New Update  
 ### **UELer v0.5.0-rc1 Summary**
+- **Installing is now two clearly separated channels.** The stable release comes from **PyPI** with a plain `pip install ueler-viewer` — no `--pre`, no second index, no long one-line command. Previews (`alpha`, `beta`, `rc`) are published to **TestPyPI** only, so the longer command with `--pre` and `--extra-index-url` is now needed *only* if you specifically want a version that is not released yet. [The installation page](https://hartmannlab.github.io/UELer/installation/) documents both, plus how to pin one preview (`ueler-viewer==0.6.0rc1`) and how to get back to the stable channel afterwards. Nothing about the package changed — same distribution name `ueler-viewer`, same `import ueler`.
 - **Removed: the "Chart (heatmap)" plugin.** The footer used to carry a third tab called *Chart (heatmap)* alongside *Scatter plot* and *Heatmap*. It was a leftover copy of the Scatter plot panel that plotted the heatmap's cluster table instead of the cell table, and it offered nothing the other two do not — so it is gone, and the footer now holds just the plugins you actually use. The **Heatmap** plugin itself is unchanged, as are **Scatter plot** and **Histogram**. Nothing you had set up moves: if you find a `Chart (heatmap)_widget_states.json` file in a dataset's `.UELer` folder, it is a dead file and you can delete it.
 
 _Earlier changes (v0.5.0-alpha2 and before) are in the [update log](https://github.com/HartmannLab/UELer/blob/main/doc/log.md)._

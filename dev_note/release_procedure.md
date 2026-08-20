@@ -115,7 +115,7 @@ flowchart TD
     dry --> tagstable["tag v0.6.0, push"]
     tagstable --> approve{{"approve the pypi deployment"}}
     approve --> pub(["on PyPI"])
-    pub --> docs["flip README + docs/installation.md<br/>to the plain PyPI command"]
+    pub --> docs["verify: pip install ueler-viewer<br/>in a clean venv<br/>(docs already document this)"]
 
     classDef loop fill:#fff3e0,stroke:#e65100,color:#000
     class rc loop
@@ -162,7 +162,7 @@ Actions → the run → *Review deployments* → approve `pypi`. A run can wait 
 pip install ueler-viewer==0.6.0     # from a clean venv, from outside the repo
 ```
 
-Then update `README.md` and `docs/installation.md` to lead with the plain PyPI command — the "Option A — Install from TestPyPI" framing exists only because PyPI has no `ueler-viewer` yet. That documentation flip belongs with the first stable release.
+The documentation flip is **already done**: `README.md` and `docs/installation.md` lead with the plain `pip install ueler-viewer` from PyPI and keep the long TestPyPI command in a *Pre-releases* subsection. Nothing needs rewriting per release — only check that any version number quoted on those pages still makes sense, and note that until the first stable upload exists, the PyPI command they document has nothing to resolve.
 
 ---
 

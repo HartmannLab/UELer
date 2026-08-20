@@ -1,18 +1,26 @@
 # Installation
 
-There are two ways to install UELer. Pick the first unless you intend to modify UELer itself.
+There are two ways to install UELer: with `pip` from an index, or from a clone of the repository. Pick the first unless you intend to modify UELer itself.
 
 ---
 
 ## Requirements
 
-- **Python** 3.10 or 3.11
+- **Python** 3.10, 3.11, or 3.12
 - [micromamba](https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html) (recommended) or conda/mamba — needed for the development install, and still the easiest way to get the binary stack (HDF5, OpenCV) on an HPC system
 - Git — development install only
 
 ---
 
-## Option A — Install from TestPyPI
+## Which install do I want?
+
+- **Just use UELer** → [Option A](#option-a-install-with-pip), `pip install ueler-viewer` from PyPI.
+- **Try an unreleased preview** → [Option A](#option-a-install-with-pip), the [TestPyPI](#pre-releases-testpypi) command.
+- **Modify UELer, run its tests, or track a branch** → [Option B](#option-b-install-from-source).
+
+---
+
+## Option A — Install with pip
 
 !!! info "The install name is `ueler-viewer`, the import name is `ueler`"
 
@@ -20,16 +28,41 @@ There are two ways to install UELer. Pick the first unless you intend to modify 
     **`ueler-viewer`**. Only `pip install` is affected — `import ueler` is unchanged, and so is every
     API and notebook. This is the same split as `scikit-image`/`skimage` and `opencv-python`/`cv2`.
 
-While UELer is in pre-release, the releases live on **TestPyPI** rather than PyPI. TestPyPI does not
-mirror UELer's runtime dependencies, so the install needs a second index to resolve them — keep the
-command on one line:
+UELer is published on two indexes, and which one you want depends on whether you want the stable release or a preview:
+
+| You want | Index | Command |
+| --- | --- | --- |
+| the **stable** release | PyPI | `pip install ueler-viewer` |
+| a **pre-release** (`alpha`, `beta`, `rc`) | TestPyPI | the longer command in [Pre-releases](#pre-releases-testpypi) below |
+
+Every release reaches TestPyPI; only stable versions are promoted to PyPI. So TestPyPI always carries at least as much as PyPI, and a pre-release is *only* ever available there.
+
+### Stable releases (PyPI)
+
+```shell
+pip install ueler-viewer
+```
+
+That pulls in every runtime dependency. Two optional extras are available:
+
+```shell
+pip install "ueler-viewer[ark]"     # adds ark-analysis (pinned) for ark-based workflows
+pip install "ueler-viewer[docs]"    # adds the mkdocs toolchain for building these docs
+```
+
+To upgrade later, run `pip install --upgrade ueler-viewer`.
+
+### Pre-releases (TestPyPI)
+
+Use this only if you want to try a version that is not released yet. TestPyPI does not mirror UELer's
+runtime dependencies, so the install needs a second index to resolve them — keep the command on one
+line:
 
 ```shell
 pip install --pre --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ ueler-viewer
 ```
 
-`--pre` is required while the version is a pre-release. That pulls in every runtime dependency. Two
-optional extras are available:
+`--pre` is what allows pip to pick a pre-release version; without it, the resolver ignores every `alpha`, `beta` and `rc`. The extras work the same way:
 
 ```shell
 # adds ark-analysis (pinned) for ark-based workflows
@@ -38,12 +71,22 @@ pip install --pre --index-url https://test.pypi.org/simple/ --extra-index-url ht
 pip install --pre --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "ueler-viewer[docs]"
 ```
 
-To upgrade later, add `--upgrade` to the same command.
+To pin one specific preview, append the version — note that PEP 440 normalises the tag spelling, so
+`v0.6.0-rc1` is installed as `0.6.0rc1`:
+
+```shell
+pip install --pre --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ ueler-viewer==0.6.0rc1
+```
+
+To upgrade later, add `--upgrade` to the same command. To go back to the stable channel, uninstall
+first (`pip uninstall ueler-viewer`), then run the plain `pip install ueler-viewer` — a plain
+`--upgrade` will not downgrade you from a newer pre-release to an older stable release.
 
 !!! warning "`No matching distribution found for scikit-image>=0.19`"
 
-    This means the resolver only consulted TestPyPI, which hosts an empty `scikit-image` project, so
-    it found no candidates for the first dependency in the list. Two causes:
+    Specific to the TestPyPI command. It means the resolver only consulted TestPyPI, which hosts an
+    empty `scikit-image` project, so it found no candidates for the first dependency in the list. Two
+    causes:
 
     - **`--extra-index-url https://pypi.org/simple/` is missing.** It is what allows the
       dependencies to come from real PyPI, and it is easily lost when a multi-line command is pasted.
@@ -66,7 +109,7 @@ from the repository, or write your own cell calling `ueler.runner.run_viewer`.
 
 ---
 
-## Option B — Install from Source
+## Option B — Install from source
 
 Use this if you want to modify UELer, run the test suite, or track the `develop` branch. The
 remaining steps on this page describe that path.
@@ -132,8 +175,8 @@ git pull
 ```
 
 No reinstall is needed when using editable mode, unless `environment.yml` or `pyproject.toml`
-changed — then re-run `pip install -e .`. For an index install, re-run the
-[Option A](#option-a-install-from-testpypi) command with `--upgrade` added.
+changed — then re-run `pip install -e .`. For a pip install, re-run the
+[Option A](#option-a-install-with-pip) command for your channel with `--upgrade` added.
 
 ---
 
