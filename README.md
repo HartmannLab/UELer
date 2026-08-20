@@ -147,11 +147,11 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 For more details, see the [user guide](https://hartmannlab.github.io/UELer/latest/tutorials/user-interface).
 
 ## New Update  
-### **UELer v0.5.0-rc1 Summary**
-- **Installing is now two clearly separated channels.** The stable release comes from **PyPI** with a plain `pip install ueler-viewer` — no `--pre`, no second index, no long one-line command. Previews (`alpha`, `beta`, `rc`) are published to **TestPyPI** only, so the longer command with `--pre` and `--extra-index-url` is now needed *only* if you specifically want a version that is not released yet. [The installation page](https://hartmannlab.github.io/UELer/installation/) documents both, plus how to pin one preview (`ueler-viewer==0.6.0rc1`) and how to get back to the stable channel afterwards. Nothing about the package changed — same distribution name `ueler-viewer`, same `import ueler`.
-- **Removed: the "Chart (heatmap)" plugin.** The footer used to carry a third tab called *Chart (heatmap)* alongside *Scatter plot* and *Heatmap*. It was a leftover copy of the Scatter plot panel that plotted the heatmap's cluster table instead of the cell table, and it offered nothing the other two do not — so it is gone, and the footer now holds just the plugins you actually use. The **Heatmap** plugin itself is unchanged, as are **Scatter plot** and **Histogram**. Nothing you had set up moves: if you find a `Chart (heatmap)_widget_states.json` file in a dataset's `.UELer` folder, it is a dead file and you can delete it.
+### **UELer v0.5.0-rc2 Summary**
+- **The screenshot above is finally the interface you get.** The old preview image predated the current layout — it showed the left panel before the **Channels / Masks / Advanced Settings** accordion, and no footer at all. The new one shows today's UELer: the channel accordion with per-channel checkboxes and a filter box, the footer with its **Heatmap** and **Scatter plot** tabs, map mode and its tile readout, the cell tooltip, and the current plugin list. Documentation only — nothing in the application changed.
+- **This README now links to the user guide instead of paraphrasing it.** The **Overall Settings** and **Tools & Plugins** walkthroughs duplicated [the user interface guide](https://hartmannlab.github.io/UELer/latest/tutorials/user-interface), which covers the same panels in more depth and had already drifted ahead of the copy here, so the copy here is replaced by a link to it. The reasoning behind the `ueler-viewer` install name moved out of the way too, on both this page and the installation page — the name mapping itself is still stated in both.
 
-_Earlier changes (v0.5.0-alpha2 and before) are in the [update log](https://github.com/HartmannLab/UELer/blob/main/doc/log.md)._
+_Earlier changes (v0.5.0-rc1 and before) are in the [update log](https://github.com/HartmannLab/UELer/blob/main/doc/log.md)._
 
 ## License
 UELer is released under the **BSD 3-Clause License** — see

@@ -24,10 +24,6 @@ There are two ways to install UELer: with `pip` from an index, or from a clone o
 
 !!! info "The install name is `ueler-viewer`, the import name is `ueler`"
 
-    PyPI administratively prohibits the project name `ueler`, so the distribution is published as
-    **`ueler-viewer`**. Only `pip install` is affected — `import ueler` is unchanged, and so is every
-    API and notebook. This is the same split as `scikit-image`/`skimage` and `opencv-python`/`cv2`.
-
 UELer is published on two indexes, and which one you want depends on whether you want the stable release or a preview:
 
 | You want | Index | Command |
