@@ -9,7 +9,7 @@ You can try UELer without installation by launching it on [Binder](https://mybin
 
 ### Option A — install with pip (recommended)
 
-**The install name is `ueler-viewer`; the import name is `ueler`.** PyPI administratively prohibits the name `ueler`, so the distribution ships as `ueler-viewer` — but nothing about using it changes, and `import ueler` stays exactly as it is. The same split as `scikit-image`/`skimage` and `opencv-python`/`cv2`.
+**The install name is `ueler-viewer`; the import name is `ueler`.**
 
 The **stable** release is on PyPI:
 
@@ -144,20 +144,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 - right: plugin tools (Mask Painter, ROI Manager, palette editors, statistics panels)
 - bottom (optional): wide plugin tabs (e.g., horizontal heatmap or gallery extensions)
 
-### Overall Settings
-- **Cache Size**: Defines the number of images that can be loaded into memory at one time.  
-- **Select Image**: Choose an image to display in the main viewer.  
-- **Channel Selection**: Select the channels you want to display. You can select multiple channels by holding down the **Shift** key and clicking.  
-- **No image (masks only)**: When masks are available, enable this checkbox to skip rendering the image layer and show masks plus annotations on a black background. This also reduces image-compositing work when you only need spatial mask context.
-- **Marker Set**: Load a pre-defined marker set, which includes channels, colors, and color ranges.
-- **Control sections**: Channel, annotation, and mask controls now live in a collapsible accordion so you can jump straight to the section you need. When annotations are available, their controls appear ahead of masks, and each pane scrolls independently to keep the palette tools in reach even with dozens of channels.
-- **Annotations**: When `<base_folder>/annotations` contains rasters named `<fov>_<annotation>.tif(f)`, enable the overlay toggle to color pixels by class. Choose between mask outlines, annotation fills, or a combined view, adjust fill opacity, and launch the palette editor to customize class colors and display labels. Annotation names can include spaces (for example, `Simple Segmentation`)—they remain selectable and the **Edit palette…** button now activates as soon as such an entry loads.
-- **Masks**: Load segmentation rasters, edit per-class colours, and save or recall `.maskcolors.json` sets—default colours are tracked automatically, and optional `ipyfilechooser` dialogs speed up import/export.
-
-### Tools & Plugins
-- **Mask Painter**: Focus on edited classes, reuse colour sets, let inactive classes follow the global default fill mode, and restore saved per-class opacity, border, and filtered-list state without leaving the plugin.
-- **ROI Manager**: Capture, centre, and tag regions of interest with persistent storage in `<base_folder>/.UELer/roi_manager.csv`; combo-box tagging keeps new labels available for future sessions.
-- **Wide Plugins**: Enable "Horizontal layout" (for example, in the heatmap plugin) to undock the tool into the footer while keeping the accordion available for other controls.
+For more details, see the [user guide](https://hartmannlab.github.io/UELer/latest/tutorials/user-interface).
 
 ## New Update  
 ### **UELer v0.5.0-rc1 Summary**
@@ -165,10 +152,6 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 - **Removed: the "Chart (heatmap)" plugin.** The footer used to carry a third tab called *Chart (heatmap)* alongside *Scatter plot* and *Heatmap*. It was a leftover copy of the Scatter plot panel that plotted the heatmap's cluster table instead of the cell table, and it offered nothing the other two do not — so it is gone, and the footer now holds just the plugins you actually use. The **Heatmap** plugin itself is unchanged, as are **Scatter plot** and **Histogram**. Nothing you had set up moves: if you find a `Chart (heatmap)_widget_states.json` file in a dataset's `.UELer` folder, it is a dead file and you can delete it.
 
 _Earlier changes (v0.5.0-alpha2 and before) are in the [update log](https://github.com/HartmannLab/UELer/blob/main/doc/log.md)._
-
-## Earlier Updates  
-
-You can find previous update logs [here](https://github.com/HartmannLab/UELer/blob/main/doc/log.md).
 
 ## License
 UELer is released under the **BSD 3-Clause License** — see
