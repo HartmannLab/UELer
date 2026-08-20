@@ -941,6 +941,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#linking-a-plot-to-the-rest-of-the-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linking a plot to the rest of the UI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#histogram" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1225,6 +1236,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../develop-notes/plugin-development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugin Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../develop-notes/viewer-runtime/" class="md-nav__link">
         
   
@@ -1233,6 +1272,34 @@
     
   
     Viewer Runtime & UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../develop-notes/mask-rendering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mask Rendering & Coloring
   
 
     
@@ -1420,6 +1487,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#linking-a-plot-to-the-rest-of-the-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linking a plot to the rest of the UI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#histogram" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1532,14 +1610,48 @@
 <p>The <strong>Scatter plot</strong> and <strong>Histogram</strong> plugins are UELer's linked distribution tools. Both require a
 <a href="../cell-table/">cell table</a>, share the same channel picker, and publish a selection that can drive the
 image and the <a href="../cell-table/#the-cell-gallery">cell gallery</a>.</p>
-<p>Both plugins have a <strong>Linked plugins</strong> tab with two checkboxes — <strong>Main viewer</strong> and <strong>Cell gallery</strong> —
-that control whether their selection highlights masks in the image and fills the gallery.</p>
+<p>They sit in different places: the <strong>Histogram</strong> is in the right-panel accordion, while the <strong>Scatter plot</strong> is allocated permanently to the wide footer beneath the viewer, since a scatter matrix is unreadable at side-panel width.</p>
+<h2 id="linking-a-plot-to-the-rest-of-the-ui">Linking a plot to the rest of the UI<a class="headerlink" href="#linking-a-plot-to-the-rest-of-the-ui" title="Permanent link">&para;</a></h2>
+<p>Both plugins have a <strong>Linked plugins</strong> tab, and the three checkboxes on it point in two different
+directions. Getting them the wrong way round is the usual reason a link "doesn't work":</p>
+<table>
+<thead>
+<tr>
+<th>Control</th>
+<th>Direction</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Main viewer</strong></td>
+<td>plot → image</td>
+<td>This plot's selection highlights the matching masks in the image</td>
+</tr>
+<tr>
+<td><strong>Cell gallery</strong></td>
+<td>plot → gallery</td>
+<td>This plot's selection fills the <a href="../cell-table/#the-cell-gallery">Gallery</a> with thumbnails</td>
+</tr>
+<tr>
+<td><strong>Follow main viewer</strong></td>
+<td>image → plot</td>
+<td>Cells you select <em>in the image</em> (click, ctrl-click, lasso) are highlighted in this plot</td>
+</tr>
+</tbody>
+</table>
+<p>All three are <strong>off</strong> by default. <strong>Follow main viewer</strong> is the exact counterpart of <strong>Main viewer</strong>,
+not a duplicate of it: one pushes the plot's selection outward, the other pulls the image's selection
+in. It is continuous — for a one-shot version, the Scatter plot's <strong>Trace</strong> tab does the same pull a
+single time.</p>
 <hr />
 <h2 id="histogram">Histogram<a class="headerlink" href="#histogram" title="Permanent link">&para;</a></h2>
 <p>The <strong>Histogram</strong> plugin draws one distribution per selected channel, rendered with Bokeh.</p>
 <ol>
-<li>Pick channels in the <strong>Channels:</strong> field (the same tag input as the left panel; you can also load
-   a marker set's channels via the <strong>Marker set:</strong> dropdown + <strong>Load set</strong>).</li>
+<li>Pick channels in the <strong>Channels:</strong> field — the same searchable picker as the left panel, with the
+   same filter box, <strong>Select all shown</strong> / <strong>Clear</strong> buttons and keyboard navigation. You can also
+   load a marker set's channels via the <strong>Marker set:</strong> dropdown + <strong>Load set</strong>; that fills this
+   plugin's picker only and does not repaint the main image.</li>
 <li>Click <strong>Plot</strong>. Adjust <strong>Bins:</strong> (default 50) as needed.</li>
 </ol>
 <h3 id="interaction-modes">Interaction modes<a class="headerlink" href="#interaction-modes" title="Permanent link">&para;</a></h3>
@@ -1568,8 +1680,7 @@ UELer dependencies) and restart the kernel.</p>
 <h3 id="all-pairwise-scatters-multi-pair">All pairwise scatters (multi-pair)<a class="headerlink" href="#all-pairwise-scatters-multi-pair" title="Permanent link">&para;</a></h3>
 <p>To compare many markers at once, select several channels in the top <strong>Channels:</strong> picker and click
 <strong>Plot all pairs</strong>. UELer generates a scatter for every pair and lays them out as an
-<strong>upper-triangular matrix</strong>. When more than one scatter is active, the plots move into the footer
-panel so the viewer stays visible.</p>
+<strong>upper-triangular matrix</strong>.</p>
 <h3 id="brushing">Brushing<a class="headerlink" href="#brushing" title="Permanent link">&para;</a></h3>
 <p>Select cells with the <strong>lasso</strong> tool in the scatter toolbar (pan/zoom and box tools are available
 too). The selection mirrors across all scatter views and, with the <strong>Linked plugins</strong> checkboxes on,

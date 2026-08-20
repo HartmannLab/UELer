@@ -753,6 +753,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#masks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Masks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#marker-sets" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -767,7 +778,7 @@
   <a href="#pixel-annotations" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Pixel Annotations
+        Pixel annotations
       
     </span>
   </a>
@@ -1252,6 +1263,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../develop-notes/plugin-development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugin Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../develop-notes/viewer-runtime/" class="md-nav__link">
         
   
@@ -1260,6 +1299,34 @@
     
   
     Viewer Runtime & UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../develop-notes/mask-rendering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mask Rendering & Coloring
   
 
     
@@ -1492,6 +1559,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#masks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Masks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#marker-sets" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1506,7 +1584,7 @@
   <a href="#pixel-annotations" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Pixel Annotations
+        Pixel annotations
       
     </span>
   </a>
@@ -1588,6 +1666,10 @@ For a hands-on first run, see <a href="../basic-usage/">Basic Usage</a>.</p>
 <p><img alt="GUI preview" src="../../GUI_preview.png" /></p>
 <hr />
 <h2 id="layout-overview">Layout Overview<a class="headerlink" href="#layout-overview" title="Permanent link">&para;</a></h2>
+<p>The left panel's accordion is <strong>built from your data</strong>: the <strong>Channels</strong> section is always there,
+<strong>Masks</strong> appears only if <code>masks_folder</code> yielded readable masks, and <strong>Pixel annotations</strong> only if
+<code>annotations_folder</code> did. A section you cannot find is usually a path that did not load rather than a
+setting to switch on.</p>
 <table>
 <thead>
 <tr>
@@ -1613,13 +1695,13 @@ For a hands-on first run, see <a href="../basic-usage/">Basic Usage</a>.</p>
 <td>Plugin tools (accordion)</td>
 </tr>
 <tr>
-<td><strong>Footer</strong> (optional)</td>
+<td><strong>Footer</strong></td>
 <td>Bottom</td>
-<td>Wide plugin tabs (e.g. heatmap, multi-scatter)</td>
+<td>The wide plugins — <strong>Scatter plot</strong> and <strong>Heatmap</strong></td>
 </tr>
 </tbody>
 </table>
-<p>Some plugins move themselves into the footer automatically when they need the extra width.</p>
+<p>Plugin placement is fixed, not adaptive: each plugin lives in either the right-panel accordion or the footer, and never moves between them. The <strong>Scatter plot</strong> and <strong>Heatmap</strong> are footer-only because both need the full window width to be readable, so they are absent from the accordion entirely — look for them at the bottom of the viewer, not on the right.</p>
 <hr />
 <h2 id="left-panel">Left Panel<a class="headerlink" href="#left-panel" title="Permanent link">&para;</a></h2>
 <h3 id="top-controls">Top controls<a class="headerlink" href="#top-controls" title="Permanent link">&para;</a></h3>
@@ -1642,16 +1724,22 @@ For a hands-on first run, see <a href="../basic-usage/">Basic Usage</a>.</p>
   these rows and keeps each channel's colour and contrast settings.</li>
 <li><strong>Show channel legend</strong> — display a color key for the visible channels.</li>
 <li><strong>Channel grid view</strong> — render each visible channel as its own labelled pane in a synchronized grid.</li>
-<li><strong>Mask &lt;name&gt;</strong> dropdowns + enable checkboxes, and <strong>Mask outline px:</strong> — control segmentation
-  mask overlays. (For per-class fill/outline, opacity, and saved palettes, use the <strong>Mask painter</strong>
-  plugin below.)</li>
 </ul>
+<h3 id="masks">Masks<a class="headerlink" href="#masks" title="Permanent link">&para;</a></h3>
+<p>A separate accordion section, present <strong>only when <code>masks_folder</code> contained readable masks</strong>:</p>
+<ul>
+<li><strong>Mask &lt;name&gt;</strong> dropdowns + enable checkboxes — one row per mask layer, each with a single
+  uniform colour.</li>
+<li><strong>Mask outline px:</strong> — outline thickness, applied to every mask layer.</li>
+</ul>
+<p>For per-class fill/outline, opacity, continuous colour scales, and saved palettes, use the
+<strong>Mask painter</strong> plugin instead.</p>
 <h3 id="marker-sets">Marker Sets<a class="headerlink" href="#marker-sets" title="Permanent link">&para;</a></h3>
 <p>Save and restore named channel/color/contrast combinations: <strong>Marker Set:</strong> dropdown, <strong>Set Name:</strong>
 input, and <strong>Load / Save / Update / Delete Marker Set</strong> buttons (deletion is gated by a <strong>Confirm
 Deletion</strong> checkbox).</p>
-<h3 id="pixel-annotations">Pixel Annotations<a class="headerlink" href="#pixel-annotations" title="Permanent link">&para;</a></h3>
-<p>Visible when <code>annotations_folder</code> contains valid rasters:</p>
+<h3 id="pixel-annotations">Pixel annotations<a class="headerlink" href="#pixel-annotations" title="Permanent link">&para;</a></h3>
+<p>Also its own accordion section, visible when <code>annotations_folder</code> contains valid rasters:</p>
 <ul>
 <li><strong>Show annotation</strong> — toggle the annotation overlay.</li>
 <li><strong>Annotation:</strong> — choose which annotation to display.</li>
@@ -1679,14 +1767,14 @@ Deletion</strong> checkbox).</p>
 <p>Plugins appear as an accordion. <strong>Which plugins load depends on whether a cell table is present:</strong></p>
 <ul>
 <li><strong>Without a cell table</strong>, only these two load — both work on images alone:<ul>
-<li><strong>ROI manager</strong> — capture, tag, and browse regions of interest. See <a href="../roi-manager/">Regions of Interest</a>.</li>
+<li><strong>ROI manager</strong> — capture, tag, draw, and browse regions of interest. See <a href="../roi-manager/">Regions of Interest</a>.</li>
 <li><strong>Batch export</strong> — export FOVs, ROIs, and single-cell crops. See <a href="../export/">Batch Export</a>.</li>
 </ul>
 </li>
 <li><strong>With a cell table loaded</strong>, the analytical plugins also appear:<ul>
-<li><strong>Scatter plot</strong> and <strong>Histogram</strong> — linked distribution plots. See <a href="../scatter-histogram/">Scatter &amp; Histogram</a>.</li>
+<li><strong>Histogram</strong> — linked per-channel distributions. See <a href="../scatter-histogram/">Scatter &amp; Histogram</a>.</li>
 <li><strong>Gallery</strong> — thumbnails of the currently selected cells.</li>
-<li><strong>Heatmap</strong>, <strong>FlowSOM</strong>, <strong>Cell Annotation</strong> — clustering and annotation. See <a href="../clustering-annotation/">Clustering &amp; Annotation</a>.</li>
+<li><strong>FlowSOM</strong> and <strong>Cell Annotation</strong> — clustering and checkpoints. See <a href="../clustering-annotation/">Clustering &amp; Annotation</a>.</li>
 <li><strong>Mask painter</strong> — per-class mask colors, fill/outline modes, opacity, and saved palettes.</li>
 <li><strong>Go to</strong> — jump and zoom to a specific cell.</li>
 <li><strong>Cell Table Editor</strong> — write a value onto the selected cells.</li>
@@ -1695,17 +1783,23 @@ Deletion</strong> checkbox).</p>
 </li>
 </ul>
 <div class="admonition note">
+<p class="admonition-title">Two plugins are not in this list</p>
+<p><strong>Scatter plot</strong> and <strong>Heatmap</strong> also require a cell table, but they live in the
+<a href="#footer-wide-plugins">footer</a> rather than the accordion. Do not go looking for them on the right.</p>
+</div>
+<div class="admonition note">
 <p class="admonition-title">Panel order</p>
 <p>The right-panel accordion order is not curated — locate a plugin by its name rather than its
 position.</p>
 </div>
 <hr />
 <h2 id="footer-wide-plugins">Footer (Wide Plugins)<a class="headerlink" href="#footer-wide-plugins" title="Permanent link">&para;</a></h2>
-<p>Some plugins expand into a horizontal footer panel so the main viewer stays visible alongside them:</p>
+<p>Two plugins are allocated permanently to the horizontal footer panel, so the main viewer stays visible above them. Neither appears in the right-panel accordion, and neither has a toggle for moving it — the placement is not a preference:</p>
 <ul>
-<li><strong>Heatmap</strong> — enable <strong>Horizontal layout</strong> in the plugin to move it to the footer.</li>
-<li><strong>Scatter plot</strong> — moves to the footer automatically when more than one scatter is active.</li>
+<li><strong>Scatter plot</strong> — single-pair and all-pairs scatter matrices. A triangular matrix of scatters is unreadable at side-panel width, which is why the plugin lives here whether one scatter is active or twenty. See <a href="../scatter-histogram/">Scatter &amp; Histogram</a>.</li>
+<li><strong>Heatmap</strong> — the cluster × marker heatmap, always drawn in its wide (horizontal) orientation. See <a href="../clustering-annotation/">Clustering &amp; Annotation</a>.</li>
 </ul>
+<p>Both require a cell table, so the footer is empty until one is loaded.</p>
 
 
 

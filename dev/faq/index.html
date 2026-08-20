@@ -1438,6 +1438,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../develop-notes/plugin-development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugin Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../develop-notes/viewer-runtime/" class="md-nav__link">
         
   
@@ -1446,6 +1474,34 @@
     
   
     Viewer Runtime & UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../develop-notes/mask-rendering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mask Rendering & Coloring
   
 
     
@@ -2059,9 +2115,12 @@ accordion and lower <strong>Max</strong> (for an all-black channel) or raise <st
 <a href="../tutorials/display-settings/#getting-contrast-right">Getting contrast right</a>.</p>
 <h3 id="how-do-i-enable-map-mode">How do I enable Map Mode?<a class="headerlink" href="#how-do-i-enable-map-mode" title="Permanent link">&para;</a></h3>
 <p>Map mode is opt-in. Set the <code>ENABLE_MAP_MODE</code> environment variable to a truthy value (<code>1</code>, <code>true</code>,
-<code>yes</code>, <code>on</code>) before launching, and place map descriptor JSON files under <code>&lt;base_folder&gt;/.UELer/maps/</code>.
-When both are present, the <strong>Map mode</strong> toggle and <strong>Select map:</strong> dropdown appear. See
+<code>yes</code>, <code>on</code>) and place map descriptor JSON files under <code>&lt;base_folder&gt;/.UELer/maps/</code>. When both are
+present, the <strong>Map mode</strong> toggle and <strong>Select map:</strong> dropdown appear. See
 <a href="../tutorials/map-mode/">Map Mode</a>.</p>
+<p><strong>Set it before <code>import ueler</code>.</strong> The flag is read once at import time, so setting it after UELer is
+imported has no effect — even if you set it before calling <code>run_viewer</code>. Set it in the shell before
+starting the kernel, or restart the kernel after setting it.</p>
 <h3 id="map-mode-renders-slowly-for-large-datasets">Map mode renders slowly for large datasets<a class="headerlink" href="#map-mode-renders-slowly-for-large-datasets" title="Permanent link">&para;</a></h3>
 <p>Map mode limits how many <em>uncached</em> tiles it draws per frame (default 80), keeping the ones nearest
 the viewport. You can lower this on the viewer object:</p>

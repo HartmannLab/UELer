@@ -1230,6 +1230,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../develop-notes/plugin-development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugin Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../develop-notes/viewer-runtime/" class="md-nav__link">
         
   
@@ -1238,6 +1266,34 @@
     
   
     Viewer Runtime & UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../develop-notes/mask-rendering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mask Rendering & Coloring
   
 
     
@@ -1553,9 +1609,10 @@ ties everything together, and the tools that operate on the current selection.</
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="n">load_cell_table</span><span class="p">(</span><span class="n">viewer</span><span class="p">,</span> <span class="n">cell_table</span><span class="o">=</span><span class="n">cell_table</span><span class="p">,</span> <span class="n">auto_display</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">after_plugins</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 </code></pre></div>
 <p>See <a href="../../getting-started/">Get Started</a> for the full launch flow. Once the table is loaded, the
-analytical plugins appear in the right panel (<strong>Scatter plot</strong>, <strong>Histogram</strong>, <strong>Gallery</strong>,
-<strong>Heatmap</strong>, <strong>FlowSOM</strong>, <strong>Cell Annotation</strong>, <strong>Mask painter</strong>, <strong>Go to</strong>, <strong>Cell Table Editor</strong>,
-<strong>Cell tooltip label</strong>).</p>
+analytical plugins appear — most in the right-panel accordion (<strong>Histogram</strong>, <strong>Gallery</strong>,
+<strong>FlowSOM</strong>, <strong>Cell Annotation</strong>, <strong>Mask painter</strong>, <strong>Go to</strong>, <strong>Cell Table Editor</strong>, <strong>Cell tooltip
+label</strong>), and two in the wide footer below the viewer (<strong>Scatter plot</strong> and <strong>Heatmap</strong>, which need
+the full window width). See the <a href="../user-interface/#right-panel-plugins">User Interface</a> reference.</p>
 <hr />
 <h2 id="anndata-input">AnnData Input<a class="headerlink" href="#anndata-input" title="Permanent link">&para;</a></h2>
 <p>An <code>AnnData</code> object works just as well as a DataFrame — pass the object, or point
@@ -1623,14 +1680,23 @@ using the numeric non-key columns as <code>X</code>.</p>
 <h2 id="the-idea-linked-selection">The Idea: Linked Selection<a class="headerlink" href="#the-idea-linked-selection" title="Permanent link">&para;</a></h2>
 <p>Most single-cell features in UELer revolve around one shared concept — a <strong>current selection</strong> of
 cells. Whenever you select cells in one place, every linked view updates:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Scatter / Histogram / Lasso  ─┐
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>                              ├──▶  selected cells  ──▶  highlighted in the image
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>                              │                     └─▶  shown in the Cell Gallery
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Scatter / Histogram / Heatmap ──▶  selected cells  ──▶  highlighted in the image
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>       ▲                      └────────────────────▶  shown in the Gallery
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>       │
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>       └── "Follow main viewer"  ◀──  click / ctrl-click / lasso in the image
 </code></pre></div>
-<p>Plots such as the scatter and histogram publish their selection; when their <strong>Main viewer</strong> and
-<strong>Cell gallery</strong> link checkboxes are enabled, that selection highlights the corresponding masks in
-the image and populates the gallery. This is what makes "gate on a marker, see those cells light up
-in the tissue" work.</p>
+<p>The link is opt-in in both directions, and each direction has its own checkbox on the plot's
+<strong>Linked plugins</strong> tab:</p>
+<ul>
+<li><strong>Outward</strong> (plot → rest of the UI): tick <strong>Main viewer</strong> to highlight the selected cells' masks in
+  the image, and <strong>Cell gallery</strong> to populate the gallery. This is what makes "gate on a marker, see
+  those cells light up in the tissue" work.</li>
+<li><strong>Inward</strong> (image → plot): tick <strong>Follow main viewer</strong> so that cells you pick in the image appear
+  highlighted in the plot instead. Useful in reverse — click an odd-looking cell in the tissue and see
+  where it falls in the marker distribution.</li>
+</ul>
+<p>All of these start <strong>off</strong>, so a freshly loaded viewer shows no linking until you ask for it. See
+<a href="../scatter-histogram/#linking-a-plot-to-the-rest-of-the-ui">Scatter &amp; Histogram</a> for the full table.</p>
 <p>The selection spans the whole cell table, not just the FOV on screen, so <strong>switching FOV keeps it</strong>:
 the image re-highlights the selected cells belonging to the FOV you moved to. Zooming and panning
 keep the highlight as well. Selections made directly in the image — a click or a <strong>lasso</strong> — are

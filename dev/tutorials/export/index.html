@@ -1258,6 +1258,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../develop-notes/plugin-development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugin Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../develop-notes/viewer-runtime/" class="md-nav__link">
         
   
@@ -1266,6 +1294,34 @@
     
   
     Viewer Runtime & UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../develop-notes/mask-rendering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mask Rendering & Coloring
   
 
     
@@ -1612,6 +1668,13 @@ It works in both standard and simple (images-only) viewer mode.</p>
 <li><strong>Filter (query):</strong> — a pandas-style query (e.g. <code>marker &gt; 0</code>); click <strong>Apply</strong>.</li>
 <li>Pick cells from <strong>Cells:</strong>, set <strong>Crop size (px):</strong> (default 128), and use <strong>Preview</strong> to check.</li>
 </ul>
+<div class="admonition warning">
+<p class="admonition-title">The <strong>Cells:</strong> list shows at most 500 cells</p>
+<p>After <strong>Apply</strong>, only the first 500 matching rows are offered in the picker. The list gives no
+indication that it was truncated, so on a large table treat <strong>Filter (query):</strong> as the way to
+choose <em>which</em> cells you get — not as a pre-filter you then scroll through. Narrow the query until
+the population you want fits.</p>
+</div>
 <div class="admonition note">
 <p class="admonition-title">Simple viewer mode</p>
 <p>Without a cell table, the Single Cells tab shows a notice and is unavailable. Full FOV and ROI

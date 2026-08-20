@@ -15,7 +15,7 @@
         <link rel="canonical" href="https://hartmannlab.github.io/UELer/latest/develop-notes/map-mode/">
       
       
-        <link rel="prev" href="../viewer-runtime/">
+        <link rel="prev" href="../mask-rendering/">
       
       
         <link rel="next" href="../export-pipeline/">
@@ -1083,6 +1083,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../plugin-development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugin Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../viewer-runtime/" class="md-nav__link">
         
   
@@ -1091,6 +1119,34 @@
     
   
     Viewer Runtime & UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mask-rendering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mask Rendering & Coloring
   
 
     
@@ -1211,6 +1267,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Tile Rendering">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-uncached-tile-budget" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The uncached-tile budget
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1443,6 +1516,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Tile Rendering">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-uncached-tile-budget" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The uncached-tile budget
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1550,8 +1640,14 @@
 <li><code>_collect_visible_tiles()</code> returns tiles whose bounding boxes intersect the viewport.</li>
 <li>Each tile is rendered via <code>render_fov_to_array()</code> using <code>channel_settings</code> from the marker profile (no UI widget reads).</li>
 <li>Tiles are stitched onto the canvas via <code>_allocate_canvas()</code> + <code>_blit_tile()</code>.</li>
-<li>If the number of visible tiles exceeds <code>_RENDER_TILE_LIMIT</code>, only the nearest tiles to the viewport center are rendered.</li>
 </ol>
+<h3 id="the-uncached-tile-budget">The uncached-tile budget<a class="headerlink" href="#the-uncached-tile-budget" title="Permanent link">&para;</a></h3>
+<p>The cap is on <em>uncached</em> tiles only — already-cached tiles always render, however many there are, because drawing them costs nothing but a memcpy. The budget exists to stop a single frame pulling hundreds of TIFFs off a slow network filesystem at once.</p>
+<ul>
+<li>The base budget is read from the viewer as <code>_map_render_tile_limit</code> (default <strong>80</strong>), so it can be lowered at runtime on a slow machine: <code>viewer._map_render_tile_limit = 40</code>.</li>
+<li>The effective budget is <code>_map_render_tile_limit × max(1, downsample_factor)</code>. It scales with the downsample factor deliberately: a fully zoomed-out view (ds ≥ 8) is cheap per tile and needs to show every FOV rather than cut off the edges of the map.</li>
+<li>When the uncached set exceeds the budget, tiles are sorted by squared distance from the viewport centre and truncated, so what survives is the region the user is actually looking at.</li>
+</ul>
 <hr />
 <h2 id="plugin-map-mode-hooks">Plugin Map-Mode Hooks<a class="headerlink" href="#plugin-map-mode-hooks" title="Permanent link">&para;</a></h2>
 <p>All plugins inherit from <code>PluginBase</code>, which provides two lifecycle hooks:</p>

@@ -1083,6 +1083,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../plugin-development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugin Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../viewer-runtime/" class="md-nav__link">
         
   
@@ -1091,6 +1119,34 @@
     
   
     Viewer Runtime & UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mask-rendering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mask Rendering & Coloring
   
 
     
@@ -1259,6 +1315,17 @@
   
     <nav class="md-nav" aria-label="ROI Manager">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#view-rois-and-shape-rois" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        View ROIs and shape ROIs
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#labels" class="md-nav__link">
@@ -1453,6 +1520,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#view-rois-and-shape-rois" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        View ROIs and shape ROIs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#labels" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1545,10 +1623,14 @@
 <li><strong>Browser and editor tabs</strong> are separate within the ROI Manager plugin, with a scrollable gallery and pagination controls.</li>
 <li><strong>Static narrow figure width</strong> avoids width clipping across different notebook layouts.</li>
 <li><strong>Caret-aware insertion pipeline</strong> for expression helpers reduces focus drift when building cell filters.</li>
+<li><strong>Drawn shapes reuse the ROI record rather than getting their own store.</strong> A polyline or polygon is an ROI with a <code>geometry</code>, so it inherits tagging, comments, filtering, thumbnails and export unchanged — and an older CSV stays readable because an absent <code>roi_kind</code> already means "view".</li>
 </ul>
 <hr />
 <h2 id="roi-manager">ROI Manager<a class="headerlink" href="#roi-manager" title="Permanent link">&para;</a></h2>
-<p>ROIs are stored persistently in <code>&lt;base_folder&gt;/.UELer/roi_manager.csv</code>. Each ROI record contains:</p>
+<p>ROIs are stored persistently in <code>&lt;base_folder&gt;/.UELer/roi_manager.csv</code>. The schema is the
+<code>ROI_COLUMNS</code> list in <code>ueler/viewer/roi_manager.py</code>, and the CSV is always written with exactly those
+columns in that order — <code>_ensure_dataframe()</code> adds any that are missing (<code>""</code> for the string columns,
+<code>0.0</code> otherwise) and reorders, so an older CSV is read without a migration step.</p>
 <table>
 <thead>
 <tr>
@@ -1558,6 +1640,14 @@
 </thead>
 <tbody>
 <tr>
+<td><code>roi_id</code></td>
+<td>Stable identifier</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>User-assigned label</td>
+</tr>
+<tr>
 <td><code>fov</code></td>
 <td>FOV name (empty for map-mode ROIs)</td>
 </tr>
@@ -1566,24 +1656,56 @@
 <td>Map layer ID (non-empty for map-mode ROIs)</td>
 </tr>
 <tr>
+<td><code>x</code>, <code>y</code>, <code>width</code>, <code>height</code>, <code>zoom</code></td>
+<td>The saved viewport</td>
+</tr>
+<tr>
 <td><code>x_min</code>, <code>x_max</code>, <code>y_min</code>, <code>y_max</code></td>
 <td>Bounding box in canvas pixels</td>
 </tr>
 <tr>
-<td><code>name</code></td>
-<td>User-assigned label</td>
+<td><code>marker_set</code></td>
+<td>Marker set to re-apply on recall</td>
 </tr>
 <tr>
 <td><code>tags</code></td>
 <td>Comma-separated tag list</td>
 </tr>
 <tr>
-<td><code>palette</code></td>
-<td>Serialized color palette snapshot</td>
+<td><code>annotation_palette</code>, <code>mask_color_set</code>, <code>mask_visibility</code>, <code>mask_painter_state</code></td>
+<td>Overlay presets captured with the ROI</td>
+</tr>
+<tr>
+<td><code>comment</code></td>
+<td>Free-text note</td>
+</tr>
+<tr>
+<td><code>roi_kind</code>, <code>geometry</code></td>
+<td>Shape support — see below</td>
+</tr>
+<tr>
+<td><code>created_at</code>, <code>updated_at</code></td>
+<td>Timestamps</td>
 </tr>
 </tbody>
 </table>
+<h3 id="view-rois-and-shape-rois">View ROIs and shape ROIs<a class="headerlink" href="#view-rois-and-shape-rois" title="Permanent link">&para;</a></h3>
+<p><code>roi_kind</code> discriminates the two record types:</p>
+<ul>
+<li><code>ROI_KIND_VIEW</code> (<code>"view"</code>) — the viewport bookmark the manager has always stored. <strong>An empty
+  <code>roi_kind</code> means the same thing</strong>, which is what lets pre-shape CSVs keep their meaning without
+  migration.</li>
+<li><code>ROI_KIND_SHAPE</code> (<code>"line"</code>) — a drawn shape, with its vertices in <code>geometry</code>. Open polylines and
+  closed polygons share the one kind and are told apart by <code>geometry["closed"]</code>: a single kind keeps
+  filtering to one predicate while the UI still names them separately. <code>is_shape_record()</code> also treats
+  a record with parseable geometry but no <code>roi_kind</code> as a shape.</li>
+</ul>
+<p>A straight horizontal or vertical line has a zero-extent bounding box, and the thumbnail renderers
+reject <code>x_max &lt;= x_min</code> — so every shape's box is grown to at least <code>SHAPE_BBOX_MIN_EXTENT</code> (8 px) per
+axis, plus <code>SHAPE_BBOX_PADDING</code> (4 px) of breathing room so the shape is not flush against the tile
+edge.</p>
 <h3 id="labels">Labels<a class="headerlink" href="#labels" title="Permanent link">&para;</a></h3>
+<p><code>format_roi_label()</code> builds the display label:</p>
 <ul>
 <li>Single-FOV ROIs: <code>&lt;fov&gt; — &lt;name&gt;</code></li>
 <li>Map-mode ROIs: <code>[MAP:&lt;map_id&gt;] — &lt;name&gt;</code></li>

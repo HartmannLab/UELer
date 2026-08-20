@@ -1081,6 +1081,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../plugin-development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugin Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../viewer-runtime/" class="md-nav__link">
         
   
@@ -1089,6 +1117,34 @@
     
   
     Viewer Runtime & UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mask-rendering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mask Rendering & Coloring
   
 
     
@@ -1462,10 +1518,11 @@
 <hr />
 <h2 id="key-decisions">Key Decisions<a class="headerlink" href="#key-decisions" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Auto-detection.</strong> OME-TIFF datasets are detected automatically from <code>.ome.tif</code>, <code>.ome.tiff</code>, or suffix-less OME TIFF files. No manual flag is required.</li>
-<li><strong><code>OMEFovWrapper</code>.</strong> Channel access is lazy and downsample-aware; the wrapper presents the same interface as the folder-based loader.</li>
-<li><strong>Pyramid level selection.</strong> The coarsest pyramid level that meets the requested downsample factor is used to minimize I/O without over-fetching pixels.</li>
-<li><strong>Frame-aware access.</strong> Stacked OME files (multiple Z-planes or time points) are accessed by frame index; slices are cached per frame.</li>
+<li><strong>Auto-detection.</strong> <code>find_ome_tiff_files()</code> matches conventional <code>.ome.tif</code> / <code>.ome.tiff</code> names first, then inspects the remaining <code>.tif</code> / <code>.tiff</code> files and accepts any whose <code>tifffile</code> handle reports <code>is_ome</code>. So an OME file with a plain <code>.tif</code> name is still found, and no manual flag is required.</li>
+<li><strong><code>OMEFovWrapper</code>.</strong> Channel access is lazy and downsample-aware; the wrapper presents the same interface as the folder-based loader, so the compositor cannot tell the two apart.</li>
+<li><strong>Pyramid level selection with a residual.</strong> <code>_select_level(ds_factor)</code> returns <strong>both</strong> the coarsest pyramid level that does not overshoot the requested factor <strong>and</strong> the <code>residual</code> factor still to apply. The level does the cheap part of the reduction by reading fewer bytes; the residual makes up the difference in memory. Without the residual, a request for factor 6 on a dataset with levels at 1/2/4 would have to either over-fetch or over-decimate.</li>
+<li><strong>Frame-aware access.</strong> Stacked OME files (multiple Z-planes or time points) carry a <code>frame_axis</code>, <code>frame_count</code> and <code>current_frame_index</code>; slices are cached per frame.</li>
+<li><strong>Keyframe fallback.</strong> Some files carry OME metadata <code>tifffile</code> rejects with an "incompatible keyframe" error. The loader retries with <code>is_ome=False</code>, falling back to plain series parsing rather than failing the FOV.</li>
 </ul>
 <hr />
 <h2 id="rendering">Rendering<a class="headerlink" href="#rendering" title="Permanent link">&para;</a></h2>

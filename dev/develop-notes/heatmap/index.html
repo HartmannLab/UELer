@@ -1083,6 +1083,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../plugin-development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugin Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../viewer-runtime/" class="md-nav__link">
         
   
@@ -1091,6 +1119,34 @@
     
   
     Viewer Runtime & UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mask-rendering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mask Rendering & Coloring
   
 
     
@@ -1299,10 +1355,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#cell-annotation-workflow-planned" class="md-nav__link">
+  <a href="#cell-annotation-workflow" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Cell Annotation Workflow (Planned)
+        Cell Annotation Workflow
       
     </span>
   </a>
@@ -1435,10 +1491,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#cell-annotation-workflow-planned" class="md-nav__link">
+  <a href="#cell-annotation-workflow" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Cell Annotation Workflow (Planned)
+        Cell Annotation Workflow
       
     </span>
   </a>
@@ -1493,13 +1549,24 @@
 </ul>
 <hr />
 <h2 id="heatmap-plugin">Heatmap Plugin<a class="headerlink" href="#heatmap-plugin" title="Permanent link">&para;</a></h2>
-<p>The heatmap displays a cell-by-marker matrix, optionally grouped by meta-cluster. Key features:</p>
+<p>The heatmap displays a <strong>cluster × marker</strong> matrix, not a cell × marker one: <code>DataLayer</code> groups the
+cell table by the chosen class column and reduces each group to a median per marker
+(<code>df.groupby(cluster_column)[marker_columns].median()</code>), then z-scores the result. One row is one
+cluster, however many cells it contains — which is what makes the plugin usable on a million-cell
+table.</p>
+<p>Key features:</p>
 <ul>
-<li>Interactive row (cell) selection linked to the scatter plot and cell gallery.</li>
+<li>Interactive row (cluster) selection linked to the scatter plot and cell gallery.</li>
 <li>FlowSOM meta-cluster assignment with a dedicated management tab.</li>
-<li>Z-score normalization toggled per-session.</li>
-<li>Wide layout mode for the footer panel.</li>
+<li>Z-score normalization toggled per-session, across markers or across classes.</li>
+<li><strong>Permanently allocated to the wide-footer panel</strong> (<code>footer_only = True</code>, #121). The plugin is
+  skipped when the side accordion is assembled and always renders in the wide orientation; the earlier
+  footer/side placement toggle and the separate horizontal-layout toggle are both gone. The adapter is
+  constructed as <code>HeatmapModeAdapter(mode="wide")</code> and never switched.</li>
+<li>Remembers a user-resized figure size across a tree re-cut.</li>
 </ul>
+<p>The plugin class composes four bases — <code>DataLayer</code>, <code>InteractionLayer</code>, <code>DisplayLayer</code>, <code>PluginBase</code> —
+which is why the implementation is spread across <code>heatmap.py</code> and <code>heatmap_layers.py</code>.</p>
 <hr />
 <h2 id="meta-cluster-management">Meta-Cluster Management<a class="headerlink" href="#meta-cluster-management" title="Permanent link">&para;</a></h2>
 <p>Meta-clusters are stored in a registry with:</p>
@@ -1510,13 +1577,24 @@
 </ul>
 <p>Color mappings are applied at render time and extend beyond the visible dendrogram cutoff.</p>
 <hr />
-<h2 id="cell-annotation-workflow-planned">Cell Annotation Workflow (Planned)<a class="headerlink" href="#cell-annotation-workflow-planned" title="Permanent link">&para;</a></h2>
-<p>A cell annotation orchestrator is specified but not yet implemented as a plugin. The planned design:</p>
+<h2 id="cell-annotation-workflow">Cell Annotation Workflow<a class="headerlink" href="#cell-annotation-workflow" title="Permanent link">&para;</a></h2>
+<p>Shipped as <code>CellAnnotationPlugin</code> (<code>ueler/viewer/plugin/cell_annotation.py</code>), displayed as <strong>Cell
+Annotation</strong>. The design that was planned here is the design that landed:</p>
 <ul>
-<li>AnnData-based checkpoint format with DAG-style lineage.</li>
-<li>Marker set semantics for annotation snapshots.</li>
-<li>Checkpoint browser UI for navigating annotation history.</li>
+<li><strong>AnnData checkpoint format.</strong> <code>CheckpointStore</code> (<code>ueler/viewer/checkpoint_store.py</code>) writes each
+  checkpoint as an <code>.h5ad</code> under <code>&lt;dataset_root&gt;/.UELer/dataset_&lt;sha1&gt;/checkpoints/</code>, with an
+  atomically-rewritten <code>manifest.json</code> beside it. The dataset hash scopes the history to one dataset,
+  so several under a shared base folder do not collide.</li>
+<li><strong>DAG-style lineage.</strong> Each record carries a <code>parent_id</code> (empty string when absent) and an <code>op</code> —
+  <code>initial</code>, <code>subset</code>, <code>recluster</code> or <code>finalize</code> — which is what lets the browser render the history as
+  a tree rather than a list.</li>
+<li><strong>Checkpoint browser UI.</strong> <code>CheckpointTreeWidget</code>, an anywidget tree renderer with an ipywidgets
+  fallback for environments without anywidget.</li>
+<li><strong>Coupled to the Heatmap and FlowSOM plugins.</strong> A checkpoint captures the heatmap state (z-scored
+  medians, meta-cluster palette, UI settings) <em>and</em> the FlowSOM parameters, so loading one restores
+  both at once.</li>
 </ul>
+<p>Unlike the Heatmap it links to, this plugin lives in the side accordion, not the footer.</p>
 <hr />
 <h2 id="related-issues">Related Issues<a class="headerlink" href="#related-issues" title="Permanent link">&para;</a></h2>
 <ul>

@@ -1035,6 +1035,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#linking-the-heatmap-to-the-image" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linking the heatmap to the image
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1219,6 +1230,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../develop-notes/plugin-development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugin Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../develop-notes/viewer-runtime/" class="md-nav__link">
         
   
@@ -1227,6 +1266,34 @@
     
   
     Viewer Runtime & UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../develop-notes/mask-rendering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mask Rendering & Coloring
   
 
     
@@ -1480,6 +1547,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#linking-the-heatmap-to-the-image" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linking the heatmap to the image
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1518,7 +1596,8 @@
 
 <h1 id="clustering-annotation">Clustering &amp; Annotation<a class="headerlink" href="#clustering-annotation" title="Permanent link">&para;</a></h1>
 <p>These three plugins — <strong>Heatmap</strong>, <strong>FlowSOM</strong>, and <strong>Cell Annotation</strong> — turn per-cell marker values
-into named cell populations. They form a pipeline:</p>
+into named cell populations. <strong>FlowSOM</strong> and <strong>Cell Annotation</strong> are in the right-panel accordion; the
+<strong>Heatmap</strong> is in the wide footer below the viewer. They form a pipeline:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>FlowSOM  ──▶  cluster labels in the cell table
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>   │
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>   ▼
@@ -1553,8 +1632,7 @@ dendrogram, and lets you group clusters into <strong>meta-clusters</strong>.</p>
 <p>Choose <strong>Channels:</strong>, the <strong>Class:</strong> column (the cluster column to summarize — e.g. your FlowSOM
 output), and the clustering <strong>Linkage:</strong> and <strong>Metric:</strong>. Toggle <strong>Z-score across markers</strong> to
 normalize per class instead of per marker. Click <strong>Plot</strong>.</p>
-<p>Enable <strong>Horizontal layout</strong> to move the heatmap into the footer panel. The heatmap remembers a
-figure size you set by dragging its resize handle, even after re-cutting the tree.</p>
+<p>The heatmap is drawn in the wide footer panel below the viewer, always in its horizontal orientation — there is no layout or placement toggle. It remembers a figure size you set by dragging its resize handle, even after re-cutting the tree.</p>
 <h3 id="assign-meta-clusters-assign-tab">Assign meta-clusters (Assign tab)<a class="headerlink" href="#assign-meta-clusters-assign-tab" title="Permanent link">&para;</a></h3>
 <p>Click the dendrogram to set the tree-cut, then assign branches to a <strong>Meta-cluster:</strong> and click
 <strong>Apply</strong>. The cutoff auto-locks after edits; use <strong>Unlock once</strong> to adjust it again.</p>
@@ -1565,6 +1643,16 @@ meta-cluster colors are used in the heatmap's color strip and can color the scat
 <h3 id="save-to-the-cell-table-save-tab">Save to the cell table (Save tab)<a class="headerlink" href="#save-to-the-cell-table-save-tab" title="Permanent link">&para;</a></h3>
 <p>Enter a <strong>Column Name:</strong> (default <code>new_cluster</code>) and click <strong>Save to Cell Table</strong> to write the
 meta-cluster labels back to the table (<strong>Overwrite</strong> if the column exists).</p>
+<h3 id="linking-the-heatmap-to-the-image">Linking the heatmap to the image<a class="headerlink" href="#linking-the-heatmap-to-the-image" title="Permanent link">&para;</a></h3>
+<p>The heatmap participates in the same <a href="../cell-table/#the-idea-linked-selection">linked selection</a> as
+the plots, in both directions:</p>
+<ul>
+<li><strong>Follow main viewer</strong> — tick it and the cells you select in the image are highlighted in the
+  heatmap continuously.</li>
+<li><strong>Trace</strong> — the one-shot version. Two buttons trace the <em>cluster</em> or the <em>meta-cluster</em> of the
+  currently selected cell, which is the fast way to answer "what population is this cell in?" without
+  leaving a link switched on.</li>
+</ul>
 <hr />
 <h2 id="cell-annotation-checkpoints">Cell Annotation: checkpoints<a class="headerlink" href="#cell-annotation-checkpoints" title="Permanent link">&para;</a></h2>
 <p>The <strong>Cell Annotation</strong> plugin saves and restores your clustering/annotation state as <code>.h5ad</code>
@@ -1576,7 +1664,9 @@ meta-cluster labels back to the table (<strong>Overwrite</strong> if the column 
 <li>The <strong>Checkpoint browser</strong> shows the checkpoints as a tree (color-coded by op). Select one and use
   <strong>Load selected</strong> to restore it, or <strong>Delete selected</strong> to remove it.</li>
 </ul>
-<p>Checkpoints are stored under <code>&lt;base_folder&gt;/.UELer/</code> (per-dataset), so they travel with your data.</p>
+<p>Checkpoints are stored under <code>&lt;base_folder&gt;/.UELer/dataset_&lt;id&gt;/checkpoints/</code>, where <code>&lt;id&gt;</code> is a hash
+of the dataset path — so several datasets under one base folder keep separate histories, and the
+checkpoints travel with the data.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>Cell Annotation wires itself to the Heatmap and FlowSOM plugins, so saving/loading a checkpoint

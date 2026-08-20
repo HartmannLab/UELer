@@ -15,10 +15,10 @@
         <link rel="canonical" href="https://hartmannlab.github.io/UELer/latest/develop-notes/viewer-runtime/">
       
       
-        <link rel="prev" href="../packaging/">
+        <link rel="prev" href="../plugin-development/">
       
       
-        <link rel="next" href="../map-mode/">
+        <link rel="next" href="../mask-rendering/">
       
       
         
@@ -1080,6 +1080,34 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugin-development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugin Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -1165,6 +1193,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#plugin-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Plugin Discovery
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#downsampling" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1234,6 +1273,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mask-rendering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mask Rendering & Coloring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1435,6 +1502,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#plugin-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Plugin Discovery
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#downsampling" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1536,19 +1614,41 @@
 <li>Overlays (masks, annotations) are composited if enabled.</li>
 <li>All registered plugins receive an <code>on_fov_change</code> notification and update their views.</li>
 </ol>
+<p>Note that a cached FOV holds only the channels that have actually been opened, and unchecking a
+channel's visibility skips its compositing without releasing its data — the pixels stay with the
+cached FOV until that FOV is evicted.</p>
+<hr />
+<h2 id="plugin-discovery">Plugin Discovery<a class="headerlink" href="#plugin-discovery" title="Permanent link">&para;</a></h2>
+<p><code>ImageMaskViewer.dynamically_load_plugins()</code> scans <code>ueler/viewer/plugin/</code> for modules not prefixed
+with <code>_</code>, imports each one, and instantiates every <code>PluginBase</code> subclass it finds. There is no
+registry to edit: dropping a module in the directory is the registration.</p>
+<p>The optional <code>allow_plugins</code> argument is how <strong>simple mode</strong> works. <code>display_ui()</code> passes
+<code>{"roi_manager_plugin", "export_fovs"}</code> when <code>viewer.cell_table is None</code>, so a viewer opened without a
+cell table loads only those two plugins rather than loading the analytical ones and disabling them.
+That is why the right panel is short in image-only mode, and why the single-cell plugins cannot be
+coaxed into appearing without a table.</p>
+<p><code>PluginBase</code> declares the lifecycle hooks the viewer broadcasts through <code>inform_plugins()</code>:
+<code>after_all_plugins_loaded</code>, <code>on_fov_change</code>, <code>on_cell_table_change</code>, <code>on_mv_update_display</code>,
+<code>on_selection_change</code>, <code>on_map_mode_activate</code>, <code>on_map_mode_deactivate</code>, <code>on_no_image_toggle</code> and
+<code>on_widget_value_change</code>. All are no-ops by default, so a plugin implements only what it needs.</p>
 <hr />
 <h2 id="downsampling">Downsampling<a class="headerlink" href="#downsampling" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Downsample factors are computed from the current viewport size and the FOV resolution.</li>
+<li>The target is <code>DOWNSAMPLE_MAX_DIMENSION = 2048</code> px on the longest drawn edge (<code>ueler/constants.py</code>, raised from a lower bound in #116). <code>calculate_downsample_factor()</code> doubles the factor until the largest dimension fits, so the factor is always a power of two.</li>
+<li>Because the calculation uses the <em>visible</em> region, zooming in shrinks it and the factor falls back toward 1 — full-resolution pixels return without a setting change. An image already at or below 2048 px gets factor 1, where the <strong>Downsample</strong> toggle changes nothing.</li>
 <li><code>select_downsample_factor</code> clamps the factor to an allowed list to avoid blur artifacts.</li>
 <li>ROI thumbnails use a separate downsample path that respects thumbnail canvas size.</li>
 </ul>
 <hr />
 <h2 id="channel-controls">Channel Controls<a class="headerlink" href="#channel-controls" title="Permanent link">&para;</a></h2>
 <ul>
+<li><strong>Channel picker</strong> — <code>ChannelPickerWidget</code> (<code>plugin/channel_picker_widget.py</code>), an anywidget-based in-DOM picker that replaced the previous <code>TagsInput</code> in #125. It renders the full channel list with a filter box, a "<em>n</em> of <em>m</em> shown · <em>k</em> selected" counter, <strong>Select all shown</strong> / <strong>Clear</strong> actions and keyboard navigation. It falls back to a plain widget when anywidget is unavailable, and the same widget is reused by the Scatter plot, Histogram and Heatmap pickers so the selection UX is identical everywhere.</li>
+<li><strong>Chip reordering</strong> — selected channels render as draggable chips (#126). The order drives the per-channel control rows, the legend, and the grid-view panes. It deliberately does <strong>not</strong> affect the composite: channels are blended additively, so the result is order-independent.</li>
 <li><strong>Visibility toggles</strong> — Each loaded channel can be toggled independently without modifying the selection list.</li>
 <li><strong>Color legend</strong> — A legend widget shows the current color assignments for all visible channels.</li>
-<li><strong>Channel grid view</strong> — Renders each visible channel as a separate labelled pane in a synchronized Matplotlib subplot grid (Issue #76).</li>
+<li><strong>Channel grid view</strong> — Renders each visible channel as a separate labelled pane in a synchronized Matplotlib subplot grid (#76). Cell location works while the grid is active (#134), which needed the locate path to resolve against the grid's axes rather than assuming the single composite canvas.</li>
+<li><strong>Contrast bounds grow, never reset.</strong> A channel's stored maximum is the running maximum over every region computed so far, so the <strong>Max</strong> slider's upper bound can rise mid-session when a brighter FOV or map tile is first rendered. User-set values are preserved; only the headroom changes.</li>
 </ul>
 <hr />
 <h2 id="tooltips">Tooltips<a class="headerlink" href="#tooltips" title="Permanent link">&para;</a></h2>

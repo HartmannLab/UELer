@@ -1152,6 +1152,34 @@
   
   
     <li class="md-nav__item">
+      <a href="plugin-development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugin Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="viewer-runtime/" class="md-nav__link">
         
   
@@ -1160,6 +1188,34 @@
     
   
     Viewer Runtime & UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="mask-rendering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mask Rendering & Coloring
   
 
     
@@ -1402,15 +1458,23 @@
 <tbody>
 <tr>
 <td><a href="packaging/">Packaging &amp; Project</a></td>
-<td>Package structure, shims, and release notes</td>
+<td>Package structure, release process, CI, PyPI</td>
+</tr>
+<tr>
+<td><a href="plugin-development/">Plugin Development</a></td>
+<td>Writing a plugin: discovery, lifecycle hooks, cross-plugin communication</td>
 </tr>
 <tr>
 <td><a href="viewer-runtime/">Viewer Runtime &amp; UI</a></td>
-<td>FOV load cycle, channel controls, downsampling, tooltips</td>
+<td>FOV load cycle, plugin discovery, downsampling, channel controls</td>
+</tr>
+<tr>
+<td><a href="mask-rendering/">Mask Rendering &amp; Coloring</a></td>
+<td>The three overlay layers, compositing order, the cell-colour registry</td>
 </tr>
 <tr>
 <td><a href="map-mode/">Map Mode Internals</a></td>
-<td>Stitched rendering, tile cache, coordinate translation</td>
+<td>Stitched rendering, the tile budget, coordinate translation</td>
 </tr>
 <tr>
 <td><a href="export-pipeline/">Export Pipeline</a></td>
@@ -1418,11 +1482,11 @@
 </tr>
 <tr>
 <td><a href="roi-gallery/">ROI Workflows</a></td>
-<td>ROI manager, gallery sizing, pagination</td>
+<td>ROI manager, the CSV schema, view vs. shape ROIs, gallery paging</td>
 </tr>
 <tr>
 <td><a href="heatmap/">Heatmap &amp; Cell Annotation</a></td>
-<td>FlowSOM clustering, heatmap adapter, annotation palette</td>
+<td>FlowSOM clustering, heatmap adapter, annotation checkpoints</td>
 </tr>
 <tr>
 <td><a href="ome-tiff/">OME-TIFF Loading</a></td>
@@ -1430,9 +1494,15 @@
 </tr>
 </tbody>
 </table>
+<div class="admonition tip">
+<p class="admonition-title">Start here to extend UELer</p>
+<p><a href="plugin-development/">Plugin Development</a> is the entry point for adding a feature. Almost every
+tool a user interacts with is a plugin, so it is usually the only page you need.</p>
+</div>
 <hr />
 <h2 id="source-notes">Source Notes<a class="headerlink" href="#source-notes" title="Permanent link">&para;</a></h2>
-<p>Detailed source-level notes are kept in the <code>dev_note/</code> directory of the repository. The topic summaries above consolidate those notes for quicker navigation.</p>
+<p>Detailed source-level notes are kept in the <code>dev_note/</code> directory of the repository. The topic summaries above consolidate those notes for quicker navigation, and each page links its source note at the top.</p>
+<p>These pages are checked against the code, not just spell-checked. <code>tools/check_docs_consistency.py</code> — run by <code>make check-docs</code>, by <code>tests/test_docs_consistency.py</code>, and in the docs workflow — fails the build when a page names a module, symbol, extra, Make target, environment variable or plugin label that no longer exists. Prose still has to be kept honest by hand; the factual scaffolding is enforced.</p>
 
 
 

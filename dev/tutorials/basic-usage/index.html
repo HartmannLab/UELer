@@ -1224,6 +1224,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../develop-notes/plugin-development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugin Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../develop-notes/viewer-runtime/" class="md-nav__link">
         
   
@@ -1232,6 +1260,34 @@
     
   
     Viewer Runtime & UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../develop-notes/mask-rendering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mask Rendering & Coloring
   
 
     
@@ -1541,14 +1597,26 @@ image data on demand and caches recently accessed FOVs in memory.</p>
 memory is tight; raise it for faster back-and-forth navigation.</p>
 <hr />
 <h2 id="3-select-channels">3. Select Channels<a class="headerlink" href="#3-select-channels" title="Permanent link">&para;</a></h2>
-<p>Channels are chosen with the <strong>Channels:</strong> field — a tag input. Click the field and pick (or type) a
-channel name; each channel you add appears as a removable chip. Remove a channel by deleting its chip.</p>
+<p>Channels are chosen with the <strong>Channels:</strong> field. Click it to open a scrollable list of every channel
+in the dataset, and type to filter that list (case-insensitive). A counter shows how much you are
+looking at — "12 of 148 shown · 2 selected".</p>
+<ul>
+<li><strong>Select all shown</strong> takes the whole filtered group at once, which is the quick way to grab a family
+  of markers: type <code>CD</code>, then click it.</li>
+<li><strong>Clear</strong> drops the entire selection.</li>
+<li>Keyboard: ↑/↓ move, Enter toggles the highlighted channel, Esc closes the list, and Backspace on an
+  empty filter box removes the last channel you added.</li>
+</ul>
+<p>Each selected channel then appears as a <strong>chip</strong> below the field. Drag a chip by its <code>⋮⋮</code> grip to
+reorder it — a blue bar marks where it will land — or click a chip and press ← / → to move it, or
+Delete to remove it. The chip order sets the order of the per-channel control rows, the channel
+legend, and the panes of the <a href="#7-use-the-channel-grid-view">channel grid view</a>.</p>
 <p>The displayed image composites all selected channels using their assigned colors and contrast ranges.</p>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>The channel picker is a tag/token field, not a scrolling list — there is no Shift- or
-Ctrl-click range selection. Add and remove channels one chip at a time, or load a saved
-<strong>marker set</strong> (below) to apply a whole combination at once.</p>
+<div class="admonition tip">
+<p class="admonition-title">Reordering does not change the image</p>
+<p>Channels are composited <strong>additively</strong>, so the result does not depend on their order and no
+channel covers another. Reorder for your own convenience — see
+<a href="../display-settings/#4-channels-pick-them-then-order-them">Display Settings</a>.</p>
 </div>
 <hr />
 <h2 id="4-load-a-marker-set">4. Load a Marker Set<a class="headerlink" href="#4-load-a-marker-set" title="Permanent link">&para;</a></h2>
@@ -1572,15 +1640,19 @@ Deletion</strong> checkbox) to remove one.</p>
 <hr />
 <h2 id="6-overlay-masks-and-annotations">6. Overlay Masks and Annotations<a class="headerlink" href="#6-overlay-masks-and-annotations" title="Permanent link">&para;</a></h2>
 <p>If <code>masks_folder</code> and/or <code>annotations_folder</code> were provided:</p>
+<p>…the left panel grows an accordion section for each:</p>
 <ul>
-<li>In the <strong>Channels</strong> panel, enable a mask via its checkbox and pick a color from its <strong>Mask
+<li>In the <strong>Masks</strong> section, enable a mask via its checkbox and pick a color from its <strong>Mask
   &lt;name&gt;</strong> dropdown. Adjust <strong>Mask outline px:</strong> to change the outline thickness.</li>
-<li>Under <strong>Pixel annotations</strong>, enable <strong>Show annotation</strong>, choose an annotation from the
+<li>In the <strong>Pixel annotations</strong> section, enable <strong>Show annotation</strong>, choose an annotation from the
   <strong>Annotation:</strong> dropdown, and adjust <strong>Fill alpha:</strong> for overlay transparency. Use <strong>Edit
   palette…</strong> to customize per-class colors.</li>
 </ul>
-<p>For richer per-class mask coloring (fill vs. outline, per-class opacity, and saved palettes), use the
-<strong>Mask painter</strong> plugin — see the <a href="../user-interface/">User Interface</a> reference.</p>
+<p>If a section is missing, that folder did not yield readable rasters — the sections are created from
+the data, not toggled on.</p>
+<p>For richer per-class mask coloring (fill vs. outline, per-class opacity, continuous colour scales, and
+saved palettes), use the <strong>Mask painter</strong> plugin — see the <a href="../user-interface/">User Interface</a>
+reference. That one needs a cell table.</p>
 <div class="admonition tip">
 <p class="admonition-title">Masks-only view</p>
 <p>Enable <strong>No image (masks only)</strong> to hide the channel image and inspect mask/annotation overlays

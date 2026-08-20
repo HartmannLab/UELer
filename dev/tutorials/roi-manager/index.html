@@ -775,6 +775,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#drawing-a-shape-roi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Drawing a shape ROI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#browsing-rois" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1208,6 +1219,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../develop-notes/plugin-development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugin Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../develop-notes/viewer-runtime/" class="md-nav__link">
         
   
@@ -1216,6 +1255,34 @@
     
   
     Viewer Runtime & UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../develop-notes/mask-rendering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mask Rendering & Coloring
   
 
     
@@ -1414,6 +1481,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#drawing-a-shape-roi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Drawing a shape ROI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#browsing-rois" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1495,10 +1573,23 @@
 
 
 <h1 id="regions-of-interest">Regions of Interest<a class="headerlink" href="#regions-of-interest" title="Permanent link">&para;</a></h1>
-<p>The <strong>ROI manager</strong> plugin lets you capture, tag, and revisit regions of interest. ROIs persist
+<p>The <strong>ROI manager</strong> plugin lets you capture, draw, tag, and revisit regions of interest. ROIs persist
 across sessions and work <strong>without a cell table</strong>, so this is part of the essentials.</p>
 <p>The plugin has two tabs: <strong>ROI browser</strong> (find and revisit ROIs) and <strong>ROI editor</strong> (capture and
 edit them).</p>
+<div class="admonition info">
+<p class="admonition-title">Two kinds of ROI</p>
+<p>UELer stores two different things under one name, and the difference matters when you filter or
+export:</p>
+<ul>
+<li>a <strong>view</strong> ROI is a saved viewport — a bookmark of where you were looking, at what zoom, with
+  which markers and overlays;</li>
+<li>a <strong>shape</strong> ROI is a polyline or polygon you drew on the image, which also carries its
+  geometry and a physical length.</li>
+</ul>
+<p>Both live in the same table and the same browser. Everything below about tags, comments,
+filtering and export applies to both.</p>
+</div>
 <hr />
 <h2 id="capturing-an-roi">Capturing an ROI<a class="headerlink" href="#capturing-an-roi" title="Permanent link">&para;</a></h2>
 <ol>
@@ -1522,6 +1613,32 @@ saved marker/mask/annotation presets).</p>
 <p class="admonition-title">Only current FOV</p>
 <p>The editor's <strong>Only current FOV</strong> checkbox (on by default) filters the saved-ROI dropdown to the
 active FOV.</p>
+</div>
+<hr />
+<h2 id="drawing-a-shape-roi">Drawing a shape ROI<a class="headerlink" href="#drawing-a-shape-roi" title="Permanent link">&para;</a></h2>
+<p>The editor tab also has a shape block for drawing directly on the image — use it to mark a boundary,
+trace a structure, or measure a distance.</p>
+<ol>
+<li>Click <strong>Draw</strong>, then click on the image to place vertices. The summary line under the buttons
+   tracks the shape as you go.</li>
+<li>Tick <strong>Closed shape (polygon)</strong> before finishing if you want the shape closed; leave it clear for
+   an open polyline.</li>
+<li>Correct as you go with <strong>Undo</strong> / <strong>Redo</strong>, or abandon the whole shape with <strong>Cancel</strong>.</li>
+<li>Click <strong>Finish</strong> to end the shape, then <strong>Save shape</strong> to store it.</li>
+</ol>
+<p>A saved shape is an ROI like any other: give it a <strong>Name:</strong>, <strong>Tags:</strong> and a <strong>Comment:</strong>, and it
+appears in the browser gallery alongside your captured views.</p>
+<ul>
+<li><strong>Show shapes on canvas</strong> (on by default) draws the saved shapes over the image. Untick it to get
+  an unobstructed view without deleting anything.</li>
+<li><strong>Edit</strong> loads the selected shape ROI back into the editor so you can move or add vertices and save
+  it again.</li>
+</ul>
+<div class="admonition tip">
+<p class="admonition-title">Shapes measure themselves</p>
+<p>The summary line reports the shape's length in µm as well as pixels, computed from the <strong>Pixel
+Size (nm):</strong> value in Advanced Settings. If that value is wrong, so is the length — see
+<a href="../display-settings/#1-pixel-size-set-it-or-the-scale-bar-lies">Display Settings</a>.</p>
 </div>
 <hr />
 <h2 id="browsing-rois">Browsing ROIs<a class="headerlink" href="#browsing-rois" title="Permanent link">&para;</a></h2>

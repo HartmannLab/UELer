@@ -1202,6 +1202,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../develop-notes/plugin-development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugin Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../develop-notes/viewer-runtime/" class="md-nav__link">
         
   
@@ -1210,6 +1238,34 @@
     
   
     Viewer Runtime & UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../develop-notes/mask-rendering/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mask Rendering & Coloring
   
 
     
@@ -1490,11 +1546,22 @@ section as one continuous canvas. It works on images alone (no cell table requir
 <p>Map mode is off by default. It only appears when <strong>both</strong> conditions are met:</p>
 <ol>
 <li>The <code>ENABLE_MAP_MODE</code> environment variable is set to a truthy value (<code>1</code>, <code>true</code>, <code>yes</code>,
-   <code>on</code>) before launching the viewer, and</li>
+   <code>on</code> — case-insensitive) <strong>before UELer is imported</strong>, and</li>
 <li>At least one map descriptor is found under <code>&lt;base_folder&gt;/.UELer/maps/</code> (UELer scans that
    folder for <code>*.json</code> descriptors).</li>
 </ol>
 <p>When either is missing, the map controls stay hidden.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Set the variable before <code>import ueler</code>, not just before <code>run_viewer</code></p>
+<p>The flag is read <strong>once, when the module is imported</strong>, and captured on every viewer built
+afterwards. So this does <em>not</em> work:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">ueler</span>                              <span class="c1"># flag already read as False</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">"ENABLE_MAP_MODE"</span><span class="p">]</span> <span class="o">=</span> <span class="s2">"1"</span>        <span class="c1"># too late</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">viewer</span> <span class="o">=</span> <span class="n">ueler</span><span class="o">.</span><span class="n">run_viewer</span><span class="p">(</span><span class="n">base_folder</span><span class="p">)</span>     <span class="c1"># no map controls</span>
+</code></pre></div>
+<p>Either set it in the shell before starting the kernel, or set it in the very first cell and
+<strong>restart the kernel</strong> if you have already imported UELer.</p>
 </div>
 <hr />
 <h2 id="what-is-map-mode">What Is Map Mode?<a class="headerlink" href="#what-is-map-mode" title="Permanent link">&para;</a></h2>
@@ -1535,7 +1602,7 @@ while map mode is active.</p>
 <h2 id="exporting-rois-in-map-mode">Exporting ROIs in Map Mode<a class="headerlink" href="#exporting-rois-in-map-mode" title="Permanent link">&para;</a></h2>
 <p><a href="../export/">Batch Export</a> fully supports map-mode ROIs. A map ROI (empty <code>fov</code>, non-empty <code>map_id</code>)
 is rendered from the stitched map layer and saved with the filename pattern:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>map_&lt;map_id&gt;_roi_&lt;name-or-id&gt;.&lt;format&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>map_&lt;map_id&gt;_roi_&lt;name-or-id&gt;.&lt;format&gt;
 </code></pre></div>
 <hr />
 <h2 id="deactivating-map-mode">Deactivating Map Mode<a class="headerlink" href="#deactivating-map-mode" title="Permanent link">&para;</a></h2>
