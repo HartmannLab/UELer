@@ -147,11 +147,43 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 For more details, see the [user guide](https://hartmannlab.github.io/UELer/latest/tutorials/user-interface).
 
 ## New Update  
-### **UELer v0.5.0-rc3 Summary**
-- **The documentation site now describes the software you actually get, and a check keeps it that way.** A pass over all 22 pages found the [user guide](https://hartmannlab.github.io/UELer/latest/tutorials/user-interface) still describing UI that had moved or changed: the **Scatter plot** and **Heatmap** were listed as right-panel plugins when both live permanently in the footer, mask controls were placed inside **Channels** rather than their own **Masks** section, and the channel picker was described as the old tag input instead of the filterable list with **Select all shown** / **Clear**. Also newly documented: the **Follow main viewer** link direction, drawing line and polygon ROIs, and the fact that `ENABLE_MAP_MODE` must be set **before `import ueler`** — setting it later has no effect, even before `run_viewer`. Two new developer pages cover [plugin development](https://hartmannlab.github.io/UELer/latest/develop-notes/plugin-development) and [mask rendering & coloring](https://hartmannlab.github.io/UELer/latest/develop-notes/mask-rendering). Documentation only — nothing in the application changed.
-- **The package now describes itself as a viewer, not as a napari alternative or an image-processing library.** The `napari-alternative` keyword and the `Topic :: Scientific/Engineering :: Image Processing` classifier were dropped from `pyproject.toml`: UELer loads, links and displays images and cell tables that other tools produced, so `Visualization` and `Bio-Informatics` are the honest topics, and a keyword field should hold terms people search for rather than a comparison with another project. Metadata only — nothing you install or run changed.
+### **UELer v0.5.0 Summary**
 
-_Earlier changes (v0.5.0-rc2 and before) are in the [update log](https://github.com/HartmannLab/UELer/blob/main/doc/log.md)._
+The `0.5.0` line turns UELer from a repository you clone into a package you install. This is the first release published to PyPI.
+
+**Installation and licensing**
+
+- **`pip install ueler-viewer` — you still `import ueler`.** PyPI prohibits the name `ueler`, so the distribution is `ueler-viewer`, like `scikit-image`/`skimage` or `opencv-python`/`cv2`. Nothing in your code changes. **Stable releases come from PyPI; alphas, betas and release candidates are only on TestPyPI** — see the [installation guide](https://hartmannlab.github.io/UELer/latest/installation). If you hold an editable install of the old `ueler` distribution, `pip uninstall ueler` first: pip treats the two as unrelated projects even though both own the `ueler/` package.
+- **Relicensed from GPL-3.0-only to BSD 3-Clause.** UELer is imported into other people's pipelines, which is where copyleft bites hardest — under the GPL, distributing a pipeline that imported `ueler` pulled that pipeline into the GPL too. BSD-3 matches the surrounding stack (scikit-image, dask, bokeh, anndata, napari). Existing users only gain permissions.
+- **Supported Python: 3.10, 3.11 and 3.12**, and `pandas>=2.0` is now a declared dependency rather than arriving through seaborn and anndata.
+- **Breaking: `import ueler` no longer claims the top-level names `viewer`, `constants`, `data_loader` and `image_utils`.** The pre-0.2 compatibility hook is removed, along with the `ensure_aliases=` argument of `run_viewer()` / `run_viewer_bia()`. The canonical paths (`ueler.constants`, `ueler.viewer.*`, …) are unchanged.
+
+**New in the viewer**
+
+- **Line and polygon ROIs, in the ROI manager.** Click a chain of points onto the canvas — left-click adds a vertex, left-drag moves one, right-click deletes the nearest, `ctrl+z`/`ctrl+y` undo and redo, `enter` finishes — with a live length or perimeter readout in px and µm. Shapes are ordinary ROI rows, so tags, thumbnails, filtering, CSV import/export and batch export all apply; exporting a shape exports its bounding box. Older ROI CSVs load unchanged.
+- **Cells selected in the image now reach the plots.** A **Follow main viewer** checkbox (*Linked plugins* tab, off by default) in the Scatter plot, Histogram and Heatmap mirrors the image's live selection into the plot, across several FOVs in map mode. It is the counterpart of the **Main viewer** checkbox, which pushes the other way.
+- **A handful of selected cells is now visible in the histogram.** Five cells out of 80 000 drew a bar 0.006 % of the plot height. When the selection's peak falls below 5 % of the tallest bar, the bins holding selected cells are tinted over their full height, with the proportional overlay still drawn on top. **Mark faint selections** turns it off.
+- **The interactive scatter is the default everywhere, VS Code included.** The static-Matplotlib fallback for VS Code worked around a webview bug that no longer happens, and cost every VS Code user their linked brushing. `UELER_SCATTER_BACKEND=static` remains as an opt-out.
+
+**Fixed**
+
+- **Locating a single cell works in the channel grid view.** Go-To, a gallery tile, a scatter or heatmap point, and centring on a saved ROI all did nothing at all in grid mode — no error, no movement.
+- **Painting a cell table no longer crashes on pandas extension dtypes.** The Mask Painter raised `TypeError: Cannot interpret '<StringDtype…>' as a data type` whenever the identifier column was categorical or nullable — which AnnData `obs` columns routinely are.
+- **The scatter matrix follows the standard SPLOM convention:** a row shares its y-axis, a column shares its x-axis. The previous layout was the transpose.
+- **A finished shape stays on screen**, instead of vanishing until the ROI was saved and loaded back, and **`Save shape` now finishes the drawing for you**.
+
+**Removed**
+
+- **The `Chart (heatmap)` plugin.** A near-duplicate of the Scatter plot reading its axes from the cluster × marker matrix, offering nothing Scatter plot or Heatmap does not. The real **Heatmap**, **Scatter plot** and **Histogram** are untouched — the plugin once labelled *Chart* is today's **Scatter plot**, not the removed one.
+
+**Worth knowing**
+
+- **`ENABLE_MAP_MODE` must be set before `import ueler`.** The flag is read at module import time, so setting it later has no effect — even before `run_viewer()`.
+- **The pixel size defaults to 390 nm — the MIBI pixel pitch — for every dataset**, and it drives the scale bar in the viewer and in every batch-exported image. Set it from your acquisition metadata (1000 nm for IMC), or to `0` to omit the scale bar entirely. The new [display settings](https://hartmannlab.github.io/UELer/latest/tutorials/display-settings) page covers this and the 99.9th-percentile contrast default.
+- **The [documentation site](https://hartmannlab.github.io/UELer/latest/) was audited against the code**, and a checker now runs on every docs deploy so install commands, the Python range, extras, repo paths, environment variables and UI labels cannot drift from the software again. Two new developer pages cover [plugin development](https://hartmannlab.github.io/UELer/latest/develop-notes/plugin-development) and [mask rendering & coloring](https://hartmannlab.github.io/UELer/latest/develop-notes/mask-rendering).
+- **Behind the scenes:** CI runs the suite on Python 3.10–3.12 and installs the built wheel outside the repository, a skipped test counts as a failure, and a pushed tag routes itself — pre-releases to TestPyPI, stable only after a matching release candidate is confirmed to ship identical code. Publishing uses PyPI Trusted Publishing; no API token exists in the repository.
+
+_Earlier changes (v0.4.4 and before) are in the [update log](https://github.com/HartmannLab/UELer/blob/main/doc/log.md)._
 
 ## License
 UELer is released under the **BSD 3-Clause License** — see

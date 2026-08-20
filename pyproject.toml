@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 # protection for the live `euler` project), so the distribution ships under
 # `ueler-viewer` on both indexes. See dev_note/issue_tracking/issue79_dist_name_rename.md.
 name = "ueler-viewer"
-version = "0.5.0-rc3"
+version = "0.5.0"
 description = "Unified Exploratory Linked Viewer for spatial proteomics and multiplexed imaging"
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
