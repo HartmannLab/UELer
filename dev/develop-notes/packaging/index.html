@@ -1604,10 +1604,9 @@
   families and unwrap categoricals to <code>.categories.dtype</code>, because a <code>category</code>
   column of integers still needs its labels converted (<code>series == "1"</code> matches no
   rows where <code>series == 1</code> matches).</li>
-<li><strong>A tag push can reach TestPyPI but never PyPI.</strong> The real upload takes an
-  explicit <code>workflow_dispatch</code> from a tag ref, behind a GitHub environment
-  reviewer. A PyPI version can be yanked but never reused, so <code>git push --tags</code>
-  must not be an irreversible public act.</li>
+<li><strong>The tag routes itself: a pre-release goes to TestPyPI, a stable release goes to TestPyPI and then PyPI.</strong> The routing predicate is <code>packaging.version.Version(tag).is_prerelease</code>, computed by <code>tools/release_channel.py</code> and tested against every tag in the repository's history. It needs no special-casing, because the repo's SemVer spellings (<code>-alpha</code>, <code>-alphaN</code>, <code>-rcN</code>) normalise to PEP 440 pre-release segments while a plain <code>vX.Y.Z</code> does not — and <code>v1.0.0.post1</code>, correctly, is not a pre-release. This <strong>supersedes</strong> the earlier rule that a tag push could never reach PyPI: that rule made <code>git push --tags</code> safe by requiring a second manual act, which proved only that a human clicked. The replacement is a stronger claim about the artifact (the rehearsal gate below) plus a required reviewer on the <code>pypi</code> environment, so a stable tag still cannot upload without a human, but the human is approving a run that is already built, verified and rehearsed rather than filling in a form.</li>
+<li><strong>A stable release must be the promotion of a release candidate TestPyPI already serves.</strong> <code>tools/check_stable_rehearsal.py</code> refuses <code>vX.Y.Z</code> unless an <code>rc</code> tag exists for the same version, the <strong>highest</strong> such rc is served by TestPyPI (asked of the index, since a tag proves nothing about whether its upload succeeded), and everything that ships in the wheel is unchanged between the two tags. "Unchanged" cannot mean the same commit or identical artifacts: <code>check_release_tag.py</code> requires the tag, <code>pyproject.toml</code>, <code>ueler.__version__</code> and both filenames to describe one release, so the rc necessarily declares <code>0.5.0rc1</code> where the stable declares <code>0.5.0</code>. The comparison is therefore scoped to <code>ueler/**</code> and <code>pyproject.toml</code>, permitting only the <code>__version__</code> and <code>version</code> lines to move — and checking that they move from exactly the rc version to exactly the stable one. Freezing <code>pyproject.toml</code> matters as much as freezing the code: a dependency floor edited after the rc changes the wheel's metadata and invalidates the rehearsal even though no Python moved. Docs, <code>doc/log.md</code> and <code>tests/**</code> stay free, which is exactly what the version-bump skill touches on an rc → stable bump. Ancestry is <em>reported</em>, not enforced: the content comparison already proves the shipped bytes match, while <code>git merge-base</code> can fail on a rebase or a shallow fetch without saying anything about the artifact. The rule applies to the next stable tag onward; nothing already released is revisited.</li>
+<li><strong>Every publishing run passes through TestPyPI, stable releases included.</strong> <code>pypi</code> has <code>needs: testpypi</code>, so the cheapest possible pre-flight always runs first and the failure direction is the safe one. It also keeps TestPyPI a complete mirror of release history, which is what makes the <em>next</em> release's rehearsal check meaningful.</li>
 <li><strong>Generated caches stay out of <code>ueler/</code>.</strong> The graphify output belongs at the repo root; a build tool that globs package data is one <code>package-data</code> change away from shipping it, and the <code>.gitignore</code> negation trick above cannot rescue a directory rule.</li>
 </ul>
 <hr />
@@ -1665,36 +1664,48 @@ repository's secrets. One-time setup before the first release:</p>
    <code>testpypi</code>.</li>
 <li>The same on <strong>PyPI</strong>, with environment <code>pypi</code>. "Pending" exists for projects that
    are not on the index yet.</li>
-<li>On GitHub → <em>Settings</em> → <em>Environments</em> → <code>pypi</code>, add a <strong>required reviewer</strong>.</li>
+<li>On GitHub → <em>Settings</em> → <em>Environments</em> → <code>pypi</code>, add a <strong>required reviewer</strong>. This
+   one is not optional: it is what keeps a human between a stable tag and an
+   irreversible upload now that the tag routes itself.</li>
+<li>Optionally, a <strong>tag ruleset</strong> (<em>Settings</em> → <em>Rules</em> → <em>Rulesets</em>, target <em>Tags</em>,
+   pattern <code>v*</code>) restricting who may create release tags.</li>
 </ol>
-<p>After that there are exactly two paths:</p>
+<p>After that the tag decides the route:</p>
 <table>
 <thead>
 <tr>
-<th>What you do</th>
+<th>What you push</th>
 <th>What happens</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>push a <code>v*</code> tag</td>
-<td>tests → build → verify the tag against the artifacts → upload to <strong>TestPyPI</strong></td>
+<td>a pre-release tag (<code>v0.6.0-alpha1</code>, <code>v0.6.0-rc1</code>)</td>
+<td>tests → build → verify → upload to <strong>TestPyPI</strong>, unattended</td>
 </tr>
 <tr>
-<td>Actions → <em>Release</em> → <em>Run workflow</em>, ref = <strong>the tag</strong>, <code>publish_to: pypi</code></td>
-<td>the same gates, then upload to <strong>PyPI</strong></td>
+<td>a stable tag (<code>v0.6.0</code>)</td>
+<td>the same, <strong>plus</strong> the rehearsal check against the highest published <code>rc</code>, then TestPyPI, then <strong>PyPI</strong> once the <code>pypi</code> environment's reviewer approves</td>
 </tr>
 </tbody>
 </table>
-<p>A tag push cannot reach PyPI. <code>release.yml</code> publishes what <code>tests.yml</code> built in the
-same run, so the uploaded artifact is the tested one.</p>
+<p>So a stable release is a two-step act. First tag <code>v0.6.0-rc1</code> and let it publish; then,
+changing nothing but the version declarations and the documentation, tag <code>v0.6.0</code>. If
+anything that ships in the wheel changed since the candidate, <code>check_stable_rehearsal.py</code>
+fails the run and asks for <code>rc2</code> — that is the mechanism working, not friction to route
+around.</p>
+<p><code>workflow_dispatch</code> survives as the way to re-drive an upload (ref = <strong>the tag</strong>,
+<code>publish_to: pypi</code>). It cannot skip anything: the rehearsal check runs in <code>verify</code>, which
+both paths share. <code>release.yml</code> publishes what <code>tests.yml</code> built in the same run, so the
+uploaded artifact is the tested one.</p>
 <h3 id="release-targets">Release targets<a class="headerlink" href="#release-targets" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>make<span class="w"> </span>test-ci<span class="w">                          </span><span class="c1"># the suite with no skips tolerated</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>make<span class="w"> </span>build<span class="w">                            </span><span class="c1"># clean dist/ first, then build sdist + wheel</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>make<span class="w"> </span>check-dist<span class="w">                       </span><span class="c1"># twine check --strict</span>
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>make<span class="w"> </span>check-release<span class="w"> </span><span class="nv">TAG</span><span class="o">=</span>v0.5.0-alpha<span class="w">   </span><span class="c1"># tag == pyproject == __version__ == dist/</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>make<span class="w"> </span>publish-test<span class="w">                     </span><span class="c1"># upload to TestPyPI</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>make<span class="w"> </span>publish<span class="w">                          </span><span class="c1"># upload to PyPI — append-only, rehearse first</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>make<span class="w"> </span>check-rehearsal<span class="w"> </span><span class="nv">TAG</span><span class="o">=</span>v0.6.0<span class="w">       </span><span class="c1"># a stable tag must promote a published rc</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>make<span class="w"> </span>publish-test<span class="w">                     </span><span class="c1"># upload to TestPyPI</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>make<span class="w"> </span>publish<span class="w">                          </span><span class="c1"># upload to PyPI — append-only, rehearse first</span>
 </code></pre></div>
 <p><code>publish*</code> depend on <code>check-dist</code>, not on <code>build</code>, so an upload sends exactly the
 artifacts that were built and inspected. <code>check-release</code> compares PEP 440-normalised
@@ -1705,7 +1716,8 @@ spelling (<code>0.5.0a0</code>) — <code>v0.5.0-a0</code> works too.</p>
 <ul>
 <li>~~Define and add a CI fast-stub job~~ — <strong>closed as superseded</strong>; the skip threshold it asked for exists, but on the real dependency stack (see the key decisions above).</li>
 <li>Add an integration test workflow for the <strong>GUI</strong> paths. The full dependency stack is now covered by <code>tests.yml</code>; the widget layer still needs a browser, so it stays manual.</li>
-<li>Rehearse on TestPyPI before the first real upload, and configure the Trusted Publishers described under <em>Release process</em>.</li>
+<li>~~Rehearse on TestPyPI before the first real upload~~ — <strong>done</strong> (2026-08-19). <code>v0.5.0-alpha2</code> published <code>ueler-viewer 0.5.0a2</code> to TestPyPI from a tag push, which also created and claimed the project there. The rehearsal is no longer a manual habit: <code>check_stable_rehearsal.py</code> now makes it a precondition of every stable release.</li>
+<li>Configure the <strong>PyPI</strong> Trusted Publisher and the <code>pypi</code> environment reviewer. <code>https://pypi.org/simple/ueler-viewer/</code> still returns 404, so the project does not exist on PyPI and the publisher must be a <em>pending</em> one. Both are preconditions of the first stable tag: without the publisher the upload fails, and without the reviewer nothing stands between a stable tag and an irreversible upload.</li>
 <li>Act on the 3.12 result. The leg has run <strong>once</strong>, and its first reading was not about 3.12: 19 errors, all one <code>np.issubdtype</code> call meeting pandas 3's default string dtype — now fixed. Tightening <code>requires-python</code> to <code>&lt;3.12</code> would have concealed it, since pandas 3 installs on 3.11 too. Re-read after the fix lands; the evidence argues for <em>widening</em> (add <code>Programming Language :: Python :: 3.12</code>, drop <code>continue-on-error</code>), and the classifiers and the bound move together. Keep the leg regardless — it is the only coverage of pandas-3 semantics.</li>
 <li>Revisit the <strong>3.10 floor</strong> before it costs coverage: pandas 3 and anndata 0.12 both require ≥ 3.11, and anndata 0.13 requires ≥ 3.12, so a 3.10 install is pinned to the older half of the stack. Nothing is broken today — pandas 3 cannot be installed on 3.10 at all, so the bad pandas-3-with-anndata-0.11 pairing is unreachable.</li>
 <li>Confirm with DKFZ that naming both the author and the institute in the BSD copyright line matches institutional policy — the only part of the relicense that is not purely a code change.</li>
