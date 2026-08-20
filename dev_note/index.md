@@ -15,6 +15,7 @@ This index maps all existing dev notes to the new topic-oriented summaries. The 
 ## Source note mapping
 
 ### Packaging and project structure
+- [dev_note/release_procedure.md](dev_note/release_procedure.md) — the runbook: how to publish a pre-release or a stable release, what each refusal means, and how to recover
 - [dev_note/Packaging_plan.md](dev_note/Packaging_plan.md)
 - [dev_note/Todos.md](dev_note/Todos.md)
 
