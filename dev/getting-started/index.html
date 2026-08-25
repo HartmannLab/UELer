@@ -534,6 +534,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#example-notebooks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example Notebooks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#prerequisites" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1506,6 +1517,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#example-notebooks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example Notebooks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#prerequisites" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1627,6 +1649,34 @@ launches are faster while the image is cached.</p>
 <hr />
 <h2 id="run-locally">Run Locally<a class="headerlink" href="#run-locally" title="Permanent link">&para;</a></h2>
 <p>To work with your own data, run UELer inside a Jupyter notebook.</p>
+<h3 id="example-notebooks">Example Notebooks<a class="headerlink" href="#example-notebooks" title="Permanent link">&para;</a></h3>
+<p>Runnable notebooks live in <a href="https://github.com/HartmannLab/UELer/tree/main/script"><code>script/</code></a> in the repository:</p>
+<table>
+<thead>
+<tr>
+<th>Notebook</th>
+<th>Use it for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="https://github.com/HartmannLab/UELer/blob/main/script/run_ueler.ipynb"><code>run_ueler.ipynb</code></a></td>
+<td>The starter notebook — local FOV folders, masks, annotations, and a cell table. Start here.</td>
+</tr>
+<tr>
+<td><a href="https://github.com/HartmannLab/UELer/blob/main/script/run_ueler_BIA.ipynb"><code>run_ueler_BIA.ipynb</code></a></td>
+<td>Streaming public BioImage Archive studies (<code>S-BIAD*</code>) with worked descriptors for several datasets.</td>
+</tr>
+<tr>
+<td><a href="https://github.com/HartmannLab/UELer/blob/main/script/run_ueler_binder.ipynb"><code>run_ueler_binder.ipynb</code></a></td>
+<td>The zero-setup Binder demo linked above.</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition note">
+<p class="admonition-title">The notebooks are not part of the installed package</p>
+<p><code>script/</code> ships with the repository only, not with the <code>ueler-viewer</code> wheel or sdist. If you installed with <code>pip</code>, download a notebook from the links above or write your own cell calling <code>ueler.run_viewer</code>.</p>
+</div>
 <h3 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h3>
 <p>Make sure you have completed <a href="../installation/">installation</a> and activated the environment:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>micromamba<span class="w"> </span>activate<span class="w"> </span>ark-analysis-ueler
