@@ -27,6 +27,19 @@ fetched on demand — only the channels you open are streamed.
 
 To work with your own data, run UELer inside a Jupyter notebook.
 
+### Example Notebooks
+
+Runnable notebooks live in [`script/`](https://github.com/HartmannLab/UELer/tree/main/script) in the repository:
+
+| Notebook | Use it for |
+|---|---|
+| [`run_ueler.ipynb`](https://github.com/HartmannLab/UELer/blob/main/script/run_ueler.ipynb) | The starter notebook — local FOV folders, masks, annotations, and a cell table. Start here. |
+| [`run_ueler_BIA.ipynb`](https://github.com/HartmannLab/UELer/blob/main/script/run_ueler_BIA.ipynb) | Streaming public BioImage Archive studies (`S-BIAD*`) with worked descriptors for several datasets. |
+| [`run_ueler_binder.ipynb`](https://github.com/HartmannLab/UELer/blob/main/script/run_ueler_binder.ipynb) | The zero-setup Binder demo linked above. |
+
+!!! note "The notebooks are not part of the installed package"
+    `script/` ships with the repository only, not with the `ueler-viewer` wheel or sdist. If you installed with `pip`, download a notebook from the links above or write your own cell calling `ueler.run_viewer`.
+
 ### Prerequisites
 
 Make sure you have completed [installation](installation.md) and activated the environment:
