@@ -45,6 +45,7 @@ from ueler.cell_table import (
     is_integer_column_dtype,
 )
 from ueler.viewer.decorators import update_status_bar
+from ueler.viewer.settings_paths import viewer_settings_folder
 from ueler.viewer.plugin.plugin_base import PluginBase
 from ueler.viewer.plugin.mask_class_list_widget import MaskClassListWidget
 from ueler.viewer.color_palettes import DEFAULT_COLOR, colors_match, normalize_hex_color
@@ -2470,11 +2471,9 @@ class MaskPainterDisplay(PluginBase):
             _logger.info(message)
 
     def _determine_storage_folder(self) -> Optional[Path]:
-        base_folder = getattr(self.main_viewer, "base_folder", None)
-        if not base_folder:
+        target = viewer_settings_folder(self.main_viewer)
+        if target is None:
             return None
-        base_path = Path(base_folder).expanduser()
-        target = base_path / ".UELer"
         try:
             target.mkdir(parents=True, exist_ok=True)
         except Exception as err:  # pylint: disable=broad-except

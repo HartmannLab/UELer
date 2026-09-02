@@ -7,6 +7,8 @@ import logging
 import os
 from ipywidgets import Widget
 
+from ueler.viewer.settings_paths import viewer_settings_folder
+
 _logger = logging.getLogger(__name__)
 
 
@@ -47,7 +49,8 @@ class PluginBase:
         return None
 
     def after_all_plugins_loaded(self):
-        widget_states_path = os.path.join(self.main_viewer.base_folder, ".UELer", f"{self.displayed_name}_widget_states.json")
+        settings_folder = viewer_settings_folder(self.main_viewer)
+        widget_states_path = os.path.join(str(settings_folder), f"{self.displayed_name}_widget_states.json")
         self.load_widget_states(widget_states_path)
 
     def on_mv_update_display(self):
@@ -93,7 +96,8 @@ class PluginBase:
     def on_widget_value_change(self, change):  # NOSONAR - legacy signature
         """Callback function to handle widget value changes."""
         if self.initialized:
-            widget_states_path = os.path.join(self.main_viewer.base_folder, ".UELer", f"{self.displayed_name}_widget_states.json")
+            settings_folder = viewer_settings_folder(self.main_viewer)
+            widget_states_path = os.path.join(str(settings_folder), f"{self.displayed_name}_widget_states.json")
             self.save_widget_states(widget_states_path)
 
     def setup_widget_observers(self):

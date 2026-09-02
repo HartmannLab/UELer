@@ -27,6 +27,7 @@ class _ViewerFactory(Protocol):  # pragma: no cover - structural typing helper
 		*,
 		masks_folder: Optional[str] = ...,
 		annotations_folder: Optional[str] = ...,
+		settings_path: Optional[str] = ...,
 		**kwargs,
 	) -> "ImageMaskViewer":
 		...
@@ -52,6 +53,22 @@ def _normalise_optional_directory(path: Optional[PathLike], *, argument: str) ->
 	if not directory.exists():
 		raise FileNotFoundError(f"{argument} '{directory}' does not exist")
 	if not directory.is_dir():
+		raise NotADirectoryError(f"{argument} '{directory}' is not a directory")
+	return str(directory)
+
+
+def _normalise_settings_path(path: Optional[PathLike], *, argument: str) -> Optional[str]:
+	"""Expand an optional settings-root override without requiring it to exist yet.
+
+	Unlike ``_normalise_optional_directory``, the target subfolder (and
+	``settings_path`` itself) is created on demand by the viewer, so this only
+	rejects the path when it already exists as something other than a directory.
+	"""
+
+	if path is None:
+		return None
+	directory = Path(path).expanduser()
+	if directory.exists() and not directory.is_dir():
 		raise NotADirectoryError(f"{argument} '{directory}' is not a directory")
 	return str(directory)
 
@@ -103,6 +120,7 @@ def run_viewer(
 	*,
 	masks_folder: Optional[PathLike] = None,
 	annotations_folder: Optional[PathLike] = None,
+	settings_path: Optional[PathLike] = None,
 	auto_display: bool = True,
 	after_plugins: bool = True,
 	viewer_factory: Optional[_ViewerFactory] = None,
@@ -118,6 +136,13 @@ def run_viewer(
 	masks_folder, annotations_folder:
 		Optional directories providing masks and annotation rasters. When omitted,
 		the viewer's default discovery rules apply.
+	settings_path:
+		Optional directory to store the ``.UELer`` settings/cache folder outside
+		``base_folder`` (issue #137) — useful when ``base_folder`` is read-only or
+		must stay untouched for a downstream pipeline. When given, settings are
+		written to ``<settings_path>/<base_folder name>/.UELer`` instead of
+		``<base_folder>/.UELer``. Defaults to ``None``, keeping the settings
+		folder inside ``base_folder`` as before.
 	auto_display:
 		If ``True`` (default) render the widget tree immediately via
 		``display_ui``.
@@ -148,6 +173,7 @@ def run_viewer(
 	annotations_dir = _normalise_optional_directory(
 		annotations_folder, argument="annotations_folder"
 	)
+	settings_dir = _normalise_settings_path(settings_path, argument="settings_path")
 
 	if viewer_factory is None:
 		factory: _ViewerFactory = _load_viewer_factory()
@@ -158,6 +184,7 @@ def run_viewer(
 		base_dir,
 		masks_folder=masks_dir,
 		annotations_folder=annotations_dir,
+		settings_path=settings_dir,
 		**viewer_kwargs,
 	)
 

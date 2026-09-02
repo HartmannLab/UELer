@@ -58,6 +58,7 @@ from ..scale_bar import (
 )
 from .plugin_base import PluginBase
 from ..roi_manager import format_roi_label, is_shape_record
+from ..settings_paths import viewer_settings_folder
 from ..layout_utils import column_block_layout, content_widget_layout, flex_fill_layout
 
 _logger = logging.getLogger(__name__)
@@ -954,9 +955,9 @@ class BatchExportPlugin(PluginBase):
         if isinstance(folder, Path):
             self._palette_registry_folder = folder
             return
-        base = getattr(self.main_viewer, "base_folder", None)
-        if base:
-            self._palette_registry_folder = Path(base).expanduser() / ".UELer"
+        settings_folder = viewer_settings_folder(self.main_viewer)
+        if settings_folder is not None:
+            self._palette_registry_folder = settings_folder
 
     def _load_palette_registry(self) -> Dict[str, Dict[str, str]]:
         folder = self._palette_registry_folder
@@ -1033,9 +1034,9 @@ class BatchExportPlugin(PluginBase):
     # Export config template helpers (Feature 3)
     # ------------------------------------------------------------------
     def _resolve_export_config_folder(self) -> None:
-        base = getattr(self.main_viewer, "base_folder", None)
-        if base:
-            folder = Path(base).expanduser() / ".UELer" / "export_configs"
+        settings_folder = viewer_settings_folder(self.main_viewer)
+        if settings_folder is not None:
+            folder = settings_folder / "export_configs"
             folder.mkdir(parents=True, exist_ok=True)
             self._export_config_folder = folder
 

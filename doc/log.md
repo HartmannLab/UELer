@@ -1,3 +1,13 @@
+### v0.5.1-alpha1
+**The `.UELer` settings folder no longer has to live inside the dataset directory**
+
+- **A new `settings_path` argument on `run_viewer`/`ImageMaskViewer` relocates `.UELer` (issue #137).** Previously every persisted UELer state — widget states, the ROI table, annotation palettes, heatmap checkpoints, export-config templates, map descriptors — was written to `<base_folder>/.UELer`, unconditionally. That broke when `base_folder` was read-only, or when a downstream pipeline treated any extra file under its dataset root as an error. `settings_path`, when given, moves the folder to `<settings_path>/<base_folder name>/.UELer`; omitted, nothing changes.
+- **Nine independent `base_folder + ".UELer"` joins became one computation.** `ImageMaskViewer.base_folder` was the source every one of those sites re-derived from, across `main_viewer.py`, `roi_manager.py`, `checkpoint_store.py`, `plugin_base.py`, `mask_painter.py` and `export_fovs.py`, with no shared helper. New `ueler/viewer/settings_paths.py` computes it once (`resolve_settings_root`/`resolve_settings_folder`), and `ImageMaskViewer.__init__` exposes the result as `self.settings_folder`; every downstream site now reads that instead of rebuilding the path. `viewer_settings_folder(viewer)` gives plugins a duck-typed accessor that still works for lightweight test doubles that only ever set `base_folder`.
+- **A checkpoint's identity does not move when its storage does.** `CheckpointStore` gained an optional `storage_root`; the `.h5ad` files move there, but `dataset_id` keeps hashing `dataset_root` itself, so relocating settings storage cannot change which dataset a saved checkpoint belongs to.
+- **`run_viewer_bia` was left alone on purpose.** BIA streaming mode already has `local_dir` for relocating its whole workspace (`.UELer` plus the download `cache/`); adding a second, overlapping way to do the same thing there would only invite the two disagreeing.
+- **Files:** added `ueler/viewer/settings_paths.py`, `tests/test_settings_path.py` (12 tests), `dev_note/issue_tracking/issue137_settings_path.md`; edited `ueler/runner.py` (`settings_path` argument, `_normalise_settings_path`, `_ViewerFactory` Protocol), `ueler/viewer/main_viewer.py`, `ueler/viewer/roi_manager.py` (`settings_dir`), `ueler/viewer/checkpoint_store.py` (`storage_root`), `ueler/viewer/plugin/{cell_annotation,plugin_base,mask_painter,export_fovs}.py`, `tests/test_runner.py`.
+- Verified: `python tools/run_test_suite.py --max-skips 0` → **1121 tests, OK**, "No tests were skipped" (1109 before, plus the 12 new).
+
 ### v0.5.0
 **The first stable release: `v0.5.0-rc3` promoted, and one README summarising the whole 0.5.0 line**
 

@@ -329,9 +329,9 @@ def _ensure_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 class ROIManager:
     """Manage Region-of-Interest records with persistence."""
 
-    def __init__(self, base_folder: str):
+    def __init__(self, base_folder: str, settings_dir: "str | os.PathLike | None" = None):
         self.base_folder = base_folder
-        self.storage_dir = os.path.join(base_folder, ".UELer")
+        self.storage_dir = str(settings_dir) if settings_dir is not None else os.path.join(base_folder, ".UELer")
         os.makedirs(self.storage_dir, exist_ok=True)
         self.storage_path = os.path.join(self.storage_dir, "roi_manager.csv")
 

@@ -46,10 +46,13 @@ def empty_manifest(dataset_id: str) -> dict:
 class CheckpointStore:
     """Read/write heatmap checkpoints atomically under ``<root>/.UELer/dataset_*/``."""
 
-    def __init__(self, dataset_root: "str | Path") -> None:
+    def __init__(self, dataset_root: "str | Path", storage_root: "str | Path | None" = None) -> None:
         root = Path(dataset_root).expanduser().resolve()
         dataset_id = f"dataset_{_dataset_hash(root)}"
-        self._dataset_dir = root / ".UELer" / dataset_id
+        # issue #137: dataset identity always hashes dataset_root, but the files
+        # themselves can live under a separately relocated storage_root.
+        storage_base = Path(storage_root).expanduser().resolve() if storage_root is not None else root
+        self._dataset_dir = storage_base / ".UELer" / dataset_id
         self._checkpoints_dir = self._dataset_dir / "checkpoints"
         self._manifest_path = self._dataset_dir / "manifest.json"
         self._dataset_id = dataset_id

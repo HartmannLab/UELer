@@ -45,6 +45,7 @@ from ueler.viewer.images import load_asset_bytes
 from ueler.viewer.scale_bar import compute_scale_bar_spec, effective_pixel_size_nm
 from .ui_components import create_widgets, display_ui, update_wide_plugin_panel
 from .roi_manager import ROIManager
+from .settings_paths import resolve_settings_root
 from ueler.viewer.plugin.roi_manager_plugin import ROIManagerPlugin
 import json
 
@@ -111,7 +112,7 @@ ANNOTATION_PALETTE_VERSION = "1.0.0"
 ANNOTATION_REGISTRY_FILENAME = "pixel_annotation_sets_index.json"
 ANNOTATION_PALETTE_FOLDER_NAME = "pixel_annotation_palettes"
 
-MAP_DESCRIPTOR_RELATIVE_PATH = Path(".UELer") / "maps"
+MAP_DESCRIPTOR_RELATIVE_PATH = Path("maps")
 _MAP_MODE_FLAG = os.getenv("ENABLE_MAP_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
@@ -247,7 +248,7 @@ def _dedupe_channel_sequence(channels: Sequence[str]) -> Tuple[str, ...]:
 
 class ImageMaskViewer:
     def __init__(self, base_folder, masks_folder=None, annotations_folder=None, debug=False,
-                 data_source=None):
+                 data_source=None, settings_path=None):
         self.initialized = False
         # Optional remote data source (issue #110, BIA streaming). When set, FOV
         # discovery and per-FOV image/mask reads route through it instead of the
@@ -260,6 +261,11 @@ class ImageMaskViewer:
         # crash the kernel (most visible when auto_display=False).
         self._widget_displayed = False
         self.base_folder = base_folder
+        # issue #137: settings_path optionally relocates the .UELer folder to
+        # <settings_path>/<base_folder name>/.UELer instead of <base_folder>/.UELer.
+        self.settings_path = settings_path
+        self.settings_root = resolve_settings_root(base_folder, settings_path)
+        self.settings_folder = self.settings_root / ".UELer"
         if self._data_source is not None:
             # Masks / annotations are served (and cached to flat local dirs) by
             # the remote source; use those dirs so the existing loaders run as-is.
@@ -442,7 +448,7 @@ class ImageMaskViewer:
         self._status_image = {}
 
         # ROI management
-        self.roi_manager = ROIManager(self.base_folder)
+        self.roi_manager = ROIManager(self.base_folder, settings_dir=self.settings_folder)
         self.roi_plugin: Optional[ROIManagerPlugin] = None
         self.active_marker_set_name: Optional[str] = None
 
@@ -591,7 +597,7 @@ class ImageMaskViewer:
             logger.debug("[INIT DEBUG] entering load_widget_states")
         self._suspend_display_updates = True
         try:
-            self.load_widget_states(os.path.join(self.base_folder, ".UELer", 'widget_states.json'))
+            self.load_widget_states(os.path.join(str(self.settings_folder), 'widget_states.json'))
         finally:
             self._suspend_display_updates = False
         # Reconcile the initial downsample factor now that the saved
@@ -651,7 +657,7 @@ class ImageMaskViewer:
     def _initialize_map_descriptors(self) -> None:
         """Load map descriptors when map mode is enabled."""
 
-        descriptor_root = Path(self.base_folder) / MAP_DESCRIPTOR_RELATIVE_PATH
+        descriptor_root = self.settings_folder / MAP_DESCRIPTOR_RELATIVE_PATH
         loader = MapDescriptorLoader()
         result = loader.load_from_directory(descriptor_root)
         self._map_descriptors = result.slides
@@ -3231,11 +3237,10 @@ class ImageMaskViewer:
         self._load_annotation_palette_registry(self.annotation_palette_folder)
 
     def _determine_annotation_palette_folder(self) -> Optional[Path]:
-        base_folder = getattr(self, "base_folder", None)
-        if not base_folder:
+        settings_folder = getattr(self, "settings_folder", None)
+        if not settings_folder:
             return None
-        base_path = Path(base_folder).expanduser()
-        target = base_path / ".UELer" / ANNOTATION_PALETTE_FOLDER_NAME
+        target = Path(settings_folder) / ANNOTATION_PALETTE_FOLDER_NAME
         try:
             target.mkdir(parents=True, exist_ok=True)
         except Exception:  # pragma: no cover - fallback for restricted environments
@@ -5388,8 +5393,8 @@ class ImageMaskViewer:
     def on_widget_value_change(self, change):
         """Callback function to handle widget value changes."""
         if self.initialized:
-            os.makedirs(os.path.join(self.base_folder, '.UELer'), exist_ok=True)
-            widget_states_path = os.path.join(self.base_folder, '.UELer', 'widget_states.json')
+            os.makedirs(str(self.settings_folder), exist_ok=True)
+            widget_states_path = os.path.join(str(self.settings_folder), 'widget_states.json')
             self.save_widget_states(widget_states_path)
     
     def on_save_marker_set_click(self, button):

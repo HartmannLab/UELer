@@ -29,10 +29,11 @@ class RunnerSmokeTest(unittest.TestCase):
 			viewer_instance = MagicMock()
 			factory_calls = {}
 
-			def fake_factory(base_folder, *, masks_folder=None, annotations_folder=None, **kwargs):
+			def fake_factory(base_folder, *, masks_folder=None, annotations_folder=None, settings_path=None, **kwargs):
 				factory_calls["base"] = base_folder
 				factory_calls["masks"] = masks_folder
 				factory_calls["annotations"] = annotations_folder
+				factory_calls["settings_path"] = settings_path
 				factory_calls["kwargs"] = kwargs
 				return viewer_instance
 
@@ -51,6 +52,7 @@ class RunnerSmokeTest(unittest.TestCase):
 			self.assertEqual(factory_calls["base"], str(base_dir))
 			self.assertEqual(factory_calls["masks"], str(masks_dir))
 			self.assertEqual(factory_calls["annotations"], str(annotations_dir))
+			self.assertIsNone(factory_calls["settings_path"])
 			self.assertEqual(factory_calls["kwargs"], {"custom_arg": "value"})
 			display_mock.assert_called_once_with(viewer_instance)
 			update_mock.assert_called_once_with(viewer_instance)

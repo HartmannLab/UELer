@@ -345,7 +345,8 @@ class CellAnnotationPlugin(PluginBase):
 
         base_folder = getattr(self.main_viewer, "base_folder", None)
         if base_folder:
-            self._store = CheckpointStore(base_folder)
+            settings_root = getattr(self.main_viewer, "settings_root", None)
+            self._store = CheckpointStore(base_folder, storage_root=settings_root)
             self._refresh_tree()
 
         side = getattr(self.main_viewer, "SidePlots", None)
