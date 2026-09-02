@@ -93,7 +93,9 @@ viewer = ueler.run_viewer(base_folder)
 ```
 
 `run_viewer` also accepts `masks_folder=...` and `annotations_folder=...` if you want segmentation
-and annotation overlays without a cell table.
+and annotation overlays without a cell table. If `base_folder` is read-only, or a downstream
+pipeline can't tolerate extra files under its dataset root, pass `settings_path=...` to move
+UELer's `.UELer` settings folder elsewhere — see [Where does UELer store my work?](faq.md#where-does-ueler-store-my-work).
 
 **Full — masks, annotations, and a cell table:**
 

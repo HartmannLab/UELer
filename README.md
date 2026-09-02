@@ -149,7 +149,7 @@ For more details, see the [user guide](https://hartmannlab.github.io/UELer/lates
 ## New Update  
 ### **UELer v0.5.1-alpha1 Summary**
 
-- **The `.UELer` settings folder no longer has to live inside the dataset directory.** `run_viewer(base_folder, settings_path=...)` moves it to `<settings_path>/<base_folder name>/.UELer` instead of `<base_folder>/.UELer` — useful when `base_folder` is read-only, or a downstream pipeline must not see extra files under its dataset root. Omit `settings_path` and nothing changes.
+- **The `.UELer` settings folder no longer has to live inside the dataset directory.** `run_viewer(base_folder, settings_path=...)` moves it to `<settings_path>/<base_folder name>/.UELer` instead of `<base_folder>/.UELer` — useful when `base_folder` is read-only, or a downstream pipeline must not see extra files under its dataset root. Omit `settings_path` and nothing changes. If neither location is writable, the viewer now fails immediately with a message naming the folder and suggesting `settings_path=...`, instead of a bare traceback.
 
 _Earlier changes (v0.5.0 and before) are in the [update log](https://github.com/HartmannLab/UELer/blob/main/doc/log.md)._
 

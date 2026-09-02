@@ -266,6 +266,22 @@ class ImageMaskViewer:
         self.settings_path = settings_path
         self.settings_root = resolve_settings_root(base_folder, settings_path)
         self.settings_folder = self.settings_root / ".UELer"
+        try:
+            self.settings_folder.mkdir(parents=True, exist_ok=True)
+        except OSError as err:
+            # Fail here, at the top of __init__, with an actionable message —
+            # otherwise the same OSError surfaces later from whichever consumer
+            # (ROIManager, widget-state save, ...) happens to touch the folder
+            # first, with no hint that settings_path exists to fix it.
+            message = (
+                f"UELer could not create its settings folder at '{self.settings_folder}' ({err}). "
+                f"If '{base_folder}' is read-only or otherwise restricted, pass "
+                "settings_path=... to run_viewer()/ImageMaskViewer() to store UELer's "
+                "settings (ROIs, widget state, palettes, checkpoints) somewhere else."
+            )
+            logger.error(message)
+            print(f"⚠️ {message}")
+            raise
         if self._data_source is not None:
             # Masks / annotations are served (and cached to flat local dirs) by
             # the remote source; use those dirs so the existing loaders run as-is.

@@ -190,6 +190,24 @@ Per-dataset state lives in a `.UELer/` folder inside your `base_folder`:
 
 Mask and annotation palettes are also saved under `.UELer/`.
 
+### Can I move the `.UELer` folder somewhere else?
+
+Yes. Pass `settings_path` to `run_viewer()`:
+
+```python
+viewer = ueler.run_viewer(base_folder, settings_path="/your/custom/path")
+```
+
+This stores settings at `/your/custom/path/<base_folder name>/.UELer` instead of
+`<base_folder>/.UELer`. Use it when `base_folder` is read-only, or a downstream
+pipeline must not see extra files under its dataset root. Leave `settings_path`
+unset to keep the default location shown above.
+
+If neither location can be created (for example `base_folder` is read-only and
+`settings_path` was not given), `run_viewer()` fails immediately with a message
+naming the folder it tried and suggesting `settings_path=...` — it does not fail
+silently or partway through loading.
+
 ### The scale bar is missing in my exports (or the viewer)
 
 The scale bar is driven by pixel size. Set the **Pixel Size (nm):** value in the left panel's Advanced

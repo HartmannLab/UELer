@@ -1,9 +1,11 @@
 """Tests for the configurable ``.UELer`` settings folder (issue #137)."""
 
+import io
 import os
 import shutil
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -155,6 +157,21 @@ class ImageMaskViewerSettingsPathTests(unittest.TestCase):
         self.assertEqual(Path(viewer.roi_manager.storage_dir), expected)
         self.assertTrue(expected.is_dir())
         self.assertFalse((Path(self.test_dir) / ".UELer").exists())
+
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root bypasses permission checks")
+    def test_unwritable_settings_location_prints_actionable_guidance(self):
+        unwritable_parent = tempfile.mkdtemp(prefix="test_settings_path_unwritable_")
+        self.addCleanup(lambda: (os.chmod(unwritable_parent, 0o755), shutil.rmtree(unwritable_parent, ignore_errors=True)))
+        os.chmod(unwritable_parent, 0o555)  # read+execute only — mkdir() inside it must fail
+
+        captured = io.StringIO()
+        with redirect_stdout(captured):
+            with self.assertRaises(OSError):
+                self._build_viewer(settings_path=unwritable_parent)
+
+        message = captured.getvalue()
+        self.assertIn("settings_path=", message)
+        self.assertIn(unwritable_parent, message)
 
 
 if __name__ == "__main__":

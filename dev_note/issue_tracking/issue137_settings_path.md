@@ -31,3 +31,11 @@ The computation is centralized in a new `ueler/viewer/settings_paths.py` module:
 ## Verification
 
 New `tests/test_settings_path.py` (12 tests) covers the path-resolution helpers, `ROIManager(settings_dir=...)`, `CheckpointStore(storage_root=...)` (including dataset-identity stability), and a full `ImageMaskViewer(base_folder, settings_path=...)` construction confirming the settings folder — and nothing else — lands under the redirected location. `tests/test_runner.py` was extended to assert `run_viewer` forwards `settings_path` to the viewer factory. Full suite: `python tools/run_test_suite.py --max-skips 0` → 1121 tests, 0 skips.
+
+## Follow-up: actionable failure message on GUI init
+
+Without a guard, a `base_folder` or `settings_path` that can't be written to surfaced as a raw `OSError`/`PermissionError` from whichever consumer happened to touch `.UELer` first — `ROIManager.__init__` in practice, deep inside `ImageMaskViewer.__init__` — giving no hint that `settings_path` exists to fix it.
+
+`ImageMaskViewer.__init__` now creates `self.settings_folder` eagerly (`mkdir(parents=True, exist_ok=True)`) immediately after resolving it, wrapped in `try`/`except OSError`. On failure it logs (`logger.error`) and `print()`s — visible directly in the notebook cell — a message naming the folder it tried and pointing at `settings_path=...`, then re-raises; construction still fails, only now with guidance attached. Every downstream consumer keeps its own `mkdir`/`makedirs` call, now unreachable on failure but a harmless no-op on success.
+
+Verified by `tests/test_settings_path.py::ImageMaskViewerSettingsPathTests::test_unwritable_settings_location_prints_actionable_guidance`, which chmods a temp directory read-only and asserts the printed message names the folder and mentions `settings_path=`. Full suite: `python tools/run_test_suite.py --max-skips 0` → 1122 tests, 0 skips.
