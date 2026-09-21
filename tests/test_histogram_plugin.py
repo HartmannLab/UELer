@@ -94,6 +94,16 @@ def _bokeh_available() -> bool:
     return bool(_h._BOKEH_OK)
 
 
+def _figures_of(layout):
+    """The figures in a ``_build_figures`` layout.
+
+    Each channel contributes a ``column(figure, bounds_row)`` rather than a bare
+    figure since the per-channel range slider landed (#138), so the figure is the
+    first child of each child.
+    """
+    return [child.children[0] for child in layout.children]
+
+
 def _bokeh_stack_available() -> bool:
     """True when both bokeh and jupyter_bokeh are importable (full interactive render)."""
     from ueler.viewer.plugin import histogram as _h
@@ -684,10 +694,10 @@ class TestHistogramMultiChannel(unittest.TestCase):
         clip the Bokeh column, so the height must live on the model itself (#112 reply 2).
         """
         from ueler.viewer.plugin.histogram import (
-            _FIGURE_HEIGHT, _MAX_PLOT_HEIGHT, _ROW_OVERHEAD,
+            _BOUNDS_ROW_HEIGHT, _FIGURE_HEIGHT, _MAX_PLOT_HEIGHT, _ROW_OVERHEAD,
         )
 
-        per = _FIGURE_HEIGHT + _ROW_OVERHEAD
+        per = _FIGURE_HEIGHT + _ROW_OVERHEAD + _BOUNDS_ROW_HEIGHT
         few = max(1, _MAX_PLOT_HEIGHT // per)          # fits within the cap
         many = (_MAX_PLOT_HEIGHT // per) + 2           # exceeds the cap
 
@@ -804,7 +814,7 @@ class TestHistogramBokehLayout(unittest.TestCase):
         self.hist.ui_component.interaction_mode.value = "Brush"
         self.hist._channels = ["intensity"]
         layout, _sources, _spans = self.hist._build_figures()
-        for fig in layout.children:
+        for fig in _figures_of(layout):
             for renderer in fig.renderers:
                 glyph = getattr(renderer, "glyph", None)
                 if glyph is None:
@@ -822,7 +832,7 @@ class TestHistogramBokehLayout(unittest.TestCase):
         self.hist.ui_component.interaction_mode.value = "Brush"
         self.hist._channels = ["intensity", "area"]
         layout, _sources, _spans = self.hist._build_figures()
-        for fig in layout.children:
+        for fig in _figures_of(layout):
             self.assertIsInstance(fig.toolbar.active_drag, BoxSelectTool)
 
     def test_cutoff_mode_does_not_activate_box_select(self):
@@ -832,7 +842,7 @@ class TestHistogramBokehLayout(unittest.TestCase):
         self.hist.ui_component.interaction_mode.value = "Cutoff"
         self.hist._channels = ["intensity"]
         layout, _sources, _spans = self.hist._build_figures()
-        for fig in layout.children:
+        for fig in _figures_of(layout):
             self.assertNotIsInstance(fig.toolbar.active_drag, BoxSelectTool)
 
 

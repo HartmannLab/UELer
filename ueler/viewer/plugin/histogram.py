@@ -23,6 +23,11 @@ Bokeh gives native, kernel-backed interactivity:
   histogram to drop just that channel's term.  Switching between Cutoff and
   Brush does not replot either: both gestures are wired on every figure and the
   toggle only re-points ``toolbar.active_drag`` (#127 reply).
+* **Adjustable bounds (#138)** — each histogram carries its own range slider, so
+  a channel with a long tail can be re-binned over just the region of interest
+  instead of spreading every bin across the full data extent. The bins are
+  recomputed in Python over the chosen range; Bokeh's zoom only magnifies the
+  bars it was already given.
 * **Faint selections stay visible (#135 reply)** — a selection made by clicking a
   few cells in the image draws a sub-pixel bar next to a full-height one, so when
   its tallest bar would fall under 5% of the tallest bar on that channel, the bins
@@ -78,12 +83,14 @@ try:  # pragma: no cover - exercised via the real notebook stack
     from bokeh.models import (
         BoxAnnotation,
         BoxSelectTool,
+        Button as _bk_button,
         ColumnDataSource,
         PanTool,
+        RangeSlider,
         Span,
     )
     from bokeh.events import DoubleTap, SelectionGeometry, Tap
-    from bokeh.layouts import column as _bk_column
+    from bokeh.layouts import column as _bk_column, row as _bk_row
 
     _BOKEH_OK = True
 except Exception:  # pragma: no cover - bokeh missing
@@ -148,7 +155,16 @@ _HIT_ALPHA = 0.45              # tint of a bin holding a faint selection (#135 r
 _FAINT_FRACTION = 0.05
 _FIGURE_HEIGHT = 220
 _ROW_OVERHEAD = 40             # approx. per-figure title + axis label DOM height
-_MAX_PLOT_HEIGHT = 560         # scroll the stack once it exceeds this many px
+_BOUNDS_ROW_HEIGHT = 56        # the per-channel range slider + "Full range" button (#138)
+# Scroll the stack once it exceeds this many px. Raised from 560 with #138: the
+# cap was set so two histograms fit without a scrollbar, and the per-channel
+# bounds row makes each one _BOUNDS_ROW_HEIGHT taller, so the budget has to grow
+# with it or two channels would start scrolling where they used to fit.
+_MAX_PLOT_HEIGHT = 640
+# Steps the range slider offers between a channel's smallest and largest value.
+# Fine enough to place a bound precisely, coarse enough that dragging does not
+# emit a stream of near-identical values (#138).
+_BOUNDS_SLIDER_STEPS = 500
 
 
 # Gate-term kinds (issue #127). A term is ``(kind, a, b)``:
@@ -217,6 +233,12 @@ class HistogramDisplay(PluginBase):
         # old single ``_brush_selection`` tuple, which could only gate on the
         # last channel touched.
         self._gates: dict = {}  # channel -> (kind, a, b)
+
+        # Per-channel binning bounds (#138): channel -> (lo, hi). A channel that
+        # is absent bins over its full data extent, which is the original
+        # behaviour. Display/binning state only — the gate terms above are
+        # evaluated on the unrestricted frame either way.
+        self._bounds: dict = {}
         self.selected_indices: Observable = Observable(set())
         self.single_point_click_state = 0
 
@@ -231,6 +253,9 @@ class HistogramDisplay(PluginBase):
         # rebuilding the stack (#127 reply).
         self._figures: dict = {}
         self._box_tools: dict = {}
+        # Live range sliders, kept so clearing a bound can put the handles back
+        # where the new bound is (#138).
+        self._bound_sliders: dict = {}
         self._bokeh_model = None
         self._observers_registered = False
 
@@ -392,6 +417,11 @@ class HistogramDisplay(PluginBase):
         dropped = [ch for ch in self._gates if ch not in channels]
         for channel in dropped:
             del self._gates[channel]
+        # Same cleanup for the binning bounds (#138). A channel that is still
+        # plotted keeps its bound — _bin_range clamps it to whatever extent the
+        # new data has, so it cannot end up binning over an empty window.
+        for channel in [ch for ch in self._bounds if ch not in channels]:
+            del self._bounds[channel]
         self._render()
         if dropped:
             # The gate changed, so the published selection must follow.
@@ -406,6 +436,7 @@ class HistogramDisplay(PluginBase):
         # switch pointing at detached figures.
         self._figures = {}
         self._box_tools = {}
+        self._bound_sliders = {}
         if data is None or not channels:
             self._plot_host.children = [self._plot_placeholder]
             return
@@ -431,7 +462,9 @@ class HistogramDisplay(PluginBase):
     def _scroll_height(self):
         """Return a fixed pixel height ('<N>px') once the stack exceeds the cap,
         else ``None`` (few histograms render at natural height, no scrollbar)."""
-        total = len(self._channels) * (_FIGURE_HEIGHT + _ROW_OVERHEAD)
+        total = len(self._channels) * (
+            _FIGURE_HEIGHT + _ROW_OVERHEAD + _BOUNDS_ROW_HEIGHT
+        )
         return f"{_MAX_PLOT_HEIGHT}px" if total > _MAX_PLOT_HEIGHT else None
 
     def _build_figures(self):
@@ -459,6 +492,7 @@ class HistogramDisplay(PluginBase):
         spans: dict = {}
         self._figures = {}
         self._box_tools = {}
+        self._bound_sliders = {}
         for channel in self._channels:
             edges = self._histogram_bin_edges(channel, bins)
             left = edges[:-1].tolist()
@@ -533,12 +567,20 @@ class HistogramDisplay(PluginBase):
             p.on_event(SelectionGeometry, self._make_range_handler(channel))
             p.on_event(Tap, self._make_tap_handler(channel))
 
-            figures.append(p)
+            # The slider sits *inside* the Bokeh layout, directly under its own
+            # figure, so it scrolls with the stack; an ipywidget in the controls
+            # area could not (#112 reply 2) and would need a channel picker to say
+            # which histogram it addresses.
+            figures.append(_bk_column(p, self._build_bounds_row(channel, p),
+                                      sizing_mode="stretch_width"))
             # ``full`` is cached so _refresh_overlays can decide the faint-selection
             # tint without re-binning the whole column on every selection (#135 reply).
+            # ``full_src`` is kept so a bounds change can rewrite the base bars in
+            # place instead of rebuilding the figure (#138).
             sources[channel] = {
                 "selected": sel_src,
                 "hits": hit_src,
+                "full_src": full_src,
                 "edges": edges,
                 "band": band,
                 "full": np.asarray(full),
@@ -550,6 +592,74 @@ class HistogramDisplay(PluginBase):
         self._apply_interaction_mode()
         layout = _bk_column(*figures, sizing_mode="stretch_width")
         return layout, sources, spans
+
+    def _build_bounds_row(self, channel: str, figure):
+        """The range slider + **Full range** button that sit under ``channel``'s figure (#138).
+
+        One two-handle ``RangeSlider`` rather than the separate lower/upper pair the
+        request sketched: it is the same two handles, and it cannot be driven into
+        an inverted ``lower > upper`` state that would need its own validation.
+
+        The slider is bound twice, deliberately:
+
+        * ``js_link`` moves the figure's x range **while the handles are dragged**,
+          entirely in the browser, so the window follows the gesture with no kernel
+          round-trip;
+        * ``on_change("value_throttled", …)`` rebins in Python once the handle is
+          released. Binding the rebin to ``value`` instead would send one full
+          re-binning round-trip per pixel of drag.
+
+        A channel with no usable extent (missing, empty or constant) gets a
+        disabled slider rather than no row, so the stack does not change height
+        depending on the data.
+        """
+        extent = self._channel_extent(channel)
+        if extent is None:
+            slider = RangeSlider(
+                start=0.0, end=1.0, value=(0.0, 1.0), step=1.0,
+                title=f"{channel} range", disabled=True, sizing_mode="stretch_width",
+            )
+            return _bk_row(slider, sizing_mode="stretch_width")
+
+        low, high = extent
+        bound = self._bin_range(channel) or extent
+        slider = RangeSlider(
+            start=low,
+            end=high,
+            value=(float(bound[0]), float(bound[1])),
+            step=(high - low) / _BOUNDS_SLIDER_STEPS,
+            title=f"{channel} range",
+            sizing_mode="stretch_width",
+        )
+        slider.js_link("value", figure.x_range, "start", attr_selector=0)
+        slider.js_link("value", figure.x_range, "end", attr_selector=1)
+        slider.on_change("value_throttled", self._make_bounds_handler(channel))
+
+        # Bokeh's own `reset` tool restores the viewport, not the binning, so the
+        # override needs its own way out.
+        reset = _bk_button(label="Full range", width=90, button_type="default")
+        reset.on_click(self._make_clear_bounds_handler(channel))
+
+        self._bound_sliders[channel] = slider
+        return _bk_row(slider, reset, sizing_mode="stretch_width")
+
+    def _make_bounds_handler(self, channel: str):
+        """Bokeh ``RangeSlider`` → re-bin ``channel`` over the chosen window (#138)."""
+
+        def _handler(_attr, _old, new):
+            if not new:
+                return
+            self.set_channel_bounds(channel, new[0], new[1])
+
+        return _handler
+
+    def _make_clear_bounds_handler(self, channel: str):
+        """Bokeh **Full range** button → drop ``channel``'s bound (#138)."""
+
+        def _handler(*_args):
+            self.clear_channel_bounds(channel)
+
+        return _handler
 
     def _brush_mode(self) -> bool:
         return self.ui_component.interaction_mode.value == "Brush"
@@ -716,13 +826,119 @@ class HistogramDisplay(PluginBase):
         return "Gate: " + " AND ".join(parts)
 
     def _histogram_bin_edges(self, channel: str, bins: int):
-        """Bin edges computed over the *full* plotted data for ``channel``.
+        """Bin edges for ``channel``, over its bounds if it has any (#138).
 
         Shared by the base and subset-overlay bars so both sit on the same grid;
         independent of the current selection (#112 reply). ``_plot_data`` is
         already NaN-dropped on the plotted channels by ``_prepare_dataframe``.
+
+        Without a bound, ``range=None`` reproduces the original behaviour exactly:
+        NumPy spreads the bins over the column's own ``[min, max]``. With one, all
+        ``bins`` bins land inside the chosen window and values outside it are left
+        out of the counts rather than piled into the end bins.
         """
-        return np.histogram_bin_edges(self._plot_data[channel], bins=bins)
+        return np.histogram_bin_edges(
+            self._plot_data[channel], bins=bins, range=self._bin_range(channel)
+        )
+
+    # ------------------------------------------------------------------
+    # Binning bounds (#138)
+    # ------------------------------------------------------------------
+    def _channel_extent(self, channel: str):
+        """``(min, max)`` of ``channel`` in the plotted data, or ``None``.
+
+        Returns ``None`` for a column that is missing, empty or constant: none of
+        those give a window with width, and every caller has to fall back to
+        NumPy's own handling of that case anyway.
+        """
+        data = self._plot_data
+        if data is None or channel not in getattr(data, "columns", []):
+            return None
+        values = pd.to_numeric(data[channel], errors="coerce").dropna()
+        if values.empty:
+            return None
+        lo, hi = float(values.min()), float(values.max())
+        if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+            return None
+        return lo, hi
+
+    def _bin_range(self, channel: str):
+        """This channel's binning window as ``(lo, hi)``, or ``None`` for "all of it".
+
+        The stored bound is clamped to the current data extent so a bound set
+        before a subset change cannot leave the histogram binned over a window
+        holding no rows. A bound that ends up with no width after clamping is
+        treated as absent.
+        """
+        bound = self._bounds.get(channel)
+        if bound is None:
+            return None
+        extent = self._channel_extent(channel)
+        if extent is None:
+            return None
+        lo, hi = (float(bound[0]), float(bound[1]))
+        if hi < lo:
+            lo, hi = hi, lo
+        lo = max(lo, extent[0])
+        hi = min(hi, extent[1])
+        if hi <= lo:
+            return None
+        return lo, hi
+
+    def set_channel_bounds(self, channel: str, lo: float, hi: float) -> None:
+        """Re-bin ``channel`` over ``[lo, hi]`` (#138).
+
+        Only that channel's bars are recomputed — no figure is rebuilt, so the
+        other histograms keep their zoom, their gate markers and their own bounds,
+        and the slider the user is holding survives the update.
+        """
+        lo, hi = (float(lo), float(hi))
+        if hi < lo:
+            lo, hi = hi, lo
+        if hi <= lo:
+            return
+        self._bounds[channel] = (lo, hi)
+        self._rebin_channel(channel)
+
+    def clear_channel_bounds(self, channel: str) -> None:
+        """Drop ``channel``'s bound and bin over its full extent again (#138)."""
+        if self._bounds.pop(channel, None) is None:
+            return
+        slider = self._bound_sliders.get(channel)
+        extent = self._channel_extent(channel)
+        if slider is not None and extent is not None:
+            slider.value = extent
+        self._rebin_channel(channel)
+
+    def _rebin_channel(self, channel: str) -> None:
+        """Recompute one channel's bars in place for its current bounds (#138).
+
+        Rewrites that figure's data sources and x range and nothing else. A
+        ``_render()`` here would rebuild the whole Bokeh layout — and with it the
+        very slider that triggered the change — which is the same replot-on-
+        interaction that #127 removed from every other path in this plugin.
+        """
+        info = self._sources.get(channel)
+        if info is None or self._plot_data is None:
+            return
+        bins = self.ui_component.bin_slider.value
+        edges = self._histogram_bin_edges(channel, bins)
+        full = bin_counts(self._plot_data[channel], edges)
+        left, right = edges[:-1].tolist(), edges[1:].tolist()
+
+        info["edges"] = edges
+        info["full"] = np.asarray(full)
+        full_src = info.get("full_src")
+        if full_src is not None:
+            full_src.data = dict(left=left, right=right, top=full.tolist())
+
+        figure = self._figures.get(channel)
+        if figure is not None:
+            figure.x_range.start, figure.x_range.end = float(edges[0]), float(edges[-1])
+
+        # The selected-subset overlay and the faint-selection tint are binned on
+        # ``info["edges"]``, so replaying them picks up the new grid.
+        self._refresh_overlays()
 
     # ------------------------------------------------------------------
     # Selection logic

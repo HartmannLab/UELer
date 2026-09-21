@@ -34,6 +34,15 @@ The **Histogram** plugin draws one distribution per selected channel, rendered w
    plugin's picker only and does not repaint the main image.
 2. Click **Plot**. Adjust **Bins:** (default 50) as needed.
 
+### Adjusting the range of a histogram
+
+Each histogram has its own range slider underneath it, labelled with the channel name. Drag the two handles to choose the lower and upper bound, and the channel is re-binned over just that window — all of the bins land inside it, so a marker whose values pile up near zero with a long tail becomes readable instead of collapsing into the first two bars. Cells outside the window are left out of the counts. Click **Full range** next to the slider to bin over the whole channel again.
+
+The x axis follows the handles while you drag; the bars are recomputed when you release. Only the histogram you adjusted changes — every other channel keeps its own range, its zoom and its gate.
+
+!!! note "Zoom is not the same thing"
+    The toolbar's pan and wheel-zoom tools magnify the bars that are already drawn; they do not change where the bin edges are. Raising **Bins:** does not help either, because the extra bins are still spread over the full data extent. The range slider is what moves the bin edges.
+
 ### Interaction modes
 
 The **Interaction:** toggle switches between two ways of selecting cells:
