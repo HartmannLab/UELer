@@ -62,8 +62,7 @@ For per-class fill/outline, opacity, continuous colour scales, and saved palette
 ### Marker Sets
 
 Save and restore named channel/color/contrast combinations: **Marker Set:** dropdown, **Set Name:**
-input, and **Load / Save / Update / Delete Marker Set** buttons (deletion is gated by a **Confirm
-Deletion** checkbox).
+input, and **Load / Save / Update / Delete Marker Set** buttons. **Delete Marker Set** opens a confirmation dialog naming the set before anything is removed (#139).
 
 ### Pixel annotations
 

@@ -55,8 +55,7 @@ saved, choose it from the **Marker Set:** dropdown and click **Load Marker Set**
 configuration instantly.
 
 To save your current configuration, type a name in **Set Name:** and click **Save Marker Set**. Use
-**Update Marker Set** to overwrite the selected set, or **Delete Marker Set** (with the **Confirm
-Deletion** checkbox) to remove one.
+**Update Marker Set** to overwrite the selected set, or **Delete Marker Set** to remove one — a dialog appears naming the set, and nothing is removed until you click **Delete** in it.
 
 ---
 

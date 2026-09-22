@@ -4956,20 +4956,50 @@ class ImageMaskViewer:
         self.update_marker_set_dropdown()
 
     def delete_marker_set(self, button):
+        """Ask before deleting the selected marker set (#139).
+
+        The old guard was a separate 'Confirm Deletion' checkbox, which made the
+        button look broken until the user found it. Now the click opens a modal
+        naming the set; :meth:`_delete_marker_set_confirmed` does the work when
+        the user answers.
+        """
         set_name = self.ui_component.marker_set_dropdown.value
         if not set_name:
             logger.warning("No marker set selected to delete.")
             return
 
-        # Check if deletion is confirmed
-        if not self.ui_component.delete_confirmation_checkbox.value:
-            logger.warning("Please check 'Confirm Deletion' to delete the marker set.")
+        dialog = getattr(self.ui_component, 'confirm_dialog', None)
+        if dialog is None:
+            # No front end to ask with -- the ipywidgets fallback shim in
+            # ui_components builds widgets that cannot render a modal. A dead
+            # Delete button would be worse than an unconfirmed one.
+            self._delete_marker_set_confirmed(set_name)
+            return
+
+        name = dialog.escape_name(set_name)
+        dialog.ask(
+            f"The marker set <b>{name}</b> and the channels, colours and contrast "
+            "ranges saved in it will be removed. This cannot be undone.",
+            lambda: self._delete_marker_set_confirmed(set_name),
+            title="Delete marker set?",
+            confirm_label="Delete",
+        )
+
+    def _delete_marker_set_confirmed(self, set_name):
+        """Delete ``set_name`` outright, with no confirmation.
+
+        ``set_name`` is captured when the dialog opens, so the set the user was
+        shown is the set that goes -- even if the dropdown moved on in the
+        meantime. It may also have been deleted by some other path while the
+        dialog was up, hence the membership check.
+        """
+        if set_name not in self.marker_sets:
+            logger.warning(f"Marker set '{set_name}' no longer exists.")
             return
 
         del self.marker_sets[set_name]
         # Update the marker set dropdown
         self.update_marker_set_dropdown()
-        self.ui_component.delete_confirmation_checkbox.value = False  # Reset the checkbox
         logger.info(f"Marker set '{set_name}' deleted.")
 
     def _apply_marker_set(self, set_name: str, *, silent: bool = False) -> bool:

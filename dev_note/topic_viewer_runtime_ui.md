@@ -24,6 +24,7 @@ These notes cover the main viewer runtime, downsampling behavior, channel contro
 - Reply 5 to Issue #85 restores shared scrolling behavior for channel controls (no per-channel internal scrollers) and offsets the color dropdown 5px left in the header row.
 - Reply 6 to Issue #85 enforces parent vertical-scroll triggering for long channel lists by preventing grouped channel rows from shrinking to fit the container height.
 - Reply 7 to Issue #85 removes marker-set channel duplication at load time by de-duplicating marker channels (save/update/apply) and eliminating redundant channel-control rebuilds in the marker-set apply flow.
+- Issue #139 replaces the marker-set **Confirm Deletion** checkbox with a modal: `ueler/viewer/confirm_dialog.py` holds a reusable `ConfirmDialog`, mounted once by `build_layout` and hidden until asked. It is deliberately not a `Widget` subclass, so `save_widget_states` does not persist its stylesheet; it positions itself with a CSS class rather than a `Layout` (which has no `position` trait); and it falls back to an unconfirmed delete where no real front end exists. Other destructive buttons (saved mask colour sets, ROI delete, export-config delete) can adopt it unchanged.
 
 ## Open items
 - Keep UI/UX changes consistent with map mode and plugin rendering updates.
@@ -36,7 +37,9 @@ These notes cover the main viewer runtime, downsampling behavior, channel contro
 - https://github.com/HartmannLab/UELer/issues/75
 - https://github.com/HartmannLab/UELer/issues/76
 - https://github.com/HartmannLab/UELer/issues/85
+- https://github.com/HartmannLab/UELer/issues/139
 
 ## Key source links
 - [dev_note/FOV_load_cycle.md](dev_note/FOV_load_cycle.md)
 - [dev_note/main_viewer.md](dev_note/main_viewer.md)
+- [dev_note/issue_tracking/issue139_confirm_dialog.md](dev_note/issue_tracking/issue139_confirm_dialog.md)

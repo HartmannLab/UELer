@@ -101,6 +101,7 @@ from .plugin.cell_gallery import CellGalleryDisplay  # type: ignore[import-error
 from .plugin.heatmap import HeatmapDisplay  # type: ignore[import-error]
 from .plugin.plugin_base import PluginBase  # type: ignore[import-error]
 from .annotation_display import AnnotationDisplay  # type: ignore[import-error]
+from .confirm_dialog import ConfirmDialog  # type: ignore[import-error]
 
 
 def _bounded_panel_layout(**overrides):
@@ -402,6 +403,14 @@ def display_ui(viewer):
     ])
 
     root_children = [ui, viewer.wide_plugin_panel]
+    # The confirmation modal (#139) is mounted once, here, and hidden until
+    # something asks a question. Its scrim is positioned against the browser
+    # viewport rather than against this container, so the mount point decides
+    # only that it exists -- a dialog mounted in the 350px left panel next to
+    # the button that opens it would be clipped to that column.
+    confirm_dialog = getattr(viewer.ui_component, 'confirm_dialog', None)
+    if confirm_dialog is not None:
+        root_children.append(confirm_dialog.view)
     if getattr(viewer, "_debug", False):
         from ueler.viewer.log_console import enable_log_console, build_log_console_panel
         viewer.log_console_handler = enable_log_console()
@@ -638,13 +647,10 @@ class uicomponents:
         )
         self.delete_marker_set_button.on_click(viewer.delete_marker_set)
 
-        self.delete_confirmation_checkbox = Checkbox(
-            value=False,
-            description='Confirm Deletion',
-            disabled=False,
-            layout=_content_widget_layout(),
-            style={'description_width': 'auto'}
-        )
+        # Deleting a marker set is guarded by a modal instead of a checkbox
+        # further down the panel (#139), so the question arrives with the click
+        # and names the set it is about to throw away.
+        self.confirm_dialog = ConfirmDialog()
 
         channel_selector_layout = _bounded_panel_layout(gap='4px')
         self.channel_selection_panel = VBox(
@@ -677,7 +683,6 @@ class uicomponents:
             children=(
                 marker_set_pickers,
                 marker_set_buttons,
-                self.delete_confirmation_checkbox,
             ),
             layout=_bounded_panel_layout(gap='6px')
         )
