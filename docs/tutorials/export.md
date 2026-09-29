@@ -72,7 +72,7 @@ These apply to whichever mode is active:
 
 Save a full set of export options for reuse. In the **Export config templates** accordion: type a
 **Name:** and click **Save config**; reload later from the **Saved:** dropdown with **Load config**
-(or **Delete**). Templates are stored under `<base_folder>/.UELer/export_configs/`.
+(or **Delete**, which asks for confirmation before removing the file). Templates are stored under `<base_folder>/.UELer/export_configs/`.
 
 ---
 

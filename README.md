@@ -149,6 +149,8 @@ For more details, see the [user guide](https://hartmannlab.github.io/UELer/lates
 ## New Update  
 ### **UELer v0.5.1-alpha1 Summary**
 
+- **Deleting saved work now asks you first, everywhere it is permanent (issue #139).** Saved export configs, mask colour sets, analysis checkpoints, ROIs and annotation palettes each open a dialog naming what is about to go. All five write to disk the moment they run — the ROI delete rewrites its CSV on the spot — so none of them can be undone. Actions that are cheap to redo, such as **Clear selection** on a plot, still happen immediately.
+
 - **Deleting a marker set now asks you first (issue #139).** **Delete Marker Set** opens a dialog naming the set and what goes with it; **Delete** removes it, **Cancel** does not. The separate **Confirm Deletion** checkbox is gone — it sat two rows below the button, so the first click looked as though it had done nothing.
 
 - **Histograms can be re-binned over a range you choose (issue #138).** Every histogram now has its own range slider beneath it: drag the two handles and that channel's bins are recomputed inside the window, so a marker whose values pile up near zero with a long tail becomes readable instead of collapsing into the first two bars. **Full range** restores the whole channel. Only the histogram you adjust changes — the others keep their range, zoom and gate. Note that this is not the same as the toolbar's zoom, which magnifies the bars already drawn without moving the bin edges.

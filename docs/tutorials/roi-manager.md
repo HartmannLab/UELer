@@ -36,7 +36,7 @@ Before or after capturing you can set:
 - **Comment:** — a free-text note.
 - **Marker set:** — which marker set to associate (**Current set**, **None**, or a saved set).
 
-Use **Update** to save edits to the selected ROI, **Delete** to remove it, and **Center** /
+Use **Update** to save edits to the selected ROI, **Delete** to remove it (a dialog appears naming the ROI, and nothing is removed until you confirm — the ROI table is written back to disk immediately, so this cannot be undone), and **Center** /
 **Center with preset** to jump the viewer back to a saved ROI (the latter also re-applies the ROI's
 saved marker/mask/annotation presets).
 

@@ -34,6 +34,11 @@ def _make_delete_stub(marker_sets, selected, *, dialog=None):
     viewer._delete_marker_set_confirmed = (
         lambda name: ImageMaskViewer._delete_marker_set_confirmed(viewer, name)
     )
+    # delete_marker_set asks through ImageMaskViewer.confirm, which is the one
+    # place that looks the dialog up (#139 reply 1).
+    viewer.confirm = lambda *args, **kwargs: ImageMaskViewer.confirm(
+        viewer, *args, **kwargs
+    )
     return viewer
 
 

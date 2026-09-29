@@ -59,6 +59,7 @@ from ueler.viewer.palette_store import (
     write_palette_file,
 )
 from ueler.rendering import MaskPainterSnapshot, set_cell_color, get_cell_color, clear_cell_colors, set_cell_colors_bulk
+from ueler.viewer.confirm_dialog import escape_name
 
 _logger = logging.getLogger(__name__)
 COLOR_SET_FILE_SUFFIX = ".maskcolors.json"
@@ -1252,11 +1253,33 @@ class MaskPainterDisplay(PluginBase):
             self._log(f"Failed to overwrite color set: {err}", error=True, clear=True)
 
     def delete_saved_color_set(self, _):
+        """Ask before deleting the selected saved color set (#139 reply 1)."""
+        record = self._get_selected_registry_record()
+        if record is None:
+            self._log("Select a saved color set to delete.", error=True, clear=True)
+            return
+        name = self.ui_component.saved_sets_dropdown.value
+        asked = self.confirm(
+            f"The saved color set <b>{escape_name(name)}</b> will be deleted from "
+            "disk. This cannot be undone.",
+            lambda: self._delete_saved_color_set_confirmed(name, record),
+            title="Delete color set?",
+            confirm_label="Delete",
+        )
+        if not asked:
+            self._log(
+                "Cannot delete: no confirmation dialog is available in this environment.",
+                error=True,
+                clear=True,
+            )
+
+    def _delete_saved_color_set_confirmed(self, name, record):
+        """Delete the color set named when the dialog opened.
+
+        ``name`` and ``record`` are both captured at ask time, so a dropdown that
+        moved while the dialog was up cannot redirect the deletion.
+        """
         try:
-            record = self._get_selected_registry_record()
-            if record is None:
-                raise ColorSetError("Select a saved color set to delete.")
-            name = self.ui_component.saved_sets_dropdown.value
             path = Path(record["path"])
             if path.exists():
                 path.unlink()

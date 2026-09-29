@@ -50,6 +50,7 @@ from ueler.viewer.plugin.roi_manager_plugin import ROIManagerPlugin
 import json
 
 from .image_display import ImageDisplay
+from .confirm_dialog import confirm_via, escape_name
 import importlib
 from ueler.viewer.plugin.plugin_base import PluginBase
 from ueler.viewer.annotation_palette_editor import AnnotationPaletteEditor
@@ -3666,18 +3667,41 @@ class ImageMaskViewer:
             self._log_annotation_palette(f"Failed to overwrite palette: {err}", error=True, clear=True)
 
     def delete_saved_annotation_palette(self, _button) -> None:
-        try:
-            record = self._get_selected_annotation_palette_record()
-            if record is None:
-                raise PaletteStoreError("Select a saved palette to delete.")
+        """Ask before deleting the selected saved annotation palette (#139 reply 1)."""
+        record = self._get_selected_annotation_palette_record()
+        if record is None:
+            self._log_annotation_palette(
+                "Select a saved palette to delete.", error=True, clear=True
+            )
+            return
+        name = self.ui_component.annotation_palette_saved_sets_dropdown.value
+        asked = self.confirm(
+            f"The saved annotation palette <b>{escape_name(name)}</b> will be "
+            "deleted from disk. This cannot be undone.",
+            lambda: self._delete_saved_annotation_palette_confirmed(name, record),
+            title="Delete annotation palette?",
+            confirm_label="Delete",
+        )
+        if not asked:
+            self._log_annotation_palette(
+                "Cannot delete: no confirmation dialog is available in this environment.",
+                error=True,
+                clear=True,
+            )
 
+    def _delete_saved_annotation_palette_confirmed(self, name, record) -> None:
+        """Delete the palette named when the dialog opened.
+
+        ``name`` and ``record`` are captured at ask time, so a dropdown that moved
+        while the dialog was up cannot redirect the deletion.
+        """
+        try:
             path = Path(record.get("path", "")).expanduser()
             if path.exists():
                 path.unlink()
 
             folder = Path(record.get("folder", self.annotation_palette_folder or path.parent)).expanduser()
             records = load_palette_registry(folder, ANNOTATION_REGISTRY_FILENAME)
-            name = self.ui_component.annotation_palette_saved_sets_dropdown.value
             records.pop(name, None)
             save_palette_registry(folder, ANNOTATION_REGISTRY_FILENAME, records)
 
@@ -4955,6 +4979,22 @@ class ImageMaskViewer:
         logger.info(f"Marker set '{set_name}' updated.")
         self.update_marker_set_dropdown()
 
+    def confirm(self, message, on_confirm, **kwargs):
+        """Ask the shared modal a yes/no question (#139).
+
+        This is the one place that reaches for the dialog, so plugins do not each
+        repeat the lookup and its fallback -- :meth:`PluginBase.confirm
+        <ueler.viewer.plugin.plugin_base.PluginBase.confirm>` delegates here.
+
+        Returns ``True`` when the question reached the user and ``False`` only
+        when there is no dialog to ask with, which is what tells a caller whose
+        action is irreversible to refuse rather than proceed. An ``ask`` that is
+        declined because a dialog is already open still counts as ``True``: a
+        question is on screen and its scrim covers the button that was clicked,
+        so there is nothing to report and nothing to fall back to.
+        """
+        return confirm_via(self.ui_component, message, on_confirm, **kwargs)
+
     def delete_marker_set(self, button):
         """Ask before deleting the selected marker set (#139).
 
@@ -4968,22 +5008,22 @@ class ImageMaskViewer:
             logger.warning("No marker set selected to delete.")
             return
 
-        dialog = getattr(self.ui_component, 'confirm_dialog', None)
-        if dialog is None:
-            # No front end to ask with -- the ipywidgets fallback shim in
-            # ui_components builds widgets that cannot render a modal. A dead
-            # Delete button would be worse than an unconfirmed one.
-            self._delete_marker_set_confirmed(set_name)
-            return
-
-        name = dialog.escape_name(set_name)
-        dialog.ask(
+        name = escape_name(set_name)
+        asked = self.confirm(
             f"The marker set <b>{name}</b> and the channels, colours and contrast "
             "ranges saved in it will be removed. This cannot be undone.",
             lambda: self._delete_marker_set_confirmed(set_name),
             title="Delete marker set?",
             confirm_label="Delete",
         )
+        if not asked:
+            # No front end to ask with -- the ipywidgets fallback shim in
+            # ui_components builds widgets that cannot render a modal. Marker
+            # sets live only in this process, so nothing leaves the session and
+            # a dead Delete button would be worse than an unconfirmed one. The
+            # plugin actions that unlink files make the opposite choice and
+            # refuse, because there the loss outlives the session (#139 reply 1).
+            self._delete_marker_set_confirmed(set_name)
 
     def _delete_marker_set_confirmed(self, set_name):
         """Delete ``set_name`` outright, with no confirmation.

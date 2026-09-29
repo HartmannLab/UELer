@@ -87,7 +87,7 @@ The **Cell Annotation** plugin saves and restores your clustering/annotation sta
   with the FlowSOM parameters. Tag it with a **Step:**, **Desc:**, **Parent:**, and an **Op:**
   (`initial`, `subset`, `recluster`, `finalize`).
 - The **Checkpoint browser** shows the checkpoints as a tree (color-coded by op). Select one and use
-  **Load selected** to restore it, or **Delete selected** to remove it.
+  **Load selected** to restore it, or **Delete selected** to remove it — deletion asks for confirmation first, because it removes the checkpoint's `.h5ad` from disk and cannot be undone.
 
 Checkpoints are stored under `<base_folder>/.UELer/dataset_<id>/checkpoints/`, where `<id>` is a hash
 of the dataset path — so several datasets under one base folder keep separate histories, and the

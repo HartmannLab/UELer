@@ -34,12 +34,43 @@ from ipywidgets import HTML, Box, Button, HBox, Layout, VBox
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["ConfirmDialog"]
+__all__ = ["ConfirmDialog", "confirm_via", "escape_name"]
 
 
 #: Above the notebook's own chrome, below nothing in particular — the viewer is
 #: the only thing on the page that positions anything.
 _Z_INDEX = 10000
+
+
+def confirm_via(ui_component, message, on_confirm, **kwargs) -> bool:
+    """Ask the dialog mounted on ``ui_component``; ``False`` if there is none.
+
+    This is the single definition of "where the dialog lives and what happens
+    when it does not", shared by :meth:`ImageMaskViewer.confirm` and, through
+    it, by :meth:`PluginBase.confirm`. It lives here rather than on the viewer so
+    that a caller (or a test) needs only this module, not the whole viewer.
+
+    ``False`` means the question never reached the user. An ``ask`` declined
+    because a dialog is already open still returns ``True``: a question is on
+    screen and its scrim covers the button that was clicked, so there is nothing
+    to report and nothing to fall back to.
+    """
+    dialog = getattr(ui_component, "confirm_dialog", None)
+    if dialog is None:
+        return False
+    dialog.ask(message, on_confirm, **kwargs)
+    return True
+
+
+def escape_name(name: str) -> str:
+    """Escape a user-supplied name for inclusion in a dialog message.
+
+    Messages are inserted as HTML so a caller can emphasise what is about to be
+    destroyed, which means anything the user named has to be escaped. This is a
+    module-level function because the message is often composed before it is
+    known whether a dialog exists to show it.
+    """
+    return escape(str(name))
 
 _STYLE = """
 <style>
@@ -205,7 +236,11 @@ class ConfirmDialog:
 
     @staticmethod
     def escape_name(name: str) -> str:
-        """Escape a user-supplied name for inclusion in a message."""
+        """Escape a user-supplied name for inclusion in a message.
+
+        Kept as a method so existing call sites that hold a dialog keep working;
+        :func:`escape_name` is the same function for callers that do not.
+        """
         return escape(str(name))
 
     # ------------------------------------------------------------------

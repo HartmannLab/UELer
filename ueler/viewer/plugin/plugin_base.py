@@ -32,6 +32,42 @@ class PluginBase:
 
         pass
 
+    # ------------------------------------------------------------------
+    # Destructive actions (#139 reply 1)
+    # ------------------------------------------------------------------
+
+    def _confirm_host(self):
+        """Return the viewer that owns the shared confirmation dialog.
+
+        ``PluginBase`` stores the viewer as ``self.viewer``, but every concrete
+        plugin also assigns ``self.main_viewer`` in its own ``__init__``. Both
+        names are checked here so that a call site never has to care which one
+        its plugin happens to use.
+        """
+        for attribute in ("main_viewer", "viewer"):
+            host = getattr(self, attribute, None)
+            if host is not None:
+                return host
+        return None
+
+    def confirm(self, message, on_confirm, **kwargs) -> bool:
+        """Ask the viewer's modal before doing something destructive.
+
+        ``message`` is inserted as HTML, so anything the user named must be
+        escaped first -- see :func:`ueler.viewer.confirm_dialog.escape_name`.
+
+        Returns ``True`` when the question reached the user. ``False`` means
+        there was no dialog to ask with, and the caller is expected to refuse
+        and say so in its own status line rather than proceed: every plugin
+        action routed through here removes something from disk, so an
+        unconfirmed fallback would destroy work the session cannot give back.
+        """
+        host = self._confirm_host()
+        asker = getattr(host, "confirm", None)
+        if not callable(asker):
+            return False
+        return bool(asker(message, on_confirm, **kwargs))
+
     def wide_panel_layout(self):
         """
         Optional hook for footer-wide layout support.

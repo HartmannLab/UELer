@@ -28,6 +28,7 @@ from ipywidgets import (
 )
 
 from ueler.viewer.plugin.plugin_base import PluginBase
+from ueler.viewer.confirm_dialog import escape_name
 
 # ------------------------------------------------------------------
 # CheckpointTreeWidget — anywidget-based tree renderer
@@ -480,14 +481,51 @@ class CellAnnotationPlugin(PluginBase):
     # ------------------------------------------------------------------
 
     def _on_delete_button(self, _btn=None):
+        """Ask before deleting the selected checkpoint (#139 reply 1).
+
+        A checkpoint is an ``.h5ad`` holding a whole analysis step, so this is
+        the costliest delete in the viewer and the one most worth interrupting.
+        """
         selected = getattr(self.tree_widget, "selected_id", "")
         if not selected:
             self._set_status("Select a checkpoint first.", error=True)
             return
         if self._store is None:
             return
+
+        asked = self.confirm(
+            f"The checkpoint <b>{escape_name(self._checkpoint_label(selected))}</b> "
+            "and the analysis step stored in it will be deleted from disk. This "
+            "cannot be undone.",
+            lambda: self._delete_checkpoint_confirmed(selected),
+            title="Delete checkpoint?",
+            confirm_label="Delete",
+        )
+        if not asked:
+            self._set_status(
+                "Cannot delete: no confirmation dialog is available in this environment.",
+                error=True,
+            )
+
+    def _checkpoint_label(self, checkpoint_id):
+        """Name the checkpoint the way the tree shows it, falling back to its id."""
+        if self._store is None:
+            return checkpoint_id
         try:
-            self._store.delete_checkpoint(selected)
+            entries = self._store.list_checkpoints()
+        except Exception:  # pragma: no cover - defensive, manifest may be unreadable
+            return checkpoint_id
+        for entry in entries:
+            if entry.get("id") == checkpoint_id:
+                return entry.get("step_id") or entry.get("description") or checkpoint_id
+        return checkpoint_id
+
+    def _delete_checkpoint_confirmed(self, checkpoint_id):
+        """Delete the checkpoint identified when the dialog opened."""
+        if self._store is None:
+            return
+        try:
+            self._store.delete_checkpoint(checkpoint_id)
         except Exception as exc:
             self._set_status(f"Delete failed: {exc}", error=True)
             return

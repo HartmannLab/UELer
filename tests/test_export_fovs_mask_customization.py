@@ -102,6 +102,7 @@ from ueler.viewer.plugin.export_fovs import (  # noqa: E402
     EXPORT_CONFIG_REGISTRY_FILENAME,
     EXPORT_CONFIG_VERSION,
 )
+from tests.confirm_support import answer, attach_dialog, without_dialog  # noqa: E402
 
 
 class _StubWidget:
@@ -342,8 +343,8 @@ class TestExportConfigTemplates(unittest.TestCase):
         plugin._apply_export_config(payload)
         self.assertEqual(plugin.ui_component.marker_set_dropdown.value, original_value)
 
-    def test_delete_config_removes_file_and_registry(self):
-        plugin = self._make_plugin()
+    def _saved_config_ready_to_delete(self, plugin):
+        """Save one config, select it, and return (config_dir, saved_name)."""
         plugin.ui_component.config_name_input.value = "to delete"
         plugin._save_export_config()
         config_dir = self.base_path / ".UELer" / "export_configs"
@@ -352,11 +353,46 @@ class TestExportConfigTemplates(unittest.TestCase):
         saved_name = sorted(plugin._export_config_registry.keys())[0]
         plugin.ui_component.config_saved_dropdown.options = [(saved_name, saved_name)]
         plugin.ui_component.config_saved_dropdown.value = saved_name
+        return config_dir, saved_name
+
+    def test_delete_config_removes_file_and_registry(self):
+        plugin = self._make_plugin()
+        dialog = attach_dialog(plugin.main_viewer)
+        config_dir, saved_name = self._saved_config_ready_to_delete(plugin)
+
         plugin._delete_export_config()
+        # Clicking only asks (#139 reply 1); the file survives until confirmed.
+        self.assertTrue(dialog.is_open)
+        self.assertEqual(len(list(config_dir.glob(f"*{EXPORT_CONFIG_FILE_SUFFIX}"))), 1)
+
+        answer(dialog, "confirm")
 
         self.assertEqual(len(list(config_dir.glob(f"*{EXPORT_CONFIG_FILE_SUFFIX}"))), 0)
         self.assertNotIn(saved_name, plugin._export_config_registry)
         self.assertIn("color:green", plugin.ui_component.config_status.value)
+
+    def test_delete_config_cancelled_keeps_the_file(self):
+        plugin = self._make_plugin()
+        dialog = attach_dialog(plugin.main_viewer)
+        config_dir, saved_name = self._saved_config_ready_to_delete(plugin)
+
+        plugin._delete_export_config()
+        answer(dialog, "cancel")
+
+        self.assertEqual(len(list(config_dir.glob(f"*{EXPORT_CONFIG_FILE_SUFFIX}"))), 1)
+        self.assertIn(saved_name, plugin._export_config_registry)
+
+    def test_delete_config_without_a_dialog_refuses(self):
+        """No dialog means no deletion: the file outlives the session (#139 reply 1)."""
+        plugin = self._make_plugin()
+        without_dialog(plugin.main_viewer)
+        config_dir, saved_name = self._saved_config_ready_to_delete(plugin)
+
+        plugin._delete_export_config()
+
+        self.assertEqual(len(list(config_dir.glob(f"*{EXPORT_CONFIG_FILE_SUFFIX}"))), 1)
+        self.assertIn(saved_name, plugin._export_config_registry)
+        self.assertIn("color:red", plugin.ui_component.config_status.value)
 
     def test_refresh_config_dropdown_reads_registry(self):
         plugin = self._make_plugin()

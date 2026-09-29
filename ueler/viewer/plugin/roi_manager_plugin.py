@@ -50,6 +50,7 @@ from ueler.rendering import (
     render_roi_to_array,
 )
 from ueler.viewer.mask_color_overlay import derive_downsampled_region
+from ueler.viewer.confirm_dialog import escape_name
 
 from .plugin_base import PluginBase
 from .roi_expression_editor import ROIExpressionEditorWidget
@@ -2105,11 +2106,37 @@ class ROIManagerPlugin(PluginBase):
             self.set_status("Failed to update ROI.", level="error")
 
     def _delete_selected_roi(self, _):
+        """Ask before deleting the selected ROI (#139 reply 1).
+
+        ``ROIManager.delete_roi`` writes the table straight back to its CSV, so
+        the row is off disk the moment this runs. The plugin's Undo button covers
+        shape drawing, not this.
+        """
         if not self._selected_roi_id:
             self.set_status("Select an ROI to delete.", level="warning")
             return
-        if self.main_viewer.roi_manager.delete_roi(self._selected_roi_id):
-            self._selected_roi_id = None
+
+        roi_id = self._selected_roi_id
+        record = self.main_viewer.roi_manager.get_roi(roi_id) or {}
+        label = str(record.get("name") or "").strip() or roi_id
+        asked = self.confirm(
+            f"The ROI <b>{escape_name(label)}</b> will be removed from the ROI "
+            "table and written out of its CSV. This cannot be undone.",
+            lambda: self._delete_roi_confirmed(roi_id),
+            title="Delete ROI?",
+            confirm_label="Delete",
+        )
+        if not asked:
+            self.set_status(
+                "Cannot delete: no confirmation dialog is available in this environment.",
+                level="error",
+            )
+
+    def _delete_roi_confirmed(self, roi_id):
+        """Delete the ROI identified when the dialog opened."""
+        if self.main_viewer.roi_manager.delete_roi(roi_id):
+            if self._selected_roi_id == roi_id:
+                self._selected_roi_id = None
             self.refresh_roi_table(force_refresh=True)
             self.set_status("ROI deleted.", level="success")
         else:

@@ -70,3 +70,73 @@ When no dialog is available — the `ipywidgets` fallback shim in `ui_components
 5. Add `tests/test_confirm_dialog.py` covering the component and the marker-set delete flow.
 6. Update `docs/tutorials/basic-usage.md` and `docs/tutorials/user-interface.md`, which both document the checkbox.
 7. Update `doc/log.md`, `README.md`, `dev_note/topic_viewer_runtime_ui.md` and append the issue report to `dev_note/github_issues.md`.
+
+---
+
+## Follow-up (#139 reply 1) — extending the dialog to destructive actions in plugins
+
+The reply asks for the dialog to cover other destructive actions, naming the saved export config as an example, and asks first for a survey. This section is that survey. **Nothing below is implemented**; the reply asks for confirmation before any of it is.
+
+### Method
+
+Every `Button` in `ueler/` whose description is a destructive verb (`Delete`, `Remove`, `Clear`, `Reset`, `Discard`, `Overwrite`) was located, its handler read, and the handler classified by **what the user loses and whether they can get it back**. That question, not the word on the button, is what decides whether a confirmation earns its interruption: a dialog in front of a cheap, repeatable action trains the user to dismiss dialogs, which costs them the one that matters.
+
+A second sweep looked for destructive work reachable *without* such a button — `path.unlink()`, `os.remove`, `shutil.rmtree` and registry `pop()` — to catch anything a button label hides.
+
+### Tier A — writes to disk, unrecoverable. These are the ones worth a dialog.
+
+Each of these removes or overwrites a file the moment the button is clicked. None of them asks anything today; the marker-set checkbox was the only guard in the codebase and #139 replaced it.
+
+| # | Where | Control | Handler | What is destroyed |
+|---|---|---|---|---|
+| A1 | **Export FOVs** plugin | **Delete** (saved config) | `plugin/export_fovs.py:1204` `_delete_export_config` → `unlink()` at :1224 | The config file plus its registry entry. *This is the example the reply names.* |
+| A2 | **Mask Painter** plugin | **Delete** (saved color set) | `plugin/mask_painter.py:1254` `delete_saved_color_set` → `unlink()` at :1262 | The colour-set file plus its registry entry. |
+| A3 | **Cell Annotation** plugin | **Delete selected** (checkpoint) | `plugin/cell_annotation.py:482` `_on_delete_button` → `checkpoint_store.py:174` `delete_checkpoint` → `unlink()` at :190 | An `.h5ad` holding a whole analysis step. The heaviest loss in the list. |
+| A4 | **ROI Manager** plugin | **Delete** (selected ROI) | `plugin/roi_manager_plugin.py:2107` `_delete_selected_roi` → `roi_manager.py:442` `delete_roi` | The ROI record. `_set_table` defaults to `persist=True`, so the row is written out of the CSV immediately — the plugin's **Undo** covers shape drawing, not this. |
+| A5 | Main viewer (not a plugin, same panel family) | **Delete** (annotation palette) | `main_viewer.py:3668` `delete_saved_annotation_palette` → `unlink()` at :3676 | The palette file plus its registry entry. Listed because it is the same action as A1/A2 and would look arbitrary left out. |
+
+### Tier A′ — silent overwrite of a saved file
+
+Three **Overwrite** buttons replace the contents of a named saved file with no prompt: the annotation palette (`ui_components.py:930`), the heatmap (`plugin/heatmap.py:319`) and the Mask Painter's saved sets (`plugin/mask_painter.py:2786`). The loss is identical to a delete — the previous contents are gone — but the button does not read as destructive, which arguably makes the confirmation *more* valuable here, not less. Worth a decision either way.
+
+### Tier B — irreversible for the session, nothing on disk. Judgement call.
+
+| # | Where | Control | Handler | Note |
+|---|---|---|---|---|
+| B1 | **Heatmap** | **Remove selected** (meta-cluster) | `plugin/heatmap_layers.py:1434` `remove_meta_cluster` | Drops the cluster's name and colour and reassigns every member cell to unassigned. Hand-curated work, no undo. The strongest Tier-B candidate. |
+| B2 | **Scatter / Chart** | **Clear all** | `plugin/chart.py:696` `_clear_all_scatter_views` | Disposes every scatter view and forgets the configured pairs. Rebuildable, but a mis-click after configuring several pairs is genuinely annoying. |
+
+### Tier C — cheap to redo. These should *not* get a dialog.
+
+Chart **Remove** (one scatter, `chart.py:862`), Chart **Clear selection** (`chart.py:876`), Histogram **Clear selection** (`histogram.py:1314`), log console **Clear** (`log_console.py:102`), and the Mask Painter class-list `×` (`mask_painter.py:2423` `_on_remove_requested` — removes a class from the *active list*, touching no data). Each is undone by repeating the action that created the state.
+
+### Three things to settle before implementing
+
+1. **Plugins have no route to the dialog.** `PluginBase.__init__` stores the viewer as `self.viewer`, while every concrete plugin separately assigns `self.main_viewer` (verified across all eleven). Reaching through `self.main_viewer.ui_component.confirm_dialog` at each call site would spread that inconsistency and repeat the `getattr` fallback five times. A single `PluginBase.confirm(message, on_confirm, **kw)` helper would give one call site, one fallback rule, and one place to test.
+2. **What should the fallback do when no dialog exists?** For marker sets the answer was "delete anyway", because a dead button is worse than an unconfirmed one and nothing left the process. For Tier A that answer is less comfortable — these unlink files. The alternative is to refuse and say so in the plugin's own status line, which every Tier-A plugin already has. This needs a decision, and it may differ per tier.
+3. **One instance, mounted at the viewer root.** Footer and accordion plugins render inside that root, so the `position: fixed` scrim covers them. If a plugin can be displayed standalone in its own notebook cell, it would have no dialog and would hit whichever fallback rule (2) settles on.
+
+### Suggested scope, if this goes ahead
+
+Tier A (five sites) plus the `PluginBase.confirm` helper, as one change with tests per site. Tier A′ and Tier B as a separate decision, since both are more about taste than about data loss. Tier C explicitly left alone, and said so in the log so it does not get "fixed" later.
+
+### What was implemented
+
+Tier A and the helper, as scoped above and confirmed by the developer. Tier A′ (the three **Overwrite** buttons) and Tier B were left for a separate decision, and Tier C was deliberately left alone.
+
+The three open questions were answered as follows:
+
+1. **`PluginBase.confirm` was added**, with `PluginBase._confirm_host` resolving `main_viewer` first and `viewer` second so a call site never has to know which name its plugin uses.
+2. **No dialog means refuse.** Every Tier-A handler reports "Cannot delete: no confirmation dialog is available in this environment" in its own status line and leaves the file alone. `delete_marker_set` keeps its original delete-anyway fallback, and the difference is deliberate: marker sets exist only in `viewer.marker_sets` for the life of the session, so nothing there outlives the process, while every Tier-A action unlinks a file.
+3. **No plugin is displayed in its own cell**, so the single dialog mounted at the viewer root covers every plugin surface and no second mount point is needed.
+
+One structural change fell out of testing. The dialog lookup started on `ImageMaskViewer.confirm`, but `tests/test_export_fovs_mask_customization.py` installs its own `sys.modules` shims and cannot import the viewer at all, so a test helper could not reach it. The rule now lives in `confirm_dialog.confirm_via(ui_component, ...)`, which `ImageMaskViewer.confirm` delegates to — one definition of "where the dialog lives and what happens when it is missing", reachable without dragging in the viewer.
+
+### Follow-up implementation steps
+
+1. Add `confirm_via` and a module-level `escape_name` to `ueler/viewer/confirm_dialog.py`.
+2. Add `ImageMaskViewer.confirm` (delegating to `confirm_via`) and route `delete_marker_set` through it.
+3. Add `PluginBase.confirm` and `PluginBase._confirm_host`.
+4. Split each Tier-A handler into an asking half and a `_..._confirmed` half that captures its target at ask time.
+5. Add `tests/confirm_support.py` and `tests/test_confirm_destructive_actions.py`; extend the export-config tests with the confirm, cancel and no-dialog cases.
+6. Update `docs/tutorials/roi-manager.md`, `docs/tutorials/export.md` and `docs/tutorials/clustering-annotation.md`, which document three of the five buttons.

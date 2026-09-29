@@ -50,6 +50,7 @@ from ueler.rendering import (
     render_roi_to_array,
 )
 from ueler.viewer.mask_color_overlay import compute_crop_regions, derive_downsampled_region
+from ueler.viewer.confirm_dialog import escape_name
 from ..scale_bar import (
     ScaleBarSpec,
     add_scale_bar,
@@ -1201,16 +1202,35 @@ class BatchExportPlugin(PluginBase):
         except Exception as exc:
             _set_status(f"<span style='color:red'>Load failed: {exc}</span>")
 
-    def _delete_export_config(self, _button=None) -> None:
+    def _set_config_status(self, msg: str) -> None:
         status_widget = getattr(self.ui_component, "config_status", None)
+        if status_widget is not None:
+            status_widget.value = msg
 
-        def _set_status(msg: str) -> None:
-            if status_widget is not None:
-                status_widget.value = msg
-
+    def _delete_export_config(self, _button=None) -> None:
+        """Ask before deleting the selected saved export configuration (#139 reply 1)."""
         name = getattr(self.ui_component.config_saved_dropdown, "value", None)
         if not name:
             return
+        asked = self.confirm(
+            f"The saved export configuration <b>{escape_name(name)}</b> will be "
+            "deleted from disk. This cannot be undone.",
+            lambda: self._delete_export_config_confirmed(name),
+            title="Delete export configuration?",
+            confirm_label="Delete",
+        )
+        if not asked:
+            self._set_config_status(
+                "<span style='color:red'>Cannot delete: no confirmation dialog "
+                "is available in this environment.</span>"
+            )
+
+    def _delete_export_config_confirmed(self, name: str) -> None:
+        """Delete the configuration named when the dialog opened.
+
+        The name is captured at ask time, so a dropdown that moved while the
+        dialog was up cannot redirect the deletion.
+        """
         record = self._export_config_registry.get(name)
         folder = self._export_config_folder
         if record and folder:
@@ -1227,9 +1247,13 @@ class BatchExportPlugin(PluginBase):
                 _save_reg(folder, EXPORT_CONFIG_REGISTRY_FILENAME, registry)
                 self._export_config_registry = registry
                 self._refresh_config_dropdown()
-                _set_status(f"<span style='color:green'>Deleted '{name}'.</span>")
+                self._set_config_status(
+                    f"<span style='color:green'>Deleted '{escape_name(name)}'.</span>"
+                )
             except Exception as exc:
-                _set_status(f"<span style='color:red'>Delete failed: {exc}</span>")
+                self._set_config_status(
+                    f"<span style='color:red'>Delete failed: {escape_name(exc)}</span>"
+                )
 
     def _refresh_mode_availability(self) -> None:
         """Show/hide the Single Cells tab based on whether a cell table is loaded."""
