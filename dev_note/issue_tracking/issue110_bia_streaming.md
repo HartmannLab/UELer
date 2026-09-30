@@ -106,6 +106,7 @@ before and after).
   "base": "Files/.../image_data",   // folder mode: dir whose subdirs (or .zip files) are FOVs
   "fov_container": "zip",           // optional: each FOV is a <FOV>.zip of channel TIFFs
   "fov_glob": "Files/.../*.ome.tiff", // ome mode: glob for per-FOV OME files
+  "cell_table": "Files/.../cell_table.csv",  // optional (#140); or {"path": …, "fov_column": …}
 
   // Masks: either the single-dir legacy form...
   "mask_dir": "Files/.../cleaned_mask",
@@ -191,3 +192,16 @@ download. Verified live on `S-BSST2926` (raises; no download). `MAX_OME_CACHE_BY
 - Region CSVs (`tumor_border/` etc. in S-BIAD2557) are not imported.
 - Auto-detection covers folder-per-FOV, OME-TIFF-per-FOV, and zip-container FOVs; masks generally
   still need a descriptor.
+
+## Follow-up: the study's cell table (#140) and S-BIAD2557's move to zipped FOVs
+
+The descriptor gained a `cell_table` key so a study's own cell table can be loaded through the same path as its images:
+
+```jsonc
+"cell_table": "Files/.../cell_table.csv"
+"cell_table": {"path": "Files/.../cell_table.csv", "fov_column": "fov"}   // when the FOV id lives elsewhere
+```
+
+`BIADataSource.has_cell_table` / `cell_table_url` / `fetch_cell_table(fovs=None, force=False)` cache it under `cache/tables/`. With `fovs=` the remote CSV is streamed through `_filter_csv_rows` and only the matching rows are written (`<stem>__fovs-<n>-<digest>.csv`), so a large table is never held in memory or on disk — `S-BIAD2557`'s is 361 MB / 439,339 rows × 50 columns / ~400 MB once parsed, against 12.4 MB / 14,344 rows / 13 MB parsed for a 12-FOV slice. The whole remote file is still read either way: a CSV has no index, and sampling `S-BIAD2557` at five offsets showed rows grouped per FOV but **not** globally sorted, so there is no safe early exit. A non-CSV table (`.h5ad`) ignores `fovs` with a warning and downloads whole. Entry points: `run_viewer_bia(..., cell_table=True, cell_table_fovs=[...])` and `ueler.load_bia_cell_table(viewer, fovs=..., force=...)`, plus the read-only `ImageMaskViewer.data_source` property.
+
+**`S-BIAD2557` no longer has folder-per-FOV images.** `Files/spatial_murine_iCCAvsHCC/image_data/` now holds one `<FOV>.zip` of channel TIFFs per FOV (~100 MB each, 562 of them), so the reference descriptor above — and every copy of it in the README, the docs and the notebooks — resolved 0 FOVs until `"fov_container": "zip"` was added. The study's HTTPS base also moved from the `pub/databases/` path to `fire/`, which the BioStudies `/info` resolution absorbs silently — the reason for never hardcoding it. Verified live after the change: 562 FOVs, 30 channels for FOV 0, one channel read out of a 100 MB zip in ~5 s, masks still `<fov>_cleaned_mask.tiff` under `segmentation/cleaned_mask`.

@@ -20,19 +20,26 @@ Structure handling is *descriptor-first*: an optional JSON descriptor maps the
 study file tree onto FOVs / channels / masks.  When no descriptor is given a
 best-effort auto-detection covers the two clean layouts above.
 
+A study that ships a **cell table** can name it with the descriptor's
+``cell_table`` key (issue #140); :meth:`BIADataSource.fetch_cell_table` caches it
+locally and can filter a CSV table down to the rows of selected FOVs while it
+streams, so a table of several hundred MB never has to be held whole.
+
 Only ``fsspec[http]``, ``requests``, ``tifffile`` (already project dependencies)
 are required — no S3 / OME-Zarr stack.
 """
 
 from __future__ import annotations
 
+import csv
 import fnmatch
+import hashlib
 import logging
 import os
 import re
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from .data_loader import (
     OMEFovWrapper,
@@ -285,6 +292,31 @@ def _normalise_sources(descriptor, list_key, dir_key, glob_key, name_key):
     return sources
 
 
+def _normalise_cell_table(descriptor) -> Optional[dict]:
+    """Normalise the optional ``cell_table`` descriptor key (issue #140).
+
+    Accepts either a plain study-relative path or a mapping that also names the
+    column holding the FOV id::
+
+        "cell_table": "Files/.../cell_table.csv"
+        "cell_table": {"path": "Files/.../cell_table.csv", "fov_column": "fov"}
+
+    Returns ``{"path": str, "fov_column": str}`` or ``None`` when the key is
+    absent, in which case the study simply has no cell table as far as UELer is
+    concerned.
+    """
+
+    raw = descriptor.get("cell_table")
+    if not raw:
+        return None
+    if isinstance(raw, dict):
+        path = raw.get("path")
+        if not path:
+            return None
+        return {"path": str(path).strip("/"), "fov_column": str(raw.get("fov_column") or "fov")}
+    return {"path": str(raw).strip("/"), "fov_column": "fov"}
+
+
 class BIALayout:
     """Normalised description of where FOVs / channels / masks live."""
 
@@ -298,6 +330,7 @@ class BIALayout:
         fov_dir: str = "",
         fov_glob: str = "*.ome.tiff",
         fov_container: Optional[str] = None,
+        cell_table: Optional[dict] = None,
     ):
         self.mode = mode  # "folder" | "ome-tiff"
         self.base = base.strip("/")
@@ -308,6 +341,8 @@ class BIALayout:
         # None → each FOV is a directory of channel TIFFs; "zip" → each FOV is a
         # <FOV>.zip archive of channel TIFFs (read per-member over HTTP ranges).
         self.fov_container = fov_container
+        # {"path", "fov_column"} for a study that ships a cell table (#140), else None.
+        self.cell_table = cell_table
 
 
 def _layout_from_descriptor(descriptor: Dict[str, object]) -> BIALayout:
@@ -316,6 +351,7 @@ def _layout_from_descriptor(descriptor: Dict[str, object]) -> BIALayout:
     annotation_sources = _normalise_sources(
         descriptor, "annotations", "annotation_dir", "annotation_glob", "annotation_name"
     )
+    cell_table = _normalise_cell_table(descriptor)
     if mode == "ome-tiff":
         fov_glob = str(descriptor.get("fov_glob", "*.ome.tiff"))
         fov_dir = os.path.dirname(fov_glob)
@@ -326,6 +362,7 @@ def _layout_from_descriptor(descriptor: Dict[str, object]) -> BIALayout:
             fov_glob=pattern,
             mask_sources=mask_sources,
             annotation_sources=annotation_sources,
+            cell_table=cell_table,
         )
     container = descriptor.get("fov_container")
     return BIALayout(
@@ -334,6 +371,7 @@ def _layout_from_descriptor(descriptor: Dict[str, object]) -> BIALayout:
         mask_sources=mask_sources,
         annotation_sources=annotation_sources,
         fov_container=str(container) if container else None,
+        cell_table=cell_table,
     )
 
 
@@ -416,6 +454,62 @@ def _download(url: str, dest: Path) -> Path:
                 tmp.unlink()
             except OSError:
                 pass
+    return dest
+
+
+def _filter_csv_rows(url: str, dest: Path, *, column: str, values: set) -> Path:
+    """Stream a remote CSV and write only the rows whose *column* is in *values*.
+
+    A study cell table can be hundreds of MB (``S-BIAD2557``'s is 361 MB), which
+    is more than a small Binder container can hold once pandas has parsed it.
+    The rows are therefore filtered while streaming — peak memory is one row, not
+    the table — and only the retained subset is cached.  The header is always
+    written, so the result is a valid CSV even when nothing matches.
+
+    Note that the whole remote file is still *read*: a CSV has no index, and the
+    rows of ``S-BIAD2557`` are grouped per FOV but not globally sorted, so there
+    is no safe point at which to stop early.  Rows are split on newlines as they
+    stream, so a quoted field containing a literal newline is not supported here
+    — pass ``fovs=None`` to download such a table whole.
+    """
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    requests = _ensure_requests()
+    fd, tmp_name = tempfile.mkstemp(dir=str(dest.parent), suffix=".part")
+    tmp = Path(tmp_name)
+    kept = 0
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as out:
+            writer = csv.writer(out)
+            with requests.get(url, stream=True, timeout=300) as resp:
+                resp.raise_for_status()
+                resp.encoding = resp.encoding or "utf-8"
+                reader = csv.reader(resp.iter_lines(decode_unicode=True))
+                try:
+                    header = next(reader)
+                except StopIteration:
+                    raise ValueError(f"[BIA] cell table '{url}' is empty.")
+                if column not in header:
+                    preview = ", ".join(header[:12])
+                    raise ValueError(
+                        f"[BIA] cell table has no '{column}' column to filter FOVs on "
+                        f"(columns: {preview}…). Set the descriptor's "
+                        '"cell_table": {"path": …, "fov_column": …} to the right column.'
+                    )
+                index = header.index(column)
+                writer.writerow(header)
+                for row in reader:
+                    if len(row) > index and row[index] in values:
+                        writer.writerow(row)
+                        kept += 1
+        os.replace(tmp, dest)
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+    logger.info("[BIA] cell table filtered to %d rows for %d FOVs", kept, len(values))
     return dest
 
 
@@ -530,6 +624,7 @@ class BIADataSource:
         self._ome_root = self.cache_dir / "ome"
         self._masks_dir = self.cache_dir / "masks_flat"
         self._annotations_dir = self.cache_dir / "annotations_flat"
+        self._tables_dir = self.cache_dir / "tables"
 
         self._fov_names: Optional[List[str]] = None
         self._channels_cache: Dict[str, Dict[str, str]] = {}
@@ -751,3 +846,57 @@ class BIADataSource:
                     local_name = fname
                 rel = _urljoin(rel_dir, fname)
                 _download(self.index.url_for(rel), Path(dest_dir) / local_name)
+
+    # -- cell table ---------------------------------------------------------
+    @property
+    def has_cell_table(self) -> bool:
+        """Whether the descriptor points at a cell table for this study (#140)."""
+        return self.layout.cell_table is not None
+
+    @property
+    def cell_table_url(self) -> Optional[str]:
+        if self.layout.cell_table is None:
+            return None
+        return self.index.url_for(self.layout.cell_table["path"])
+
+    def fetch_cell_table(
+        self,
+        fovs: Optional[Sequence[str]] = None,
+        *,
+        force: bool = False,
+    ) -> Optional[str]:
+        """Cache the study's cell table locally and return its path (#140).
+
+        ``fovs`` restricts a CSV table to the rows of those FOVs, streamed so the
+        full table is never held in memory or on disk — the practical difference
+        between a 361 MB table and the ~8 MB slice a Binder session needs.  Pass
+        ``None`` for the whole table.  ``force`` re-fetches an already cached
+        copy.  Returns ``None`` when the descriptor declares no cell table.
+        """
+
+        spec = self.layout.cell_table
+        if spec is None:
+            return None
+        url = self.index.url_for(spec["path"])
+        name = os.path.basename(spec["path"]) or "cell_table.csv"
+
+        wanted = {str(f) for f in fovs} if fovs is not None else None
+        if wanted is not None and not _has_suffix(name, (".csv",)):
+            logger.warning(
+                "[BIA] cell table '%s' is not a CSV; the fovs filter is ignored and the "
+                "whole file is downloaded.", name
+            )
+            wanted = None
+
+        if wanted is None:
+            dest = self._tables_dir / name
+            if force and dest.exists():
+                dest.unlink()
+            return str(_download(url, dest))
+
+        stem, ext = os.path.splitext(name)
+        digest = hashlib.sha1("\n".join(sorted(wanted)).encode("utf-8")).hexdigest()[:8]
+        dest = self._tables_dir / f"{stem}__fovs-{len(wanted)}-{digest}{ext or '.csv'}"
+        if dest.exists() and dest.stat().st_size > 0 and not force:
+            return str(dest)
+        return str(_filter_csv_rows(url, dest, column=spec["fov_column"], values=wanted))

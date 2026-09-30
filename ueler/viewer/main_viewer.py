@@ -5343,6 +5343,16 @@ class ImageMaskViewer:
         self._status_image["processing"] = load_asset_bytes("loading.gif")
         self._status_image["ready"] = load_asset_bytes("ready.png")
 
+    @property
+    def data_source(self):
+        """The remote data source backing this viewer, or ``None`` for local data.
+
+        Read-only view of the object passed as ``data_source=`` (issue #110), so
+        callers such as :func:`ueler.runner.load_bia_cell_table` can reach the
+        study's cell table (#140) without touching a private attribute.
+        """
+        return self._data_source
+
     def load_cell_table_from_path(self, file_path, *, layer=None, obsm_keys=None):
         """Load the cell table from a CSV or ``.h5ad`` file.
 

@@ -13,7 +13,7 @@ counterparts has been removed. Notebooks must import from ``ueler.*``.
 from importlib import import_module as _import_module
 from typing import TYPE_CHECKING, Any
 
-from .runner import load_cell_table, run_viewer, run_viewer_bia
+from .runner import load_bia_cell_table, load_cell_table, run_viewer, run_viewer_bia
 
 __all__ = [
 	"viewer",
@@ -23,6 +23,7 @@ __all__ = [
 	"run_viewer",
 	"run_viewer_bia",
 	"load_cell_table",
+	"load_bia_cell_table",
 ]
 
 __version__ = "0.5.1a1"

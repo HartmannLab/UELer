@@ -153,12 +153,19 @@ viewer = ueler.run_viewer_bia(
     "S-BIAD2557",
     descriptor={
         "mode": "folder",
+        "fov_container": "zip",
         "base": "Files/spatial_murine_iCCAvsHCC/image_data",
         "mask_dir": "Files/spatial_murine_iCCAvsHCC/segmentation/cleaned_mask",
         "mask_glob": "{fov}_*.tiff",
+        "cell_table": "Files/spatial_murine_iCCAvsHCC/cell_table/pCSL005_cell_table.csv",
     },
 )
+
+# Attach the study's cell table for the FOVs you plan to open.
+ueler.load_bia_cell_table(viewer, fovs=viewer.available_fovs[:12])
 ```
+
+The descriptor's `cell_table` key names the study's cell table; `load_bia_cell_table` caches it in the workspace and attaches it, and `fovs=` keeps only those FOVs' rows — filtered while the file streams, which matters here because the table is 361 MB / ~440,000 cells. Pass `fovs=None` for the whole table, or `run_viewer_bia(..., cell_table=True)` to attach it as the viewer opens.
 
 See `script/run_ueler_BIA.ipynb` for more worked examples across several studies.
 

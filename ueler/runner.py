@@ -9,7 +9,7 @@ from typing import Any, Callable, Optional, Protocol, Sequence, TYPE_CHECKING, U
 
 _logger = logging.getLogger(__name__)
 
-__all__ = ["run_viewer", "run_viewer_bia", "load_cell_table"]
+__all__ = ["run_viewer", "run_viewer_bia", "load_cell_table", "load_bia_cell_table"]
 
 PathLike = Union[str, Path]
 
@@ -245,6 +245,8 @@ def run_viewer_bia(
 	descriptor: Optional[object] = None,
 	local_dir: Optional[PathLike] = None,
 	max_download_bytes: Optional[int] = None,
+	cell_table: bool = False,
+	cell_table_fovs: Optional[Sequence[str]] = None,
 	auto_display: bool = True,
 	after_plugins: bool = True,
 	viewer_factory: Optional[_ViewerFactory] = None,
@@ -273,6 +275,15 @@ def run_viewer_bia(
 		Ceiling for caching a single non-pyramidal OME-TIFF FOV (default 2 GiB).
 		Opening a larger non-pyramidal remote OME raises rather than silently
 		downloading the whole file; raise this only if you truly intend to.
+	cell_table:
+		Attach the study's cell table when the descriptor declares one via its
+		``cell_table`` key (issue #140).  Defaults to ``False``, since a study
+		cell table can be hundreds of MB and fetching it is a visible wait; use
+		:func:`load_bia_cell_table` to attach it after the viewer is open.
+	cell_table_fovs:
+		Restrict the fetched cell table to these FOVs (CSV tables only).  The rows
+		are filtered while streaming, so a large table never has to be held whole.
+		Ignored unless ``cell_table`` is ``True``.
 	data_source_factory:
 		Optional factory returning the data-source object; primarily for testing.
 		Defaults to :class:`ueler.bia_loader.BIADataSource`.
@@ -306,6 +317,13 @@ def run_viewer_bia(
 		**viewer_kwargs,
 	)
 
+	if cell_table:
+		# Attach before the display / after_all_plugins_loaded tail so the plugins
+		# are built once, against a viewer that already has cell data.
+		viewer.load_cell_table_from_path(
+			_fetch_bia_cell_table(data_source, fovs=cell_table_fovs, force=False)
+		)
+
 	_finalise_viewer(
 		viewer,
 		auto_display=auto_display,
@@ -313,6 +331,40 @@ def run_viewer_bia(
 		display_callback=display_callback,
 	)
 	return viewer
+
+
+def _bia_data_source(viewer: "ImageMaskViewer") -> object:
+	"""Return the BIA data source backing *viewer*, with an actionable error."""
+
+	source = getattr(viewer, "data_source", None) or getattr(viewer, "_data_source", None)
+	if source is None:
+		raise ValueError(
+			"This viewer is not backed by a BioImage Archive study. Open it with "
+			"run_viewer_bia(...) first, or load a local file with "
+			"load_cell_table(viewer, cell_table_path=...)."
+		)
+	return source
+
+
+def _fetch_bia_cell_table(
+	data_source: object,
+	*,
+	fovs: Optional[Sequence[str]],
+	force: bool,
+) -> str:
+	"""Cache the study's cell table locally and return the file path."""
+
+	if not getattr(data_source, "has_cell_table", False):
+		raise ValueError(
+			"The study descriptor declares no cell table. Add a 'cell_table' key to the "
+			"descriptor, e.g. cell_table='Files/.../cell_table.csv' (or "
+			"{'path': ..., 'fov_column': ...}), and reopen the viewer."
+		)
+	path = data_source.fetch_cell_table(fovs, force=force)
+	if path is None:  # pragma: no cover - guarded by has_cell_table above
+		raise ValueError("The study's cell table could not be fetched.")
+	_logger.info("[runner] BIA cell table cached at %s", path)
+	return str(path)
 
 
 def _load_descriptor(descriptor: Optional[object]) -> Optional[dict]:
@@ -439,3 +491,38 @@ def load_cell_table(
 			post_loader()
 
 	return viewer
+
+
+def load_bia_cell_table(
+	viewer: "ImageMaskViewer",
+	*,
+	fovs: Optional[Sequence[str]] = None,
+	force: bool = False,
+	auto_display: bool = True,
+	after_plugins: bool = True,
+) -> "ImageMaskViewer":
+	"""Attach the cell table of the BIA study *viewer* was opened from (issue #140).
+
+	The study's ``cell_table`` descriptor entry is fetched into the workspace cache
+	and handed to :func:`load_cell_table`, so the refresh and redisplay behaviour is
+	the same as for a local file.
+
+	``fovs`` restricts a CSV table to the rows of those FOVs — the filtering happens
+	while the file streams, so a large table (``S-BIAD2557``'s is 361 MB / ~440 k
+	rows) never has to be downloaded or parsed whole. Passing
+	``viewer.available_fovs[:12]`` keeps a memory-constrained session such as Binder
+	comfortable; ``None`` fetches the entire table. ``force`` re-fetches a table that
+	is already cached.
+	"""
+
+	if viewer is None:
+		raise ValueError("viewer must be provided")
+
+	data_source = _bia_data_source(viewer)
+	path = _fetch_bia_cell_table(data_source, fovs=fovs, force=force)
+	return load_cell_table(
+		viewer,
+		cell_table_path=path,
+		auto_display=auto_display,
+		after_plugins=after_plugins,
+	)

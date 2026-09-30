@@ -105,17 +105,22 @@ Make sure these paths are correctly set in the notebook for the viewer to access
 You can explore a public BioImage Archive study (an `S-BIAD*` accession) without downloading the
 whole dataset first:
 ```python
-from ueler.runner import run_viewer_bia
+from ueler.runner import load_bia_cell_table, run_viewer_bia
 
 viewer = run_viewer_bia(
     "S-BIAD2557",                      # accession id (or a direct HTTPS base URL)
     descriptor={                        # optional; auto-detection is attempted if omitted
         "mode": "folder",
+        "fov_container": "zip",         # each FOV is a <FOV>.zip of channel TIFFs
         "base": "Files/spatial_murine_iCCAvsHCC/image_data",
         "mask_dir": "Files/spatial_murine_iCCAvsHCC/segmentation/cleaned_mask",
         "mask_glob": "{fov}_*.tiff",
+        "cell_table": "Files/spatial_murine_iCCAvsHCC/cell_table/pCSL005_cell_table.csv",
     },
 )
+
+# The study's cell table, restricted to the FOVs you plan to open:
+load_bia_cell_table(viewer, fovs=viewer.available_fovs[:12])
 ```
 Because BIA studies have no standard folder layout, a small JSON **descriptor** (a dict or a path
 to a `.json` file) maps the study files onto FOVs / channels / masks; when omitted, UELer attempts
@@ -127,6 +132,7 @@ flexible enough for the variation seen across real studies:
 - **Zipped FOVs**: set `"fov_container": "zip"` when each FOV is a `<FOV>.zip` of channel TIFFs —
   UELer reads a single channel straight out of the remote zip via an HTTP byte-range request rather
   than downloading the whole archive.
+- **Cell table**: `"cell_table"` names the study's cell table (a path, or `{"path": ..., "fov_column": ...}` when the FOV id is not in a `fov` column). `load_bia_cell_table(viewer, fovs=...)` caches it and attaches it; `run_viewer_bia(..., cell_table=True)` does it as the viewer opens. `fovs=` keeps only those FOVs' rows and filters them while the file streams, so a large table (S-BIAD2557's is 361 MB / ~440,000 cells) never has to be downloaded or parsed whole.
 
 Pyramidal OME-TIFFs and single zip members are streamed via HTTP byte-range requests; other files
 (e.g. single-resolution MIBI TIFFs) are downloaded once into a local cache. A per-study
@@ -148,6 +154,8 @@ For more details, see the [user guide](https://hartmannlab.github.io/UELer/lates
 
 ## New Update  
 ### **UELer v0.5.1-alpha1 Summary**
+
+- **The Binder demo now opens the study's cell table, and streams its images again (issue #140).** `S-BIAD2557` has changed shape since the example was written — each field of view is now a single `.zip` of channel images, which the old example could not see, so it found no fields of view at all. The example is fixed and now also loads the study's cell table, which is what turns on the heatmap, the scatter plot and the cell gallery. Because that table is 361 MB (about 440,000 cells), it is loaded for the first twelve fields of view by default: the rows are filtered while the file streams, so a small session never has to hold the whole table. Any BIA study can do the same by adding a `cell_table` entry to its descriptor and calling `load_bia_cell_table(viewer, fovs=...)`.
 
 - **Deleting saved work now asks you first, everywhere it is permanent (issue #139).** Saved export configs, mask colour sets, analysis checkpoints, ROIs and annotation palettes each open a dialog naming what is about to go. All five write to disk the moment they run — the ROI delete rewrites its CSV on the spot — so none of them can be undone. Actions that are cheap to redo, such as **Clear selection** on a plot, still happen immediately.
 
