@@ -806,13 +806,7 @@ class ExportFOVsBatchTests(unittest.TestCase):
             plugin,
             "_render_with_scale_bar",
             side_effect=lambda array, _spec, _dpi: array,
-        ) as scale_mock, mock.patch(
-            "ueler.viewer.plugin.export_fovs.plt.subplots",
-            return_value=(
-                SimpleNamespace(),
-                SimpleNamespace(imshow=lambda *_args, **_kwargs: None, axis=lambda *_args, **_kwargs: None),
-            ),
-        ), mock.patch("ueler.viewer.plugin.export_fovs.plt.close"), mock.patch("ueler.viewer.plugin.export_fovs.display"):
+        ) as scale_mock, mock.patch("ueler.viewer.plugin.export_fovs.display"):
             plugin._preview_single_cell()
 
         finalise_mock.assert_called_once()

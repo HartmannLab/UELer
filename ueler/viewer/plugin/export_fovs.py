@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import os
 import re
@@ -15,7 +16,7 @@ from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 from IPython import get_ipython
-from IPython.display import display
+from IPython.display import Image as IPyImage, display
 from ipywidgets import (
     Accordion,
     Button,
@@ -35,8 +36,9 @@ from ipywidgets import (
     Text,
     VBox,
 )
-from matplotlib import pyplot as plt
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.colors import to_rgb
+from matplotlib.figure import Figure
 
 from ueler.rendering import (
     AnnotationRenderSettings,
@@ -83,6 +85,27 @@ def _resolve_config_path(folder: Optional[Path], stored_path: str) -> Path:
     if folder is not None:
         return folder / p
     return p
+
+
+def _agg_figure(figsize: Tuple[float, float], dpi: int) -> Figure:
+    """Build a standalone Agg figure, deliberately bypassing pyplot.
+
+    Export runs on a ``ThreadPoolExecutor`` worker, and pyplot is not safe
+    there.  Under ``%matplotlib widget`` every ``plt.figure()`` builds an ipympl
+    ``Canvas`` *ipywidget* — opening a comm to the browser from a background
+    thread — and ``savefig`` on it sets ``canvas.manager = None`` for its whole
+    duration, so a comm message serviced on the main thread in that window
+    crashes with ``AttributeError: 'NoneType' object has no attribute
+    'handle_json'``.  See ``ueler/viewer/ipympl_guard.py``.
+
+    A figure built this way is not registered in pyplot's global ``Gcf``, so it
+    also cannot displace the user's active figure, and needs no ``plt.close()``
+    — dropping the reference is enough.  Pinning the canvas to Agg additionally
+    guarantees ``buffer_rgba`` exists, whatever backend the notebook selected.
+    """
+    fig = Figure(figsize=figsize, dpi=dpi)
+    FigureCanvasAgg(fig)
+    return fig
 
 
 @dataclass(frozen=True)
@@ -2730,24 +2753,18 @@ class BatchExportPlugin(PluginBase):
         dpi: int,
     ) -> np.ndarray:
         height, width = array.shape[:2]
-        fig = None
         try:
-            fig = plt.figure(figsize=(max(width / dpi, 1.0), max(height / dpi, 1.0)), dpi=dpi)
+            fig = _agg_figure((max(width / dpi, 1.0), max(height / dpi, 1.0)), dpi)
             ax = fig.add_axes([0, 0, 1, 1])
             ax.imshow(array)
             ax.axis("off")
             add_scale_bar(ax, spec, color="white", font_size=12.0)
             fig.canvas.draw()
-            if hasattr(fig.canvas, "buffer_rgba"):
-                buffer = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
-                buffer = buffer.reshape((height, width, 4))
-                return buffer[..., :3].copy()
-            return array
+            buffer = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
+            buffer = buffer.reshape((height, width, 4))
+            return buffer[..., :3].copy()
         except Exception:
             return array
-        finally:
-            if fig is not None:
-                plt.close(fig)
 
     def _write_pdf_with_scale_bar(
         self,
@@ -2756,19 +2773,14 @@ class BatchExportPlugin(PluginBase):
         dpi: int,
         spec: Optional[ScaleBarSpec],
     ) -> None:
-        fig = None
-        try:
-            height, width = array.shape[:2]
-            fig = plt.figure(figsize=(max(width / dpi, 1.0), max(height / dpi, 1.0)), dpi=dpi)
-            ax = fig.add_axes([0, 0, 1, 1])
-            ax.imshow(array)
-            ax.axis("off")
-            if spec is not None:
-                add_scale_bar(ax, spec, color="white", font_size=12.0)
-            fig.savefig(output_path, dpi=dpi, bbox_inches="tight", pad_inches=0)
-        finally:
-            if fig is not None:
-                plt.close(fig)
+        height, width = array.shape[:2]
+        fig = _agg_figure((max(width / dpi, 1.0), max(height / dpi, 1.0)), dpi)
+        ax = fig.add_axes([0, 0, 1, 1])
+        ax.imshow(array)
+        ax.axis("off")
+        if spec is not None:
+            add_scale_bar(ax, spec, color="white", font_size=12.0)
+        fig.savefig(output_path, dpi=dpi, bbox_inches="tight", pad_inches=0)
 
     def _progress_callback(self, status) -> None:
         self._dispatch_to_main(lambda: self._update_progress_ui(status=status))
@@ -2880,13 +2892,18 @@ class BatchExportPlugin(PluginBase):
         fig_w = max(width / dpi, 1.5)
         fig_h = max(height / dpi, 1.5)
 
+        fig = _agg_figure((fig_w, fig_h), dpi)
+        ax = fig.add_subplot(111)
+        ax.axis("off")
+        ax.imshow(image)
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight", pad_inches=0)
+
         self.ui_component.cell_preview_output.clear_output()
         with self.ui_component.cell_preview_output:
-            fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=dpi)
-            ax.axis("off")
-            ax.imshow(image)
-            display(fig)
-            plt.close(fig)
+            # A PNG rather than display(fig): the preview then renders the same
+            # way under every backend, and no Canvas widget is created per click.
+            display(IPyImage(data=buf.getvalue(), format="png"))
 
     def _notify(self, message: str, level: str = "info") -> None:
         color_map = {"info": "#424242", "success": "#2e7d32", "warning": "#f9a825", "error": "#c62828"}

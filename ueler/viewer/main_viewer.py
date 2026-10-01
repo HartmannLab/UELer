@@ -52,6 +52,7 @@ from ueler.viewer.plugin.roi_manager_plugin import ROIManagerPlugin
 import json
 
 from .image_display import ImageDisplay
+from .ipympl_guard import install_canvas_message_guard
 from .confirm_dialog import confirm_via, escape_name
 import importlib
 from ueler.viewer.plugin.plugin_base import PluginBase
@@ -253,6 +254,10 @@ class ImageMaskViewer:
     def __init__(self, base_folder, masks_folder=None, annotations_folder=None, debug=False,
                  data_source=None, settings_path=None):
         self.initialized = False
+        # Must run before the first Canvas is built: ipympl binds the handler as
+        # a bound method in Canvas.__init__, so a canvas created earlier keeps
+        # the unguarded one.  See ueler/viewer/ipympl_guard.py.
+        install_canvas_message_guard()
         # Optional remote data source (issue #110, BIA streaming). When set, FOV
         # discovery and per-FOV image/mask reads route through it instead of the
         # local filesystem; ``base_folder`` is then a local workspace directory
