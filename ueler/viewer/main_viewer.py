@@ -22,6 +22,8 @@ from IPython.display import display
 import pandas as pd
 # Import modules
 from ueler import cell_table as cell_table_utils
+from ueler import cell_table_source
+from ueler.viewer.decorators import update_status_bar
 from ueler.constants import PREDEFINED_COLORS, DOWNSAMPLE_FACTORS, DOWNSAMPLE_MAX_DIMENSION, UICOMPNENTS_SKIP
 from ueler.data_loader import (
     load_annotations_for_fov,
@@ -313,6 +315,12 @@ class ImageMaskViewer:
         # Both stay ``None`` for a plain DataFrame or CSV table.
         self.cell_table_adata = None
         self.cell_table_columns = None
+        # The store ``cell_table`` is read from (#141).  ``None`` or an
+        # ``InMemorySource`` means every column is already in the frame; a lazy
+        # source (Parquet) means ``cell_table`` holds the spine plus whatever has
+        # been materialised, and ``cell_table_schema`` is the truth about which
+        # columns exist.
+        self._cell_table_source = None
 
         # Cell-table row indices that the linked plots (scatter, histogram,
         # chart-heatmap) last pushed to the main viewer as a mask highlight.
@@ -4886,7 +4894,12 @@ class ImageMaskViewer:
             self.mask_key = self.ui_component.mask_key.value
         if hasattr(self.ui_component, 'fov_key'):
             self.fov_key = self.ui_component.fov_key.value
-    
+        # The key widgets are free-text, so a retargeted key may name a column a
+        # lazy table has not read yet; without this the viewer would locate no
+        # cells at all (#141).  A no-op for an eager table.
+        self.ensure_columns([self.x_key, self.y_key, self.label_key, self.fov_key])
+
+
     def inform_plugins(self, method_name):
         '''
         Inform all plugins about the method call.
@@ -5353,15 +5366,174 @@ class ImageMaskViewer:
         """
         return self._data_source
 
+    # ------------------------------------------------------------------
+    # Cell-table schema and lazy columns (#141)
+    # ------------------------------------------------------------------
+    @property
+    def cell_table_source(self):
+        """The store the cell table is read from, or ``None`` for a plain frame."""
+        # ``getattr`` rather than the attribute: several tests build a viewer that
+        # deliberately skips ``__init__`` to avoid the image-folder scan, and the
+        # cell-table surface has to keep working for them.
+        return getattr(self, "_cell_table_source", None)
+
+    @property
+    def cell_table_schema(self):
+        """Ordered ``{column: dtype}`` for every column the cell table *has*.
+
+        This — not ``cell_table.columns`` — is what a dropdown should be built
+        from.  With a lazy source (a Parquet file) the frame holds only the spine
+        plus whatever has been materialised, so enumerating the frame would offer
+        the user a list that shrinks to whatever happens to be loaded.  The
+        dtypes come along because most enumeration sites filter on them
+        (``is_numeric_dtype``, ``select_dtypes``), and a dtype must not cost a
+        read either.
+
+        Deliberately **not** named ``cell_table_columns``: that attribute already
+        holds the AnnData obs/var/obsm provenance (#123).
+
+        Columns the plugins added in memory (FlowSOM clusters, heatmap
+        meta-clusters, cell-table edits) are included, after the file's own, so
+        the schema always describes the table the user can actually see.
+        """
+        frame = self.cell_table
+        if frame is None:
+            return OrderedDict()
+        schema = OrderedDict()
+        source = self.cell_table_source
+        if source is not None:
+            try:
+                schema.update(source.schema)
+            except Exception:
+                logger.debug("[cell table] source schema unavailable.", exc_info=True)
+        # The frame wins on dtype for anything it holds, and contributes any
+        # column the source does not know about.
+        for name, dtype in frame.dtypes.items():
+            schema[str(name)] = dtype
+        return schema
+
+    @property
+    def unmaterialised_columns(self):
+        """Columns that exist in the source but are not in the frame yet."""
+        frame = self.cell_table
+        source = self.cell_table_source
+        if frame is None or source is None or not getattr(source, "is_lazy", False):
+            return []
+        return [name for name in source.schema if name not in frame.columns]
+
+    def ensure_columns(self, names):
+        """Materialise *names* into :attr:`cell_table` and return the frame.
+
+        The single entry point for laziness.  Idempotent, cached (a column is read
+        once and stays), and a no-op when the table is not lazy — which is why
+        call sites can invoke it unconditionally before touching a column they
+        only know the name of.
+
+        Rows are never involved: a column arrives complete and in file order, so
+        it aligns with the spine positionally and the frame's index is untouched.
+        """
+        frame = self.cell_table
+        if frame is None:
+            return None
+        source = self.cell_table_source
+        if source is None or not getattr(source, "is_lazy", False):
+            return frame
+        if isinstance(names, str):
+            names = [names]
+        schema = source.schema
+        missing = []
+        for name in names or ():
+            name = str(name) if name is not None else ""
+            if name and name not in frame.columns and name in schema and name not in missing:
+                missing.append(name)
+        if not missing:
+            return frame
+
+        logger.debug("[cell table] materialising %d column(s): %s", len(missing), missing)
+        data = source.read_columns(missing)
+        if len(data) != len(frame):
+            raise ValueError(
+                f"The cell-table source returned {len(data)} rows for columns {missing} "
+                f"but the table has {len(frame)}; the source and the frame are out of step."
+            )
+        for name in missing:
+            values = data[name]
+            values.index = frame.index
+            frame[name] = values
+        return frame
+
+    @update_status_bar
+    def ensure_all_columns(self):
+        """Materialise every column — for the whole-table consumers.
+
+        ``get_cell_table_adata``, the checkpoint store and the batch export all
+        need the complete table.  On a remote source this is a real wait (~90 MB
+        for ``S-BIAD2557``), so the status bar shows the spinner for its duration
+        rather than the UI appearing to hang.
+        """
+        pending = self.unmaterialised_columns
+        if not pending:
+            return self.cell_table
+        logger.info("[cell table] materialising all %d remaining column(s).", len(pending))
+        return self.ensure_columns(pending)
+
+    def set_parquet_cell_table(self, source, *, storage_options=None, spine=None):
+        """Attach a Parquet cell table column-lazily (#141).
+
+        *source* is a local path, a URL fsspec can open, or an already-built
+        :class:`~ueler.cell_table_source.CellTableSource`.  Only *spine* (by
+        default the viewer's FOV/label/coordinate keys, whichever the file has) is
+        read now; everything else arrives through :meth:`ensure_columns`.
+        """
+        if isinstance(source, cell_table_source.CellTableSource):
+            table_source = source
+        else:
+            table_source = cell_table_source.open_parquet_source(
+                source, storage_options=storage_options
+            )
+
+        if spine is None:
+            # The viewer's current keys *and* the conventional names: the key
+            # widgets are free-text, so a user may retarget ``label_key`` to a
+            # column the spine would otherwise not have read, and paying for a
+            # couple of extra integer columns now beats a stall on the first
+            # click.
+            spine = list(cell_table_source.DEFAULT_SPINE) + [
+                self.fov_key, self.label_key, self.x_key, self.y_key
+            ]
+        columns = table_source.spine_columns(spine)
+        frame = table_source.read_columns(columns)
+        logger.info(
+            "[cell table] Parquet table attached lazily: %d rows, %d of %d columns "
+            "materialised (%s).",
+            table_source.n_rows,
+            len(frame.columns),
+            len(table_source.schema),
+            ", ".join(str(col) for col in frame.columns) or "none",
+        )
+        self.set_cell_table(frame, source=table_source)
+
     def load_cell_table_from_path(self, file_path, *, layer=None, obsm_keys=None):
-        """Load the cell table from a CSV or ``.h5ad`` file.
+        """Load the cell table from a CSV, Parquet or ``.h5ad`` file.
 
         CSV columns whose float values are all integral are converted to the
         nullable ``Int64`` dtype (floats are how ``read_csv`` represents an integer
         column containing NAs).  An ``.h5ad`` file is read with ``anndata`` and
         handed to :meth:`set_cell_table`, which keeps the AnnData object and
         derives the DataFrame view from it (#123).
+
+        A ``.parquet`` file is opened **column-lazily** (#141): only the spine is
+        read up front and every other column arrives on first use through
+        :meth:`ensure_columns`.
         """
+        if cell_table_source.is_parquet_path(file_path):
+            if layer is not None or obsm_keys is not None:
+                raise ValueError(
+                    "layer/obsm_keys are only supported for an AnnData cell table"
+                )
+            self.set_parquet_cell_table(file_path)
+            return
+
         if str(file_path).lower().endswith(".h5ad"):
             import anndata
 
@@ -5381,7 +5553,7 @@ class ImageMaskViewer:
 
         self.set_cell_table(df)
 
-    def set_cell_table(self, cell_table, *, layer=None, obsm_keys=None):
+    def set_cell_table(self, cell_table, *, layer=None, obsm_keys=None, source=None):
         """Attach a cell table, given either a DataFrame or an AnnData object.
 
         For an AnnData input the object is kept on ``self.cell_table_adata`` and
@@ -5390,7 +5562,21 @@ class ImageMaskViewer:
         ``var_names`` entry, narrow ``obsm`` arrays, and ``obs_names``.  ``layer``
         selects an entry of ``adata.layers`` instead of ``X``; ``obsm_keys`` opts
         wide ``obsm`` entries in.  Both arguments only apply to AnnData input.
+
+        *source* attaches a :class:`~ueler.cell_table_source.CellTableSource` that
+        *cell_table* is a partial view of (#141); it is set by
+        :meth:`set_parquet_cell_table` and is ``None`` everywhere else, which
+        leaves every existing caller with the eager behaviour it had.
         """
+        previous = getattr(self, "_cell_table_source", None)
+        if previous is not None and previous is not source:
+            # Replacing the table releases the handle the old source held open.
+            try:
+                previous.close()
+            except Exception:
+                logger.debug("[cell table] closing the previous source failed.", exc_info=True)
+        self._cell_table_source = source
+
         if cell_table_utils.is_anndata(cell_table):
             frame, provenance = cell_table_utils.flatten_anndata(
                 cell_table, layer=layer, obsm_keys=obsm_keys
@@ -5413,6 +5599,16 @@ class ImageMaskViewer:
             )
         self.cell_table_adata = None
         self.cell_table_columns = None
+        if (
+            getattr(self, "_debug", False)
+            and source is not None
+            and getattr(source, "is_lazy", False)
+            and cell_table is not None
+        ):
+            # In debug mode a membership test for a column that exists but has not
+            # been materialised says so in the log instead of quietly answering
+            # "no" and letting the plugin draw nothing (#141).
+            cell_table = cell_table_source.guarded_frame(cell_table, source.schema)
         self.cell_table = cell_table
 
     def sync_cell_table_to_adata(self):
@@ -5425,6 +5621,9 @@ class ImageMaskViewer:
         adata = getattr(self, "cell_table_adata", None)
         if adata is None or self.cell_table is None:
             return []
+        # A whole-table consumer: obs must not lose the columns that happen not to
+        # be materialised (#141).  A no-op unless the table is lazy.
+        self.ensure_all_columns()
         return cell_table_utils.sync_cell_table_to_obs(
             adata, self.cell_table, getattr(self, "cell_table_columns", None)
         )
@@ -5443,6 +5642,10 @@ class ImageMaskViewer:
         if self.cell_table_adata is not None:
             self.sync_cell_table_to_adata()
             return self.cell_table_adata
+        # ``X`` is built from "every numeric column that is not a viewer key", so a
+        # lazy table has to be complete first or the AnnData silently loses the
+        # markers nobody has plotted yet (#141).
+        self.ensure_all_columns()
         system_keys = [
             key
             for key in (self.fov_key, self.label_key, self.x_key, self.y_key, self.mask_key)

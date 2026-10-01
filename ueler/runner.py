@@ -320,9 +320,7 @@ def run_viewer_bia(
 	if cell_table:
 		# Attach before the display / after_all_plugins_loaded tail so the plugins
 		# are built once, against a viewer that already has cell data.
-		viewer.load_cell_table_from_path(
-			_fetch_bia_cell_table(data_source, fovs=cell_table_fovs, force=False)
-		)
+		_attach_bia_cell_table(viewer, data_source, fovs=cell_table_fovs, force=False)
 
 	_finalise_viewer(
 		viewer,
@@ -365,6 +363,48 @@ def _fetch_bia_cell_table(
 		raise ValueError("The study's cell table could not be fetched.")
 	_logger.info("[runner] BIA cell table cached at %s", path)
 	return str(path)
+
+
+def _attach_bia_cell_table(
+	viewer: "ImageMaskViewer",
+	data_source: object,
+	*,
+	fovs: Optional[Sequence[str]],
+	force: bool,
+) -> None:
+	"""Attach the study's cell table to *viewer*, streaming it when it is Parquet.
+
+	A Parquet table (#141) is never downloaded: the file is opened over HTTP range
+	requests and only the spine is read, so the viewer comes up against the whole
+	table -- every row, every column name -- having fetched a few MB.  Every other
+	format goes through :meth:`BIADataSource.fetch_cell_table`, which caches a
+	local copy and, for a CSV, can filter it down to *fovs* on the way.
+	"""
+
+	if not getattr(data_source, "has_cell_table", False):
+		raise ValueError(
+			"The study descriptor declares no cell table. Add a 'cell_table' key to the "
+			"descriptor, e.g. cell_table='Files/.../cell_table.csv' (or "
+			"{'path': ..., 'fov_column': ...}), and reopen the viewer."
+		)
+
+	if getattr(data_source, "cell_table_is_parquet", False):
+		if fovs is not None:
+			_logger.info(
+				"[runner] the study's cell table is Parquet, so it is read column by "
+				"column over the network and the fovs filter is unnecessary; every row "
+				"is available."
+			)
+		source = data_source.open_cell_table_source()
+		attach = getattr(viewer, "set_parquet_cell_table", None)
+		if not callable(attach):
+			raise AttributeError("viewer does not support a Parquet cell table")
+		attach(source)
+		return
+
+	viewer.load_cell_table_from_path(
+		_fetch_bia_cell_table(data_source, fovs=fovs, force=force)
+	)
 
 
 def _load_descriptor(descriptor: Optional[object]) -> Optional[dict]:
@@ -443,7 +483,9 @@ def load_cell_table(
 	"""Attach a cell table to an existing viewer and re-render the UI.
 
 	Exactly one of ``cell_table_path`` or ``cell_table`` must be provided. The
-	former loads a ``.csv`` or ``.h5ad`` file on demand; the latter is forwarded to
+	former loads a ``.csv``, ``.parquet`` or ``.h5ad`` file on demand -- a Parquet
+	file is opened column-lazily, so only the spine is read up front and every
+	other column arrives on first use (#141); the latter is forwarded to
 	:meth:`ImageMaskViewer.set_cell_table` and accepts either a pandas
 	``DataFrame`` or an :class:`anndata.AnnData`.
 
@@ -503,9 +545,12 @@ def load_bia_cell_table(
 ) -> "ImageMaskViewer":
 	"""Attach the cell table of the BIA study *viewer* was opened from (issue #140).
 
-	The study's ``cell_table`` descriptor entry is fetched into the workspace cache
-	and handed to :func:`load_cell_table`, so the refresh and redisplay behaviour is
-	the same as for a local file.
+	A **Parquet** table is opened in place and read column by column over HTTP range
+	requests (#141): the viewer comes up with every row and every column *name*
+	having fetched only the footer and the spine, and ``fovs`` is unnecessary
+	because no column costs more than the column itself. Any other format is
+	fetched into the workspace cache and loaded from there, with the same refresh
+	and redisplay behaviour as for a local file.
 
 	``fovs`` restricts a CSV table to the rows of those FOVs — the filtering happens
 	while the file streams, so a large table (``S-BIAD2557``'s is 361 MB / ~440 k
@@ -519,10 +564,17 @@ def load_bia_cell_table(
 		raise ValueError("viewer must be provided")
 
 	data_source = _bia_data_source(viewer)
-	path = _fetch_bia_cell_table(data_source, fovs=fovs, force=force)
-	return load_cell_table(
-		viewer,
-		cell_table_path=path,
-		auto_display=auto_display,
-		after_plugins=after_plugins,
-	)
+	_attach_bia_cell_table(viewer, data_source, fovs=fovs, force=force)
+	_refresh_viewer_state(viewer)
+
+	if auto_display:
+		display_fn, update_panel = _load_display_helpers()
+		display_fn(viewer)
+		update_panel(viewer)
+
+	if after_plugins:
+		post_loader = getattr(viewer, "after_all_plugins_loaded", None)
+		if callable(post_loader):
+			post_loader()
+
+	return viewer

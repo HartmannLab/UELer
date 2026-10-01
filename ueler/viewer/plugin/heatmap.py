@@ -6,7 +6,7 @@ from ipywidgets import (SelectMultiple, FloatSlider, Dropdown, VBox, Output, Tag
                         Checkbox, Text, Button, HBox, Layout, IntSlider, Tab, RadioButtons, HTML)
 from scipy.cluster.hierarchy import dendrogram
 import pandas as pd
-from ueler.cell_table import categorical_columns
+from ueler.cell_table import categorical_columns, table_schema
 from ueler.viewer.observable import Observable
 from ueler.viewer.plugin.plugin_base import PluginBase
 from ueler.viewer.plugin.heatmap_adapter import HeatmapModeAdapter
@@ -118,7 +118,7 @@ class UiComponent:
             parent.main_viewer
         )
         self.channel_selector = self.channel_selector_bundle.tags
-        cluster_columns = categorical_columns(parent.main_viewer.cell_table)
+        cluster_columns = categorical_columns(table_schema(parent.main_viewer))
         self.high_level_cluster_dropdown = Dropdown(
             options=cluster_columns,
             description='Class:',

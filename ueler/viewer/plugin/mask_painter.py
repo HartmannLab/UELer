@@ -41,8 +41,11 @@ FileChooser = getattr(_FileChooserModule, "FileChooser", None)
 
 from ueler.cell_table import (
     categorical_columns,
+    ensure_table_columns,
     is_float_column_dtype,
     is_integer_column_dtype,
+    table_has_column,
+    table_schema,
 )
 from ueler.viewer.decorators import update_status_bar
 from ueler.viewer.settings_paths import viewer_settings_folder
@@ -564,8 +567,10 @@ class MaskPainterDisplay(PluginBase):
     def _initialise_identifier_options(self) -> None:
         identifier_options: Iterable[str] = []
         if self.main_viewer.cell_table is not None:
+            # Schema, not frame (#141): the identifier dropdown has to offer every
+            # class/cluster column the table has, whether or not it is loaded.
             identifier_options = categorical_columns(
-                self.main_viewer.cell_table, include_bool=True
+                table_schema(self.main_viewer), include_bool=True
             )
 
         self.ui_component.identifier_dropdown.options = list(identifier_options)
@@ -574,10 +579,11 @@ class MaskPainterDisplay(PluginBase):
         """Populate the continuous-value dropdown with the float columns."""
         continuous_options: Iterable[str] = []
         if self.main_viewer.cell_table is not None:
-            cell_table = self.main_viewer.cell_table
-            continuous_options = cell_table.select_dtypes(
-                include=["float", "float32", "float64"]
-            ).columns.tolist()
+            continuous_options = [
+                name
+                for name, dtype in table_schema(self.main_viewer).items()
+                if is_float_column_dtype(dtype)
+            ]
         self.ui_component.continuous_column_dropdown.options = list(continuous_options)
 
     # ------------------------------------------------------------------
@@ -590,6 +596,9 @@ class MaskPainterDisplay(PluginBase):
             self._log("Select a valid identifier before editing colors.", clear=True)
             return
 
+        # The dropdown offers every column in the schema, so the one just chosen
+        # may not be in the frame yet (#141).
+        ensure_table_columns(self.main_viewer, [identifier])
         column = self.main_viewer.cell_table[identifier]
         classes = column.dropna().astype(str).unique().tolist()
         classes.sort()
@@ -1592,6 +1601,11 @@ class MaskPainterDisplay(PluginBase):
         if not column or self.main_viewer.cell_table is None:
             return None
         if column not in self.main_viewer.cell_table.columns:
+            # Deliberately a *frame* test, not a schema test (#141): this runs for
+            # every ``build_painter_state_maps_for_fov``, and a blocking column
+            # read has no business on the render path.  The column is materialised
+            # by the dropdown/auto-range handlers that put it here in the first
+            # place, so reaching this line means nothing has selected it yet.
             return None
         arcsinh = bool(self.ui_component.arcsinh_checkbox.value)
         cofactor = _safe_float(self.ui_component.arcsinh_cofactor_input.value, 5.0)
@@ -1662,10 +1676,14 @@ class MaskPainterDisplay(PluginBase):
         if (
             not column
             or self.main_viewer.cell_table is None
-            or column not in self.main_viewer.cell_table.columns
+            or not table_has_column(self.main_viewer, column)
             or not self.ui_component.auto_range_checkbox.value
         ):
             return
+        # The auto range is a *global* percentile over the whole column, so the
+        # column must be complete before it is computed (#141) — this is the call
+        # that pays for it, once, off the render path.
+        ensure_table_columns(self.main_viewer, [column])
         arcsinh = bool(self.ui_component.arcsinh_checkbox.value)
         cofactor = _safe_float(self.ui_component.arcsinh_cofactor_input.value, 5.0)
         rng = self._compute_auto_range(column, arcsinh, cofactor)
@@ -1714,6 +1732,12 @@ class MaskPainterDisplay(PluginBase):
     def _on_continuous_column_change(self, _change):
         if self._syncing:
             return
+        # Picking a column is what makes it needed, so this is where a lazy table
+        # pays for it (#141) — not the per-FOV render, and not only when the auto
+        # range happens to be on.
+        ensure_table_columns(
+            self.main_viewer, [self.ui_component.continuous_column_dropdown.value]
+        )
         self._refresh_save_button_state()
         # New column → recompute the global auto-range (no-op in manual mode).
         self._refresh_auto_range_fields()
@@ -1743,9 +1767,10 @@ class MaskPainterDisplay(PluginBase):
 
     def _recompute_continuous_range(self, _):
         column = self.ui_component.continuous_column_dropdown.value
-        if not column or self.main_viewer.cell_table is None or column not in self.main_viewer.cell_table.columns:
+        if not column or self.main_viewer.cell_table is None or not table_has_column(self.main_viewer, column):
             self._log("Select a continuous value column first.", error=True, clear=True)
             return
+        ensure_table_columns(self.main_viewer, [column])
         self._refresh_auto_range_fields()
         self._refresh_continuous_display()
 

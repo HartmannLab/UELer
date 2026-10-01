@@ -30,6 +30,7 @@ VBox = getattr(_ipywidgets, "VBox")
 
 from jscatter import compose
 
+from ueler.cell_table import table_columns
 from ueler.viewer.decorators import update_status_bar
 from ueler.viewer.observable import Observable
 
@@ -779,7 +780,11 @@ class ChartDisplay(PluginBase):
 class UiComponent:
     def __init__(self, viewer):
         widget_style = {"description_width": "auto"}
-        dropdown_options = ["None"] + viewer.cell_table.columns.tolist()
+        # From the schema, not the frame (#141): with a lazy table the frame holds
+        # the spine only, and the axis pickers must still offer every column.  The
+        # column itself is read when a plot actually asks for it, via
+        # ``_chart_common.prepare_dataframe``.
+        dropdown_options = ["None"] + table_columns(viewer)
 
         self.x_axis_selector = Dropdown(
             options=dropdown_options,

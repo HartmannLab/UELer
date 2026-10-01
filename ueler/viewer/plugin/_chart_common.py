@@ -19,7 +19,7 @@ import pandas as pd
 
 import ipywidgets as _ipywidgets
 
-from ueler.cell_table import categorical_columns
+from ueler.cell_table import categorical_columns, ensure_table_columns, table_schema
 from ueler.viewer.plugin.channel_picker_widget import build_channel_picker
 
 Button = getattr(_ipywidgets, "Button")
@@ -50,6 +50,12 @@ def prepare_dataframe(
     Mirrors the previous ``ChartDisplay._prepare_dataframe`` so both the
     scatter and histogram plugins filter identically.
     """
+    # Materialise before copying: every column this function filters or drops NAs
+    # on has to be in the frame, and a lazy table only holds the spine until asked
+    # (#141).  A no-op for an eager table.
+    ensure_table_columns(
+        viewer, [subset_on, viewer.fov_key, *(columns or ())]
+    )
     cell_table = viewer.cell_table.copy()
     subset_values = list(subset_values) if subset_values else []
     if subset_on and subset_values:
@@ -71,12 +77,17 @@ def build_subset_controls(viewer):
     # string obs columns (#123); without ``categorical_columns`` they would be
     # missing from the subset options even though they are exactly the columns
     # users want to subset on.
-    grouping = set(categorical_columns(viewer.cell_table))
+    # Built from the schema rather than the frame (#141): with a lazy table the
+    # frame holds the spine only, and a subset dropdown offering four columns out
+    # of fifty is worse than useless.  The dtypes come from the schema too, so
+    # populating the dropdown still reads no data.
+    schema = table_schema(viewer)
+    grouping = set(categorical_columns(schema))
     subset_columns = [
         col
-        for col in viewer.cell_table.columns
-        if pd.api.types.is_numeric_dtype(viewer.cell_table[col])
-        or pd.api.types.is_object_dtype(viewer.cell_table[col])
+        for col, dtype in schema.items()
+        if pd.api.types.is_numeric_dtype(dtype)
+        or pd.api.types.is_object_dtype(dtype)
         or col in grouping
     ]
     subset_on_dropdown = Dropdown(
@@ -134,8 +145,9 @@ def build_follow_selection_checkbox():
 
 def subset_options_for(viewer, selected_column) -> list:
     """Return the sorted unique values of ``selected_column`` (for the subset selector)."""
-    if not selected_column or selected_column not in viewer.cell_table.columns:
+    if not selected_column or selected_column not in table_schema(viewer):
         return []
+    ensure_table_columns(viewer, [selected_column])
     unique_values = viewer.cell_table[selected_column].dropna().unique().tolist()
     return sorted(unique_values)
 
@@ -290,13 +302,12 @@ def numeric_columns(viewer) -> List[str]:
     Used by both the histogram and scatter plugins so their channel pickers
     offer an identical set of options.
     """
-    cell_table = viewer.cell_table
     return marker_first(
         viewer,
         [
             col
-            for col in cell_table.columns
-            if pd.api.types.is_numeric_dtype(cell_table[col])
+            for col, dtype in table_schema(viewer).items()
+            if pd.api.types.is_numeric_dtype(dtype)
         ],
     )
 

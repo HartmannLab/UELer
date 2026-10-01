@@ -25,7 +25,7 @@ can be written out with ``write_h5ad``.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -37,12 +37,16 @@ __all__ = [
     "DEFAULT_MAX_OBSM_WIDTH",
     "categorical_columns",
     "dataframe_to_anndata",
+    "ensure_table_columns",
     "flatten_anndata",
     "is_anndata",
     "is_float_column_dtype",
     "is_integer_column_dtype",
     "new_provenance",
     "sync_cell_table_to_obs",
+    "table_columns",
+    "table_has_column",
+    "table_schema",
 ]
 
 #: ``obsm`` entries wider than this are skipped unless requested explicitly, so
@@ -58,6 +62,90 @@ CATEGORICAL_DTYPES: Tuple[str, ...] = ("int", "int64", "object", "category", "st
 _LEGACY_CATEGORICAL_DTYPES: Tuple[str, ...] = ("int", "int64", "object")
 
 _INDEX_COLUMN = "obs_names"
+
+
+# ---------------------------------------------------------------------------
+# The viewer's table, by schema rather than by frame (#141)
+# ---------------------------------------------------------------------------
+# A cell table may be *column-lazy*: ``viewer.cell_table`` holds the spine plus
+# whatever has been materialised, while ``viewer.cell_table_schema`` knows every
+# column the table has.  The four helpers below are what the plugins use instead
+# of reaching for ``viewer.cell_table.columns`` — a dropdown built from the frame
+# would shrink to whatever happens to be loaded, and a ``col in
+# cell_table.columns`` guard would silently answer "no" for a column that exists.
+#
+# All four are defensive by design: they fall back to the frame when the viewer
+# predates the schema (the plugin test doubles do), so a converted call site keeps
+# working against an eager table with no behaviour change at all.
+def table_schema(viewer: Any) -> Dict[str, Any]:
+    """Return ``{column: dtype}`` for every column *viewer*'s cell table has."""
+
+    if viewer is None:
+        return {}
+    schema = getattr(viewer, "cell_table_schema", None)
+    if schema:
+        return dict(schema)
+    frame = getattr(viewer, "cell_table", None)
+    if frame is None:
+        return {}
+    try:
+        return {str(name): dtype for name, dtype in frame.dtypes.items()}
+    except AttributeError:
+        return {}
+
+
+def table_columns(viewer: Any) -> List[str]:
+    """Return every column name of *viewer*'s cell table, in schema order."""
+
+    return list(table_schema(viewer))
+
+
+def table_has_column(viewer: Any, name: Any) -> bool:
+    """Whether *name* is a column of the cell table, materialised or not."""
+
+    if not name:
+        return False
+    return str(name) in table_schema(viewer)
+
+
+def ensure_table_columns(viewer: Any, names: Any) -> Any:
+    """Materialise *names* on *viewer* and return the cell table.
+
+    The single call every plugin makes before reading a column it only knows the
+    name of.  A no-op for an eager table, so it is safe on any code path that is
+    not a render hot loop.
+    """
+
+    if viewer is None:
+        return None
+    if isinstance(names, str):
+        names = [names]
+    ensure = getattr(viewer, "ensure_columns", None)
+    if callable(ensure):
+        return ensure(list(names or ()))
+    return getattr(viewer, "cell_table", None)
+
+
+def _schema_categorical(schema: Dict[str, Any], include: Sequence[str]) -> List[str]:
+    """Filter a ``{name: dtype}`` schema the way ``select_dtypes(include=...)`` would."""
+
+    wanted = {str(alias) for alias in include}
+    selected = []
+    for name, dtype in schema.items():
+        label = str(dtype)
+        if label in wanted:
+            selected.append(name)
+        elif "int" in wanted and is_integer_column_dtype(dtype):
+            selected.append(name)
+        elif "object" in wanted and pd.api.types.is_object_dtype(dtype):
+            selected.append(name)
+        elif "category" in wanted and isinstance(dtype, pd.CategoricalDtype):
+            selected.append(name)
+        elif "string" in wanted and pd.api.types.is_string_dtype(dtype) and label != "object":
+            selected.append(name)
+        elif "bool" in wanted and pd.api.types.is_bool_dtype(dtype):
+            selected.append(name)
+    return selected
 
 
 # ---------------------------------------------------------------------------
@@ -540,6 +628,11 @@ def categorical_columns(cell_table: Any, *, include_bool: bool = False) -> List[
     ``select_dtypes(['int', 'int64', 'object'])`` with ``category``/``string`` so
     that string columns coming back from an ``.h5ad`` round-trip are offered too;
     ``bool`` stays opt-in because only the mask painter used to include it.
+
+    *cell_table* is either a DataFrame or a ``{name: dtype}`` schema (#141).  The
+    dropdown call sites pass the schema, so they offer every grouping column the
+    table has rather than only the ones that happen to be materialised; the rule
+    itself is the same either way, because it only ever looked at dtypes.
     """
 
     if cell_table is None:
@@ -547,6 +640,8 @@ def categorical_columns(cell_table: Any, *, include_bool: bool = False) -> List[
     include = list(CATEGORICAL_DTYPES)
     if include_bool:
         include.append("bool")
+    if isinstance(cell_table, Mapping):
+        return _schema_categorical(cell_table, include)
     try:
         return cell_table.select_dtypes(include=include).columns.tolist()
     except TypeError:

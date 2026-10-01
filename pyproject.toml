@@ -71,6 +71,10 @@ dependencies = [
     "anndata>=0.10",
     "tifffile",
     "fsspec[http]",
+    # Only transitive before (via dask/anndata), but the column-lazy cell table
+    # reads Parquet column chunks through pyarrow directly (#141), so the
+    # dependency is now real and has to be declared.
+    "pyarrow>=14",
     "requests",
     "bokeh>=3.0",
     "jupyter_bokeh>=4.0",

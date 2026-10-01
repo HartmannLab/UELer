@@ -227,6 +227,10 @@ class BIAStudyIndex:
         return sorted(name for name, is_dir in self.list_dir(rel_path) if not is_dir)
 
 
+#: Cell-table suffixes that are read in place rather than downloaded (#141).
+PARQUET_SUFFIXES: Tuple[str, ...] = (".parquet", ".pq")
+
+
 def _has_suffix(name: str, suffixes: Tuple[str, ...]) -> bool:
     lower = name.lower()
     return any(lower.endswith(s) for s in suffixes)
@@ -859,6 +863,38 @@ class BIADataSource:
             return None
         return self.index.url_for(self.layout.cell_table["path"])
 
+    @property
+    def cell_table_is_parquet(self) -> bool:
+        """Whether the study's cell table is Parquet, and so streamable (#141).
+
+        A Parquet table is never downloaded: it is read column by column over
+        range requests through :meth:`open_cell_table_source`.
+        """
+        spec = self.layout.cell_table
+        if spec is None:
+            return False
+        return _has_suffix(os.path.basename(spec["path"]), PARQUET_SUFFIXES)
+
+    def open_cell_table_source(self):
+        """Open the study's Parquet cell table for column-lazy reading (#141).
+
+        Returns a :class:`~ueler.cell_table_source.ParquetSource` over the remote
+        file, with the handle held for the session so the footer is read once.
+        Nothing but the footer is fetched here; each column is a range request
+        made when the viewer first asks for it.
+
+        Returns ``None`` when the study has no cell table or it is not Parquet —
+        a CSV has no column index, so :meth:`fetch_cell_table` remains the only
+        way to read one.
+        """
+        if not self.cell_table_is_parquet:
+            return None
+        from ueler.cell_table_source import open_parquet_source
+
+        url = self.index.url_for(self.layout.cell_table["path"])
+        logger.info("[BIA] opening the study's Parquet cell table: %s", url)
+        return open_parquet_source(url)
+
     def fetch_cell_table(
         self,
         fovs: Optional[Sequence[str]] = None,
@@ -869,9 +905,12 @@ class BIADataSource:
 
         ``fovs`` restricts a CSV table to the rows of those FOVs, streamed so the
         full table is never held in memory or on disk — the practical difference
-        between a 361 MB table and the ~8 MB slice a Binder session needs.  Pass
+        between a 361 MB table and the 12 MB slice a Binder session needs.  Pass
         ``None`` for the whole table.  ``force`` re-fetches an already cached
         copy.  Returns ``None`` when the descriptor declares no cell table.
+
+        A Parquet table should go through :meth:`open_cell_table_source` instead,
+        which reads columns in place rather than downloading anything (#141).
         """
 
         spec = self.layout.cell_table

@@ -30,7 +30,12 @@ from ipywidgets import (
     Text,
     VBox,
 )
-from ueler.cell_table import categorical_columns
+from ueler.cell_table import (
+    categorical_columns,
+    ensure_table_columns,
+    table_columns,
+    table_schema,
+)
 from ueler.viewer.plugin.channel_picker_widget import build_channel_picker
 from matplotlib.backend_bases import MouseButton
 from matplotlib.text import Annotation
@@ -66,7 +71,7 @@ def _feature_columns(main_viewer):
     FlowSOM deliberately offers *all* columns as clustering features (not just the
     numeric ones the scatter/histogram pickers show), so this only reorders them.
     """
-    columns = main_viewer.cell_table.columns.tolist()
+    columns = table_columns(main_viewer)
     return _chart_common.marker_first(main_viewer, columns)
 
 
@@ -100,14 +105,20 @@ class RunFlowsom(PluginBase):
     def on_cell_table_change(self):
         # Update the channel_selector options
         self.ui_component.channel_selector.allowed_tags = _feature_columns(self.main_viewer)
-        self.ui_component.subset_on_dropdown.options = categorical_columns(self.main_viewer.cell_table)
+        self.ui_component.subset_on_dropdown.options = categorical_columns(table_schema(self.main_viewer))
 
     @update_status_bar
     def run_flowsom(self, b):
         # First, subset the data based on the selected high-level clusters
         subset_on = self.ui_component.subset_on_dropdown.value
         subset = list(self.ui_component.subset_selector.value)
-        df = self.main_viewer.cell_table
+        # FlowSOM clusters on whichever features the user ticked, over every row —
+        # so those columns (and the subset column) must be materialised first
+        # (#141).  A no-op for an eager table.
+        df = ensure_table_columns(
+            self.main_viewer,
+            [subset_on, *self.ui_component.channel_selector.value],
+        )
         if subset:
             in_subset = df[subset_on].isin(subset)
             df_src = df.copy()
@@ -185,6 +196,7 @@ class RunFlowsom(PluginBase):
         selected_clusters = change['new']  # Get the selected clusters
         if selected_clusters:
             # Filter the cell_table based on the selected high-level clusters
+            ensure_table_columns(self.main_viewer, [selected_clusters])
             filtered_fovs = self.main_viewer.cell_table[selected_clusters].unique()
             # Update the subset_selector options
             self.ui_component.subset_selector.options = filtered_fovs
@@ -249,7 +261,7 @@ class UiComponent:
             placeholder='Type to filter features...',
             layout=Layout(width='100%'),
         )
-        cluster_columns = categorical_columns(parent.main_viewer.cell_table)
+        cluster_columns = categorical_columns(table_schema(parent.main_viewer))
         self.column_name_text = Text(
             value="FlowSOM_cluster",
             description='Save as:',

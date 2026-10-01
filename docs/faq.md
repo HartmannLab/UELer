@@ -52,7 +52,9 @@ load_cell_table(viewer, cell_table=cell_table, auto_display=True, after_plugins=
 ```
 
 `run_viewer` itself has no `cell_table_path` argument — the table is always attached with
-`load_cell_table`. `cell_table=` also accepts an **AnnData** object and `cell_table_path=` an
+`load_cell_table`. For a large table, pass a `.parquet` file (see
+[Getting Started](getting-started.md#a-large-table-use-parquet)) and its columns are read on
+demand rather than all at once. `cell_table=` also accepts an **AnnData** object and `cell_table_path=` an
 `.h5ad` file. See [Get Started](getting-started.md) and
 [Working with a Cell Table](tutorials/cell-table.md).
 
@@ -69,15 +71,15 @@ viewer = ueler.run_viewer_bia(
         "base": "Files/spatial_murine_iCCAvsHCC/image_data",
         "mask_dir": "Files/spatial_murine_iCCAvsHCC/segmentation/cleaned_mask",
         "mask_glob": "{fov}_*.tiff",
-        "cell_table": "Files/spatial_murine_iCCAvsHCC/cell_table/pCSL005_cell_table.csv",
+        "cell_table": "Files/spatial_murine_iCCAvsHCC/cell_table/pCSL005_cell_table.parquet",
     },
 )
 
-# Attach the study's cell table for the FOVs you plan to open.
-ueler.load_bia_cell_table(viewer, fovs=viewer.available_fovs[:12])
+# Attach the study's cell table (all 439,339 cells; a few seconds).
+ueler.load_bia_cell_table(viewer)
 ```
 
-Only the channels you open are streamed/cached; here each FOV is a `<FOV>.zip` read per member over HTTP ranges (`fov_container`). The `cell_table` key points at the study's cell table, and `fovs=` restricts it to the FOVs you name, filtered while the file streams so a 361 MB table never has to be held whole. See `script/run_ueler_BIA.ipynb` for more examples.
+Only the channels you open are streamed/cached; here each FOV is a `<FOV>.zip` read per member over HTTP ranges (`fov_container`). The `cell_table` key points at the study's cell table. This study publishes it as both `.csv` and `.parquet`; the Parquet one is used above and is read column by column over range requests without being downloaded, so no `fovs=` is needed. For a `.csv` table, `fovs=` restricts it to the FOVs you name, filtered while the file streams so a 361 MB table never has to be held whole. See `script/run_ueler_BIA.ipynb` for more examples.
 
 ---
 

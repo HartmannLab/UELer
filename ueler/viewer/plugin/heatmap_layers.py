@@ -27,7 +27,12 @@ except Exception:  # pragma: no cover - optional in non-notebook contexts
     def display(*_args, **_kwargs):
         return None
 
-from ueler.cell_table import categorical_columns
+from ueler.cell_table import (
+    categorical_columns,
+    ensure_table_columns,
+    table_has_column,
+    table_schema,
+)
 from ueler.viewer.decorators import update_status_bar
 from ueler.viewer.plugin import _chart_common
 from ipywidgets import HBox, HTML, Layout, Output, Tab, VBox
@@ -465,12 +470,16 @@ class DataLayer:
         _logger.info("Data autosaved to %s", data_file)
 
     def prepare_heatmap_data(self):
-        df = self.main_viewer.cell_table
         cluster_column = self.ui_component.high_level_cluster_dropdown.value
         subset_on = self.ui_component.subset_on_dropdown.value
 
         marker_columns = list(self.ui_component.channel_selector.value)
         channel = marker_columns + [cluster_column]
+        # Every marker the user ticked, plus the cluster and subset columns, has to
+        # be in the frame before the heatmap groups on them (#141).
+        df = ensure_table_columns(
+            self.main_viewer, [*marker_columns, cluster_column, subset_on]
+        )
 
         _logger.debug("Preparing heatmap data for channels: %s", channel)
         _logger.debug("Using cluster: %s", [cluster_column])
@@ -529,11 +538,15 @@ class DataLayer:
         column_name = self.ui_component.column_name_text.value
         overwrite = self.ui_component.overwrite_checkbox.value
 
-        if column_name in self.main_viewer.cell_table.columns:
+        # Schema, not frame (#141): the name in the text box may collide with a
+        # column that exists in the file but is not materialised, and answering
+        # "no collision" there would merge a duplicate instead of warning.
+        if table_has_column(self.main_viewer, column_name):
             if not overwrite:
                 _logger.warning("If you intend to overwrite the existing column, please check the 'Overwrite' checkbox.")
                 return
             _logger.info("Overwriting the existing column.")
+            ensure_table_columns(self.main_viewer, [column_name, f"{column_name}_revised"])
             self.main_viewer.cell_table.drop(column_name, axis=1, inplace=True)
             if f"{column_name}_revised" in self.main_viewer.cell_table.columns:
                 self.main_viewer.cell_table.drop(f"{column_name}_revised", axis=1, inplace=True)
@@ -583,7 +596,7 @@ class DataLayer:
                 revised_label_column
             ].map(self._meta_cluster_display_name)
 
-        cluster_columns = categorical_columns(self.main_viewer.cell_table)
+        cluster_columns = categorical_columns(table_schema(self.main_viewer))
         _logger.debug("Cluster-capable columns: %s", cluster_columns)
 
         self.main_viewer.inform_plugins('on_cell_table_change')
@@ -592,7 +605,7 @@ class DataLayer:
         self.display_row_colors_as_patches()
 
     def on_cell_table_change(self):
-        cluster_columns = categorical_columns(self.main_viewer.cell_table)
+        cluster_columns = categorical_columns(table_schema(self.main_viewer))
         old_cluster = self.ui_component.high_level_cluster_dropdown.value
         self.ui_component.high_level_cluster_dropdown.options = cluster_columns
         self.ui_component.high_level_cluster_dropdown.value = old_cluster

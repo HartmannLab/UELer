@@ -115,12 +115,12 @@ viewer = run_viewer_bia(
         "base": "Files/spatial_murine_iCCAvsHCC/image_data",
         "mask_dir": "Files/spatial_murine_iCCAvsHCC/segmentation/cleaned_mask",
         "mask_glob": "{fov}_*.tiff",
-        "cell_table": "Files/spatial_murine_iCCAvsHCC/cell_table/pCSL005_cell_table.csv",
+        "cell_table": "Files/spatial_murine_iCCAvsHCC/cell_table/pCSL005_cell_table.parquet",
     },
 )
 
-# The study's cell table, restricted to the FOVs you plan to open:
-load_bia_cell_table(viewer, fovs=viewer.available_fovs[:12])
+# The study's cell table — read column by column over the network, never downloaded:
+load_bia_cell_table(viewer)
 ```
 Because BIA studies have no standard folder layout, a small JSON **descriptor** (a dict or a path
 to a `.json` file) maps the study files onto FOVs / channels / masks; when omitted, UELer attempts
@@ -154,6 +154,8 @@ For more details, see the [user guide](https://hartmannlab.github.io/UELer/lates
 
 ## New Update  
 ### **UELer v0.5.1-alpha1 Summary**
+
+- **A large cell table can now be loaded a column at a time, if you save it as Parquet (follow-up to issue #140).** Save your table with `python tools/cell_table_to_parquet.py cells.csv cells.parquet`, then load the `.parquet` instead of the `.csv`. The viewer reads only the columns it needs: it opens knowing every column's name and type, so all the dropdowns are complete from the start, and fetches a marker's values the first time you plot it. The S-BIAD2557 example now uses the study's own `.parquet` table: it opens with all **439,339 cells across 455 FOVs in about three seconds**, where the 361 MB CSV took several minutes for a twelve-FOV slice. Nothing about how you use the viewer changes, and every statistic — the mask painter's automatic colour range, the heatmap, FlowSOM — is still computed over every cell, never just the fields of view you have opened. A BIA study can point its `cell_table` descriptor entry at a `.parquet` file and it is read the same way, over the network, without downloading it.
 
 - **The Binder demo now opens the study's cell table, and streams its images again (issue #140).** `S-BIAD2557` has changed shape since the example was written — each field of view is now a single `.zip` of channel images, which the old example could not see, so it found no fields of view at all. The example is fixed and now also loads the study's cell table, which is what turns on the heatmap, the scatter plot and the cell gallery. Because that table is 361 MB (about 440,000 cells), it is loaded for the first twelve fields of view by default: the rows are filtered while the file streams, so a small session never has to hold the whole table. Any BIA study can do the same by adding a `cell_table` entry to its descriptor and calling `load_bia_cell_table(viewer, fovs=...)`.
 

@@ -69,7 +69,7 @@ path is not provided.
 base_folder = "/path/to/your/image_data"                     # Required
 masks_folder = "/path/to/segmentation/output"                # Optional
 annotations_folder = "/path/to/annotations"                  # Optional
-cell_table_path = "/path/to/cell_table.csv"                  # Optional (.csv or .h5ad)
+cell_table_path = "/path/to/cell_table.csv"                  # Optional (.csv, .parquet or .h5ad)
 ```
 
 | Variable | Purpose | Required |
@@ -77,7 +77,7 @@ cell_table_path = "/path/to/cell_table.csv"                  # Optional (.csv or
 | `base_folder` | FOV folders containing per-channel TIFF images | ✅ Yes |
 | `masks_folder` | Segmentation `.tif` rasters | ❌ Optional |
 | `annotations_folder` | Annotation raster `.tif` files | ❌ Optional |
-| `cell_table_path` | Per-cell feature table (`.csv`, or `.h5ad` for AnnData) | ❌ Optional |
+| `cell_table_path` | Per-cell feature table (`.csv`, `.parquet`, or `.h5ad` for AnnData) | ❌ Optional |
 
 ### 3. Launch the Viewer
 
@@ -133,6 +133,29 @@ load_cell_table(viewer, cell_table=ad.read_h5ad("cells.h5ad"), auto_display=True
     histogram plots and the cell gallery enabled. If you have no cell table, skip step 2 and let
     `run_viewer` display on its own (`auto_display` defaults to `True`).
 
+#### A large table: use Parquet
+
+A study-scale table is wide as well as long, and loading all of it to plot one marker is what makes a big table slow. Convert it once:
+
+```bash
+python tools/cell_table_to_parquet.py cell_table.csv cell_table.parquet
+```
+
+then pass the `.parquet` to `load_cell_table` exactly as you would the CSV. The viewer reads the column names and types up front, so every marker, cluster and annotation dropdown is complete the moment it opens, and it fetches a column's values the first time something plots them. Nothing about using the viewer changes, and nothing is approximated: every column arrives complete, so the mask painter's automatic colour range, the heatmap, FlowSOM and the histogram gates are all still computed over every cell.
+
+The converter prints what each column costs, which is what materialising it will cost later:
+
+```text
+wrote cell_table.parquet: 2.8 MB, 16 row group(s) of ~897 rows, compression=zstd
+
+per-column footprint (2.8 MB total):
+    2.4%       70.0 KB  CD45
+    2.4%       69.5 KB  Ki67
+    ...
+```
+
+Use `--row-groups` if you want to tune it; the default of 16 is chosen for whole-column reads, which is the access pattern the viewer actually has.
+
 !!! tip "`%matplotlib widget`"
     The `%matplotlib widget` magic enables the interactive backend used by the viewer. Run it once
     per kernel session before launching.
@@ -157,15 +180,17 @@ viewer = ueler.run_viewer_bia(
         "base": "Files/spatial_murine_iCCAvsHCC/image_data",
         "mask_dir": "Files/spatial_murine_iCCAvsHCC/segmentation/cleaned_mask",
         "mask_glob": "{fov}_*.tiff",
-        "cell_table": "Files/spatial_murine_iCCAvsHCC/cell_table/pCSL005_cell_table.csv",
+        "cell_table": "Files/spatial_murine_iCCAvsHCC/cell_table/pCSL005_cell_table.parquet",
     },
 )
 
-# Attach the study's cell table for the FOVs you plan to open.
-ueler.load_bia_cell_table(viewer, fovs=viewer.available_fovs[:12])
+# Attach the study's cell table (all 439,339 cells; a few seconds).
+ueler.load_bia_cell_table(viewer)
 ```
 
-The descriptor's `cell_table` key names the study's cell table; `load_bia_cell_table` caches it in the workspace and attaches it, and `fovs=` keeps only those FOVs' rows — filtered while the file streams, which matters here because the table is 361 MB / ~440,000 cells. Pass `fovs=None` for the whole table, or `run_viewer_bia(..., cell_table=True)` to attach it as the viewer opens.
+The descriptor's `cell_table` key names the study's cell table, and `load_bia_cell_table` attaches it — or pass `run_viewer_bia(..., cell_table=True)` to attach it as the viewer opens.
+
+`S-BIAD2557` publishes the table as both `.csv` and `.parquet`, and the descriptor above points at the **Parquet** one, which is why there is no `fovs=` here: nothing is downloaded, the file is read over HTTP range requests a column at a time, and all 439,339 cells across 455 FOVs are there from the start. Pointing `cell_table` at the `.csv` instead falls back to fetching the file into the workspace, where `fovs=` is worth using to keep only the rows of the FOVs you name — the CSV is 361 MB and has no column index, so it is read end to end either way.
 
 See `script/run_ueler_BIA.ipynb` for more worked examples across several studies.
 
