@@ -153,21 +153,13 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 For more details, see the [user guide](https://hartmannlab.github.io/UELer/latest/tutorials/user-interface).
 
 ## New Update  
-### **UELer v0.5.1-alpha1 Summary**
+### **UELer v0.5.1-alpha2 Summary**
 
 - **A large cell table can now be loaded a column at a time, if you save it as Parquet (follow-up to issue #140).** Save your table with `python tools/cell_table_to_parquet.py cells.csv cells.parquet`, then load the `.parquet` instead of the `.csv`. The viewer reads only the columns it needs: it opens knowing every column's name and type, so all the dropdowns are complete from the start, and fetches a marker's values the first time you plot it. The S-BIAD2557 example now uses the study's own `.parquet` table: it opens with all **439,339 cells across 455 FOVs in about three seconds**, where the 361 MB CSV took several minutes for a twelve-FOV slice. Nothing about how you use the viewer changes, and every statistic — the mask painter's automatic colour range, the heatmap, FlowSOM — is still computed over every cell, never just the fields of view you have opened. A BIA study can point its `cell_table` descriptor entry at a `.parquet` file and it is read the same way, over the network, without downloading it.
 
 - **The Binder demo now opens the study's cell table, and streams its images again (issue #140).** `S-BIAD2557` has changed shape since the example was written — each field of view is now a single `.zip` of channel images, which the old example could not see, so it found no fields of view at all. The example is fixed and now also loads the study's cell table, which is what turns on the heatmap, the scatter plot and the cell gallery. Because that table is 361 MB (about 440,000 cells), it is loaded for the first twelve fields of view by default: the rows are filtered while the file streams, so a small session never has to hold the whole table. Any BIA study can do the same by adding a `cell_table` entry to its descriptor and calling `load_bia_cell_table(viewer, fovs=...)`.
 
-- **Deleting saved work now asks you first, everywhere it is permanent (issue #139).** Saved export configs, mask colour sets, analysis checkpoints, ROIs and annotation palettes each open a dialog naming what is about to go. All five write to disk the moment they run — the ROI delete rewrites its CSV on the spot — so none of them can be undone. Actions that are cheap to redo, such as **Clear selection** on a plot, still happen immediately.
-
-- **Deleting a marker set now asks you first (issue #139).** **Delete Marker Set** opens a dialog naming the set and what goes with it; **Delete** removes it, **Cancel** does not. The separate **Confirm Deletion** checkbox is gone — it sat two rows below the button, so the first click looked as though it had done nothing.
-
-- **Histograms can be re-binned over a range you choose (issue #138).** Every histogram now has its own range slider beneath it: drag the two handles and that channel's bins are recomputed inside the window, so a marker whose values pile up near zero with a long tail becomes readable instead of collapsing into the first two bars. **Full range** restores the whole channel. Only the histogram you adjust changes — the others keep their range, zoom and gate. Note that this is not the same as the toolbar's zoom, which magnifies the bars already drawn without moving the bin edges.
-
-- **The `.UELer` settings folder no longer has to live inside the dataset directory.** `run_viewer(base_folder, settings_path=...)` moves it to `<settings_path>/<base_folder name>/.UELer` instead of `<base_folder>/.UELer` — useful when `base_folder` is read-only, or a downstream pipeline must not see extra files under its dataset root. Omit `settings_path` and nothing changes. If neither location is writable, the viewer now fails immediately with a message naming the folder and suggesting `settings_path=...`, instead of a bare traceback.
-
-_Earlier changes (v0.5.0 and before) are in the [update log](https://github.com/HartmannLab/UELer/blob/main/doc/log.md)._
+_Earlier changes (v0.5.1-alpha1 and before) are in the [update log](https://github.com/HartmannLab/UELer/blob/main/doc/log.md)._
 
 ## License
 UELer is released under the **BSD 3-Clause License** — see
