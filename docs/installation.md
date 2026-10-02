@@ -244,5 +244,8 @@ The documentation site is then available at `http://127.0.0.1:8000`.
 !!! tip "Widget not rendering"
     The interactive scatter is the default in every environment, VS Code included. If widgets do not render at all, check that `%matplotlib widget` ran in the kernel; a static Matplotlib scatter is available as an opt-in fallback. See the [FAQ](faq.md) for details.
 
+!!! tip "`Unable to find widget 'anywidget'` in VS Code"
+    The JavaScript half of `anywidget` is not where your frontend looks for it, usually because it was installed with `pip install --user` while the kernel runs from a different environment. Reinstall it into the kernel's environment (`pip install --force-reinstall anywidget`), or add `"jsdelivr.com"` to the VS Code setting `jupyter.widgetScriptSources`. See the [FAQ](faq.md#my-editor-cannot-find-the-widget-anywidget) for why JupyterLab can work while VS Code does not.
+
 !!! tip "ModuleNotFoundError on import"
     Make sure you have activated the correct environment and that `pip install -e .` completed without errors.

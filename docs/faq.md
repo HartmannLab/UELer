@@ -96,6 +96,19 @@ Make sure the correct `micromamba`/conda environment is active first. Create it 
 `environment.yml`, then install UELer. For documentation or test extras, use `pip install ".[docs]"`
 or `pip install ".[dev]"`.
 
+### Why can't UELer install the widget frontend for me?
+
+Because no package can. This comes up whenever a widget's browser half goes missing — see [My editor cannot find the widget `anywidget`](#my-editor-cannot-find-the-widget-anywidget) — and the instinct is that UELer should be able to declare its way out of it. It cannot, and no change to UELer's `pyproject.toml` would help.
+
+A Python package declares **what** it needs. **Where** those files land is decided entirely by the `pip` command you run — `--user`, `--prefix`, `--target`, or simply which environment was active. Nothing in dependency metadata can reach across and constrain that. So the same `anywidget>=0.9` line produces a working install or a broken one depending only on how you invoked pip.
+
+Two specific ideas that look promising and are not:
+
+- **Pinning a newer `anywidget`.** This would only help if some release shipped no browser files at all. None does: every version from 0.9.0 through 0.11 ships both `share/jupyter/labextensions/anywidget/` and `share/jupyter/nbextensions/anywidget/`. The files are always built — the only question is which directory they were copied into.
+- **Shipping a copy of the browser files with UELer.** Technically possible, genuinely harmful. It writes into another package's namespace, fighting pip and conda over who owns those files, and it goes stale by construction: the JavaScript has to match whichever `anywidget` version resolves at runtime, and UELer deliberately accepts a range. You would be trading a loud, diagnosable failure for a quiet version mismatch.
+
+What actually fixes it is the install itself — put `anywidget` in the environment your kernel runs from, rather than in a user-level directory beside it. UELer's part is to notice and say so: the viewer checks at startup and logs a warning naming the paths it found and the remedies, instead of leaving you with blank panels and a frontend notification about a package you never installed on purpose.
+
 ---
 
 ## Viewer & Widgets
@@ -106,6 +119,21 @@ Run `%matplotlib widget` once per kernel session before launching the viewer —
 interactive backend UELer relies on. If widgets still don't appear, restart the kernel and re-run the
 cells. See [Display Settings](tutorials/display-settings.md#before-you-launch) for the rest of the
 launch checklist.
+
+### My editor cannot find the widget `anywidget`
+
+The full message is usually `Unable to find widget 'anywidget' version '~0.9.*' from configured widget sources ["local"]. Expected behavior may be affected.`
+
+Several parts of UELer — the channel picker, the ROI expression editor, the Mask Painter class list, the gallery tiles and the scatter plot — are built with `anywidget`, which has a Python half and a JavaScript half. That notification means your frontend found the Python half but not the JavaScript, so those panels come up as empty boxes. It is a packaging problem, not a bug in your data or notebook.
+
+The usual cause is installing into one place and running the kernel from another — most often `pip install --user` while the kernel runs from a shared or read-only environment. The files then land in `~/.local/share/jupyter/`, where JupyterLab finds them but VS Code does not: VS Code's `local` widget source searches only `<environment>/share/jupyter/nbextensions`. That is why the same environment can work in JupyterLab and fail in VS Code.
+
+Either of these fixes it:
+
+- **Install into the environment the kernel runs from**, without `--user`: `pip install --force-reinstall anywidget`.
+- **Let VS Code fetch widget scripts from a CDN**: add `"jsdelivr.com"` to the `jupyter.widgetScriptSources` setting, then reload the window.
+
+UELer checks for this when the viewer opens and logs a warning naming the paths it found, so you do not have to work it out from the frontend notification alone. For why UELer cannot simply install the missing files itself, see [Why can't UELer install the widget frontend for me?](#why-cant-ueler-install-the-widget-frontend-for-me)
 
 ### Do I need to set `UELER_SCATTER_BACKEND`?
 

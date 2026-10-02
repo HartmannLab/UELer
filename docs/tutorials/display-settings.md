@@ -30,6 +30,16 @@ Without it the canvas renders as a static PNG — no zoom, no pan, no lasso. If 
 
 ---
 
+## The Setup Dialog
+
+The first time you open a dataset, UELer puts a short setup dialog in front of the viewer asking for exactly the settings that apply to what you loaded: the viewer settings always, the **Mask key:** if you passed a masks folder, and the cell-table column mapping if you loaded a table. It exists because these settings are easy to miss and expensive to get wrong — the pixel size in particular is applied silently and shows up in every exported figure.
+
+The fields in the dialog *are* the fields in the left panel, so whatever you set there is already applied and stays editable in **Advanced Settings** afterwards. **Skip setup** dismisses it. UELer remembers which steps it has shown for each dataset (in `.UELer/setup_dialog.json`), so it does not ask again — and if you load a cell table later in the same session, it asks only about the new columns.
+
+The rest of this section is what the dialog asks for, with the reasoning behind each answer.
+
+---
+
 ## The Four Things to Set First
 
 Do these in order the first time you open a dataset. Two of the four are wrong by default for most non-MIBI data.

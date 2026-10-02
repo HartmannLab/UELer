@@ -31,6 +31,7 @@ from ueler.data_loader import (
     load_images_for_fov,
     load_masks_for_fov,
     load_one_channel_fov,
+    discover_mask_suffixes,
     merge_channel_max,
     OMEFovWrapper,
     find_ome_tiff_files,
@@ -53,7 +54,21 @@ import json
 
 from .image_display import ImageDisplay
 from .ipympl_guard import install_canvas_message_guard
+from .widget_frontend_check import warn_about_widget_frontend
 from .confirm_dialog import confirm_via, escape_name
+from .data_mapping import (
+    CELL_TABLE_FIELDS,
+    MASK_FIELD,
+    apply_options,
+    column_options,
+    ensure_option,
+)
+from .setup_dialog import (
+    build_setup_steps,
+    load_seen_steps,
+    record_seen_steps,
+    setup_state_path,
+)
 import importlib
 from ueler.viewer.plugin.plugin_base import PluginBase
 from ueler.viewer.annotation_palette_editor import AnnotationPaletteEditor
@@ -258,6 +273,10 @@ class ImageMaskViewer:
         # a bound method in Canvas.__init__, so a canvas created earlier keeps
         # the unguarded one.  See ueler/viewer/ipympl_guard.py.
         install_canvas_message_guard()
+        # Six plugins render as anywidget subclasses, and a frontend that cannot
+        # resolve the anywidget JS shows them as empty boxes with nothing in the
+        # kernel log.  See ueler/viewer/widget_frontend_check.py.
+        warn_about_widget_frontend()
         # Optional remote data source (issue #110, BIA streaming). When set, FOV
         # discovery and per-FOV image/mask reads route through it instead of the
         # local filesystem; ``base_folder`` is then a local workspace directory
@@ -655,6 +674,14 @@ class ImageMaskViewer:
             logger.debug(
                 f"[INIT DEBUG] load_widget_states done; reconciled downsample factor={self.current_downsample_factor}"
             )
+
+        # Fill the Data mapping dropdowns from the dataset itself (#142).  At
+        # this point only the masks folder is known -- a cell table attached
+        # later refreshes again from ``after_all_plugins_loaded``.
+        try:
+            self.refresh_data_mapping_options()
+        except Exception:
+            logger.debug("[viewer] Initial data-mapping option refresh failed.", exc_info=True)
 
         # Setup attribute observers
         if self._debug:
@@ -1971,6 +1998,20 @@ class ImageMaskViewer:
                     attr.after_all_plugins_loaded()
                 except Exception as exc:
                     logger.warning(f"[viewer] after_all_plugins_loaded failed for {attr_name}: {exc}")
+
+        # The only hook both ``run_viewer()`` and ``load_cell_table()`` call
+        # after ``display_ui()``, which makes it the one place where the data
+        # mapping can be filled from a table that may have arrived after the
+        # widgets were built (#142).  Guarded: a dataset that defeats discovery
+        # must not stop the viewer from opening.
+        try:
+            self.refresh_data_mapping_options()
+        except Exception:
+            logger.debug("[viewer] Refreshing the data-mapping options failed.", exc_info=True)
+        try:
+            self.maybe_show_setup_dialog()
+        except Exception:
+            logger.debug("[viewer] The guided setup dialog could not be opened.", exc_info=True)
 
 
     def dynamically_load_plugins(self, allow_plugins: Optional[Iterable[str]] = None):
@@ -4887,6 +4928,90 @@ class ImageMaskViewer:
         self._notify_plugins_mask_outline_changed(thickness)
         
     
+    # ------------------------------------------------------------------
+    # Data mapping (#142)
+    # ------------------------------------------------------------------
+
+    def available_mask_suffixes(self, *, limit=3):
+        """Mask suffixes this dataset offers, for the ``Mask key:`` dropdown.
+
+        Unions two sources because neither is complete on its own.
+        ``mask_names_set`` holds every suffix seen so far, but it is filled as a
+        side effect of reading the TIFFs one FOV at a time, so at startup it
+        reflects the single FOV already loaded -- or none.
+        :func:`~ueler.data_loader.discover_mask_suffixes` re-derives the list
+        from the filenames without opening an image, which is what makes the
+        dropdown complete before the user has browsed anywhere.
+        """
+        suffixes = {str(name) for name in getattr(self, "mask_names_set", ()) or () if name}
+        folder = getattr(self, "masks_folder", None)
+        if folder:
+            try:
+                suffixes.update(
+                    discover_mask_suffixes(
+                        folder, getattr(self, "available_fovs", ()) or (), limit=limit
+                    )
+                )
+            except Exception:
+                logger.debug("[data mapping] mask suffix discovery failed.", exc_info=True)
+        return sorted(suffixes)
+
+    def refresh_data_mapping_options(self):
+        """Rebuild the Data-mapping dropdowns from the data that is loaded (#142).
+
+        Safe to call repeatedly and at any point in the lifecycle: a source that
+        offers nothing leaves its widget untouched, so an images-only session
+        keeps the shipped defaults and a cell table arriving later fills only
+        the four column dropdowns.  See ``ueler/viewer/data_mapping.py`` for why
+        replacing the options cannot change an answer that is still valid.
+        """
+        ui_component = getattr(self, "ui_component", None)
+        if ui_component is None:
+            return
+        try:
+            schema = self.cell_table_schema
+        except Exception:
+            logger.debug("[data mapping] cell-table schema unavailable.", exc_info=True)
+            schema = {}
+        if schema:
+            for field in CELL_TABLE_FIELDS:
+                apply_options(
+                    getattr(ui_component, field.attribute, None),
+                    column_options(schema, numeric_only=field.numeric_only),
+                    preferred=field.preferred,
+                )
+        apply_options(
+            getattr(ui_component, MASK_FIELD.attribute, None),
+            self.available_mask_suffixes(),
+            preferred=MASK_FIELD.preferred,
+        )
+        # ``on_key_change`` already mirrored every value the calls above
+        # changed, but not the ones they left alone; this is the cheap way to
+        # guarantee the viewer attributes match the widgets either way.
+        self.update_keys()
+
+    # ------------------------------------------------------------------
+    # Guided setup (#142)
+    # ------------------------------------------------------------------
+
+    def maybe_show_setup_dialog(self):
+        """Open the first-run setup wizard if this dataset still needs it.
+
+        ``False`` when there is nothing to ask -- every applicable step already
+        answered for this dataset, no dialog mounted, or the widget tree not on
+        screen yet (opening a modal into a tree that has not been displayed
+        would show it on the *next* render, over whatever is there then).
+        """
+        ui_component = getattr(self, "ui_component", None)
+        dialog = getattr(ui_component, "setup_dialog", None)
+        if dialog is None or not getattr(self, "_widget_displayed", False):
+            return False
+        path = setup_state_path(self)
+        steps = build_setup_steps(self, seen=load_seen_steps(path))
+        if not steps:
+            return False
+        return dialog.open(steps, on_close=lambda keys: record_seen_steps(path, keys))
+
     def update_keys(self, *args):
         # Update key attributes based on the loaded widget values.
         if hasattr(self.ui_component, 'x_key'):
@@ -4899,9 +5024,10 @@ class ImageMaskViewer:
             self.mask_key = self.ui_component.mask_key.value
         if hasattr(self.ui_component, 'fov_key'):
             self.fov_key = self.ui_component.fov_key.value
-        # The key widgets are free-text, so a retargeted key may name a column a
-        # lazy table has not read yet; without this the viewer would locate no
-        # cells at all (#141).  A no-op for an eager table.
+        # A key the user retargets -- in the dropdown or in the setup dialog
+        # (#142) -- may name a column a lazy table has not read yet; without
+        # this the viewer would locate no cells at all (#141).  A no-op for an
+        # eager table.
         self.ensure_columns([self.x_key, self.y_key, self.label_key, self.fov_key])
 
 
@@ -5295,6 +5421,13 @@ class ImageMaskViewer:
                     if hasattr(attr, 'value'):
                         if self._debug:
                             logger.debug(f"[INIT DEBUG] restoring widget '{attr_name}' = {value!r}")
+                        # The data-mapping keys are dropdowns now (#142), and a
+                        # dropdown refuses a value outside its options.  A saved
+                        # key whose column is gone from this dataset would
+                        # otherwise raise and abort the rest of the restore, so
+                        # it is re-admitted as an option of its own -- visibly
+                        # wrong beats silently retargeted.
+                        ensure_option(attr, value)
                         attr.value = value
                         if self._debug:
                             logger.debug(f"[INIT DEBUG] widget '{attr_name}' restored ok")
@@ -5498,11 +5631,10 @@ class ImageMaskViewer:
             )
 
         if spine is None:
-            # The viewer's current keys *and* the conventional names: the key
-            # widgets are free-text, so a user may retarget ``label_key`` to a
-            # column the spine would otherwise not have read, and paying for a
-            # couple of extra integer columns now beats a stall on the first
-            # click.
+            # The viewer's current keys *and* the conventional names: a user
+            # may retarget ``label_key`` to a column the spine would otherwise
+            # not have read, and paying for a couple of extra integer columns
+            # now beats a stall on the first click.
             spine = list(cell_table_source.DEFAULT_SPINE) + [
                 self.fov_key, self.label_key, self.x_key, self.y_key
             ]

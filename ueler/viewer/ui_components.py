@@ -102,6 +102,8 @@ from .plugin.heatmap import HeatmapDisplay  # type: ignore[import-error]
 from .plugin.plugin_base import PluginBase  # type: ignore[import-error]
 from .annotation_display import AnnotationDisplay  # type: ignore[import-error]
 from .confirm_dialog import ConfirmDialog  # type: ignore[import-error]
+from .data_mapping import KEY_FIELDS  # type: ignore[import-error]
+from .setup_dialog import SetupDialog  # type: ignore[import-error]
 
 
 def _bounded_panel_layout(**overrides):
@@ -411,6 +413,11 @@ def display_ui(viewer):
     confirm_dialog = getattr(viewer.ui_component, 'confirm_dialog', None)
     if confirm_dialog is not None:
         root_children.append(confirm_dialog.view)
+    # The guided setup wizard (#142) mounts the same way and for the same
+    # reason; it is opened from ``after_all_plugins_loaded``, once per dataset.
+    setup_dialog = getattr(viewer.ui_component, 'setup_dialog', None)
+    if setup_dialog is not None:
+        root_children.append(setup_dialog.view)
     if getattr(viewer, "_debug", False):
         from ueler.viewer.log_console import enable_log_console, build_log_console_panel
         viewer.log_console_handler = enable_log_console()
@@ -651,6 +658,7 @@ class uicomponents:
         # further down the panel (#139), so the question arrives with the click
         # and names the set it is about to throw away.
         self.confirm_dialog = ConfirmDialog()
+        self.setup_dialog = SetupDialog()
 
         channel_selector_layout = _bounded_panel_layout(gap='4px')
         self.channel_selection_panel = VBox(
@@ -723,40 +731,23 @@ class uicomponents:
             style={'description_width': 'auto'}
         )
 
-        self.x_key = Text(
-            value='centroid-1',
-            description='X key:',
-            disabled=False
-        )
-        self.x_key.observe(viewer.on_key_change, names='value')
-
-        self.y_key = Text(
-            value='centroid-0',
-            description='Y key:',
-            disabled=False
-        )
-        self.y_key.observe(viewer.on_key_change, names='value')
-
-        self.label_key = Text(
-            value='label',
-            description='Label key:',
-            disabled=False
-        )
-        self.label_key.observe(viewer.on_key_change, names='value')
-        
-        self.mask_key = Text(
-            value='whole_cell',
-            description='Mask key:',
-            disabled=False
-        )
-        self.mask_key.observe(viewer.on_key_change, names='value')
-
-        self.fov_key = Text(
-            value='fov',
-            description='Fov key:',
-            disabled=False
-        )
-        self.fov_key.observe(viewer.on_key_change, names='value')
+        # The data-mapping keys are dropdowns, not free text (#142). Each one
+        # starts holding only its own default -- a Dropdown rejects a value
+        # outside its options, and nothing is loaded yet -- and is repopulated
+        # from the real columns and mask suffixes by
+        # ``viewer.refresh_data_mapping_options()``. See
+        # ``ueler/viewer/data_mapping.py`` for the rule that keeps replacing the
+        # options from changing an answer the user already gave.
+        for field in KEY_FIELDS:
+            default = field.preferred[0]
+            widget = Dropdown(
+                options=[default],
+                value=default,
+                description=field.description,
+                disabled=False,
+            )
+            widget.observe(viewer.on_key_change, names='value')
+            setattr(self, field.attribute, widget)
 
         identifiers_VBox = VBox([
             self.x_key,

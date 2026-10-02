@@ -6,6 +6,7 @@ import glob
 import logging
 import math
 import os
+import time
 import xml.etree.ElementTree as ET
 from typing import Dict, List, Optional, Tuple
 
@@ -227,6 +228,80 @@ def load_images_for_fov(fov_name, base_folder, channel_max_values, requested_cha
         channels[channel_name] = channel_image
 
     return channels
+
+
+MASK_EXTENSIONS = (".tiff", ".tif")
+
+#: Seconds :func:`discover_mask_suffixes` may spend scanning a mask folder.
+#: It runs during viewer construction, so the cap is what keeps a slow or
+#: very large network directory from making the viewer unopenable (#142).
+MASK_DISCOVERY_BUDGET = 2.0
+
+
+def discover_mask_suffixes(masks_folder, fov_names, *, limit=3, budget=MASK_DISCOVERY_BUDGET):
+    """Mask suffixes present in *masks_folder*, derived from filenames alone.
+
+    :func:`load_masks_for_fov` learns the suffixes as a side effect of reading
+    the TIFFs, one FOV at a time, so the ``mask_names_set`` it fills is only
+    ever as complete as the FOVs already visited -- at startup that is usually
+    one and sometimes none.  A dropdown of mask layers needs the list *before*
+    that (#142), so this re-derives it from the same ``{fov}_{suffix}.tif[f]``
+    convention without opening a single image.
+
+    *limit* caps how many FOV prefixes are recognised: by the convention the
+    list is the same for all of them, but scanning more than one still matters
+    because an individual FOV may be missing a mask the rest of the set has.
+
+    **One streaming pass, under a deadline.**  This runs inside
+    ``ImageMaskViewer.__init__``, where a cohort's mask folder may hold tens of
+    thousands of entries on shared network storage.  ``glob`` would materialise
+    the whole listing once per FOV; ``os.scandir`` streams it, and the *budget*
+    (seconds, ``None`` to disable) is checked as it goes, so a directory too
+    slow or too large to finish yields whatever was found rather than stalling
+    the constructor.  Discovery is an optimisation -- the dropdown falls back to
+    the suffixes ``mask_names_set`` accumulates -- so giving up early is always
+    preferable to making the viewer unopenable.
+    """
+    if not masks_folder:
+        return []
+    prefixes = []
+    for fov_name in fov_names or ():
+        if limit is not None and len(prefixes) >= limit:
+            break
+        name = str(fov_name)
+        if name:
+            prefixes.append(name + "_")
+    if not prefixes:
+        return []
+
+    deadline = (time.monotonic() + budget) if budget else None
+    suffixes = set()
+    scanned = 0
+    try:
+        with os.scandir(str(masks_folder)) as entries:
+            for scanned, entry in enumerate(entries, start=1):
+                # Checking the clock every entry would cost more than the match;
+                # every 512 bounds the overrun to a fraction of a directory.
+                if deadline is not None and scanned % 512 == 0 and time.monotonic() > deadline:
+                    logger.debug(
+                        "[masks] suffix discovery gave up after %d entries in %s; "
+                        "using the %d suffix(es) found so far.",
+                        scanned, masks_folder, len(suffixes),
+                    )
+                    break
+                stem, extension = os.path.splitext(entry.name)
+                if extension.lower() not in MASK_EXTENSIONS:
+                    continue
+                for prefix in prefixes:
+                    if stem.startswith(prefix) and len(stem) > len(prefix):
+                        suffixes.add(stem[len(prefix):])
+                        break
+    except OSError:
+        # A missing folder, a path that is not a directory, or an unreadable
+        # mount: all of them mean "no suffixes to offer", never an error.
+        logger.debug("[masks] could not scan %s for mask suffixes.", masks_folder, exc_info=True)
+        return []
+    return sorted(suffixes)
 
 
 def load_masks_for_fov(fov_name, masks_folder, mask_names_set):

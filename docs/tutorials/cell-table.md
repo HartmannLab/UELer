@@ -55,8 +55,10 @@ Markers are listed **first** in the marker pickers, so they aren't buried under 
 `X` and `Y`.
 
 Your `obs` must still contain the FOV and mask-label columns that link cells to the images — by
-default `fov` and `label`. If yours are named differently, set the **Fov key:** / **Label key:**
-fields in the left panel (or rename the columns in `obs` beforehand).
+default `fov` and `label`. If yours are named differently, pick the right ones from the **Fov key:** /
+**Label key:** dropdowns, which the setup dialog shows you when the table loads and which also live
+under **Advanced Settings → Data mapping**. Both lists are built from your own columns, so there is
+nothing to type and nothing to spell wrong.
 
 Two optional arguments:
 
