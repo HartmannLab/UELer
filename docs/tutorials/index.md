@@ -28,6 +28,7 @@ Everything here works on images alone — no cell table required.
 | Tutorial | What you'll learn |
 |---|---|
 | [Basic Usage](basic-usage.md) | Launch the viewer, pick an FOV, select channels, and navigate |
+| [Guided Setup](setup-dialog.md) | The dialog that opens on first load, and the key fields that link your table to the images |
 | [User Interface](user-interface.md) | A reference map of the four regions and every left-panel control |
 | [Display Settings](display-settings.md) | Set the viewer up so it shows your data correctly — pixel size, cache, downsampling, contrast |
 | [Regions of Interest](roi-manager.md) | Capture, tag, and browse ROIs that persist across sessions |

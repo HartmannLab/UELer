@@ -164,6 +164,20 @@ without a priming cell.
 2. Restart the kernel and run all cells again.
 3. Check that your data paths are correct.
 
+### The image loads but no cells are shown
+
+Almost always the **data mapping**: the four keys that tell UELer which columns of your cell table hold the coordinates, the mask label and the FOV name. If one of them names a column your table does not have, UELer finds no cells to draw — and an empty overlay looks exactly the same as a dataset that genuinely has nothing in it, which is what makes this hard to spot.
+
+Open **Advanced Settings → Data mapping** in the left panel and compare **X key:**, **Y key:**, **Label key:** and **Fov key:** against your table's real column names. Each field offers your own columns as suggestions, so in the normal case you can pick the right one; it also accepts a name typed by hand. **Mask key:** does the same for the mask suffixes in your masks folder.
+
+The [setup dialog](tutorials/setup-dialog.md) asks for exactly these when a table first loads, and pre-fills the ones it recognises — so if you skipped it, that is the thing to check first.
+
+### Launching takes a long time on shared or network storage
+
+Opening a dataset reads the FOV list and scans the masks folder, and on a shared filesystem (an HPC project mount, say) a directory holding tens of thousands of mask files can make that scan the slowest part of startup. UELer caps it: the mask-suffix scan is a single streaming pass over the directory with a two-second budget, and if the budget runs out it uses what it found and carries on. The **Mask key:** list then fills in as you browse FOVs, so a partial scan costs you a shorter suggestion list and nothing else — you can always type the suffix you want.
+
+If launching is slow beyond that, the remaining cost is reading the images themselves. Lower **Cache Size:** if memory is the constraint, and see [Display Settings](tutorials/display-settings.md) for the downsampling options.
+
 ### Channel images appear all-white or all-black
 
 This is a contrast issue. Each channel's display range starts at the 99.9th percentile of its data,

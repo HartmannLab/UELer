@@ -79,16 +79,18 @@ Also its own accordion section, visible when `annotations_folder` contains valid
 Two tabs inside one accordion section:
 
 - **Data mapping** — **X key:**, **Y key:**, **Label key:**, **Mask key:** and **Fov key:**, the names
-  that link your cell table and your masks to the images. All five are **dropdowns built from your own
-  data**: the four cell-table keys list the columns your table actually has (**X key:** and **Y key:**
-  list the numeric ones), and **Mask key:** lists the mask suffixes found in your masks folder. There
-  is nothing to type, so there is nothing to spell wrong. Without a cell table the four column
-  dropdowns keep their defaults, since there is nothing to offer yet.
+  that link your cell table and your masks to the images. Each is a text field with a **suggestion
+  list built from your own data**: the four cell-table keys offer the columns your table actually has
+  (**X key:** and **Y key:** offer the numeric ones), and **Mask key:** offers the mask suffixes found
+  in your masks folder. So you normally pick rather than spell — and you can still type a name the
+  list does not contain, which is what keeps the field usable when discovery comes up short. Without
+  a cell table the four column fields keep their defaults, since there is nothing to offer yet. See
+  [Guided Setup](setup-dialog.md#the-key-fields-are-suggestion-lists-not-menus).
 - **Advanced Settings** — **Cache Size:**, the **Pixel Size (nm):** input that drives the
   [scale bar](#main-viewer), and a **Downsample** toggle.
 
 !!! note "You are asked for these on first load"
-    A [setup dialog](display-settings.md#the-setup-dialog) opens the first time you load a dataset and
+    A [setup dialog](setup-dialog.md) opens the first time you load a dataset and
     walks you through whichever of these apply to what you loaded. It edits these same fields, so
     anything you set there is already applied here.
 

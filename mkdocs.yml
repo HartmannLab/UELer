@@ -82,6 +82,7 @@ nav:
       - Overview: tutorials/index.md
       - Essentials:
           - Basic Usage: tutorials/basic-usage.md
+          - Guided Setup: tutorials/setup-dialog.md
           - User Interface: tutorials/user-interface.md
           - Display Settings: tutorials/display-settings.md
           - Regions of Interest: tutorials/roi-manager.md

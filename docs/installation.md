@@ -247,5 +247,8 @@ The documentation site is then available at `http://127.0.0.1:8000`.
 !!! tip "`Unable to find widget 'anywidget'` in VS Code"
     The JavaScript half of `anywidget` is not where your frontend looks for it, usually because it was installed with `pip install --user` while the kernel runs from a different environment. Reinstall it into the kernel's environment (`pip install --force-reinstall anywidget`), or add `"jsdelivr.com"` to the VS Code setting `jupyter.widgetScriptSources`. See the [FAQ](faq.md#my-editor-cannot-find-the-widget-anywidget) for why JupyterLab can work while VS Code does not.
 
+!!! tip "Shared or read-only environments (HPC clusters)"
+    `pip install --user` is the usual move when the environment itself is not writable, and it is the usual cause of trouble here: the Python package lands on your path while its browser-side files land in `~/.local/share/jupyter/`, which JupyterLab searches and VS Code does not. If you can, create your own environment (see [Option B](#option-b-install-from-source)) and install into that rather than using `--user`. UELer checks this when the viewer opens and logs a warning naming the paths it actually found.
+
 !!! tip "ModuleNotFoundError on import"
     Make sure you have activated the correct environment and that `pip install -e .` completed without errors.

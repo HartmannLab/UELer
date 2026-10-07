@@ -657,6 +657,7 @@ def _build_ipywidgets_stub():
                 kwargs.get("restrict_to_allowed_tags", False)
             )
             self.ensure_option = kwargs.get("ensure_option")
+            self.continuous_update = kwargs.get("continuous_update", True)
             self.description = kwargs.get("description", "")
             self.button_style = kwargs.get("button_style", "")
             self.icon = kwargs.get("icon", "")

@@ -84,6 +84,7 @@ Output = _ensure_widget_class("Output", default=_FallbackOutput)
 Checkbox = _ensure_widget_class("Checkbox")
 IntText = _ensure_widget_class("IntText")
 Text = _ensure_widget_class("Text")
+Combobox = _ensure_widget_class("Combobox")
 Button = _ensure_widget_class("Button")
 HBox = _ensure_widget_class("HBox")
 Accordion = _ensure_widget_class("Accordion")
@@ -102,7 +103,7 @@ from .plugin.heatmap import HeatmapDisplay  # type: ignore[import-error]
 from .plugin.plugin_base import PluginBase  # type: ignore[import-error]
 from .annotation_display import AnnotationDisplay  # type: ignore[import-error]
 from .confirm_dialog import ConfirmDialog  # type: ignore[import-error]
-from .data_mapping import KEY_FIELDS  # type: ignore[import-error]
+from .data_mapping import KEY_FIELDS, build_key_widget  # type: ignore[import-error]
 from .setup_dialog import SetupDialog  # type: ignore[import-error]
 
 
@@ -738,14 +739,17 @@ class uicomponents:
         # ``viewer.refresh_data_mapping_options()``. See
         # ``ueler/viewer/data_mapping.py`` for the rule that keeps replacing the
         # options from changing an answer the user already gave.
+        # ``Combobox``, not ``Dropdown``: the options are a suggestion list, not
+        # a constraint.  A dropdown is only as good as the options it was given,
+        # and discovery can legitimately come up short -- an unreadable masks
+        # folder, a scan that ran out of its budget, a column named something no
+        # heuristic would guess.  A dropdown in that state offers one wrong value
+        # and no way to type the right one, which is a worse failure than the
+        # free text this replaced (#142 follow-up).  ``ensure_option=False`` is
+        # the trait that keeps the field typeable and is stated rather than
+        # inherited, so a later edit has to mean it.
         for field in KEY_FIELDS:
-            default = field.preferred[0]
-            widget = Dropdown(
-                options=[default],
-                value=default,
-                description=field.description,
-                disabled=False,
-            )
+            widget = build_key_widget(Combobox, field)
             widget.observe(viewer.on_key_change, names='value')
             setattr(self, field.attribute, widget)
 

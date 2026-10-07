@@ -7,14 +7,26 @@ typo is indistinguishable from a wrong dataset: both render an empty overlay
 with nothing in the log.  They are ``Dropdown`` widgets now, offering the
 columns the cell table actually has and the mask suffixes actually on disk.
 
-Everything in this module exists to make *replacing a dropdown's options* safe.
-``ipywidgets.Dropdown`` rejects a value that is not among its options, so the
-naive assignment is a ``TraitError`` (or, worse, a silent retarget of a key the
-user chose) in three ordinary situations: restoring ``widget_states.json``,
+The widget is a ``Combobox``: the discovered names are a **suggestion list,
+not a constraint**.  That distinction is the correction to the first version,
+which used a ``Dropdown`` and so made the field exactly as good as the options
+it happened to be given.  Discovery can legitimately come up short -- an
+unreadable masks folder, a scan that hit its time budget, a column no heuristic
+would guess -- and a closed dropdown in that state offers one wrong value and no
+way to type the right one.  That is a worse failure than the free text it
+replaced: bad at discovery, but never able to strand anyone.
+:func:`build_key_widget` is where that choice lives.
+
+Everything else in this module exists to make *replacing the options* safe.  A
+widget whose options constrain its value rejects anything outside them, so the
+naive assignment is a ``TraitError`` -- or, worse, a silent retarget of a key the
+user chose -- in three ordinary situations: restoring ``widget_states.json``,
 loading a second cell table over a first, and an images-only session that has no
 columns to offer at all.  :func:`apply_options` is the single rule that covers
 all three, and :func:`ensure_option` is the same invariant for the restore path,
-which assigns a value without knowing where it came from.
+which assigns a value without knowing where it came from.  Both still matter
+under a ``Combobox``: the constraint is gone, but "do not change an answer the
+user already gave" is not about the constraint.
 """
 
 from __future__ import annotations
@@ -26,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "KeyField",
+    "build_key_widget",
     "KEY_FIELDS",
     "CELL_TABLE_FIELDS",
     "MASK_FIELD",
@@ -84,6 +97,33 @@ CELL_TABLE_FIELDS = (
 MASK_FIELD = KeyField("mask_key", "Mask key:", ("whole_cell", "cell", "nuclear", "nucleus"))
 
 KEY_FIELDS = CELL_TABLE_FIELDS + (MASK_FIELD,)
+
+
+def build_key_widget(widget_cls, field: KeyField, **kwargs):
+    """Construct one Data-mapping key widget.
+
+    Here rather than in ``ui_components`` so the two properties that make it
+    safe are stated once and can be tested without building the whole UI:
+
+    * ``ensure_option=False`` -- the options are suggestions, so the field stays
+      typeable when discovery offers nothing useful;
+    * ``continuous_update=False`` -- ``on_key_change`` reaches ``ensure_columns``
+      and a half-typed column name is never one.
+
+    *widget_cls* is passed in because ``ui_components`` resolves its widget
+    classes through a helper that tolerates a stripped widget stack.
+    """
+    default = field.preferred[0]
+    options = dict(
+        options=[default],
+        value=default,
+        description=field.description,
+        ensure_option=False,
+        continuous_update=False,
+        disabled=False,
+    )
+    options.update(kwargs)
+    return widget_cls(**options)
 
 
 def _is_numeric(dtype: Any) -> bool:

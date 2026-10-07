@@ -30,8 +30,10 @@ import ipywidgets as widgets
 from ueler.data_loader import discover_mask_suffixes
 from ueler.viewer.data_mapping import (
     CELL_TABLE_FIELDS,
+    KEY_FIELDS,
     MASK_FIELD,
     apply_options,
+    build_key_widget,
     column_options,
     ensure_option,
 )
@@ -174,6 +176,64 @@ class ViewerMaskSuffixTests(unittest.TestCase):
         viewer = SimpleNamespace(mask_names_set=set(), masks_folder=None, available_fovs=[])
 
         self.assertEqual(ImageMaskViewer.available_mask_suffixes(viewer), [])
+
+
+class KeyWidgetTests(unittest.TestCase):
+    """The key field must never be able to strand the user (#142 follow-up).
+
+    The first implementation used a ``Dropdown``, which made each key exactly as
+    good as the options discovery happened to find.  When discovery came up
+    short -- an unreadable masks folder, a scan that hit its time budget, a
+    column no heuristic would guess -- the field held one wrong value and
+    offered no way to type the right one, which is strictly worse than the free
+    text it replaced.
+
+    The construction kwargs are asserted rather than the resulting traits: the
+    headless bootstrap maps every widget class onto one stub, so a stub
+    ``Combobox`` would accept an unlisted value even if the shipped code had
+    regressed to a ``Dropdown``.  The kwargs are the thing that is actually
+    load-bearing, and they are checked against what the factory passes.
+    """
+
+    class _Recorder:
+        """Stands in for the widget class and keeps what it was built with."""
+
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    def test_the_options_are_a_suggestion_list_not_a_constraint(self) -> None:
+        """``ensure_option=False`` is what keeps an unlisted value assignable."""
+        for field in KEY_FIELDS:
+            with self.subTest(field=field.attribute):
+                built = build_key_widget(self._Recorder, field)
+
+                self.assertIs(built.kwargs["ensure_option"], False)
+
+    def test_the_handler_fires_on_commit_not_per_keystroke(self) -> None:
+        """``on_key_change`` reaches ``ensure_columns``; ``fo`` is never a column."""
+        for field in KEY_FIELDS:
+            with self.subTest(field=field.attribute):
+                built = build_key_widget(self._Recorder, field)
+
+                self.assertIs(built.kwargs["continuous_update"], False)
+
+    def test_it_opens_on_the_shipped_default(self) -> None:
+        for field in KEY_FIELDS:
+            with self.subTest(field=field.attribute):
+                widget = build_key_widget(widgets.Combobox, field)
+
+                self.assertEqual(widget.value, field.preferred[0])
+                self.assertEqual(widget.description, field.description)
+
+    def test_a_typed_key_survives_a_later_refresh_as_an_option(self) -> None:
+        """Discovery that does not know the user's column must not erase it."""
+        widget = build_key_widget(widgets.Combobox, CELL_TABLE_FIELDS[2])
+        widget.value = "my_label_column"
+
+        apply_options(widget, ["alpha", "beta"], preferred=CELL_TABLE_FIELDS[2].preferred)
+
+        self.assertEqual(widget.value, "my_label_column")
+        self.assertIn("my_label_column", widget.options)
 
 
 class ApplyOptionsTests(unittest.TestCase):
