@@ -747,6 +747,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-setup-dialog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Setup Dialog
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-four-things-to-set-first" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1525,6 +1536,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-setup-dialog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Setup Dialog
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-four-things-to-set-first" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1679,6 +1701,11 @@
 <p>Earlier versions of UELer dropped to a static Matplotlib scatter under VS Code, and the variable was the way to force the interactive one. That fallback is gone. Delete the line — it does nothing now. The static renderer survives as an opt-out (<code>UELER_SCATTER_BACKEND=static</code>), which you are unlikely to want.</p>
 </div>
 <p><strong>3. Give the notebook some width.</strong> The left control panel is a fixed 350 px column. On a narrow window, or at high browser zoom, the image canvas gets whatever is left over and can end up uncomfortably small. Zooming the browser <em>out</em> one step (<code>Ctrl</code>/<code>Cmd</code> + <code>-</code>) buys the canvas real estate without shrinking the controls' legibility much.</p>
+<hr />
+<h2 id="the-setup-dialog">The Setup Dialog<a class="headerlink" href="#the-setup-dialog" title="Permanent link">&para;</a></h2>
+<p>The first time you open a dataset, UELer puts a short setup dialog in front of the viewer asking for exactly the settings that apply to what you loaded: the viewer settings always, the <strong>Mask key:</strong> if you passed a masks folder, and the cell-table column mapping if you loaded a table. It exists because these settings are easy to miss and expensive to get wrong — the pixel size in particular is applied silently and shows up in every exported figure.</p>
+<p>The fields in the dialog <em>are</em> the fields in the left panel, so whatever you set there is already applied and stays editable in <strong>Advanced Settings</strong> afterwards. <strong>Skip setup</strong> dismisses it. UELer remembers which steps it has shown for each dataset (in <code>.UELer/setup_dialog.json</code>), so it does not ask again — and if you load a cell table later in the same session, it asks only about the new columns.</p>
+<p>The rest of this section is what the dialog asks for, with the reasoning behind each answer.</p>
 <hr />
 <h2 id="the-four-things-to-set-first">The Four Things to Set First<a class="headerlink" href="#the-four-things-to-set-first" title="Permanent link">&para;</a></h2>
 <p>Do these in order the first time you open a dataset. Two of the four are wrong by default for most non-MIBI data.</p>

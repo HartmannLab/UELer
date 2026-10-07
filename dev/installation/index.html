@@ -1923,6 +1923,10 @@ code path goes untested. This target prints every skip with its reason instead.<
 <p>The interactive scatter is the default in every environment, VS Code included. If widgets do not render at all, check that <code>%matplotlib widget</code> ran in the kernel; a static Matplotlib scatter is available as an opt-in fallback. See the <a href="../faq/">FAQ</a> for details.</p>
 </div>
 <div class="admonition tip">
+<p class="admonition-title"><code>Unable to find widget 'anywidget'</code> in VS Code</p>
+<p>The JavaScript half of <code>anywidget</code> is not where your frontend looks for it, usually because it was installed with <code>pip install --user</code> while the kernel runs from a different environment. Reinstall it into the kernel's environment (<code>pip install --force-reinstall anywidget</code>), or add <code>"jsdelivr.com"</code> to the VS Code setting <code>jupyter.widgetScriptSources</code>. See the <a href="../faq/#my-editor-cannot-find-the-widget-anywidget">FAQ</a> for why JupyterLab can work while VS Code does not.</p>
+</div>
+<div class="admonition tip">
 <p class="admonition-title">ModuleNotFoundError on import</p>
 <p>Make sure you have activated the correct environment and that <code>pip install -e .</code> completed without errors.</p>
 </div>

@@ -1662,7 +1662,7 @@ the plots, in both directions:</p>
   with the FlowSOM parameters. Tag it with a <strong>Step:</strong>, <strong>Desc:</strong>, <strong>Parent:</strong>, and an <strong>Op:</strong>
   (<code>initial</code>, <code>subset</code>, <code>recluster</code>, <code>finalize</code>).</li>
 <li>The <strong>Checkpoint browser</strong> shows the checkpoints as a tree (color-coded by op). Select one and use
-  <strong>Load selected</strong> to restore it, or <strong>Delete selected</strong> to remove it.</li>
+  <strong>Load selected</strong> to restore it, or <strong>Delete selected</strong> to remove it — deletion asks for confirmation first, because it removes the checkpoint's <code>.h5ad</code> from disk and cannot be undone.</li>
 </ul>
 <p>Checkpoints are stored under <code>&lt;base_folder&gt;/.UELer/dataset_&lt;id&gt;/checkpoints/</code>, where <code>&lt;id&gt;</code> is a hash
 of the dataset path — so several datasets under one base folder keep separate histories, and the

@@ -1660,8 +1660,10 @@ the full window width). See the <a href="../user-interface/#right-panel-plugins"
 <p>Markers are listed <strong>first</strong> in the marker pickers, so they aren't buried under <code>label</code>, <code>area</code>,
 <code>X</code> and <code>Y</code>.</p>
 <p>Your <code>obs</code> must still contain the FOV and mask-label columns that link cells to the images — by
-default <code>fov</code> and <code>label</code>. If yours are named differently, set the <strong>Fov key:</strong> / <strong>Label key:</strong>
-fields in the left panel (or rename the columns in <code>obs</code> beforehand).</p>
+default <code>fov</code> and <code>label</code>. If yours are named differently, pick the right ones from the <strong>Fov key:</strong> /
+<strong>Label key:</strong> dropdowns, which the setup dialog shows you when the table loads and which also live
+under <strong>Advanced Settings → Data mapping</strong>. Both lists are built from your own columns, so there is
+nothing to type and nothing to spell wrong.</p>
 <p>Two optional arguments:</p>
 <ul>
 <li><code>layer="counts"</code> — read <code>adata.layers["counts"]</code> instead of <code>adata.X</code>.</li>

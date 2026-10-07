@@ -586,6 +586,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="3. Launch the Viewer">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-large-table-use-parquet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A large table: use Parquet
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
       </ul>
@@ -1569,6 +1586,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="3. Launch the Viewer">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-large-table-use-parquet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A large table: use Parquet
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
       </ul>
@@ -1694,7 +1728,7 @@ path is not provided.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">base_folder</span> <span class="o">=</span> <span class="s2">"/path/to/your/image_data"</span>                     <span class="c1"># Required</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">masks_folder</span> <span class="o">=</span> <span class="s2">"/path/to/segmentation/output"</span>                <span class="c1"># Optional</span>
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">annotations_folder</span> <span class="o">=</span> <span class="s2">"/path/to/annotations"</span>                  <span class="c1"># Optional</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">cell_table_path</span> <span class="o">=</span> <span class="s2">"/path/to/cell_table.csv"</span>                  <span class="c1"># Optional (.csv or .h5ad)</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">cell_table_path</span> <span class="o">=</span> <span class="s2">"/path/to/cell_table.csv"</span>                  <span class="c1"># Optional (.csv, .parquet or .h5ad)</span>
 </code></pre></div>
 <table>
 <thead>
@@ -1722,7 +1756,7 @@ path is not provided.</p>
 </tr>
 <tr>
 <td><code>cell_table_path</code></td>
-<td>Per-cell feature table (<code>.csv</code>, or <code>.h5ad</code> for AnnData)</td>
+<td>Per-cell feature table (<code>.csv</code>, <code>.parquet</code>, or <code>.h5ad</code> for AnnData)</td>
 <td>❌ Optional</td>
 </tr>
 </tbody>
@@ -1736,7 +1770,9 @@ path is not provided.</p>
 <a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="n">viewer</span> <span class="o">=</span> <span class="n">ueler</span><span class="o">.</span><span class="n">run_viewer</span><span class="p">(</span><span class="n">base_folder</span><span class="p">)</span>
 </code></pre></div>
 <p><code>run_viewer</code> also accepts <code>masks_folder=...</code> and <code>annotations_folder=...</code> if you want segmentation
-and annotation overlays without a cell table.</p>
+and annotation overlays without a cell table. If <code>base_folder</code> is read-only, or a downstream
+pipeline can't tolerate extra files under its dataset root, pass <code>settings_path=...</code> to move
+UELer's <code>.UELer</code> settings folder elsewhere — see <a href="../faq/#where-does-ueler-store-my-work">Where does UELer store my work?</a>.</p>
 <p><strong>Full — masks, annotations, and a cell table:</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">ueler</span>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
@@ -1768,6 +1804,20 @@ and annotation overlays without a cell table.</p>
 histogram plots and the cell gallery enabled. If you have no cell table, skip step 2 and let
 <code>run_viewer</code> display on its own (<code>auto_display</code> defaults to <code>True</code>).</p>
 </div>
+<h4 id="a-large-table-use-parquet">A large table: use Parquet<a class="headerlink" href="#a-large-table-use-parquet" title="Permanent link">&para;</a></h4>
+<p>A study-scale table is wide as well as long, and loading all of it to plot one marker is what makes a big table slow. Convert it once:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>python<span class="w"> </span>tools/cell_table_to_parquet.py<span class="w"> </span>cell_table.csv<span class="w"> </span>cell_table.parquet
+</code></pre></div>
+<p>then pass the <code>.parquet</code> to <code>load_cell_table</code> exactly as you would the CSV. The viewer reads the column names and types up front, so every marker, cluster and annotation dropdown is complete the moment it opens, and it fetches a column's values the first time something plots them. Nothing about using the viewer changes, and nothing is approximated: every column arrives complete, so the mask painter's automatic colour range, the heatmap, FlowSOM and the histogram gates are all still computed over every cell.</p>
+<p>The converter prints what each column costs, which is what materialising it will cost later:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>wrote cell_table.parquet: 2.8 MB, 16 row group(s) of ~897 rows, compression=zstd
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>per-column footprint (2.8 MB total):
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    2.4%       70.0 KB  CD45
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>    2.4%       69.5 KB  Ki67
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>    ...
+</code></pre></div>
+<p>Use <code>--row-groups</code> if you want to tune it; the default of 16 is chosen for whole-column reads, which is the access pattern the viewer actually has.</p>
 <div class="admonition tip">
 <p class="admonition-title"><code>%matplotlib widget</code></p>
 <p>The <code>%matplotlib widget</code> magic enables the interactive backend used by the viewer. Run it once
@@ -1778,33 +1828,40 @@ per kernel session before launching.</p>
 <p>You are not limited to local folders. <code>run_viewer_bia</code> streams a public BioImage Archive study
 (<code>S-BIAD*</code>) without downloading the whole dataset — pass an accession id (or a direct HTTPS URL) and
 an optional layout descriptor:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">ueler</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="o">%</span><span class="n">matplotlib</span> <span class="n">widget</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="n">viewer</span> <span class="o">=</span> <span class="n">ueler</span><span class="o">.</span><span class="n">run_viewer_bia</span><span class="p">(</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    <span class="s2">"S-BIAD2557"</span><span class="p">,</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>    <span class="n">descriptor</span><span class="o">=</span><span class="p">{</span>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>        <span class="s2">"mode"</span><span class="p">:</span> <span class="s2">"folder"</span><span class="p">,</span>
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>        <span class="s2">"base"</span><span class="p">:</span> <span class="s2">"Files/spatial_murine_iCCAvsHCC/image_data"</span><span class="p">,</span>
-<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>        <span class="s2">"mask_dir"</span><span class="p">:</span> <span class="s2">"Files/spatial_murine_iCCAvsHCC/segmentation/cleaned_mask"</span><span class="p">,</span>
-<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>        <span class="s2">"mask_glob"</span><span class="p">:</span> <span class="s2">"</span><span class="si">{fov}</span><span class="s2">_*.tiff"</span><span class="p">,</span>
-<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>    <span class="p">},</span>
-<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">ueler</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="o">%</span><span class="n">matplotlib</span> <span class="n">widget</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="n">viewer</span> <span class="o">=</span> <span class="n">ueler</span><span class="o">.</span><span class="n">run_viewer_bia</span><span class="p">(</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="s2">"S-BIAD2557"</span><span class="p">,</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>    <span class="n">descriptor</span><span class="o">=</span><span class="p">{</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>        <span class="s2">"mode"</span><span class="p">:</span> <span class="s2">"folder"</span><span class="p">,</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>        <span class="s2">"fov_container"</span><span class="p">:</span> <span class="s2">"zip"</span><span class="p">,</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>        <span class="s2">"base"</span><span class="p">:</span> <span class="s2">"Files/spatial_murine_iCCAvsHCC/image_data"</span><span class="p">,</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>        <span class="s2">"mask_dir"</span><span class="p">:</span> <span class="s2">"Files/spatial_murine_iCCAvsHCC/segmentation/cleaned_mask"</span><span class="p">,</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>        <span class="s2">"mask_glob"</span><span class="p">:</span> <span class="s2">"</span><span class="si">{fov}</span><span class="s2">_*.tiff"</span><span class="p">,</span>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>        <span class="s2">"cell_table"</span><span class="p">:</span> <span class="s2">"Files/spatial_murine_iCCAvsHCC/cell_table/pCSL005_cell_table.parquet"</span><span class="p">,</span>
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>    <span class="p">},</span>
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="p">)</span>
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>
+<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="c1"># Attach the study's cell table (all 439,339 cells; a few seconds).</span>
+<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a><span class="n">ueler</span><span class="o">.</span><span class="n">load_bia_cell_table</span><span class="p">(</span><span class="n">viewer</span><span class="p">)</span>
 </code></pre></div>
+<p>The descriptor's <code>cell_table</code> key names the study's cell table, and <code>load_bia_cell_table</code> attaches it — or pass <code>run_viewer_bia(..., cell_table=True)</code> to attach it as the viewer opens.</p>
+<p><code>S-BIAD2557</code> publishes the table as both <code>.csv</code> and <code>.parquet</code>, and the descriptor above points at the <strong>Parquet</strong> one, which is why there is no <code>fovs=</code> here: nothing is downloaded, the file is read over HTTP range requests a column at a time, and all 439,339 cells across 455 FOVs are there from the start. Pointing <code>cell_table</code> at the <code>.csv</code> instead falls back to fetching the file into the workspace, where <code>fovs=</code> is worth using to keep only the rows of the FOVs you name — the CSV is 361 MB and has no column index, so it is read end to end either way.</p>
 <p>See <code>script/run_ueler_BIA.ipynb</code> for more worked examples across several studies.</p>
 <hr />
 <h2 id="expected-folder-structure">Expected Folder Structure<a class="headerlink" href="#expected-folder-structure" title="Permanent link">&para;</a></h2>
 <p>For local data, UELer expects one subdirectory per FOV, each containing single-channel TIFF images
 named by the channel/marker:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>base_folder/
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>├── fov1/
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>│   ├── CD3.tiff
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>│   ├── CD8.tiff
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>│   └── DAPI.tiff
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>├── fov2/
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>│   ├── CD3.tiff
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>│   └── ...
-<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>└── ...
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>base_folder/
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>├── fov1/
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>│   ├── CD3.tiff
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>│   ├── CD8.tiff
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>│   └── DAPI.tiff
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>├── fov2/
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>│   ├── CD3.tiff
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>│   └── ...
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>└── ...
 </code></pre></div>
 <hr />
 <h2 id="next-steps">Next Steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>

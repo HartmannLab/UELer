@@ -964,6 +964,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#adjusting-the-range-of-a-histogram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adjusting the range of a histogram
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#interaction-modes" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1510,6 +1521,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#adjusting-the-range-of-a-histogram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adjusting the range of a histogram
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#interaction-modes" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1654,6 +1676,13 @@ single time.</p>
    plugin's picker only and does not repaint the main image.</li>
 <li>Click <strong>Plot</strong>. Adjust <strong>Bins:</strong> (default 50) as needed.</li>
 </ol>
+<h3 id="adjusting-the-range-of-a-histogram">Adjusting the range of a histogram<a class="headerlink" href="#adjusting-the-range-of-a-histogram" title="Permanent link">&para;</a></h3>
+<p>Each histogram has its own range slider underneath it, labelled with the channel name. Drag the two handles to choose the lower and upper bound, and the channel is re-binned over just that window — all of the bins land inside it, so a marker whose values pile up near zero with a long tail becomes readable instead of collapsing into the first two bars. Cells outside the window are left out of the counts. Click <strong>Full range</strong> next to the slider to bin over the whole channel again.</p>
+<p>The x axis follows the handles while you drag; the bars are recomputed when you release. Only the histogram you adjusted changes — every other channel keeps its own range, its zoom and its gate.</p>
+<div class="admonition note">
+<p class="admonition-title">Zoom is not the same thing</p>
+<p>The toolbar's pan and wheel-zoom tools magnify the bars that are already drawn; they do not change where the bin edges are. Raising <strong>Bins:</strong> does not help either, because the extra bins are still spread over the full data extent. The range slider is what moves the bin edges.</p>
+</div>
 <h3 id="interaction-modes">Interaction modes<a class="headerlink" href="#interaction-modes" title="Permanent link">&para;</a></h3>
 <p>The <strong>Interaction:</strong> toggle switches between two ways of selecting cells:</p>
 <ul>

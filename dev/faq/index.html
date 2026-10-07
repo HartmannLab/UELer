@@ -1136,6 +1136,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#why-cant-ueler-install-the-widget-frontend-for-me" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why can't UELer install the widget frontend for me?
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1158,6 +1169,17 @@
     <span class="md-ellipsis">
       
         Nothing renders / the widgets don't show up
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#my-editor-cannot-find-the-widget-anywidget" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        My editor cannot find the widget anywidget
       
     </span>
   </a>
@@ -1291,6 +1313,17 @@
     <span class="md-ellipsis">
       
         Where does UELer store my work?
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#can-i-move-the-ueler-folder-somewhere-else" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Can I move the .UELer folder somewhere else?
       
     </span>
   </a>
@@ -1822,6 +1855,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#why-cant-ueler-install-the-widget-frontend-for-me" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why can't UELer install the widget frontend for me?
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1844,6 +1888,17 @@
     <span class="md-ellipsis">
       
         Nothing renders / the widgets don't show up
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#my-editor-cannot-find-the-widget-anywidget" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        My editor cannot find the widget anywidget
       
     </span>
   </a>
@@ -1984,6 +2039,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#can-i-move-the-ueler-folder-somewhere-else" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Can I move the .UELer folder somewhere else?
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#the-scale-bar-is-missing-in-my-exports-or-the-viewer" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2055,7 +2121,9 @@ and no local data required.</p>
 <a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="n">load_cell_table</span><span class="p">(</span><span class="n">viewer</span><span class="p">,</span> <span class="n">cell_table</span><span class="o">=</span><span class="n">cell_table</span><span class="p">,</span> <span class="n">auto_display</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">after_plugins</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 </code></pre></div>
 <p><code>run_viewer</code> itself has no <code>cell_table_path</code> argument — the table is always attached with
-<code>load_cell_table</code>. <code>cell_table=</code> also accepts an <strong>AnnData</strong> object and <code>cell_table_path=</code> an
+<code>load_cell_table</code>. For a large table, pass a <code>.parquet</code> file (see
+<a href="../getting-started/#a-large-table-use-parquet">Getting Started</a>) and its columns are read on
+demand rather than all at once. <code>cell_table=</code> also accepts an <strong>AnnData</strong> object and <code>cell_table_path=</code> an
 <code>.h5ad</code> file. See <a href="../getting-started/">Get Started</a> and
 <a href="../tutorials/cell-table/">Working with a Cell Table</a>.</p>
 <h3 id="how-do-i-stream-a-study-from-the-bioimage-archive">How do I stream a study from the BioImage Archive?<a class="headerlink" href="#how-do-i-stream-a-study-from-the-bioimage-archive" title="Permanent link">&para;</a></h3>
@@ -2064,13 +2132,18 @@ and no local data required.</p>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="s2">"S-BIAD2557"</span><span class="p">,</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="n">descriptor</span><span class="o">=</span><span class="p">{</span>
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>        <span class="s2">"mode"</span><span class="p">:</span> <span class="s2">"folder"</span><span class="p">,</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>        <span class="s2">"base"</span><span class="p">:</span> <span class="s2">"Files/spatial_murine_iCCAvsHCC/image_data"</span><span class="p">,</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>        <span class="s2">"mask_dir"</span><span class="p">:</span> <span class="s2">"Files/spatial_murine_iCCAvsHCC/segmentation/cleaned_mask"</span><span class="p">,</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>        <span class="s2">"mask_glob"</span><span class="p">:</span> <span class="s2">"</span><span class="si">{fov}</span><span class="s2">_*.tiff"</span><span class="p">,</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    <span class="p">},</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="p">)</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>        <span class="s2">"fov_container"</span><span class="p">:</span> <span class="s2">"zip"</span><span class="p">,</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>        <span class="s2">"base"</span><span class="p">:</span> <span class="s2">"Files/spatial_murine_iCCAvsHCC/image_data"</span><span class="p">,</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>        <span class="s2">"mask_dir"</span><span class="p">:</span> <span class="s2">"Files/spatial_murine_iCCAvsHCC/segmentation/cleaned_mask"</span><span class="p">,</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>        <span class="s2">"mask_glob"</span><span class="p">:</span> <span class="s2">"</span><span class="si">{fov}</span><span class="s2">_*.tiff"</span><span class="p">,</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>        <span class="s2">"cell_table"</span><span class="p">:</span> <span class="s2">"Files/spatial_murine_iCCAvsHCC/cell_table/pCSL005_cell_table.parquet"</span><span class="p">,</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>    <span class="p">},</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="p">)</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="c1"># Attach the study's cell table (all 439,339 cells; a few seconds).</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="n">ueler</span><span class="o">.</span><span class="n">load_bia_cell_table</span><span class="p">(</span><span class="n">viewer</span><span class="p">)</span>
 </code></pre></div>
-<p>Only the channels you open are streamed/cached. See <code>script/run_ueler_BIA.ipynb</code> for more examples.</p>
+<p>Only the channels you open are streamed/cached; here each FOV is a <code>&lt;FOV&gt;.zip</code> read per member over HTTP ranges (<code>fov_container</code>). The <code>cell_table</code> key points at the study's cell table. This study publishes it as both <code>.csv</code> and <code>.parquet</code>; the Parquet one is used above and is read column by column over range requests without being downloaded, so no <code>fovs=</code> is needed. For a <code>.csv</code> table, <code>fovs=</code> restricts it to the FOVs you name, filtered while the file streams so a 361 MB table never has to be held whole. See <code>script/run_ueler_BIA.ipynb</code> for more examples.</p>
 <hr />
 <h2 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h2>
 <h3 id="i-get-modulenotfounderror-no-module-named-ueler">I get <code>ModuleNotFoundError: No module named 'ueler'</code><a class="headerlink" href="#i-get-modulenotfounderror-no-module-named-ueler" title="Permanent link">&para;</a></h3>
@@ -2080,6 +2153,15 @@ repository.</p>
 <p>Make sure the correct <code>micromamba</code>/conda environment is active first. Create it from the repository's
 <code>environment.yml</code>, then install UELer. For documentation or test extras, use <code>pip install ".[docs]"</code>
 or <code>pip install ".[dev]"</code>.</p>
+<h3 id="why-cant-ueler-install-the-widget-frontend-for-me">Why can't UELer install the widget frontend for me?<a class="headerlink" href="#why-cant-ueler-install-the-widget-frontend-for-me" title="Permanent link">&para;</a></h3>
+<p>Because no package can. This comes up whenever a widget's browser half goes missing — see <a href="#my-editor-cannot-find-the-widget-anywidget">My editor cannot find the widget <code>anywidget</code></a> — and the instinct is that UELer should be able to declare its way out of it. It cannot, and no change to UELer's <code>pyproject.toml</code> would help.</p>
+<p>A Python package declares <strong>what</strong> it needs. <strong>Where</strong> those files land is decided entirely by the <code>pip</code> command you run — <code>--user</code>, <code>--prefix</code>, <code>--target</code>, or simply which environment was active. Nothing in dependency metadata can reach across and constrain that. So the same <code>anywidget&gt;=0.9</code> line produces a working install or a broken one depending only on how you invoked pip.</p>
+<p>Two specific ideas that look promising and are not:</p>
+<ul>
+<li><strong>Pinning a newer <code>anywidget</code>.</strong> This would only help if some release shipped no browser files at all. None does: every version from 0.9.0 through 0.11 ships both <code>share/jupyter/labextensions/anywidget/</code> and <code>share/jupyter/nbextensions/anywidget/</code>. The files are always built — the only question is which directory they were copied into.</li>
+<li><strong>Shipping a copy of the browser files with UELer.</strong> Technically possible, genuinely harmful. It writes into another package's namespace, fighting pip and conda over who owns those files, and it goes stale by construction: the JavaScript has to match whichever <code>anywidget</code> version resolves at runtime, and UELer deliberately accepts a range. You would be trading a loud, diagnosable failure for a quiet version mismatch.</li>
+</ul>
+<p>What actually fixes it is the install itself — put <code>anywidget</code> in the environment your kernel runs from, rather than in a user-level directory beside it. UELer's part is to notice and say so: the viewer checks at startup and logs a warning naming the paths it found and the remedies, instead of leaving you with blank panels and a frontend notification about a package you never installed on purpose.</p>
 <hr />
 <h2 id="viewer-widgets">Viewer &amp; Widgets<a class="headerlink" href="#viewer-widgets" title="Permanent link">&para;</a></h2>
 <h3 id="nothing-renders-the-widgets-dont-show-up">Nothing renders / the widgets don't show up<a class="headerlink" href="#nothing-renders-the-widgets-dont-show-up" title="Permanent link">&para;</a></h3>
@@ -2087,6 +2169,16 @@ or <code>pip install ".[dev]"</code>.</p>
 interactive backend UELer relies on. If widgets still don't appear, restart the kernel and re-run the
 cells. See <a href="../tutorials/display-settings/#before-you-launch">Display Settings</a> for the rest of the
 launch checklist.</p>
+<h3 id="my-editor-cannot-find-the-widget-anywidget">My editor cannot find the widget <code>anywidget</code><a class="headerlink" href="#my-editor-cannot-find-the-widget-anywidget" title="Permanent link">&para;</a></h3>
+<p>The full message is usually <code>Unable to find widget 'anywidget' version '~0.9.*' from configured widget sources ["local"]. Expected behavior may be affected.</code></p>
+<p>Several parts of UELer — the channel picker, the ROI expression editor, the Mask Painter class list, the gallery tiles and the scatter plot — are built with <code>anywidget</code>, which has a Python half and a JavaScript half. That notification means your frontend found the Python half but not the JavaScript, so those panels come up as empty boxes. It is a packaging problem, not a bug in your data or notebook.</p>
+<p>The usual cause is installing into one place and running the kernel from another — most often <code>pip install --user</code> while the kernel runs from a shared or read-only environment. The files then land in <code>~/.local/share/jupyter/</code>, where JupyterLab finds them but VS Code does not: VS Code's <code>local</code> widget source searches only <code>&lt;environment&gt;/share/jupyter/nbextensions</code>. That is why the same environment can work in JupyterLab and fail in VS Code.</p>
+<p>Either of these fixes it:</p>
+<ul>
+<li><strong>Install into the environment the kernel runs from</strong>, without <code>--user</code>: <code>pip install --force-reinstall anywidget</code>.</li>
+<li><strong>Let VS Code fetch widget scripts from a CDN</strong>: add <code>"jsdelivr.com"</code> to the <code>jupyter.widgetScriptSources</code> setting, then reload the window.</li>
+</ul>
+<p>UELer checks for this when the viewer opens and logs a warning naming the paths it found, so you do not have to work it out from the frontend notification alone. For why UELer cannot simply install the missing files itself, see <a href="#why-cant-ueler-install-the-widget-frontend-for-me">Why can't UELer install the widget frontend for me?</a></p>
 <h3 id="do-i-need-to-set-ueler_scatter_backend">Do I need to set <code>UELER_SCATTER_BACKEND</code>?<a class="headerlink" href="#do-i-need-to-set-ueler_scatter_backend" title="Permanent link">&para;</a></h3>
 <p>No. The interactive <code>jupyter-scatter</code> widget is the default in <strong>every</strong> environment — JupyterLab, the
 classic Notebook, and VS Code alike. Earlier versions dropped to a static Matplotlib scatter under VS
@@ -2171,6 +2263,18 @@ without one. See <a href="../tutorials/cell-table/">Working with a Cell Table</a
 </tbody>
 </table>
 <p>Mask and annotation palettes are also saved under <code>.UELer/</code>.</p>
+<h3 id="can-i-move-the-ueler-folder-somewhere-else">Can I move the <code>.UELer</code> folder somewhere else?<a class="headerlink" href="#can-i-move-the-ueler-folder-somewhere-else" title="Permanent link">&para;</a></h3>
+<p>Yes. Pass <code>settings_path</code> to <code>run_viewer()</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">viewer</span> <span class="o">=</span> <span class="n">ueler</span><span class="o">.</span><span class="n">run_viewer</span><span class="p">(</span><span class="n">base_folder</span><span class="p">,</span> <span class="n">settings_path</span><span class="o">=</span><span class="s2">"/your/custom/path"</span><span class="p">)</span>
+</code></pre></div>
+<p>This stores settings at <code>/your/custom/path/&lt;base_folder name&gt;/.UELer</code> instead of
+<code>&lt;base_folder&gt;/.UELer</code>. Use it when <code>base_folder</code> is read-only, or a downstream
+pipeline must not see extra files under its dataset root. Leave <code>settings_path</code>
+unset to keep the default location shown above.</p>
+<p>If neither location can be created (for example <code>base_folder</code> is read-only and
+<code>settings_path</code> was not given), <code>run_viewer()</code> fails immediately with a message
+naming the folder it tried and suggesting <code>settings_path=...</code> — it does not fail
+silently or partway through loading.</p>
 <h3 id="the-scale-bar-is-missing-in-my-exports-or-the-viewer">The scale bar is missing in my exports (or the viewer)<a class="headerlink" href="#the-scale-bar-is-missing-in-my-exports-or-the-viewer" title="Permanent link">&para;</a></h3>
 <p>The scale bar is driven by pixel size. Set the <strong>Pixel Size (nm):</strong> value in the left panel's Advanced
 Settings (see the <a href="../tutorials/user-interface/#left-panel">User Interface</a> reference). If no pixel size
