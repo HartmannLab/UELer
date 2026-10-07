@@ -61,8 +61,8 @@ from .data_mapping import (
     MASK_FIELD,
     apply_options,
     column_options,
-    ensure_option,
 )
+from .widget_restore import restore_widget_value, restore_widget_values
 from .setup_dialog import (
     build_setup_steps,
     load_seen_steps,
@@ -5387,6 +5387,65 @@ class ImageMaskViewer:
         if self._debug:
             logger.debug(f"Widget states saved to {file_path}")
 
+    def _restore_state_entry(self, attr_name, value):
+        """Apply one entry of ``widget_states.json``.  Called inside a guard."""
+        # Skip attributes that are in the UICOMPNENTS_SKIP list
+        if attr_name in UICOMPNENTS_SKIP:
+            return
+        # Check if the ui_component has an attribute with the name attr_name
+        elif hasattr(self.ui_component, attr_name):
+            # Get the attribute from the ui_component
+            attr = getattr(self.ui_component, attr_name)
+            # Check if the attribute is an instance of Widget
+            if isinstance(attr, Widget):
+                # If the widget has a 'value' attribute, set it to the saved value
+                if hasattr(attr, 'value'):
+                    if self._debug:
+                        logger.debug(f"[INIT DEBUG] restoring widget '{attr_name}' = {value!r}")
+                    # A value this widget refuses must cost the setting, not
+                    # the session: ``restore_widget_value`` substitutes the
+                    # nearest acceptable one and warns.  See
+                    # ueler/viewer/widget_restore.py.
+                    restore_widget_value(attr, value, label=attr_name, log=logger)
+                    if self._debug:
+                        logger.debug(f"[INIT DEBUG] widget '{attr_name}' restored ok")
+                else:
+                    # Skip widgets without a 'value' attribute
+                    pass
+            # Check if the attribute is a dictionary
+            elif isinstance(attr, dict):
+                # Per-channel colour and contrast widgets, keyed by channel
+                # name.  Same rule as above, one entry at a time, so a
+                # channel that has gone from the dataset costs its own row
+                # and nothing else.
+                restore_widget_values(
+                    {key: widget for key, widget in attr.items() if isinstance(widget, Widget)},
+                    value,
+                    label=attr_name,
+                    log=logger,
+                )
+            else:
+                # Handle other attribute types if necessary
+                pass
+        # Special handling for 'marker_sets' attribute
+        elif attr_name == 'marker_sets':
+            if isinstance(value, dict):
+                self.marker_sets = value
+            else:
+                logger.warning(
+                    "[settings] saved 'marker_sets' is %s, not a mapping; ignored.",
+                    type(value).__name__,
+                )
+        # Special handling for 'mask_names' attribute
+        elif attr_name == 'mask_names':
+            if isinstance(value, (list, tuple)):
+                self.mask_names = list(value)
+            else:
+                logger.warning(
+                    "[settings] saved 'mask_names' is %s, not a list; ignored.",
+                    type(value).__name__,
+                )
+
     def load_widget_states(self, file_path):
         """Load the state of all widgets from a JSON file."""
         # When the json file does not exist, do nothing
@@ -5397,8 +5456,25 @@ class ImageMaskViewer:
 
         if self._debug:
             logger.debug(f"[INIT DEBUG] load_widget_states: reading {file_path}")
-        with open(file_path, 'r') as f:
-            state = json.load(f)
+        # A session killed mid-write leaves this file truncated, and it is
+        # editable by hand.  Neither is a reason to refuse to open the viewer:
+        # an unreadable file means "no saved settings", loudly.
+        try:
+            with open(file_path, 'r') as f:
+                state = json.load(f)
+        except Exception:
+            logger.warning(
+                "[settings] %s could not be read and was ignored; the viewer opens "
+                "with default settings. Delete the file to stop this recurring.",
+                file_path, exc_info=True,
+            )
+            return
+        if not isinstance(state, dict):
+            logger.warning(
+                "[settings] %s does not contain a settings object (found %s); ignored.",
+                file_path, type(state).__name__,
+            )
+            return
         if self._debug:
             logger.debug(f"[INIT DEBUG] load_widget_states: {len(state)} keys to restore")
 
@@ -5408,68 +5484,37 @@ class ImageMaskViewer:
         for attr_name, value in state.items():
             if attr_name == 'control_sections_selected_index':
                 continue
-            # Skip attributes that are in the UICOMPNENTS_SKIP list
-            if attr_name in UICOMPNENTS_SKIP:
-                continue
-            # Check if the ui_component has an attribute with the name attr_name
-            elif hasattr(self.ui_component, attr_name):
-                # Get the attribute from the ui_component
-                attr = getattr(self.ui_component, attr_name)
-                # Check if the attribute is an instance of Widget
-                if isinstance(attr, Widget):
-                    # If the widget has a 'value' attribute, set it to the saved value
-                    if hasattr(attr, 'value'):
-                        if self._debug:
-                            logger.debug(f"[INIT DEBUG] restoring widget '{attr_name}' = {value!r}")
-                        # The data-mapping keys are dropdowns now (#142), and a
-                        # dropdown refuses a value outside its options.  A saved
-                        # key whose column is gone from this dataset would
-                        # otherwise raise and abort the rest of the restore, so
-                        # it is re-admitted as an option of its own -- visibly
-                        # wrong beats silently retargeted.
-                        ensure_option(attr, value)
-                        attr.value = value
-                        if self._debug:
-                            logger.debug(f"[INIT DEBUG] widget '{attr_name}' restored ok")
-                    else:
-                        # Skip widgets without a 'value' attribute
-                        pass
-                # Check if the attribute is a dictionary
-                elif isinstance(attr, dict):
-                    # Iterate over the dictionary items
-                    for key, widget_value in value.items():
-                        # If the key exists in the attribute dictionary
-                        if key in attr:
-                            # Get the widget from the dictionary
-                            widget = attr[key]
-                            # If the widget is an instance of Widget and has a 'value' attribute, set it to the saved value
-                            if isinstance(widget, Widget) and hasattr(widget, 'value'):
-                                widget.value = widget_value
-                else:
-                    # Handle other attribute types if necessary
-                    pass
-            # Special handling for 'marker_sets' attribute
-            elif attr_name == 'marker_sets':
-                self.marker_sets = value
-            # Special handling for 'mask_names' attribute
-            elif attr_name == 'mask_names':
-                self.mask_names = value
+            # One unusable entry must cost that entry only.  The restore runs
+            # inside ``__init__``, so anything escaping this loop is the
+            # difference between a wrong setting and no viewer at all.
+            try:
+                self._restore_state_entry(attr_name, value)
+            except Exception:
+                logger.warning(
+                    "[settings] the saved value for %r could not be applied and was "
+                    "skipped; the rest of the settings were restored normally.",
+                    attr_name, exc_info=True,
+                )
 
-        # Update the marker set dropdown and controls
-        if self._debug:
-            logger.debug("[INIT DEBUG] load_widget_states: calling update_marker_set_dropdown")
-        self.update_marker_set_dropdown()
-        if self._debug:
-            logger.debug("[INIT DEBUG] load_widget_states: calling update_controls")
-        self.update_controls(None)
-        if self._debug:
-            logger.debug("[INIT DEBUG] load_widget_states: calling update_display (suppressed if _suspend_display_updates)")
-        self.update_display(self.current_downsample_factor)
-        if self._debug:
-            logger.debug("[INIT DEBUG] load_widget_states: calling update_keys")
-        self.update_keys(None)
-        if self._debug:
-            logger.debug("[INIT DEBUG] load_widget_states: update_keys done")
+        # Rebuilding the UI from the values just restored.  Each step is
+        # guarded on its own: these are driven by saved state, so a stale entry
+        # that survived the per-entry guard above surfaces here instead, and it
+        # must still cost the step rather than the session.
+        for step_name, step in (
+            ("update_marker_set_dropdown", self.update_marker_set_dropdown),
+            ("update_controls", lambda: self.update_controls(None)),
+            ("update_display", lambda: self.update_display(self.current_downsample_factor)),
+            ("update_keys", lambda: self.update_keys(None)),
+        ):
+            if self._debug:
+                logger.debug("[INIT DEBUG] load_widget_states: calling %s", step_name)
+            try:
+                step()
+            except Exception:
+                logger.warning(
+                    "[settings] %s failed while applying the saved settings; the viewer "
+                    "opens without that part of them.", step_name, exc_info=True,
+                )
 
         accordion = getattr(self.ui_component, 'control_sections', None)
         if accordion is not None:
@@ -5485,8 +5530,14 @@ class ImageMaskViewer:
             logger.debug(f"Widget states loaded from {file_path}")
         if self._debug:
             logger.debug("[INIT DEBUG] load_widget_states: calling inform_plugins")
-        self.inform_plugins('on_marker_sets_changed')
-        self.inform_plugins('refresh_roi_table')
+        for message in ('on_marker_sets_changed', 'refresh_roi_table'):
+            try:
+                self.inform_plugins(message)
+            except Exception:
+                logger.warning(
+                    "[settings] notifying the plugins of %r failed; the viewer opens "
+                    "regardless.", message, exc_info=True,
+                )
         if self._debug:
             logger.debug("[INIT DEBUG] load_widget_states: DONE")
     

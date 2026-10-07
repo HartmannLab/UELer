@@ -172,6 +172,18 @@ Open **Advanced Settings → Data mapping** in the left panel and compare **X ke
 
 The [setup dialog](tutorials/setup-dialog.md) asks for exactly these when a table first loads, and pre-fills the ones it recognises — so if you skipped it, that is the thing to check first.
 
+### A setting came back different, with a warning in the log
+
+UELer saves your settings per dataset in `widget_states.json` (inside the `.UELer` folder) and restores them next time. The data can change in between — a field of view removed from the folder, a marker set deleted, a column renamed — and then a saved setting names something that is no longer there.
+
+When that happens UELer does **not** fail to open. It falls back to the nearest value the control will accept — the first available FOV for **Select Image:**, the first option for a list, the nearest end of a slider's range, otherwise that control's default — and logs a warning naming the setting, the value it could not use, and what it used instead:
+
+```
+[settings] image_selector could not be restored to 'fov_07' (TraitError); using 'fov_01' instead.
+```
+
+That is informational, not an error: set the control again if the setting matters for this dataset, and it will be saved as normal. A settings file that is corrupt or truncated — a kernel killed mid-write will do it — is ignored in the same spirit, with a warning, and the viewer opens with defaults. Deleting `widget_states.json` is always safe; you lose the saved settings for that dataset and nothing else.
+
 ### Launching takes a long time on shared or network storage
 
 Opening a dataset reads the FOV list and scans the masks folder, and on a shared filesystem (an HPC project mount, say) a directory holding tens of thousands of mask files can make that scan the slowest part of startup. UELer caps it: the mask-suffix scan is a single streaming pass over the directory with a two-second budget, and if the budget runs out it uses what it found and carries on. The **Mask key:** list then fills in as you browse FOVs, so a partial scan costs you a shorter suggestion list and nothing else — you can always type the suffix you want.

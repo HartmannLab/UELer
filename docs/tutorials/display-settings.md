@@ -126,6 +126,8 @@ Two mechanisms, with different jobs.
 
 **Widget state** is the automatic one. UELer writes `<base_folder>/.UELer/widget_states.json` whenever a control changes, and reloads it when you next open the same `base_folder`, restoring the FOV, channel selection, contrast, overlays, advanced settings, and accordion positions. Plugins keep their own state alongside it, one file each, named `<Plugin Name>_widget_states.json`.
 
+If the data has changed since — a field of view removed, a marker set deleted — a saved setting can name something that no longer exists. UELer falls back to the nearest value the control accepts and logs a warning saying what it used instead, rather than failing to open; see [A setting came back different, with a warning in the log](../faq.md#a-setting-came-back-different-with-a-warning-in-the-log).
+
 !!! tip "Resetting a bad restored state"
     Because restoration is automatic and covers nearly everything, a session that ended in a strange state comes back in that same strange state. To start clean, close the viewer and delete `<base_folder>/.UELer/widget_states.json`. Your ROIs, palettes, marker sets, and export configs live in separate files under `.UELer/` and are not affected — see [Where does UELer store my work?](../faq.md#where-does-ueler-store-my-work).
 
