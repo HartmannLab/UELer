@@ -642,6 +642,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../tutorials/setup-dialog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guided Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../tutorials/user-interface/" class="md-nav__link">
         
   
@@ -1213,6 +1241,39 @@
     <span class="md-ellipsis">
       
         The viewer is blank or does not update after launching
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-image-loads-but-no-cells-are-shown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The image loads but no cells are shown
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-setting-came-back-different-with-a-warning-in-the-log" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A setting came back different, with a warning in the log
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#launching-takes-a-long-time-on-shared-or-network-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Launching takes a long time on shared or network storage
       
     </span>
   </a>
@@ -1939,6 +2000,39 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#the-image-loads-but-no-cells-are-shown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The image loads but no cells are shown
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-setting-came-back-different-with-a-warning-in-the-log" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A setting came back different, with a warning in the log
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#launching-takes-a-long-time-on-shared-or-network-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Launching takes a long time on shared or network storage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#channel-images-appear-all-white-or-all-black" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2200,6 +2294,19 @@ without a priming cell.</p>
 <li>Restart the kernel and run all cells again.</li>
 <li>Check that your data paths are correct.</li>
 </ol>
+<h3 id="the-image-loads-but-no-cells-are-shown">The image loads but no cells are shown<a class="headerlink" href="#the-image-loads-but-no-cells-are-shown" title="Permanent link">&para;</a></h3>
+<p>Almost always the <strong>data mapping</strong>: the four keys that tell UELer which columns of your cell table hold the coordinates, the mask label and the FOV name. If one of them names a column your table does not have, UELer finds no cells to draw — and an empty overlay looks exactly the same as a dataset that genuinely has nothing in it, which is what makes this hard to spot.</p>
+<p>Open <strong>Advanced Settings → Data mapping</strong> in the left panel and compare <strong>X key:</strong>, <strong>Y key:</strong>, <strong>Label key:</strong> and <strong>Fov key:</strong> against your table's real column names. Each field offers your own columns as suggestions, so in the normal case you can pick the right one; it also accepts a name typed by hand. <strong>Mask key:</strong> does the same for the mask suffixes in your masks folder.</p>
+<p>The <a href="../tutorials/setup-dialog/">setup dialog</a> asks for exactly these when a table first loads, and pre-fills the ones it recognises — so if you skipped it, that is the thing to check first.</p>
+<h3 id="a-setting-came-back-different-with-a-warning-in-the-log">A setting came back different, with a warning in the log<a class="headerlink" href="#a-setting-came-back-different-with-a-warning-in-the-log" title="Permanent link">&para;</a></h3>
+<p>UELer saves your settings per dataset in <code>widget_states.json</code> (inside the <code>.UELer</code> folder) and restores them next time. The data can change in between — a field of view removed from the folder, a marker set deleted, a column renamed — and then a saved setting names something that is no longer there.</p>
+<p>When that happens UELer does <strong>not</strong> fail to open. It falls back to the nearest value the control will accept — the first available FOV for <strong>Select Image:</strong>, the first option for a list, the nearest end of a slider's range, otherwise that control's default — and logs a warning naming the setting, the value it could not use, and what it used instead:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>[settings] image_selector could not be restored to 'fov_07' (TraitError); using 'fov_01' instead.
+</code></pre></div>
+<p>That is informational, not an error: set the control again if the setting matters for this dataset, and it will be saved as normal. A settings file that is corrupt or truncated — a kernel killed mid-write will do it — is ignored in the same spirit, with a warning, and the viewer opens with defaults. Deleting <code>widget_states.json</code> is always safe; you lose the saved settings for that dataset and nothing else.</p>
+<h3 id="launching-takes-a-long-time-on-shared-or-network-storage">Launching takes a long time on shared or network storage<a class="headerlink" href="#launching-takes-a-long-time-on-shared-or-network-storage" title="Permanent link">&para;</a></h3>
+<p>Opening a dataset reads the FOV list and scans the masks folder, and on a shared filesystem (an HPC project mount, say) a directory holding tens of thousands of mask files can make that scan the slowest part of startup. UELer caps it: the mask-suffix scan is a single streaming pass over the directory with a two-second budget, and if the budget runs out it uses what it found and carries on. The <strong>Mask key:</strong> list then fills in as you browse FOVs, so a partial scan costs you a shorter suggestion list and nothing else — you can always type the suffix you want.</p>
+<p>If launching is slow beyond that, the remaining cost is reading the images themselves. Lower <strong>Cache Size:</strong> if memory is the constraint, and see <a href="../tutorials/display-settings/">Display Settings</a> for the downsampling options.</p>
 <h3 id="channel-images-appear-all-white-or-all-black">Channel images appear all-white or all-black<a class="headerlink" href="#channel-images-appear-all-white-or-all-black" title="Permanent link">&para;</a></h3>
 <p>This is a contrast issue. Each channel's display range starts at the 99.9th percentile of its data,
 not its maximum — so a single bright artefact can push the whole image dark. Expand the <strong>Channels</strong>
@@ -2216,7 +2323,7 @@ starting the kernel, or restart the kernel after setting it.</p>
 <h3 id="map-mode-renders-slowly-for-large-datasets">Map mode renders slowly for large datasets<a class="headerlink" href="#map-mode-renders-slowly-for-large-datasets" title="Permanent link">&para;</a></h3>
 <p>Map mode limits how many <em>uncached</em> tiles it draws per frame (default 80), keeping the ones nearest
 the viewport. You can lower this on the viewer object:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">viewer</span><span class="o">.</span><span class="n">_map_render_tile_limit</span> <span class="o">=</span> <span class="mi">40</span>  <span class="c1"># lower for slower systems</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">viewer</span><span class="o">.</span><span class="n">_map_render_tile_limit</span> <span class="o">=</span> <span class="mi">40</span>  <span class="c1"># lower for slower systems</span>
 </code></pre></div>
 <hr />
 <h2 id="single-cell-analysis">Single-Cell Analysis<a class="headerlink" href="#single-cell-analysis" title="Permanent link">&para;</a></h2>
@@ -2265,7 +2372,7 @@ without one. See <a href="../tutorials/cell-table/">Working with a Cell Table</a
 <p>Mask and annotation palettes are also saved under <code>.UELer/</code>.</p>
 <h3 id="can-i-move-the-ueler-folder-somewhere-else">Can I move the <code>.UELer</code> folder somewhere else?<a class="headerlink" href="#can-i-move-the-ueler-folder-somewhere-else" title="Permanent link">&para;</a></h3>
 <p>Yes. Pass <code>settings_path</code> to <code>run_viewer()</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">viewer</span> <span class="o">=</span> <span class="n">ueler</span><span class="o">.</span><span class="n">run_viewer</span><span class="p">(</span><span class="n">base_folder</span><span class="p">,</span> <span class="n">settings_path</span><span class="o">=</span><span class="s2">"/your/custom/path"</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">viewer</span> <span class="o">=</span> <span class="n">ueler</span><span class="o">.</span><span class="n">run_viewer</span><span class="p">(</span><span class="n">base_folder</span><span class="p">,</span> <span class="n">settings_path</span><span class="o">=</span><span class="s2">"/your/custom/path"</span><span class="p">)</span>
 </code></pre></div>
 <p>This stores settings at <code>/your/custom/path/&lt;base_folder name&gt;/.UELer</code> instead of
 <code>&lt;base_folder&gt;/.UELer</code>. Use it when <code>base_folder</code> is read-only, or a downstream

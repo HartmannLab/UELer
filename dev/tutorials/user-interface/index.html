@@ -15,7 +15,7 @@
         <link rel="canonical" href="https://hartmannlab.github.io/UELer/latest/tutorials/user-interface/">
       
       
-        <link rel="prev" href="../basic-usage/">
+        <link rel="prev" href="../setup-dialog/">
       
       
         <link rel="next" href="../display-settings/">
@@ -628,6 +628,34 @@
     
   
     Basic Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup-dialog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guided Setup
   
 
     
@@ -1750,17 +1778,19 @@ input, and <strong>Load / Save / Update / Delete Marker Set</strong> buttons. <s
 <p>Two tabs inside one accordion section:</p>
 <ul>
 <li><strong>Data mapping</strong> — <strong>X key:</strong>, <strong>Y key:</strong>, <strong>Label key:</strong>, <strong>Mask key:</strong> and <strong>Fov key:</strong>, the names
-  that link your cell table and your masks to the images. All five are <strong>dropdowns built from your own
-  data</strong>: the four cell-table keys list the columns your table actually has (<strong>X key:</strong> and <strong>Y key:</strong>
-  list the numeric ones), and <strong>Mask key:</strong> lists the mask suffixes found in your masks folder. There
-  is nothing to type, so there is nothing to spell wrong. Without a cell table the four column
-  dropdowns keep their defaults, since there is nothing to offer yet.</li>
+  that link your cell table and your masks to the images. Each is a text field with a <strong>suggestion
+  list built from your own data</strong>: the four cell-table keys offer the columns your table actually has
+  (<strong>X key:</strong> and <strong>Y key:</strong> offer the numeric ones), and <strong>Mask key:</strong> offers the mask suffixes found
+  in your masks folder. So you normally pick rather than spell — and you can still type a name the
+  list does not contain, which is what keeps the field usable when discovery comes up short. Without
+  a cell table the four column fields keep their defaults, since there is nothing to offer yet. See
+  <a href="../setup-dialog/#the-key-fields-are-suggestion-lists-not-menus">Guided Setup</a>.</li>
 <li><strong>Advanced Settings</strong> — <strong>Cache Size:</strong>, the <strong>Pixel Size (nm):</strong> input that drives the
   <a href="#main-viewer">scale bar</a>, and a <strong>Downsample</strong> toggle.</li>
 </ul>
 <div class="admonition note">
 <p class="admonition-title">You are asked for these on first load</p>
-<p>A <a href="../display-settings/#the-setup-dialog">setup dialog</a> opens the first time you load a dataset and
+<p>A <a href="../setup-dialog/">setup dialog</a> opens the first time you load a dataset and
 walks you through whichever of these apply to what you loaded. It edits these same fields, so
 anything you set there is already applied here.</p>
 </div>

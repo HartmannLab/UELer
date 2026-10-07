@@ -860,6 +860,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../tutorials/setup-dialog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guided Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../tutorials/user-interface/" class="md-nav__link">
         
   
@@ -1925,6 +1953,10 @@ code path goes untested. This target prints every skip with its reason instead.<
 <div class="admonition tip">
 <p class="admonition-title"><code>Unable to find widget 'anywidget'</code> in VS Code</p>
 <p>The JavaScript half of <code>anywidget</code> is not where your frontend looks for it, usually because it was installed with <code>pip install --user</code> while the kernel runs from a different environment. Reinstall it into the kernel's environment (<code>pip install --force-reinstall anywidget</code>), or add <code>"jsdelivr.com"</code> to the VS Code setting <code>jupyter.widgetScriptSources</code>. See the <a href="../faq/#my-editor-cannot-find-the-widget-anywidget">FAQ</a> for why JupyterLab can work while VS Code does not.</p>
+</div>
+<div class="admonition tip">
+<p class="admonition-title">Shared or read-only environments (HPC clusters)</p>
+<p><code>pip install --user</code> is the usual move when the environment itself is not writable, and it is the usual cause of trouble here: the Python package lands on your path while its browser-side files land in <code>~/.local/share/jupyter/</code>, which JupyterLab searches and VS Code does not. If you can, create your own environment (see <a href="#option-b-install-from-source">Option B</a>) and install into that rather than using <code>--user</code>. UELer checks this when the viewer opens and logs a warning naming the paths it actually found.</p>
 </div>
 <div class="admonition tip">
 <p class="admonition-title">ModuleNotFoundError on import</p>

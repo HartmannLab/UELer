@@ -648,6 +648,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../setup-dialog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guided Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../user-interface/" class="md-nav__link">
         
   
@@ -1703,9 +1731,9 @@
 <p><strong>3. Give the notebook some width.</strong> The left control panel is a fixed 350 px column. On a narrow window, or at high browser zoom, the image canvas gets whatever is left over and can end up uncomfortably small. Zooming the browser <em>out</em> one step (<code>Ctrl</code>/<code>Cmd</code> + <code>-</code>) buys the canvas real estate without shrinking the controls' legibility much.</p>
 <hr />
 <h2 id="the-setup-dialog">The Setup Dialog<a class="headerlink" href="#the-setup-dialog" title="Permanent link">&para;</a></h2>
-<p>The first time you open a dataset, UELer puts a short setup dialog in front of the viewer asking for exactly the settings that apply to what you loaded: the viewer settings always, the <strong>Mask key:</strong> if you passed a masks folder, and the cell-table column mapping if you loaded a table. It exists because these settings are easy to miss and expensive to get wrong — the pixel size in particular is applied silently and shows up in every exported figure.</p>
-<p>The fields in the dialog <em>are</em> the fields in the left panel, so whatever you set there is already applied and stays editable in <strong>Advanced Settings</strong> afterwards. <strong>Skip setup</strong> dismisses it. UELer remembers which steps it has shown for each dataset (in <code>.UELer/setup_dialog.json</code>), so it does not ask again — and if you load a cell table later in the same session, it asks only about the new columns.</p>
-<p>The rest of this section is what the dialog asks for, with the reasoning behind each answer.</p>
+<p>The first time you open a dataset, UELer puts a short dialog in front of the viewer asking for exactly the settings on this page that apply to what you loaded — the viewer settings always, the <strong>Mask key:</strong> if you passed a masks folder, and the cell-table column mapping if you loaded a table. The fields in the dialog <em>are</em> the fields in the left panel, so whatever you set there is already applied and stays editable in <strong>Advanced Settings</strong> afterwards.</p>
+<p><strong>Skip setup</strong> dismisses it, and UELer remembers which steps it has shown for each dataset, so it does not ask twice. <a href="../setup-dialog/">Guided Setup</a> covers it in full, including how to make it appear again.</p>
+<p>The rest of this page is what the dialog asks for, with the reasoning behind each answer.</p>
 <hr />
 <h2 id="the-four-things-to-set-first">The Four Things to Set First<a class="headerlink" href="#the-four-things-to-set-first" title="Permanent link">&para;</a></h2>
 <p>Do these in order the first time you open a dataset. Two of the four are wrong by default for most non-MIBI data.</p>
@@ -1783,6 +1811,7 @@
 <p>Two mechanisms, with different jobs.</p>
 <p><strong>Marker sets</strong> are the deliberate, portable unit: a named combination of channels, their colours, and their contrast ranges. Type a name in <strong>Set Name:</strong>, click <strong>Save Marker Set</strong>, and reload it later from the <strong>Marker Set:</strong> dropdown. Use these for the views you want to reproduce — a figure panel, a QC pass, a set of markers you always check first.</p>
 <p><strong>Widget state</strong> is the automatic one. UELer writes <code>&lt;base_folder&gt;/.UELer/widget_states.json</code> whenever a control changes, and reloads it when you next open the same <code>base_folder</code>, restoring the FOV, channel selection, contrast, overlays, advanced settings, and accordion positions. Plugins keep their own state alongside it, one file each, named <code>&lt;Plugin Name&gt;_widget_states.json</code>.</p>
+<p>If the data has changed since — a field of view removed, a marker set deleted — a saved setting can name something that no longer exists. UELer falls back to the nearest value the control accepts and logs a warning saying what it used instead, rather than failing to open; see <a href="../../faq/#a-setting-came-back-different-with-a-warning-in-the-log">A setting came back different, with a warning in the log</a>.</p>
 <div class="admonition tip">
 <p class="admonition-title">Resetting a bad restored state</p>
 <p>Because restoration is automatic and covers nearly everything, a session that ended in a strange state comes back in that same strange state. To start clean, close the viewer and delete <code>&lt;base_folder&gt;/.UELer/widget_states.json</code>. Your ROIs, palettes, marker sets, and export configs live in separate files under <code>.UELer/</code> and are not affected — see <a href="../../faq/#where-does-ueler-store-my-work">Where does UELer store my work?</a>.</p>

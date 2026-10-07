@@ -12,13 +12,13 @@
         <meta name="author" content="Yu-Le Wu (Hartmann Lab, DKFZ)">
       
       
-        <link rel="canonical" href="https://hartmannlab.github.io/UELer/latest/develop-notes/map-mode/">
+        <link rel="canonical" href="https://hartmannlab.github.io/UELer/latest/tutorials/setup-dialog/">
       
       
-        <link rel="prev" href="../mask-rendering/">
+        <link rel="prev" href="../basic-usage/">
       
       
-        <link rel="next" href="../export-pipeline/">
+        <link rel="next" href="../user-interface/">
       
       
         
@@ -29,7 +29,7 @@
     
     
       
-        <title>Map Mode Internals - UELer</title>
+        <title>Guided Setup - UELer</title>
       
     
     
@@ -82,7 +82,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#map-mode-internals" class="md-skip">
+        <a href="#guided-setup" class="md-skip">
           Skip to content
         </a>
       
@@ -121,7 +121,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Map Mode Internals
+              Guided Setup
             
           </span>
         </div>
@@ -283,11 +283,13 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="../../tutorials/" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
           
   
   
@@ -322,13 +324,11 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
-        <a href="../" class="md-tabs__link">
+      <li class="md-tabs__item">
+        <a href="../../develop-notes/" class="md-tabs__link">
           
   
   
@@ -475,28 +475,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
-        
-          
-          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
             
   
   
@@ -514,7 +517,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
             
@@ -532,7 +535,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tutorials/" class="md-nav__link">
+      <a href="../" class="md-nav__link">
         
   
   
@@ -557,28 +560,31 @@
                 
   
   
+    
   
   
+  
     
     
     
     
       
       
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
         
           
+          
         
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4_2" >
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_2" checked>
         
           
-          <label class="md-nav__link" for="__nav_4_2" id="__nav_4_2_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_2" id="__nav_4_2_label" tabindex="">
             
   
   
@@ -596,7 +602,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_2_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_2_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_4_2">
             <span class="md-nav__icon md-icon"></span>
             
@@ -614,7 +620,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tutorials/basic-usage/" class="md-nav__link">
+      <a href="../basic-usage/" class="md-nav__link">
         
   
   
@@ -639,10 +645,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../tutorials/setup-dialog/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guided Setup
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -658,6 +691,70 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-asks-and-when" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it asks, and when
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-key-fields-are-suggestion-lists-not-menus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The key fields are suggestion lists, not menus
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-ueler-remembers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What UELer remembers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-these-settings-live-afterwards" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where these settings live afterwards
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -670,7 +767,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tutorials/user-interface/" class="md-nav__link">
+      <a href="../user-interface/" class="md-nav__link">
         
   
   
@@ -698,7 +795,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tutorials/display-settings/" class="md-nav__link">
+      <a href="../display-settings/" class="md-nav__link">
         
   
   
@@ -726,7 +823,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tutorials/roi-manager/" class="md-nav__link">
+      <a href="../roi-manager/" class="md-nav__link">
         
   
   
@@ -754,7 +851,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tutorials/map-mode/" class="md-nav__link">
+      <a href="../map-mode/" class="md-nav__link">
         
   
   
@@ -782,7 +879,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tutorials/export/" class="md-nav__link">
+      <a href="../export/" class="md-nav__link">
         
   
   
@@ -824,10 +921,13 @@
       
       
         
+          
+          
+        
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
       
         
         
@@ -836,7 +936,7 @@
         <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4_3" >
         
           
-          <label class="md-nav__link" for="__nav_4_3" id="__nav_4_3_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4_3" id="__nav_4_3_label" tabindex="">
             
   
   
@@ -872,7 +972,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tutorials/cell-table/" class="md-nav__link">
+      <a href="../cell-table/" class="md-nav__link">
         
   
   
@@ -900,7 +1000,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tutorials/scatter-histogram/" class="md-nav__link">
+      <a href="../scatter-histogram/" class="md-nav__link">
         
   
   
@@ -928,7 +1028,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../tutorials/clustering-annotation/" class="md-nav__link">
+      <a href="../clustering-annotation/" class="md-nav__link">
         
   
   
@@ -995,31 +1095,28 @@
       
   
   
-    
   
   
-  
     
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
         
           
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
             
   
   
@@ -1037,7 +1134,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1055,7 +1152,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../" class="md-nav__link">
+      <a href="../../develop-notes/" class="md-nav__link">
         
   
   
@@ -1083,7 +1180,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../packaging/" class="md-nav__link">
+      <a href="../../develop-notes/packaging/" class="md-nav__link">
         
   
   
@@ -1111,7 +1208,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../plugin-development/" class="md-nav__link">
+      <a href="../../develop-notes/plugin-development/" class="md-nav__link">
         
   
   
@@ -1139,7 +1236,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../viewer-runtime/" class="md-nav__link">
+      <a href="../../develop-notes/viewer-runtime/" class="md-nav__link">
         
   
   
@@ -1167,7 +1264,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../mask-rendering/" class="md-nav__link">
+      <a href="../../develop-notes/mask-rendering/" class="md-nav__link">
         
   
   
@@ -1192,37 +1289,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Map Mode Internals
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../develop-notes/map-mode/" class="md-nav__link">
         
   
   
@@ -1238,120 +1308,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#context" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Context
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#key-decisions" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Key Decisions
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#coordinate-systems" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Coordinate Systems
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#tile-rendering" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Tile Rendering
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Tile Rendering">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#the-uncached-tile-budget" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The uncached-tile budget
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#plugin-map-mode-hooks" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Plugin Map-Mode Hooks
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#known-fixes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Known Fixes
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#related-issues" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Related Issues
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1364,7 +1320,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../export-pipeline/" class="md-nav__link">
+      <a href="../../develop-notes/export-pipeline/" class="md-nav__link">
         
   
   
@@ -1392,7 +1348,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../roi-gallery/" class="md-nav__link">
+      <a href="../../develop-notes/roi-gallery/" class="md-nav__link">
         
   
   
@@ -1420,7 +1376,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../heatmap/" class="md-nav__link">
+      <a href="../../develop-notes/heatmap/" class="md-nav__link">
         
   
   
@@ -1448,7 +1404,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../ome-tiff/" class="md-nav__link">
+      <a href="../../develop-notes/ome-tiff/" class="md-nav__link">
         
   
   
@@ -1503,10 +1459,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#context" class="md-nav__link">
+  <a href="#what-it-asks-and-when" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Context
+        What it asks, and when
       
     </span>
   </a>
@@ -1514,10 +1470,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#key-decisions" class="md-nav__link">
+  <a href="#the-key-fields-are-suggestion-lists-not-menus" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Key Decisions
+        The key fields are suggestion lists, not menus
       
     </span>
   </a>
@@ -1525,10 +1481,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#coordinate-systems" class="md-nav__link">
+  <a href="#what-ueler-remembers" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Coordinate Systems
+        What UELer remembers
       
     </span>
   </a>
@@ -1536,60 +1492,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#tile-rendering" class="md-nav__link">
+  <a href="#where-these-settings-live-afterwards" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Tile Rendering
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Tile Rendering">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#the-uncached-tile-budget" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The uncached-tile budget
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#plugin-map-mode-hooks" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Plugin Map-Mode Hooks
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#known-fixes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Known Fixes
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#related-issues" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Related Issues
+        Where these settings live afterwards
       
     </span>
   </a>
@@ -1616,88 +1522,76 @@
   
 
 
-<h1 id="map-mode-internals">Map Mode Internals<a class="headerlink" href="#map-mode-internals" title="Permanent link">&para;</a></h1>
-<blockquote>
-<p>Source: <a href="https://github.com/HartmannLab/UELer/blob/main/dev_note/topic_map_mode_spatial.md"><code>dev_note/topic_map_mode_spatial.md</code></a></p>
-</blockquote>
+<h1 id="guided-setup">Guided Setup<a class="headerlink" href="#guided-setup" title="Permanent link">&para;</a></h1>
+<p>The first time you open a dataset, UELer puts a short dialog in front of the viewer and asks for the handful of settings that decide whether what you see is correct. It exists because these settings are easy to miss and expensive to get wrong: a wrong pixel size silently mis-scales the scale bar in every figure you export, and a wrong column name makes the viewer find no cells at all — with nothing in the log to say why.</p>
+<p>You can always dismiss it. Everything it asks for also lives in the left panel under <strong>Advanced Settings</strong>, and the dialog edits those same fields rather than copies of them.</p>
 <hr />
-<h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">&para;</a></h2>
-<p>Map mode stitches multiple FOVs into a single composite view and introduces spatial navigation challenges for plugins that assume per-FOV coordinates.</p>
-<hr />
-<h2 id="key-decisions">Key Decisions<a class="headerlink" href="#key-decisions" title="Permanent link">&para;</a></h2>
-<ul>
-<li><strong><code>VirtualMapLayer</code></strong> renders stitched tiles by reusing existing single-FOV rendering paths.</li>
-<li>Map mode is gated behind <code>ENABLE_MAP_MODE</code>; single-FOV behavior is fully preserved when disabled.</li>
-<li>FOV-local coordinates are resolved into stitched-map pixels for selection and navigation without mutating underlying data tables.</li>
-<li>A dedicated stitched-tile cache (keyed by channel and overlay state) avoids stale renders.</li>
-</ul>
-<hr />
-<h2 id="coordinate-systems">Coordinate Systems<a class="headerlink" href="#coordinate-systems" title="Permanent link">&para;</a></h2>
+<h2 id="what-it-asks-and-when">What it asks, and when<a class="headerlink" href="#what-it-asks-and-when" title="Permanent link">&para;</a></h2>
+<p>The steps are built from what you actually loaded, so you are never asked about data you do not have.</p>
 <table>
 <thead>
 <tr>
-<th>System</th>
-<th>Description</th>
+<th>Step</th>
+<th>Appears when</th>
+<th>Fields</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>FOV-local pixels</td>
-<td>Pixel coordinates within a single FOV image</td>
+<td><strong>Main viewer settings</strong></td>
+<td>always</td>
+<td><strong>Cache Size:</strong>, <strong>Pixel Size (nm):</strong>, <strong>Downsample</strong></td>
 </tr>
 <tr>
-<td>Stitched-canvas pixels</td>
-<td>Pixel coordinates in the full stitched map canvas</td>
+<td><strong>Mask mapping</strong></td>
+<td>you passed a masks folder</td>
+<td><strong>Mask key:</strong></td>
 </tr>
 <tr>
-<td>Physical µm</td>
-<td>Real-world coordinates from the map descriptor</td>
+<td><strong>Cell table mapping</strong></td>
+<td>a cell table is loaded</td>
+<td><strong>X key:</strong>, <strong>Y key:</strong>, <strong>Label key:</strong>, <strong>Fov key:</strong></td>
 </tr>
 </tbody>
 </table>
-<p>Conversion helpers:</p>
-<ul>
-<li><code>resolve_cell_map_position()</code> — FOV-local → stitched-canvas</li>
-<li><code>map_bounds()</code> → physical µm bounds of the full map</li>
-<li><code>base_pixel_size_um()</code> → µm per pixel at base resolution</li>
-</ul>
+<p><strong>Next</strong> moves on, <strong>Back</strong> returns, and the last step's button reads <strong>Done</strong>. <strong>Skip setup</strong> dismisses the whole dialog, not just the step you are on.</p>
+<div class="admonition warning">
+<p class="admonition-title">Pixel Size (nm) is the one to read twice</p>
+<p>It defaults to <strong>390 nm</strong>, the MIBI detector pitch, and it is applied to every dataset without comment. If your instrument is something else, every scale bar UELer draws — on screen and in every batch-exported image — is wrong by that ratio. This is the kind of error that surfaces when a figure is already in review, which is why the dialog names it instead of leaving it in an accordion to be found.</p>
+</div>
 <hr />
-<h2 id="tile-rendering">Tile Rendering<a class="headerlink" href="#tile-rendering" title="Permanent link">&para;</a></h2>
-<ol>
-<li><code>VirtualMapLayer.render()</code> is called with the current viewport.</li>
-<li><code>_collect_visible_tiles()</code> returns tiles whose bounding boxes intersect the viewport.</li>
-<li>Each tile is rendered via <code>render_fov_to_array()</code> using <code>channel_settings</code> from the marker profile (no UI widget reads).</li>
-<li>Tiles are stitched onto the canvas via <code>_allocate_canvas()</code> + <code>_blit_tile()</code>.</li>
-</ol>
-<h3 id="the-uncached-tile-budget">The uncached-tile budget<a class="headerlink" href="#the-uncached-tile-budget" title="Permanent link">&para;</a></h3>
-<p>The cap is on <em>uncached</em> tiles only — already-cached tiles always render, however many there are, because drawing them costs nothing but a memcpy. The budget exists to stop a single frame pulling hundreds of TIFFs off a slow network filesystem at once.</p>
+<h2 id="the-key-fields-are-suggestion-lists-not-menus">The key fields are suggestion lists, not menus<a class="headerlink" href="#the-key-fields-are-suggestion-lists-not-menus" title="Permanent link">&para;</a></h2>
+<p>The five key fields — <strong>X key:</strong>, <strong>Y key:</strong>, <strong>Label key:</strong>, <strong>Mask key:</strong>, <strong>Fov key:</strong> — are the names that link your cell table and your masks to the images. Each one is a text field with a list attached:</p>
 <ul>
-<li>The base budget is read from the viewer as <code>_map_render_tile_limit</code> (default <strong>80</strong>), so it can be lowered at runtime on a slow machine: <code>viewer._map_render_tile_limit = 40</code>.</li>
-<li>The effective budget is <code>_map_render_tile_limit × max(1, downsample_factor)</code>. It scales with the downsample factor deliberately: a fully zoomed-out view (ds ≥ 8) is cheap per tile and needs to show every FOV rather than cut off the edges of the map.</li>
-<li>When the uncached set exceeds the budget, tiles are sorted by squared distance from the viewport centre and truncated, so what survives is the region the user is actually looking at.</li>
+<li><strong>The list is built from your own data.</strong> The four cell-table keys offer the columns your table actually has (<strong>X key:</strong> and <strong>Y key:</strong> offer the numeric ones); <strong>Mask key:</strong> offers the mask suffixes found in your masks folder. So in the normal case you pick rather than spell, and a typo is not a way to fail.</li>
+<li><strong>You can still type a name that is not in the list.</strong> This matters more than it sounds. Discovery can come up short — a masks folder on storage too slow to finish scanning, a column whose name no heuristic would guess — and a field that only offered what it had found would leave you with one wrong value and no way to correct it. Typing always works.</li>
+<li><strong>UELer pre-fills what it recognises.</strong> If your table uses <code>x</code>/<code>y</code> rather than <code>centroid-1</code>/<code>centroid-0</code>, or <code>cell_label</code> rather than <code>label</code>, the right column is already selected when the dialog opens, and the step is a confirmation rather than a decision.</li>
+<li><strong>It never silently changes an answer you gave.</strong> If you set a key and it is still a real column, it stays set. If it is <em>not</em> a column of the table you just loaded, it is kept and shown anyway rather than swapped for a plausible-looking neighbour — a visibly wrong key is something you can fix, a silently retargeted one is not.</li>
 </ul>
+<div class="admonition tip">
+<p class="admonition-title">If the viewer shows no cells at all</p>
+<p>Check these four first. The overlay is empty both when the keys are wrong and when the dataset genuinely has nothing to show, and the two look identical. Open <strong>Advanced Settings → Data mapping</strong> and compare each key against your table's actual column names.</p>
+</div>
 <hr />
-<h2 id="plugin-map-mode-hooks">Plugin Map-Mode Hooks<a class="headerlink" href="#plugin-map-mode-hooks" title="Permanent link">&para;</a></h2>
-<p>All plugins inherit from <code>PluginBase</code>, which provides two lifecycle hooks:</p>
-<ul>
-<li><code>on_map_mode_activate()</code> — Called when map mode is enabled. Plugins should disable FOV-scope filters.</li>
-<li><code>on_map_mode_deactivate()</code> — Called when map mode is disabled. Plugins restore normal behavior.</li>
-</ul>
-<p>The active FOV is retrieved via <code>get_active_fov()</code>, which returns <code>None</code> in map mode to prevent stale widget reads.</p>
+<h2 id="what-ueler-remembers">What UELer remembers<a class="headerlink" href="#what-ueler-remembers" title="Permanent link">&para;</a></h2>
+<p>Answered steps are recorded per dataset, in <code>setup_dialog.json</code> inside the dataset's <code>.UELer</code> settings folder. The record is <strong>per step</strong>, not per session, which is what makes the two ways of loading a cell table behave sensibly:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">viewer</span> <span class="o">=</span> <span class="n">ueler</span><span class="o">.</span><span class="n">run_viewer</span><span class="p">(</span><span class="n">base_folder</span><span class="p">,</span> <span class="n">masks_folder</span><span class="o">=</span><span class="n">masks_folder</span><span class="p">)</span>   <span class="c1"># asks: viewer settings, mask key</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">load_cell_table</span><span class="p">(</span><span class="n">viewer</span><span class="p">,</span> <span class="n">cell_table</span><span class="o">=</span><span class="n">table</span><span class="p">)</span>                           <span class="c1"># asks: the four columns only</span>
+</code></pre></div>
+<p>Loading the table later in the same notebook asks only about the new columns instead of repeating the whole wizard. Closing counts as answered whether you pressed <strong>Done</strong> or <strong>Skip setup</strong> — a question you deliberately dismissed should not come back on every load.</p>
+<p><strong>To see the dialog again</strong>, delete <code>setup_dialog.json</code> from the dataset's <code>.UELer</code> folder and reload. You rarely need to: every field it asks for stays editable under <strong>Advanced Settings</strong> for the life of the session.</p>
+<div class="admonition note">
+<p class="admonition-title">A read-only settings folder costs you a repeated dialog, not a failed session</p>
+<p>If UELer cannot write the record — a dataset folder you only have read access to — the dialog simply asks again next time. Nothing else is affected.</p>
+</div>
 <hr />
-<h2 id="known-fixes">Known Fixes<a class="headerlink" href="#known-fixes" title="Permanent link">&para;</a></h2>
+<h2 id="where-these-settings-live-afterwards">Where these settings live afterwards<a class="headerlink" href="#where-these-settings-live-afterwards" title="Permanent link">&para;</a></h2>
+<p>Everything above is in the left panel, in the <strong>Advanced Settings</strong> accordion, split across two tabs:</p>
 <ul>
-<li><strong>Missing bounds offset (v0.3.1):</strong> <code>_export_map_roi_worker</code> now applies <code>map_bounds()</code> origin offset to canvas-pixel → µm conversion.</li>
-<li><strong>Render suppression at startup:</strong> <code>_suspend_display_updates</code> prevents burst renders during <code>load_widget_states</code>.</li>
+<li><strong>Data mapping</strong> — the five key fields.</li>
+<li><strong>Advanced Settings</strong> — <strong>Cache Size:</strong>, <strong>Pixel Size (nm):</strong>, <strong>Downsample</strong>.</li>
 </ul>
-<hr />
-<h2 id="related-issues">Related Issues<a class="headerlink" href="#related-issues" title="Permanent link">&para;</a></h2>
-<ul>
-<li><a href="https://github.com/HartmannLab/UELer/issues/3">#3</a></li>
-<li><a href="https://github.com/HartmannLab/UELer/issues/58">#58</a></li>
-<li><a href="https://github.com/HartmannLab/UELer/issues/59">#59</a></li>
-<li><a href="https://github.com/HartmannLab/UELer/issues/62">#62</a></li>
-</ul>
+<p>See <a href="../user-interface/#advanced-settings">User Interface</a> for the control-by-control map, and <a href="../display-settings/">Display Settings</a> for the reasoning behind each value.</p>
 
 
 
