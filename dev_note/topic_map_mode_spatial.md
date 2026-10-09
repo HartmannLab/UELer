@@ -8,6 +8,7 @@ Map mode stitches multiple FOVs into a single composite view and introduces spat
 - Keep map mode gated behind `ENABLE_MAP_MODE` and preserve single-FOV behavior when disabled.
 - Resolve FOV-local coordinates into stitched-map pixels for selection and navigation without mutating underlying data tables.
 - Keep a dedicated stitched-tile cache keyed by channel and overlay state to avoid stale renders.
+- A descriptor may list FOVs the base folder does not hold (a cohort-wide slide export opened against a subset). `_initialize_map_descriptors` filters each descriptor against `available_fovs` through `_drop_unavailable_map_fovs`: missing FOVs are dropped with one `[Map mode]` warning per map, and a map left empty is dropped entirely. As a second line of defence, `load_fov` raises `FileNotFoundError` rather than caching a `None` channel struct, and `_render_fov_region` turns that into a blank tile, so one unrenderable tile never aborts the whole map view.
 
 ## Current status
 - Descriptor parsing, map-mode activation, and stitched rendering are implemented with regression coverage.

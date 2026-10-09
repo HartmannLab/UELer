@@ -5,7 +5,7 @@ import html as html_lib
 import math
 import os
 import glob
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as dataclass_replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
@@ -101,7 +101,7 @@ from ueler.viewer.palette_store import (
     save_registry as save_palette_registry,
     write_palette_file,
 )
-from ueler.viewer.map_descriptor_loader import MapDescriptorLoader
+from ueler.viewer.map_descriptor_loader import MapDescriptorLoader, SlideDescriptor
 from .tooltip_utils import resolve_cell_record
 from .virtual_map_layer import MapPixelHit, VirtualMapLayer
 
@@ -717,7 +717,7 @@ class ImageMaskViewer:
         descriptor_root = self.settings_folder / MAP_DESCRIPTOR_RELATIVE_PATH
         loader = MapDescriptorLoader()
         result = loader.load_from_directory(descriptor_root)
-        self._map_descriptors = result.slides
+        self._map_descriptors = self._drop_unavailable_map_fovs(result.slides)
         self._map_fov_lookup.clear()
         self._map_layers.clear()
         self._map_tile_cache.clear()
@@ -742,6 +742,35 @@ class ImageMaskViewer:
             self._record_map_mode_warning(message)
         for message in result.errors:
             self._record_map_mode_warning(message)
+
+    def _drop_unavailable_map_fovs(self, slides: Mapping[str, SlideDescriptor]) -> Dict[str, SlideDescriptor]:
+        """Remove map FOVs that have no image data in the base folder.
+
+        A map descriptor may list more FOVs than the base folder holds (e.g. a
+        slide export covering a whole cohort, opened against a subset). Those
+        tiles cannot be rendered, so they are dropped here with one warning per
+        map; a map left with no FOVs is dropped entirely.
+        """
+        available = set(getattr(self, "available_fovs", None) or ())
+        if not available:
+            return dict(slides)
+        kept: Dict[str, SlideDescriptor] = {}
+        for map_id, descriptor in slides.items():
+            fovs = tuple(getattr(descriptor, "fovs", ()))
+            present = tuple(spec for spec in fovs if str(getattr(spec, "name", "")) in available)
+            missing = [str(getattr(spec, "name", "")) for spec in fovs if str(getattr(spec, "name", "")) not in available]
+            if missing:
+                preview = ", ".join(missing[:5]) + (", ..." if len(missing) > 5 else "")
+                self._record_map_mode_warning(
+                    f"{len(missing)} of {len(fovs)} FOVs in map '{map_id}' were not found in the base folder and are skipped: {preview}"
+                )
+            if not present:
+                self._record_map_mode_warning(
+                    f"Map '{map_id}' has no FOVs in the base folder; it is not available."
+                )
+                continue
+            kept[map_id] = descriptor if not missing else dataclass_replace(descriptor, fovs=present)
+        return kept
 
     def _record_map_mode_warning(self, message: str) -> None:
         text = f"[Map mode] {message}"
@@ -2174,6 +2203,11 @@ class ImageMaskViewer:
         if fov_name not in self.image_cache:
             # Load channel structures
             channels = load_channel_struct_fov(fov_name, self.base_folder)
+            if channels is None:
+                # Never cache the None: every later lookup would subscript it.
+                raise FileNotFoundError(
+                    f"No image data found for FOV '{fov_name}' in {self.base_folder}."
+                )
             # Add to cache
             self.image_cache[fov_name] = channels
 
@@ -4350,13 +4384,21 @@ class ImageMaskViewer:
         region_xy: Tuple[int, int, int, int],
         region_ds: Tuple[int, int, int, int],
     ) -> np.ndarray:
-        result = self._compose_fov_image(
-            fov_name,
-            tuple(selected_channels),
-            downsample_factor,
-            region_xy,
-            region_ds,
-        )
+        try:
+            result = self._compose_fov_image(
+                fov_name,
+                tuple(selected_channels),
+                downsample_factor,
+                region_xy,
+                region_ds,
+            )
+        except FileNotFoundError as exc:
+            # A map tile without image data renders as a blank region rather
+            # than aborting the whole map view.
+            self._record_map_mode_warning(str(exc))
+            height = max(1, region_ds[3] - region_ds[2])
+            width = max(1, region_ds[1] - region_ds[0])
+            return np.zeros((height, width, 3), dtype=np.float32)
         # Lazily compute channel stats for this tile now that its data is loaded.
         self._update_stats_for_visited_tile(fov_name, tuple(selected_channels))
         return result
