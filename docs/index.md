@@ -6,7 +6,7 @@
 
 **Unified Exploratory Linked Viewer** — a Jupyter Notebook-integrated viewer for spatial proteomics and multiplexed imaging data, with linked interactive plots and enhanced usability.
 
-[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/HartmannLab/UELer/main?urlpath=%2Fdoc%2Ftree%2Fscript%2Frun_ueler_binder.ipynb)
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/HartmannLab/UELer/develop?urlpath=%2Fdoc%2Ftree%2Fscript%2Frun_ueler_binder.ipynb)
 [![GitHub](https://img.shields.io/badge/GitHub-HartmannLab%2FUELer-blue?logo=github)](https://github.com/HartmannLab/UELer)
 
 ---
@@ -29,7 +29,9 @@ UELer is an interactive image viewer designed for **multiplexed imaging** data (
 
 You can launch UELer in your browser via Binder — no local setup required:
 
-[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/HartmannLab/UELer/main?urlpath=%2Fdoc%2Ftree%2Fscript%2Frun_ueler_binder.ipynb)
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/HartmannLab/UELer/develop?urlpath=%2Fdoc%2Ftree%2Fscript%2Frun_ueler_binder.ipynb)
+
+The demo builds from the `develop` branch, so it shows the newest features — including ones not yet in the latest release.
 
 ---
 

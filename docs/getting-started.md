@@ -12,7 +12,7 @@ The fastest way to see UELer is on **Binder**. The demo notebook **streams a pub
 there is nothing to download and no data to configure — the viewer opens on a real multiplexed
 imaging dataset.
 
-[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/HartmannLab/UELer/main?urlpath=%2Fdoc%2Ftree%2Fscript%2Frun_ueler_binder.ipynb)
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/HartmannLab/UELer/develop?urlpath=%2Fdoc%2Ftree%2Fscript%2Frun_ueler_binder.ipynb)
 
 Click the badge, wait for the environment to build, then run all cells. The first field of view is
 fetched on demand — only the channels you open are streamed.
@@ -20,6 +20,9 @@ fetched on demand — only the channels you open are streamed.
 !!! note "First launch can be slow"
     Binder builds a fresh environment on first use, which may take a few minutes. Subsequent
     launches are faster while the image is cached.
+
+!!! tip "The demo runs the development branch"
+    The badge builds from `develop`, not from the latest release, so you are testing the newest features as they land. If you want the demo to match the version you have installed, point the Binder URL at a release tag instead of `develop`.
 
 ---
 
