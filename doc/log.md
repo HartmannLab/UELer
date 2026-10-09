@@ -2,8 +2,8 @@
 **The Binder demo on the documentation site now builds from `develop`**
 
 - **The badge pointed at `main`, so the "try it without installation" route showed the last release rather than the current work.** For a demo whose job is to let a visitor try the thing before installing it, that is the wrong branch: the features worth showing are the ones that have just landed. The three badges in the site (`docs/index.md`, twice, and `docs/getting-started.md`) now launch `https://mybinder.org/v2/gh/HartmannLab/UELer/develop?urlpath=%2Fdoc%2Ftree%2Fscript%2Frun_ueler_binder.ipynb`, and both pages say which branch they build from so a visitor is not surprised by a feature their installed copy does not have.
-- **The README badge was deliberately left on `main`.** It is what someone sees next to the install instructions for the released package, where a demo running ahead of the release would be misleading rather than useful.
-- **Files:** edited `docs/index.md`, `docs/getting-started.md`.
+- **The README badge follows the same rule.** Both the inline link and the badge at the top of `README.md` build from `develop` as well, with the same one-line note, so the repository front page and the site agree about what the demo is showing.
+- **Files:** edited `docs/index.md`, `docs/getting-started.md`, `README.md`.
 - Verified: `tools/check_docs_consistency.py` clean; `script/run_ueler_binder.ipynb` and `.binder/` both exist on `origin/develop`.
 
 **A stale `widget_states.json` can no longer stop the viewer from opening**
