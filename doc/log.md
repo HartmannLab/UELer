@@ -1,4 +1,4 @@
-### v0.5.1-alpha3
+### v0.5.1-alpha4
 **Map mode opens when the map lists FOVs the base folder does not have**
 
 - **Turning on map mode crashed with `TypeError: 'NoneType' object is not subscriptable` (user report).** The map JSON listed more FOVs than the base folder held, which is the ordinary case when a slide-wide export is opened against a subset of the data. `_initialize_map_descriptors` registered every FOV in the descriptor as a tile without checking that it existed. When such a tile came into view, `load_fov` asked `load_channel_struct_fov` for its channels, got `None` back for the missing folder, cached that `None`, and then subscripted it on the next line. The traceback pointed at `load_fov` with nothing naming the FOV or the map behind it.
@@ -7,6 +7,7 @@
 - **Files:** edited `ueler/viewer/main_viewer.py` (`_drop_unavailable_map_fovs`, `load_fov`, `_render_fov_region`), `dev_note/topic_map_mode_spatial.md`, `README.md`; added `tests/test_map_missing_fovs.py` (4 tests).
 - Verified: `python -m unittest discover -s tests` → **1385 tests, OK** (1381 before, plus the 4 new).
 
+### v0.5.1-alpha3
 **The Binder demo on the documentation site now builds from `develop`**
 
 - **The badge pointed at `main`, so the "try it without installation" route showed the last release rather than the current work.** For a demo whose job is to let a visitor try the thing before installing it, that is the wrong branch: the features worth showing are the ones that have just landed. The three badges in the site (`docs/index.md`, twice, and `docs/getting-started.md`) now launch `https://mybinder.org/v2/gh/HartmannLab/UELer/develop?urlpath=%2Fdoc%2Ftree%2Fscript%2Frun_ueler_binder.ipynb`, and both pages say which branch they build from so a visitor is not surprised by a feature their installed copy does not have.

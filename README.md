@@ -155,7 +155,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 For more details, see the [user guide](https://hartmannlab.github.io/UELer/latest/tutorials/user-interface).
 
 ## New Update  
-### **UELer v0.5.1-alpha3 Summary**
+### **UELer v0.5.1-alpha4 Summary**
 
 - **Map mode now opens when your map file lists fields of view you have not loaded (reported by a user).** A slide's map JSON often covers more FOVs than the folder you opened, for example a whole-slide export viewed against a subset. Turning on map mode in that case used to fail with `TypeError: 'NoneType' object is not subscriptable`. UELer now leaves out the FOVs it cannot find, prints one warning per map naming them, and shows the rest of the map with gaps where the missing ones would be. A map with none of its FOVs in the folder is left out of the map list.
 
