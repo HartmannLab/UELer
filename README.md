@@ -155,7 +155,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 For more details, see the [user guide](https://hartmannlab.github.io/UELer/latest/tutorials/user-interface).
 
 ## New Update  
-### **UELer v0.5.1-alpha4 Summary**
+### **UELer v0.5.1-beta1 Summary**
 
 - **Streaming a BioImage Archive study: the cell gallery now shows the masks, and hovering a cell shows its values (reported by a user).** With `S-BIAD2557`, gallery tiles had no mask outlines even though the main viewer showed them, because the study's mask is called `cleaned_mask` and UELer kept looking for one called `whole_cell`. When **Mask key:** is still on its default and your data has no mask by that name, UELer now picks one of the masks you actually have. The hover tooltip showed only the mask ID because, with a Parquet cell table, the marker and label values had not been loaded yet; the tooltip now loads the columns it shows the first time you hover, which takes a moment once per column.
 

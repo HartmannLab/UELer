@@ -1,4 +1,4 @@
-### v0.5.1-alpha4
+### v0.5.1-beta1
 **In BIA streaming mode the gallery shows the masks again, and the hover tooltip shows the cell's values**
 
 - **The cell gallery drew no masks for `S-BIAD2557`, even while the main viewer displayed them (user report).** The gallery, the mask painter and the linked-plot highlights find the cell mask through `mask_key`; the main viewer draws from its mask checkboxes and never reads it, which is why the two disagreed. The study's only mask layer is `cleaned_mask`, which matches none of the `Mask key:` aliases, so a fresh workspace kept the shipped default `whole_cell` — a layer that does not exist. `apply_options` now takes a `default=`: when the widget still holds that shipped default and the data has neither it nor a preferred alias, the first discovered layer is selected. Only the mask field uses it (any real mask layer beats a missing one; the first *column* would be an arbitrary coordinate), and a key the user typed is still never replaced.
@@ -7,6 +7,7 @@
 - **Files:** edited `ueler/viewer/data_mapping.py` (`apply_options(default=)`), `ueler/viewer/main_viewer.py` (`refresh_data_mapping_options`, `_tooltip_columns`, `_ensure_tooltip_columns`, `_lookup_mask_hit`), `ueler/viewer/image_display.py`, `ueler/viewer/channel_grid_view.py`, `dev_note/issue_tracking/issue110_bia_streaming.md`, `dev_note/topic_viewer_runtime_ui.md`, `README.md`; added `tests/test_bia_mask_key_and_tooltip.py` (8 tests).
 - Verified: `python tools/run_test_suite.py --max-skips 0` → **1393 tests, OK**, "No tests were skipped"; reproduced and confirmed fixed against the live `S-BIAD2557` study in an empty workspace.
 
+### v0.5.1-alpha4
 **Map mode opens when the map lists FOVs the base folder does not have**
 
 - **Turning on map mode crashed with `TypeError: 'NoneType' object is not subscriptable` (user report).** The map JSON listed more FOVs than the base folder held, which is the ordinary case when a slide-wide export is opened against a subset of the data. `_initialize_map_descriptors` registered every FOV in the descriptor as a tile without checking that it existed. When such a tile came into view, `load_fov` asked `load_channel_struct_fov` for its channels, got `None` back for the missing folder, cached that `None`, and then subscripted it on the next line. The traceback pointed at `load_fov` with nothing naming the FOV or the map behind it.
