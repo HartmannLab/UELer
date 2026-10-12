@@ -9,6 +9,7 @@ Map mode stitches multiple FOVs into a single composite view and introduces spat
 - Resolve FOV-local coordinates into stitched-map pixels for selection and navigation without mutating underlying data tables.
 - Keep a dedicated stitched-tile cache keyed by channel and overlay state to avoid stale renders.
 - A descriptor may list FOVs the base folder does not hold (a cohort-wide slide export opened against a subset). `_initialize_map_descriptors` filters each descriptor against `available_fovs` through `_drop_unavailable_map_fovs`: missing FOVs are dropped with one `[Map mode]` warning per map, and a map left empty is dropped entirely. As a second line of defence, `load_fov` raises `FileNotFoundError` rather than caching a `None` channel struct, and `_render_fov_region` turns that into a blank tile, so one unrenderable tile never aborts the whole map view.
+- Orientation: descriptor `centerPointMicrons.y` grows upward on the slide, while canvas rows grow downward (`origin='upper'`). `VirtualMapLayer._build_tile_index` mirrors each tile's `y_min_um`/`y_max_um` about the map's vertical extent (`y' = y_min + y_max − y`) so the top of the slide is drawn at the top. Bounds are unchanged, and the pixel content inside a tile is never flipped. All downstream code must read tile y from `MapTileGeometry`, never from `MapFOVSpec.center_um`, or it will reintroduce the mirror.
 
 ## Current status
 - Descriptor parsing, map-mode activation, and stitched rendering are implemented with regression coverage.

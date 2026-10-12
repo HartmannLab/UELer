@@ -229,6 +229,50 @@ class TileCapTests(unittest.TestCase):
             self.assertGreaterEqual(canvas.shape[1], min_w, msg=f"width too small for {(xmin,xmax,ymin,ymax,ds)}")
             self.assertGreaterEqual(canvas.shape[0], min_h, msg=f"height too small for {(xmin,xmax,ymin,ymax,ds)}")
 
+    def test_larger_stage_y_is_drawn_at_top(self):
+        """Stage y grows upward, so the FOV with the larger y fills the top canvas rows."""
+        specs = (
+            MapFOVSpec(
+                name="FOV_A",
+                slide_id="slide-1",
+                center_um=(100.0, 100.0),
+                frame_size_px=(100, 100),
+                fov_size_um=100.0,
+                metadata={},
+            ),
+            MapFOVSpec(
+                name="FOV_B",
+                slide_id="slide-1",
+                center_um=(100.0, 250.0),
+                frame_size_px=(100, 100),
+                fov_size_um=100.0,
+                metadata={},
+            ),
+        )
+        descriptor = SlideDescriptor(
+            slide_id="slide-1",
+            source_path=Path("dummy.json"),
+            export_datetime=None,
+            fovs=specs,
+        )
+        viewer = DummyViewer()
+        layer = VirtualMapLayer(viewer, descriptor, allowed_downsample=[1])
+
+        self.assertEqual(layer.map_bounds(), (50.0, 150.0, 50.0, 300.0))
+        xmin, xmax, ymin, ymax = layer.map_bounds()
+        layer.set_viewport(xmin, xmax, ymin, ymax, downsample_factor=1)
+        output = layer.render(["DAPI"])
+
+        self.assertEqual(output.shape, (250, 100, 3))
+        np.testing.assert_allclose(output[:100], 2.0)  # FOV_B on top
+        np.testing.assert_allclose(output[100:150], 0.0)
+        np.testing.assert_allclose(output[150:], 1.0)  # FOV_A at bottom
+
+        hit = layer.localize_map_pixel(10.0, 10.0)
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit.fov_name, "FOV_B")
+        self.assertAlmostEqual(hit.local_y_px, 10.0)
+
 
 if __name__ == "__main__":
     unittest.main()

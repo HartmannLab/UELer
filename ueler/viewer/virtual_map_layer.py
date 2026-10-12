@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Dict, Iterable, MutableMapping, Optional, Sequence, Tuple
 
 import numpy as np
@@ -276,6 +276,16 @@ class VirtualMapLayer:
 
         if base_pixel_size is not None:
             self._base_pixel_size_um = base_pixel_size
+        if y_values:
+            # Stage y grows upward on the slide, but canvas rows grow downward
+            # (origin='upper'). Mirror tile placement about the map's vertical
+            # extent so the top of the slide is drawn at the top; bounds are
+            # unchanged and tile pixel content is not flipped.
+            y_sum = min(y_values) + max(y_values)
+            tiles = [
+                replace(tile, y_min_um=y_sum - tile.y_max_um, y_max_um=y_sum - tile.y_min_um)
+                for tile in tiles
+            ]
         self._tiles = tiles
         self._tile_lookup = {tile.name: tile for tile in tiles}
         if x_values and y_values:
