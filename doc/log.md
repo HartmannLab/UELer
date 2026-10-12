@@ -1,4 +1,4 @@
-### v0.5.1-beta1
+### v0.5.1
 **Map mode no longer draws the slide upside-down**
 
 - **The stitched map was mirrored top-to-bottom while every FOV looked right on its own (user report).** `VirtualMapLayer._tile_from_spec` placed each tile at `centerPointMicrons.y ± half`, and `_blit_tile` turned that straight into a canvas row, so row index grew with stage y. The canvas is drawn with `origin='upper'`, so the FOV with the *smallest* stage y landed at the top. Stage y grows upward on the slide, so the tile layout came out flipped vertically. Tile pixel content was never flipped, which is why each FOV looked correct and only their arrangement was wrong.
@@ -7,6 +7,7 @@
 - **Files:** edited `ueler/viewer/virtual_map_layer.py`, `dev_note/topic_map_mode_spatial.md`, `README.md`; added `test_larger_stage_y_is_drawn_at_top` to `tests/test_virtual_map_layer.py` (fails on the previous code).
 - Verified: `python -m unittest discover -s tests` → **1394 tests, OK**.
 
+### v0.5.1-beta1
 **In BIA streaming mode the gallery shows the masks again, and the hover tooltip shows the cell's values**
 
 - **The cell gallery drew no masks for `S-BIAD2557`, even while the main viewer displayed them (user report).** The gallery, the mask painter and the linked-plot highlights find the cell mask through `mask_key`; the main viewer draws from its mask checkboxes and never reads it, which is why the two disagreed. The study's only mask layer is `cleaned_mask`, which matches none of the `Mask key:` aliases, so a fresh workspace kept the shipped default `whole_cell` — a layer that does not exist. `apply_options` now takes a `default=`: when the widget still holds that shipped default and the data has neither it nor a preferred alias, the first discovered layer is selected. Only the mask field uses it (any real mask layer beats a missing one; the first *column* would be an arbitrary coordinate), and a key the user typed is still never replaced.

@@ -155,7 +155,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 For more details, see the [user guide](https://hartmannlab.github.io/UELer/latest/tutorials/user-interface).
 
 ## New Update  
-### **UELer v0.5.1-beta1 Summary**
+### **UELer v0.5.1 Summary**
 
 - **Map mode now shows the slide the right way up (reported by a user).** The stitched map used to be mirrored top-to-bottom: each field of view looked correct, but they were arranged in reverse vertical order, because the slide's y coordinate points up while image rows count down. The top of the slide is now at the top of the map. If you saved ROIs in map mode before this update, they will appear at the vertically mirrored position and need to be redrawn; ROIs drawn on a single FOV are unaffected.
 
