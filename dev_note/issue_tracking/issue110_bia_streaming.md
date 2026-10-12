@@ -215,3 +215,38 @@ The `cell_table` key needs no new syntax for this — the **suffix decides**. A 
 **`S-BIAD2557` now publishes `pCSL005_cell_table.parquet` beside the CSV**, so the descriptor in the Binder notebook, `run_ueler_BIA.ipynb`, the README and both docs pages points at it and no longer passes `fovs=`. Against the live study: the viewer opens with all **439,339 rows across 455 FOVs in 3.3 s**, having fetched the footer plus the 9.1 MB spine (6.0% of the file); one marker column is 3.8 MB and ~2.5 s; `lineage_level1` is 0.3 s. The published file is pandas' default output — float64, uncompressed, **one row group** — so it is 150 MB against the ~86 MB `tools/cell_table_to_parquet.py` would produce, and a marker column costs 3.8 MB rather than ~2.1 MB. A single row group is not a problem for this reader: it means exactly one range request per column, which is the best case for round trips.
 
 Measured earlier against the 12-FOV slice cached above (14,344 rows × 50 columns, 12.4 MB CSV → 2.97 MB Parquet) over HTTP with 25 ms of latency per request: the viewer opens in 0.35 s having fetched 340 KB (11.4%, the footer plus the spine) and knows all 50 column names and dtypes; one marker column costs 72 KB and 0.04 s; a second ask for it costs nothing; materialising all 50 costs 2.73 MB and 0.66 s. See `dev_note/issue_tracking/cell_table_parquet_streaming.md` for the design and the full measurement set.
+
+## Follow-up: gallery tiles without masks, and an empty hover tooltip, in streaming mode
+
+Two reports from using `S-BIAD2557` with its Parquet cell table: the cell gallery showed no mask outlines even while the main viewer displayed the masks, and the hover tooltip in the main viewer showed no marker or label values. Both reproduced against the live study in a fresh workspace, and both turned out to be lazy-loading gaps rather than anything in the streaming of the mask files themselves — the masks were downloaded and cached correctly every time.
+
+### Root causes
+
+* **The gallery looked the mask up under the wrong name.** The gallery, the mask painter, the linked-plot highlights and the export all find the cell mask through `viewer.mask_key`; the main viewer draws masks from the `mask_display_controls` checkboxes and never consults it, which is why the two disagreed. `S-BIAD2557`'s only mask layer is `cleaned_mask`, which none of `MASK_FIELD.preferred` (`whole_cell`, `cell`, `nuclear`, `nucleus`) name, so `apply_options` kept the shipped default `whole_cell` under its "never swap an unrecognised key for a guess" rule. In painted-colour mode a missing mask array also skips the fallback to the viewer's own overlay, so the tiles had no masks at all — the rendered tiles were byte-identical with and without the overlay snapshot. The maintainer's own workspace was unaffected because its `widget_states.json` already held `mask_key: cleaned_mask`, which is what made this look like a streaming bug rather than a first-run one.
+* **The tooltip read a row that only had the spine.** A Parquet cell table (#141) materialises `fov`, the label and the coordinates up front and every other column on request. The hover path (`_lookup_mask_hit` → `resolve_cell_record`) never requested the displayed channels or the ticked labels, so the resolved row held six columns and `process_hover_event` found none of the names it was asked to show. This is the call-site class the #141 plan warned about — a `name in row.index` test that silently answers "no" for a column that exists but is not loaded — on a site that plan did not list.
+
+### Actions taken
+
+* **`apply_options` takes a `default=`** (`ueler/viewer/data_mapping.py`). When the current value is still that shipped default and neither it nor any preferred alias is among the options, the first option is selected. Only `refresh_data_mapping_options` passes it, and only for `MASK_FIELD`: any mask layer that exists beats one that does not, whereas "the first column" is an arbitrary pick for a coordinate, so the column fields keep the old rule and the setup dialog. A value the user typed is still kept, since the default is the one value nobody chose. A `widget_states.json` that saved `whole_cell` earlier is corrected the same way on the next open, because the refresh in `after_all_plugins_loaded` runs after the restore.
+* **The tooltip materialises its own columns** (`ueler/viewer/main_viewer.py`): `_tooltip_columns` lists the selected channels and `selected_tooltip_labels`, and `_ensure_tooltip_columns` passes them to `ensure_columns` just before `resolve_cell_record`. Names that are not columns (a channel with no marker column) are ignored by `ensure_columns`, and an eager table makes it a no-op. The fetch happens on the first hover that needs a column — about 2.5 s per marker column on `S-BIAD2557`, once — and is free afterwards; doing it at channel selection instead would charge every image-only channel change for a table read.
+* **Both tooltips stop reusing a cached row** (`image_display.py`, `channel_grid_view.py`). `hit.cell_record` is resolved on every hover anyway, so the per-cell cache only ever served a row that could predate a column materialised since — hovering the same cell after ticking a label would have kept showing the old row.
+
+### Files changed
+
+* `ueler/viewer/data_mapping.py` — `apply_options(..., default=)`.
+* `ueler/viewer/main_viewer.py` — `refresh_data_mapping_options` passes the mask default; new `_tooltip_columns` / `_ensure_tooltip_columns`, called from `_lookup_mask_hit`.
+* `ueler/viewer/image_display.py`, `ueler/viewer/channel_grid_view.py` — use the fresh `hit.cell_record`.
+* `tests/test_bia_mask_key_and_tooltip.py` — new, 8 tests.
+* `dev_note/topic_viewer_runtime_ui.md` — the tooltip status line.
+
+### Tests
+
+```bash
+python -m unittest tests/test_bia_mask_key_and_tooltip.py tests/test_issue142_setup_dialog.py
+python tools/run_test_suite.py --max-skips 0
+```
+
+* ✅ 1393 tests, OK, none skipped.
+* Live check against `S-BIAD2557` in an empty workspace: before, `mask_key` stayed `whole_cell`, gallery tiles were identical with and without the overlay in both colour modes, and the hovered row held only `cell_id` / `fov` / coordinates; after, `mask_key` is `cleaned_mask`, the tiles carry the outlines, and the row carries `mFoxP3` and `lineage_level1`.
+
+**A trap worth recording:** the `ueler` micromamba environment has a non-editable install of `ueler` 0.5.1a3 in `site-packages`, so a script or notebook run from anywhere but the repo root (including `script/*.ipynb`) imports that copy, not the working tree. Reproductions must set `PYTHONPATH` to the repo, or the environment needs `pip install -e .`.

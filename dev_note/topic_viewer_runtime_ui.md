@@ -13,7 +13,7 @@ These notes cover the main viewer runtime, downsampling behavior, channel contro
 ## Current status
 - FOV load cycle is documented end-to-end, including cache and plugin update steps.
 - Downsampling flow and `select_downsample_factor` behavior are captured for main viewer and ROI thumbnails.
-- Tooltip lookup uses viewer-configured keys and caches resolved rows for performance.
+- Tooltip lookup uses viewer-configured keys. `_lookup_mask_hit` first materialises the tooltip's columns (the displayed channels plus the ticked annotation labels) through `ensure_columns`, so a lazy Parquet cell table has the values to show; each column is read once, on the first hover that needs it. Both tooltips (`image_display.py`, `channel_grid_view.py`) use the freshly resolved `hit.cell_record` on every hover rather than a row cached per cell, which could predate a column materialised since.
 - VS Code scatter fallback uses a static Matplotlib plot when widget front-ends fail.
 - Per-channel visibility toggles and channel color legend features are implemented and tested.
 - Channel grid display mode (Issue #76) is implemented: a "Channel grid view" checkbox renders each visible channel as a separate labelled pane in a synchronised matplotlib subplot grid.

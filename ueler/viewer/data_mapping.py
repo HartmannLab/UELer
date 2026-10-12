@@ -191,7 +191,9 @@ def ensure_option(widget, value) -> bool:
     return True
 
 
-def apply_options(widget, options: Sequence, *, preferred: Iterable = ()) -> bool:
+def apply_options(
+    widget, options: Sequence, *, preferred: Iterable = (), default: Any = None
+) -> bool:
     """Replace *widget*'s options without changing a valid answer.
 
     Returns ``True`` when the widget's value ended up different from the one it
@@ -205,6 +207,13 @@ def apply_options(widget, options: Sequence, *, preferred: Iterable = ()) -> boo
       ``centroid-1``/``centroid-0`` is mapped correctly on arrival.  It can only
       fire when the current value names something that does not exist, which is
       to say when the viewer is already showing nothing;
+    * otherwise, when the current value is still the shipped *default*, the
+      first option is selected.  The default is not an answer anybody gave, so
+      replacing it guesses over nobody.  Only the ``Mask key:`` passes it: any
+      mask layer that exists beats one that does not, whereas "the first
+      column" is an arbitrary pick for a coordinate.  Without it a study whose
+      only mask is ``cleaned_mask`` kept ``whole_cell``, and the gallery, the
+      mask painter and the linked highlights found no mask at all;
     * otherwise the current value is kept, as an option of its own, so an
       unrecognised key is never silently swapped for a plausible-looking one.
     """
@@ -223,6 +232,8 @@ def apply_options(widget, options: Sequence, *, preferred: Iterable = ()) -> boo
 
     if current and current not in names:
         chosen = next((str(alias) for alias in preferred if str(alias) in names), "")
+        if not chosen and default is not None and current == str(default):
+            chosen = names[0]
         if not chosen:
             # Keep the unrecognised key visible and selectable rather than
             # replacing it with a guess the user never made.

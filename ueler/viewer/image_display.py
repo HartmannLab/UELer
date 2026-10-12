@@ -339,14 +339,12 @@ class ImageDisplay:
             self.fig.canvas.draw_idle()
             return
 
-        lookup_key = (hit.fov_name, hit.mask_name, hit.mask_id)
-        cached_key = getattr(self, "_cached_tooltip_key", None)
-        if cached_key != lookup_key:
-            cell_row = hit.cell_record
-            self._cached_tooltip_row = cell_row
-            self._cached_tooltip_key = lookup_key
-        else:
-            cell_row = getattr(self, "_cached_tooltip_row", None)
+        # ``hit.cell_record`` is resolved on every hover, after the tooltip's
+        # columns were materialised; a row cached from an earlier hover could
+        # predate a column the user has since asked for (#141).
+        cell_row = hit.cell_record
+        self._cached_tooltip_row = cell_row
+        self._cached_tooltip_key = (hit.fov_name, hit.mask_name, hit.mask_id)
 
         mask_label = hit.mask_name or "Mask"
         tooltip_lines = [f"{mask_label} ID: {hit.mask_id}"]

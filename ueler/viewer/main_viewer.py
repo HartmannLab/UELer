@@ -1668,6 +1668,29 @@ class ImageMaskViewer:
         except Exception:
             return None
 
+    def _tooltip_columns(self) -> Tuple[str, ...]:
+        """Cell-table columns the hover tooltip shows: the displayed channels,
+        then the labels ticked in the annotation panel."""
+        selector = getattr(getattr(self, "ui_component", None), "channel_selector", None)
+        names = list(getattr(selector, "value", ()) or ())
+        names.extend(getattr(self, "selected_tooltip_labels", ()) or ())
+        return tuple(dict.fromkeys(str(name) for name in names if name))
+
+    def _ensure_tooltip_columns(self) -> None:
+        """Materialise the tooltip's columns before the hovered row is read.
+
+        A lazy (Parquet) cell table holds only the spine until a column is asked
+        for (#141), so the row the tooltip reads had no marker or label values
+        and the tooltip showed nothing but the mask ID.  Each column is fetched
+        once, complete, on the first hover that needs it; ``ensure_columns`` is a
+        no-op for an eager table and for names that are not columns (a channel
+        with no matching marker column).
+        """
+        try:
+            self.ensure_columns(self._tooltip_columns())
+        except Exception:
+            logger.warning("[viewer] Could not load the tooltip's cell-table columns.", exc_info=True)
+
     def _lookup_mask_hit(
         self,
         fov_name: str,
@@ -1706,6 +1729,7 @@ class ImageMaskViewer:
 
             cell_row = None
             if self.cell_table is not None:
+                self._ensure_tooltip_columns()
                 try:
                     cell_row = resolve_cell_record(
                         self.cell_table,
@@ -5026,6 +5050,7 @@ class ImageMaskViewer:
             getattr(ui_component, MASK_FIELD.attribute, None),
             self.available_mask_suffixes(),
             preferred=MASK_FIELD.preferred,
+            default=MASK_FIELD.preferred[0],
         )
         # ``on_key_change`` already mirrored every value the calls above
         # changed, but not the ones they left alone; this is the cheap way to
