@@ -104,6 +104,7 @@ from .plugin.plugin_base import PluginBase  # type: ignore[import-error]
 from .annotation_display import AnnotationDisplay  # type: ignore[import-error]
 from .confirm_dialog import ConfirmDialog  # type: ignore[import-error]
 from .data_mapping import KEY_FIELDS, build_key_widget  # type: ignore[import-error]
+from .fullscreen_toggle import HOST_CLASS as FULLSCREEN_HOST_CLASS, attach_canvas_fit, build_fullscreen_toggle  # type: ignore[import-error]
 from .setup_dialog import SetupDialog  # type: ignore[import-error]
 
 
@@ -406,6 +407,24 @@ def display_ui(viewer):
     ])
 
     root_children = [ui, viewer.wide_plugin_panel]
+    # The full-screen button (#104) sits at the top-left of the root and
+    # enlarges the root itself, which it finds by the class added below. It is
+    # left out when anywidget cannot render, so the layout is unchanged then.
+    viewer.fullscreen_toggle = build_fullscreen_toggle()
+    if viewer.fullscreen_toggle is not None:
+        root_children.insert(0, HBox(
+            [viewer.fullscreen_toggle],
+            layout=Layout(justify_content='flex-start', min_height='28px'),
+        ))
+        # The image figure fills the width the panels leave -- a square by
+        # default, the whole screen while enlarged -- so the side column sits
+        # at the right edge. The side accordions are 6in (576 CSS px) wide
+        # when there are any.
+        attach_canvas_fit(
+            viewer.fullscreen_toggle,
+            viewer,
+            side_width_px=576 if accordion_children else 0,
+        )
     # The confirmation modal (#139) is mounted once, here, and hidden until
     # something asks a question. Its scrim is positioned against the browser
     # viewport rather than against this container, so the mount point decides
@@ -428,6 +447,9 @@ def display_ui(viewer):
         disable_log_console()
 
     root = VBox(root_children, layout=Layout(width='100%', max_width='100%', min_width='0', box_sizing='border-box', gap='12px'))
+    add_class = getattr(root, 'add_class', None)
+    if callable(add_class):
+        add_class(FULLSCREEN_HOST_CLASS)
 
     if hasattr(viewer, 'refresh_bottom_panel'):
         viewer.refresh_bottom_panel()
