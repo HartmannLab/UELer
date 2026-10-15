@@ -645,3 +645,34 @@ python -m unittest tests.test_fullscreen_toggle
 python -m unittest discover -s tests
 ```
 - ✅ All tests passed (24 in the module; full suite 1418, OK)
+
+---
+
+## **Update Summary: VS Code notice before grow-in-place (follow-up 13)**
+
+User request: in VS Code, clicking the button should say that full screen is not supported there and that it needs JupyterLab or JupyterHub.
+
+---
+
+### **Actions Taken**
+- **Notice instead of an attempt:**
+  in a VS Code webview the click no longer calls `requestFullscreen()` (always refused there). It opens a notice under the button: "Full screen is not supported in VS Code", explaining that VS Code does not let notebook outputs go full screen and to open the notebook in JupyterLab or JupyterHub if needed. **Enlarge in place instead** enters the existing `expanded` mode, so grow-in-place stays reachable; **Close**, Esc and the button itself dismiss the notice. Focus moves to **Close**, and the notice carries `role="dialog"`.
+- **Inline, not a modal:**
+  `ConfirmDialog`-style `position: fixed` centring is wrong in VS Code. The probe showed the output webview is as tall as the whole notebook, so "the centre of the viewport" can be thousands of pixels off screen, and it would be drawn under the code cells. The notice is appended to the button's own element, in the page flow, where the click happened.
+- **Other environments unchanged:** JupyterLab, Notebook and any other page still go straight to native full screen or the overlay.
+
+---
+
+### **Files Changed**
+- `ueler/viewer/fullscreen_toggle.py` — `showNotice` / `closeNotice` / `noticeButton`, click routing, Esc, unmount; notice CSS using JupyterLab and VS Code theme variables
+- `tests/test_fullscreen_toggle.py` — 25 tests: the click shows the notice without attempting full screen; its text names VS Code, JupyterLab and JupyterHub; Esc, Close and the button dismiss it; unmount removes it; the VS Code scenarios reach grow-in-place through **Enlarge in place instead**
+- `doc/log.md`, `README.md`, `dev_note/topic_viewer_runtime_ui.md`
+
+---
+
+### **Tests**
+```bash
+python -m unittest tests.test_fullscreen_toggle
+python -m unittest discover -s tests
+```
+- ✅ All tests passed (25 in the module; full suite 1419, OK)

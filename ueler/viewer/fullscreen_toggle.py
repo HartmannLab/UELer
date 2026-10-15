@@ -17,7 +17,10 @@ Strategies, in order
    it, which is JupyterLab and Notebook in practice.
 2. When the Fullscreen API is missing or refuses:
 
-   * **Expand** (VS Code) — the VS Code output webview may not go full screen,
+   * **Expand** (VS Code) — reached from a notice, not directly: in VS Code
+     the button first explains that full screen is not supported there and
+     points to JupyterLab / JupyterHub, offering this as the alternative.
+     The VS Code output webview may not go full screen,
      and the code-cell editors are drawn by VS Code on a layer *above* that
      webview, so an overlay inside it is covered by them (markdown cells render
      inside the webview, which is why only code cells showed through). The host
@@ -211,11 +214,68 @@ function render({ model, el }) {
     announceResize();
   }
 
+  // VS Code refuses full screen to notebook outputs and draws code cells
+  // above them, so instead of trying, the button says so and points to
+  // JupyterLab / JupyterHub, offering grow-in-place as what VS Code allows.
+  // The notice is inline, under the button: VS Code's output webview is as
+  // tall as the whole notebook, so a centred overlay could land far off
+  // screen, and it would sit under the code cells anyway.
+  let notice = null;
+  function closeNotice() {
+    if (!notice) return;
+    notice.remove();
+    notice = null;
+  }
+  function noticeButton(label, onClick) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ueler-fs-notice-btn";
+    button.textContent = label;
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      onClick();
+    });
+    return button;
+  }
+  function showNotice() {
+    if (notice) return;
+    notice = document.createElement("div");
+    notice.className = "ueler-fs-notice";
+    notice.setAttribute("role", "dialog");
+    notice.setAttribute("aria-label", "Full screen is not supported in VS Code");
+    const title = document.createElement("div");
+    title.className = "ueler-fs-notice-title";
+    title.textContent = "Full screen is not supported in VS Code";
+    const text = document.createElement("div");
+    text.className = "ueler-fs-notice-text";
+    text.textContent = "VS Code does not let notebook outputs go full screen. "
+      + "If you need it, open this notebook in JupyterLab or JupyterHub, "
+      + "where this button shows the viewer full screen.";
+    const actions = document.createElement("div");
+    actions.className = "ueler-fs-notice-actions";
+    const grow = noticeButton("Enlarge in place instead", () => {
+      closeNotice();
+      const node = host();
+      if (node) fallback(node);
+    });
+    const close = noticeButton("Close", closeNotice);
+    actions.appendChild(grow);
+    actions.appendChild(close);
+    notice.appendChild(title);
+    notice.appendChild(text);
+    notice.appendChild(actions);
+    el.appendChild(notice);
+    if (typeof close.focus === "function") close.focus();
+  }
+
   btn.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    if (model.get("mode") === "off") enter();
-    else setMode("off");
+    if (model.get("mode") !== "off") setMode("off");
+    else if (notice) closeNotice();
+    else if (isVSCodeWebview()) showNotice();
+    else enter();
   });
 
   // Esc in native mode is handled by the browser; this keeps the trait honest.
@@ -226,6 +286,11 @@ function render({ model, el }) {
   };
   // Esc in the fallback modes is ours to handle.
   const onKeydown = (event) => {
+    if (event.key === "Escape" && notice) {
+      event.stopPropagation();
+      closeNotice();
+      return;
+    }
     const mode = model.get("mode");
     if (event.key === "Escape" && active && (mode === "maximized" || mode === "expanded")) {
       event.stopPropagation();
@@ -295,6 +360,7 @@ function render({ model, el }) {
     window.removeEventListener("resize", onWindowResize);
     clearTimeout(resizeTimer);
     model.off("change:mode", onModeChange);
+    closeNotice();
     teardown();
   };
 }
@@ -322,6 +388,37 @@ _CSS = """
 .ueler-fs-btn:focus-visible {
   outline: 2px solid var(--jp-brand-color1, #1976d2);
   outline-offset: 1px;
+}
+
+/* VS Code notice: inline under the button, in the page flow. */
+.ueler-fs-notice {
+  box-sizing: border-box;
+  max-width: 440px;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--jp-border-color1, var(--vscode-editorWidget-border, #c0c0c0));
+  border-radius: 6px;
+  background: var(--jp-layout-color1, var(--vscode-editorWidget-background, #ffffff));
+  color: var(--jp-ui-font-color1, var(--vscode-foreground, #333333));
+  font-size: 13px;
+  line-height: 1.4;
+}
+.ueler-fs-notice-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.ueler-fs-notice-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.ueler-fs-notice-btn {
+  padding: 3px 10px;
+  border: 1px solid var(--jp-border-color1, var(--vscode-button-border, #c0c0c0));
+  border-radius: 4px;
+  background: var(--jp-layout-color2, var(--vscode-button-secondaryBackground, #eeeeee));
+  color: inherit;
+  cursor: pointer;
 }
 
 /* Native and maximize: an opaque, scrollable page for the viewer. */

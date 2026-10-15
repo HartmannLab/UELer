@@ -310,9 +310,10 @@ const onLinkClick = (href) => {
 };
 host.classList.add("ueler-root");
 const wrapper = { id: "wrapper", classList: classSet() };  // the anywidget's own box
+let focused = null;
 const el = {
   children: [],
-  appendChild(c) { this.children.push(c); },
+  appendChild(c) { c.parentNode = this; this.children.push(c); },
   closest(sel) { return sel === ".ueler-root" ? (scenario === "no-host" ? null : host) : null; },
   parentElement: wrapper,
 };
@@ -336,15 +337,21 @@ globalThis.document = {
   fullscreenElement: null,
   body: { classList: bodyClasses, hasAttribute: () => false },
   scrollingElement: { scrollHeight: 5000, scrollTop: 0 },
-  createElement() {
-    const btn = { attrs: {}, handlers: {}, innerHTML: "", title: "" };
+  createElement(tag) {
+    const btn = { tag, attrs: {}, handlers: {}, innerHTML: "", title: "", textContent: "", children: [] };
     btn.setAttribute = (k, v) => { btn.attrs[k] = v; };
     btn.addEventListener = (t, fn) => { btn.handlers[t] = fn; };
     btn.click = () => btn.handlers.click
       ? btn.handlers.click({ preventDefault() {}, stopPropagation() {} })
       : onLinkClick(btn.href);
     btn.style = {};
-    btn.remove = () => {};
+    btn.appendChild = (c) => { c.parentNode = btn; btn.children.push(c); };
+    btn.remove = () => {
+      const p = btn.parentNode;
+      if (p && p.children) p.children = p.children.filter((c) => c !== btn);
+      btn.parentNode = null;
+    };
+    btn.focus = () => { focused = btn; };
     return btn;
   },
   addEventListener(t, fn) { (listeners[t] ||= new Set()).add(fn); },
@@ -392,7 +399,41 @@ const snap = () => ({
 });
 
 const out = { initial: snap() };
+// The VS Code notice, and its buttons by label.
+const notice = () => el.children.find((c) => c.className === "ueler-fs-notice");
+const findByText = (node, text) => {
+  if (!node) return null;
+  if (node.textContent === text) return node;
+  for (const c of node.children || []) { const hit = findByText(c, text); if (hit) return hit; }
+  return null;
+};
+const noticeText = () => {
+  const n = notice();
+  return n ? n.children.map((c) => c.textContent).join(" | ") : null;
+};
+
 btn.click(); await tick();
+if (scenario.startsWith("vscode")) {
+  // In VS Code the click explains instead of trying.
+  out.notice = { shown: !!notice(), mode: state.mode, text: noticeText(),
+                 role: notice()?.attrs.role, focusedClose: focused?.textContent === "Close",
+                 fullscreenCalls: host.fullscreenCalls };
+  if (scenario === "vscode-notice") {
+    fire("keydown", { key: "Escape" }); await tick();
+    out.notice.afterEsc = !!notice();
+    btn.click(); await tick();
+    findByText(notice(), "Close").click(); await tick();
+    out.notice.afterClose = !!notice();
+    btn.click(); await tick();
+    btn.click(); await tick();   // the button itself toggles it shut
+    out.notice.afterToggle = !!notice();
+    out.notice.modeAfterAll = state.mode;
+    btn.click(); await tick();   // leave one open for unmount
+  } else {
+    findByText(notice(), "Enlarge in place instead").click(); await tick();
+    out.notice.afterGrow = !!notice();
+  }
+}
 out.entered = snap();
 
 if (scenario === "native-ok") {
@@ -402,6 +443,9 @@ if (scenario === "native-ok") {
   document.fullscreenElement = null;   // browser Esc
   fire("fullscreenchange"); await tick();
   out.browserEsc = snap();
+} else if (scenario === "vscode-notice") {
+  cleanup();
+  out.noticeAfterUnmount = !!notice();
 } else if (scenario === "width") {
   const settle = () => new Promise((r) => setTimeout(r, 250));
   out.watching = resizeObservers.size;
@@ -513,10 +557,31 @@ class FullscreenToggleEsmTests(unittest.TestCase):
         self.assertEqual(out["esc"]["mode"], "off")
         self.assertFalse(out["esc"]["maximized"])
 
+    def test_vscode_click_explains_instead_of_trying(self):
+        out = self._run("vscode-notice")
+        notice = out["notice"]
+        self.assertTrue(notice["shown"])
+        self.assertEqual(notice["mode"], "off")
+        self.assertEqual(notice["fullscreenCalls"], 0)
+        self.assertEqual(notice["role"], "dialog")
+        self.assertIn("not supported in VS Code", notice["text"])
+        self.assertIn("JupyterLab", notice["text"])
+        self.assertIn("JupyterHub", notice["text"])
+        self.assertTrue(notice["focusedClose"])
+        # Esc, Close and the button itself all dismiss it; nothing is enlarged.
+        self.assertFalse(notice["afterEsc"])
+        self.assertFalse(notice["afterClose"])
+        self.assertFalse(notice["afterToggle"])
+        self.assertEqual(notice["modeAfterAll"], "off")
+        self.assertFalse(out["noticeAfterUnmount"])
+
     def test_vscode_refusal_expands_in_flow_instead_of_overlaying(self):
         out = self._run("vscode")
+        # Reached through the notice's "Enlarge in place instead".
+        self.assertTrue(out["notice"]["shown"])
+        self.assertFalse(out["notice"]["afterGrow"])
         entered = out["entered"]
-        self.assertEqual(entered["fullscreenCalls"], 1)
+        self.assertEqual(entered["fullscreenCalls"], 0)
         self.assertEqual(entered["mode"], "expanded")
         self.assertTrue(entered["expanded"])
         self.assertFalse(entered["maximized"])
