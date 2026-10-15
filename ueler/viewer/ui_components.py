@@ -108,6 +108,12 @@ from .fullscreen_toggle import HOST_CLASS as FULLSCREEN_HOST_CLASS, attach_canva
 from .setup_dialog import SetupDialog  # type: ignore[import-error]
 
 
+#: Width of the side accordions (``Layout(width='6in')``) in CSS pixels.
+SIDE_PANEL_PX = 576
+#: Width of the button that hides the side column.
+SIDE_TOGGLE_PX = 24
+
+
 def _bounded_panel_layout(**overrides):
     """Return a width-constrained layout that avoids edge overflow in panels."""
     props = {
@@ -400,11 +406,22 @@ def display_ui(viewer):
         layout=Layout()
     )
 
-    ui = HBox([
-        left_panel,
-        center_area,
-        viewer.side_plot  # Add the chart output widget to the right
-    ])
+    # The button that hides the side column sits right against it, and stays
+    # at the right edge where the column was while it is hidden.
+    side_toggle = viewer.ui_component.side_panel_hidden if accordion_children else None
+    ui_children = [left_panel, center_area]
+    if side_toggle is not None:
+        ui_children.append(VBox(
+            [side_toggle],
+            layout=Layout(width=f'{SIDE_TOGGLE_PX}px', flex=f'0 0 {SIDE_TOGGLE_PX}px'),
+        ))
+    ui_children.append(viewer.side_plot)  # the plugin column, on the right
+    ui = HBox(ui_children)
+
+    def _side_width_px():
+        if side_toggle is None:
+            return 0
+        return SIDE_TOGGLE_PX + (0 if side_toggle.value else SIDE_PANEL_PX)
 
     root_children = [ui, viewer.wide_plugin_panel]
     # The full-screen button (#104) sits at the top-left of the root and
@@ -418,13 +435,30 @@ def display_ui(viewer):
         ))
         # The image figure fills the width the panels leave -- a square by
         # default, the whole screen while enlarged -- so the side column sits
-        # at the right edge. The side accordions are 6in (576 CSS px) wide
-        # when there are any.
-        attach_canvas_fit(
+        # at the right edge, and takes the column's width while it is hidden.
+        refit_canvas = attach_canvas_fit(
             viewer.fullscreen_toggle,
             viewer,
-            side_width_px=576 if accordion_children else 0,
+            side_width_px=_side_width_px,
         )
+    else:
+        refit_canvas = None
+
+    if side_toggle is not None:
+        def _apply_side_panel(change=None):
+            hidden = bool(side_toggle.value)
+            viewer.side_plot.layout.display = 'none' if hidden else ''
+            side_toggle.icon = 'angle-double-left' if hidden else 'angle-double-right'
+            side_toggle.tooltip = 'Show the side panel' if hidden else 'Hide the side panel'
+            if refit_canvas is not None:
+                refit_canvas()
+            # A canvas that was hidden can come back blank; the footer panel
+            # re-attaches the heatmap the same way.
+            if change is not None and not hidden:
+                _restore_heatmap(viewer)
+
+        side_toggle.observe(_apply_side_panel, names='value')
+        _apply_side_panel()  # the remembered state, restored before display
     # The confirmation modal (#139) is mounted once, here, and hidden until
     # something asks a question. Its scrim is positioned against the browser
     # viewport rather than against this container, so the mount point decides
@@ -502,6 +536,18 @@ class uicomponents:
             layout=Layout(width='auto', height='28px'),
         )
         self.lasso_select_toggle.observe(viewer.on_lasso_select_toggle, names='value')
+
+        # Hides the side plugin column (#104 follow-up). It lives on
+        # ``ui_component`` so ``widget_states.json`` remembers it like any
+        # other setting; ``display_ui`` mounts it against the column and
+        # applies it.
+        self.side_panel_hidden = ToggleButton(
+            value=False,
+            description='',
+            tooltip='Hide the side panel',
+            icon='angle-double-right',
+            layout=Layout(width=f'{SIDE_TOGGLE_PX}px', height='28px', padding='0'),
+        )
 
         map_controls_disabled = not (getattr(viewer, "_map_mode_enabled", False) and getattr(viewer, "_map_descriptors", {}))
         self.map_mode_toggle = Checkbox(

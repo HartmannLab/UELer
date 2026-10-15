@@ -676,3 +676,38 @@ python -m unittest tests.test_fullscreen_toggle
 python -m unittest discover -s tests
 ```
 - ✅ All tests passed (25 in the module; full suite 1419, OK)
+
+---
+
+## **Update Summary: hide the side column; remembered (follow-up 14)**
+
+User request: make the side column hideable, with the button close to the column and the state remembered.
+
+---
+
+### **Actions Taken**
+- **Toggle against the column:**
+  `ui_component.side_panel_hidden` is an icon-only `ToggleButton` (24 px; `angle-double-right` while shown, `angle-double-left` while hidden), mounted in its own 24 px column between the image area and `side_plot`. When the column is hidden, the square image fills the space and the toggle ends up at the right edge where the column was, so it is found in the same place to bring the column back. It is mounted only when there are side plugins.
+- **Hiding is display-only:**
+  `side_plot.layout.display = "none"` keeps every plugin alive, with its selections and computed plots. Showing again calls `_restore_heatmap(viewer)`, the same re-attach the footer panel uses, because a hidden ipympl canvas can come back blank.
+- **The image takes the space:**
+  `attach_canvas_fit` accepts `side_width_px` as a callable and returns its refit function. `display_ui` passes `24 + (0 if hidden else 576)` and calls the refit on every toggle. This also holds while enlarged.
+- **Remembered through the existing mechanism:**
+  as a `Widget` with `.value` on `ui_component`, the toggle is saved to `widget_states.json` by `save_widget_states` on every change (`setup_widget_observers` observes it) and restored by `load_widget_states` before `display_ui` runs, which applies the restored value once at mount. No new settings file.
+
+---
+
+### **Files Changed**
+- `ueler/viewer/ui_components.py` — `SIDE_PANEL_PX`, `SIDE_TOGGLE_PX`, `uicomponents.side_panel_hidden`, toggle column and `_apply_side_panel` in `display_ui`
+- `ueler/viewer/fullscreen_toggle.py` — `attach_canvas_fit`: callable side width, returns the refit function
+- `tests/test_fullscreen_toggle.py` — 30 tests: toggle sits directly before the side column; hiding hides it, frees 576 px and refits; showing restores the heatmap; a state restored before display is applied at mount; the toggle is a `ToggleButton` on `ui_component`
+- `doc/log.md`, `README.md`, `dev_note/topic_viewer_runtime_ui.md`
+
+---
+
+### **Tests**
+```bash
+python -m unittest tests.test_fullscreen_toggle
+python -m unittest discover -s tests
+```
+- ✅ All tests passed (30 in the module; full suite 1424, OK)

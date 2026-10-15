@@ -606,6 +606,10 @@ def attach_canvas_fit(toggle, viewer, *, side_width_px=0):
       :func:`fit_square_inches` -- the default layout.
     * Neither known: the figure's own size, as created.
 
+    ``side_width_px`` is a number or a callable returning one, so the width of
+    a side column that can be hidden is read at each refit. Returns the refit
+    function, for callers that change the layout themselves.
+
     Failures are logged, never raised: a canvas that keeps its size is not
     worth breaking the viewer for.
     """
@@ -615,13 +619,17 @@ def attach_canvas_fit(toggle, viewer, *, side_width_px=0):
         display = getattr(viewer, "image_display", None)
         return getattr(display, "fig", None)
 
+    def _side():
+        return side_width_px() if callable(side_width_px) else side_width_px
+
     def _target(fig):
         css_dpi = getattr(fig, "_original_dpi", None) or getattr(fig, "dpi", None)
+        side_width = _side()
         if toggle.mode != "off":
-            size = fit_canvas_inches(toggle.viewport, side_width_px=side_width_px, css_dpi=css_dpi)
+            size = fit_canvas_inches(toggle.viewport, side_width_px=side_width, css_dpi=css_dpi)
             if size is not None:
                 return size
-        size = fit_square_inches(toggle.host_width, side_width_px=side_width_px, css_dpi=css_dpi)
+        size = fit_square_inches(toggle.host_width, side_width_px=side_width, css_dpi=css_dpi)
         if size is not None:
             return size
         return state["original"]
@@ -649,3 +657,4 @@ def attach_canvas_fit(toggle, viewer, *, side_width_px=0):
             _logger.debug("[fullscreen] could not resize the canvas", exc_info=True)
 
     toggle.observe(_refresh, names=["viewport", "mode", "host_width"])
+    return _refresh

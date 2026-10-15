@@ -119,7 +119,104 @@ class DisplayUiMountTests(unittest.TestCase):
         self.assertIn(HOST_CLASS, root.classes)
         self.assertEqual(root.children[0], ("hbox", (sentinel,)))
         self.assertIs(viewer.fullscreen_toggle, sentinel)
-        attach.assert_called_once_with(sentinel, viewer, side_width_px=0)
+        args, kwargs = attach.call_args
+        self.assertEqual(args, (sentinel, viewer))
+        # No side plugins: no side column to leave room for.
+        self.assertEqual(kwargs["side_width_px"](), 0)
+
+
+class SidePanelToggleTests(unittest.TestCase):
+    """The button that hides the side column, and what hiding it changes."""
+
+    def _display(self, *, hidden_before_display=False):
+        import traitlets
+        from types import SimpleNamespace
+
+        from ueler.viewer import ui_components
+
+        class _Toggle(traitlets.HasTraits):
+            value = traitlets.Bool(False)
+            icon = traitlets.Unicode("")
+            tooltip = traitlets.Unicode("")
+
+        toggle = _Toggle(value=hidden_before_display)
+        viewer = _minimal_viewer()
+        viewer.ui_component.side_panel_hidden = toggle
+
+        plugin = SimpleNamespace(ui=ui_components.Output(), displayed_name="Chart")
+
+        def load_plugins(**_kw):
+            viewer.SidePlots.chart_output = plugin
+
+        viewer.dynamically_load_plugins = load_plugins
+        viewer.cell_table = object()   # side plugins only exist with a cell table
+        captured = {}
+        refit = mock.Mock()
+        # The toggle fires after ``display_ui`` returns, so this one stays patched.
+        restore_patch = mock.patch.object(ui_components, "_restore_heatmap")
+        restore = restore_patch.start()
+        self.addCleanup(restore_patch.stop)
+
+        def fake_hbox(children, **_kw):
+            box = ("hbox", tuple(children))
+            captured.setdefault("hboxes", []).append(box)
+            return box
+
+        with mock.patch.object(ui_components, "AnnotationDisplay"), \
+                mock.patch.object(ui_components, "build_fullscreen_toggle", return_value=object()), \
+                mock.patch.object(ui_components, "attach_canvas_fit", return_value=refit) as attach, \
+                mock.patch.object(ui_components, "HBox", side_effect=fake_hbox), \
+                mock.patch.object(ui_components, "display"):
+            ui_components.display_ui(viewer)
+            side_width = attach.call_args.kwargs["side_width_px"]
+            return SimpleNamespace(viewer=viewer, toggle=toggle, refit=refit, restore=restore,
+                                   side_width=side_width, hboxes=captured["hboxes"])
+
+    def test_toggle_sits_right_against_the_side_column(self):
+        rig = self._display()
+        main_row = next(b for b in rig.hboxes if rig.viewer.side_plot in b[1])
+        children = main_row[1]
+        self.assertIs(children[-1], rig.viewer.side_plot)
+        self.assertIn(rig.toggle, children[-2].children)
+
+    def test_hiding_frees_the_column_for_the_image(self):
+        from ueler.viewer.ui_components import SIDE_PANEL_PX, SIDE_TOGGLE_PX
+
+        rig = self._display()
+        self.assertEqual(rig.side_width(), SIDE_TOGGLE_PX + SIDE_PANEL_PX)
+        self.assertEqual(rig.viewer.side_plot.layout.display, "")
+        rig.refit.reset_mock()
+        rig.toggle.value = True
+        self.assertEqual(rig.viewer.side_plot.layout.display, "none")
+        self.assertEqual(rig.side_width(), SIDE_TOGGLE_PX)
+        self.assertEqual(rig.toggle.icon, "angle-double-left")
+        rig.refit.assert_called()
+        rig.restore.assert_not_called()
+
+    def test_showing_again_restores_canvases(self):
+        rig = self._display()
+        rig.toggle.value = True
+        rig.toggle.value = False
+        self.assertEqual(rig.viewer.side_plot.layout.display, "")
+        self.assertEqual(rig.toggle.icon, "angle-double-right")
+        rig.restore.assert_called_once_with(rig.viewer)
+
+    def test_remembered_state_is_applied_at_display(self):
+        # ``widget_states.json`` is restored before ``display_ui`` runs.
+        rig = self._display(hidden_before_display=True)
+        self.assertEqual(rig.viewer.side_plot.layout.display, "none")
+        self.assertEqual(rig.toggle.icon, "angle-double-left")
+
+
+class SidePanelPersistenceTests(unittest.TestCase):
+    def test_toggle_is_a_saved_widget_on_ui_component(self):
+        """A ``ToggleButton`` attribute of ``ui_component`` is what ``save_widget_states`` persists."""
+        import inspect
+
+        from ueler.viewer import ui_components
+
+        source = inspect.getsource(ui_components.uicomponents.__init__)
+        self.assertIn("self.side_panel_hidden = ToggleButton(", source)
 
 
 class CanvasFitTests(unittest.TestCase):
