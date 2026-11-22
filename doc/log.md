@@ -1,3 +1,8 @@
+### v0.5.2-rc1
+**Release candidate for 0.5.2: the full-screen button (#104) and the side-column toggle**
+
+- **No code changes since v0.5.2-alpha1.** This candidate is published to TestPyPI so that the stable v0.5.2 can promote it, as `dev_note/release_procedure.md` requires.
+
 ### v0.5.2-alpha1
 **A full-screen button for the viewer (#104)**
 
