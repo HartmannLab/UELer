@@ -155,7 +155,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 For more details, see the [user guide](https://hartmannlab.github.io/UELer/latest/tutorials/user-interface).
 
 ## New Update  
-### **UELer v0.5.2-rc1 Summary**
+### **UELer v0.5.2 Summary**
 
 - **The viewer can now go full screen (issue #104).** Click the button at the top-left of the viewer to give it the whole screen; click it again or press Esc to return. The image grows to fill the extra space and goes back to its usual size when you leave. VS Code does not let a notebook output go truly full screen, so there the button tells you so and suggests opening the notebook in JupyterLab or JupyterHub; you can choose **Enlarge in place instead**, which grows to the height of the editor and pushes the cells below it down; anything taller scrolls inside the viewer. and you scroll the notebook to line it up; for the most room, combine it with VS Code's **View: Toggle Maximized Editor Group** or Zen mode.
 

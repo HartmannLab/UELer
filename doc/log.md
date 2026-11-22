@@ -1,3 +1,8 @@
+### v0.5.2
+**Stable release: the full-screen button (#104) and the side-column toggle**
+
+- **Promotes v0.5.2-rc1 unchanged.** Only the version declarations and release notes differ from the candidate on TestPyPI.
+
 ### v0.5.2-rc1
 **Release candidate for 0.5.2: the full-screen button (#104) and the side-column toggle**
 
