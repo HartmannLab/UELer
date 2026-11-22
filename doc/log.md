@@ -1,4 +1,4 @@
-### v0.5.2-alpha1
+### v0.6.0-alpha1
 **Rendering is about twice as fast: a float32 composite and a downsample factor that follows the screen**
 
 - **Blending the channels was ~9× slower than it needed to be.** `_composite_channels` promoted each channel to float64 (`uint16 − float`) and built a full H × W × 3 temporary per channel. It now works in float32 in place and adds each channel only to the colour planes it uses: 2048² × 10 channels ~570 → ~60 ms, identical output to 2 × 10⁻⁷. The main viewer, map tiles, Cell Gallery and export all render through it.
@@ -17,6 +17,17 @@
 - **Files:** added `ueler/viewer/predraw.py`, `tests/test_predraw_render.py` (11 tests), `tools/benchmark/` (synthetic data generator and harness); edited `ueler/viewer/image_display.py`, `ueler/viewer/channel_grid_view.py`, `dev_note/main_viewer.md`, `README.md`.
 - Verified: `python -m unittest discover -s tests -t .` → **1435 tests, OK**. Checked by hand in a browser: a pan sends one frame, with no second draw.
 
+### v0.5.2
+**Stable release: the full-screen button (#104) and the side-column toggle**
+
+- **Promotes v0.5.2-rc1 unchanged.** Only the version declarations and release notes differ from the candidate on TestPyPI.
+
+### v0.5.2-rc1
+**Release candidate for 0.5.2: the full-screen button (#104) and the side-column toggle**
+
+- **No code changes since v0.5.2-alpha1.** This candidate is published to TestPyPI so that the stable v0.5.2 can promote it, as `dev_note/release_procedure.md` requires.
+
+### v0.5.2-alpha1
 **A full-screen button for the viewer (#104)**
 
 - **The viewer could only be as large as its notebook output cell.** A button at the top-left of the viewer now takes the whole viewer (left panel, canvas, side and footer plugins, and its dialogs) full screen; the button or Esc brings it back.
