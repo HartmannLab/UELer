@@ -17,6 +17,7 @@ from ueler.constants import DOWNSAMPLE_MAX_DIMENSION
 from ueler.image_utils import (
     calculate_downsample_factor,
     generate_edges,
+    screen_downsample_factor,
     get_axis_limits_with_padding,
 )
 from ueler.rendering.engine import scale_outline_thickness, thicken_outline
@@ -29,9 +30,76 @@ import cv2
 import math
 from matplotlib.backend_bases import MouseButton
 from ueler.viewer.decorators import update_status_bar
+from ueler.viewer.predraw import install_pre_draw_hook
 from .tooltip_utils import format_tooltip_value, resolve_cell_record
 
 _logger = logging.getLogger(__name__)
+
+
+def _render_if_view_changed(display) -> bool:
+    """Re-render the main view if the axis limits changed since the last render.
+
+    Called before each draw (pre-draw hook) and from ``on_draw``. Returns True
+    when a render was started. The status bar only flips to "processing" when
+    a render actually happens, not on every draw.
+    """
+    # ``main_viewer`` is attached by ImageMaskViewer after construction, but a
+    # draw can already happen before that (any draw_idle() during setup is
+    # processed synchronously by non-interactive backends).
+    if getattr(display, "main_viewer", None) is None:
+        return False
+
+    xlim = display.ax.get_xlim()
+    ylim = display.ax.get_ylim()
+    current_center_x = (xlim[0] + xlim[1]) / 2
+    current_center_y = (ylim[0] + ylim[1]) / 2
+    current_viewport_width = xlim[1] - xlim[0]
+    current_viewport_height = abs(ylim[0] - ylim[1])
+
+    # After every map activation _set_map_canvas_dimensions sets this flag
+    # so that the first draw after the widget is shown always triggers a
+    # real tile render, even when center/size appear unchanged (because the
+    # prev values were seeded to match the full canvas dimensions).
+    if getattr(display, '_map_needs_initial_render', False):
+        display._map_needs_initial_render = False
+    elif hasattr(display, "prev_center_x") and hasattr(display, "prev_center_y"):
+        if (math.isclose(current_center_x, display.prev_center_x)
+                and math.isclose(current_center_y, display.prev_center_y)
+                and math.isclose(current_viewport_width, display.prev_viewport_width)
+                and math.isclose(current_viewport_height, display.prev_viewport_height)):
+            return False
+
+    display.prev_center_x = current_center_x
+    display.prev_center_y = current_center_y
+    display.prev_viewport_width = current_viewport_width
+    display.prev_viewport_height = current_viewport_height
+    _render_for_view(display, xlim, ylim)
+    return True
+
+
+@update_status_bar
+def _render_for_view(display, xlim, ylim) -> None:
+    """Adjust the downsample factor for the zoom level, then re-render."""
+    viewer = display.main_viewer
+    if viewer.initialized:
+        # Match the render to the axes' size on screen (device pixels).
+        bbox = getattr(display.ax, "bbox", None)
+        new_downsample_factor = screen_downsample_factor(
+            np.abs(xlim[1] - xlim[0]),
+            np.abs(ylim[1] - ylim[0]),
+            getattr(bbox, "width", None),
+            getattr(bbox, "height", None),
+            not viewer.ui_component.enable_downsample_checkbox.value,
+            max_dimension=DOWNSAMPLE_MAX_DIMENSION,
+        )
+    else:
+        new_downsample_factor = 8
+
+    if new_downsample_factor != viewer.current_downsample_factor:
+        viewer.on_downsample_factor_changed(new_downsample_factor)
+
+    if viewer.initialized and getattr(viewer, '_widget_displayed', False):
+        viewer.update_display(viewer.current_downsample_factor)
 
 
 @dataclass(frozen=True)
@@ -243,73 +311,30 @@ class ImageDisplay:
         )
 
     def _setup_event_connections(self):
+        # Render for the new view *before* the canvas rasterises, so the frame
+        # sent to the browser already shows it (see ueler/viewer/predraw.py).
+        install_pre_draw_hook(self.fig.canvas, lambda: _render_if_view_changed(self))
         self.fig.canvas.callbacks.connect('draw_event', self.on_draw)
         self.fig.canvas.mpl_connect('motion_notify_event', self.on_mouse_move)
         self.fig.canvas.mpl_connect('button_press_event', self.on_mouse_click)
 
-    @update_status_bar
     def on_draw(self, event):
-        # ``main_viewer`` is attached by ImageMaskViewer after construction, but a
-        # draw event can already fire before that (any draw_idle() during setup is
-        # processed synchronously by non-interactive backends).
-        if getattr(self, "main_viewer", None) is None:
-            return
+        """Fallback for draws that bypass ``canvas.draw`` (normally a no-op).
 
-        current_center_x = (self.ax.get_xlim()[0] + self.ax.get_xlim()[1]) / 2
-        current_center_y = (self.ax.get_ylim()[0] + self.ax.get_ylim()[1]) / 2
-
-        current_viewport_width = self.ax.get_xlim()[1] - self.ax.get_xlim()[0]
-        current_viewport_height = abs(self.ax.get_ylim()[0] - self.ax.get_ylim()[1])
-
-        # After every map activation _set_map_canvas_dimensions sets this flag
-        # so that the first on_draw after the widget is shown always triggers a
-        # real tile render, even when center/size appear unchanged (because the
-        # prev values were seeded to match the full canvas dimensions).
-        if getattr(self, '_map_needs_initial_render', False):
-            self._map_needs_initial_render = False
-        elif hasattr(self, "prev_center_x") and hasattr(self, "prev_center_y"):
-            if (math.isclose(current_center_x, self.prev_center_x)
-                    and math.isclose(current_center_y, self.prev_center_y)
-                    and math.isclose(current_viewport_width, self.prev_viewport_width)
-                    and math.isclose(current_viewport_height, self.prev_viewport_height)):
-                return
-
-        self.prev_center_x = current_center_x
-        self.prev_center_y = current_center_y
-        self.prev_viewport_width = current_viewport_width
-        self.prev_viewport_height = current_viewport_height
-        
-        """Adjust the downsample factor based on the zoom level."""
-        if self.main_viewer.initialized:
-            # Get the range width of the x and y axis
-            range_width_x = self.ax.get_xlim()[1] - self.ax.get_xlim()[0]
-            range_width_y = self.ax.get_ylim()[1] - self.ax.get_ylim()[0]
-
-            new_downsample_factor = calculate_downsample_factor(
-                np.abs(range_width_x),
-                np.abs(range_width_y),
-                not self.main_viewer.ui_component.enable_downsample_checkbox.value,
-                max_dimension=DOWNSAMPLE_MAX_DIMENSION,
-            )
-        else:
-            new_downsample_factor = 8
-
-        if new_downsample_factor != self.main_viewer.current_downsample_factor:
-            self.main_viewer.on_downsample_factor_changed(new_downsample_factor)
-        
-        if self.main_viewer.initialized and getattr(self.main_viewer, '_widget_displayed', False):
-            self.main_viewer.update_display(self.main_viewer.current_downsample_factor)
+        The pre-draw hook has already rendered for the current view, so the
+        viewport here matches the stored one and nothing happens. A render that
+        does happen here lands one frame late, as it did before the hook.
+        """
+        _render_if_view_changed(self)
 
     def on_mouse_move(self, event):
         if event.inaxes != self.ax:
-            self.mask_id_annotation.set_visible(False)
-            self.fig.canvas.draw_idle()
+            self._hide_tooltip()
             return
 
         x, y = event.xdata, event.ydata
         if x is None or y is None:
-            self.mask_id_annotation.set_visible(False)
-            self.fig.canvas.draw_idle()
+            self._hide_tooltip()
             return
 
         # Cancel any existing timer
@@ -329,14 +354,12 @@ class ImageDisplay:
         event = self.last_hover_event
         x, y = event.xdata, event.ydata
         if x is None or y is None:
-            self.mask_id_annotation.set_visible(False)
-            self.fig.canvas.draw_idle()
+            self._hide_tooltip()
             return
 
         hit = self.main_viewer.resolve_mask_hit_at_viewport(x, y)
         if hit is None:
-            self.mask_id_annotation.set_visible(False)
-            self.fig.canvas.draw_idle()
+            self._hide_tooltip()
             return
 
         # ``hit.cell_record`` is resolved on every hover, after the tooltip's
@@ -365,10 +388,30 @@ class ImageDisplay:
                     )
 
         tooltip_text = "\n".join(tooltip_lines)
+        self._show_tooltip((x, y), tooltip_text)
 
-        self.mask_id_annotation.xy = (x, y)
-        self.mask_id_annotation.set_text(tooltip_text)
-        self.mask_id_annotation.set_visible(True)
+    # Each redraw re-rasterises the whole figure and sends a PNG to the
+    # browser, so the tooltip only asks for one when it actually changes. The
+    # hover timer fires after every pause of the mouse, and a motion event
+    # outside the axes arrives for every pixel the pointer moves.
+    def _hide_tooltip(self):
+        annotation = self.mask_id_annotation
+        if annotation.get_visible() is False:
+            return
+        annotation.set_visible(False)
+        self.fig.canvas.draw_idle()
+
+    def _show_tooltip(self, xy, text):
+        annotation = self.mask_id_annotation
+        if (
+            annotation.get_visible() is True
+            and annotation.get_text() == text
+            and tuple(annotation.xy) == tuple(xy)
+        ):
+            return
+        annotation.xy = xy
+        annotation.set_text(text)
+        annotation.set_visible(True)
         self.fig.canvas.draw_idle()
 
     def on_mouse_click(self, event):

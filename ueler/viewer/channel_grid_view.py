@@ -19,8 +19,9 @@ import numpy as np
 from matplotlib.backend_bases import MouseButton
 
 from ueler.constants import DOWNSAMPLE_MAX_DIMENSION
-from ueler.image_utils import calculate_downsample_factor, get_axis_limits_with_padding
+from ueler.image_utils import calculate_downsample_factor, get_axis_limits_with_padding, screen_downsample_factor
 from ueler.viewer.tooltip_utils import format_tooltip_value
+from ueler.viewer.predraw import install_pre_draw_hook
 
 
 class GridChannelDisplay:
@@ -127,7 +128,10 @@ class GridChannelDisplay:
         self._prev_cx: float | None = None
         self._prev_cy: float | None = None
 
-        # Connect events
+        # Connect events. The pre-draw hook renders a changed view before the
+        # canvas rasterises, so the frame sent already shows it; ``_on_draw``
+        # stays as a fallback and is a no-op once the hook has run.
+        install_pre_draw_hook(self.fig.canvas, lambda: self._on_draw(None))
         self.fig.canvas.callbacks.connect("draw_event", self._on_draw)
         self._setup_grid_events()
 
@@ -463,15 +467,19 @@ class GridChannelDisplay:
         disable_ds = not getattr(
             self.main_viewer.ui_component, "enable_downsample_checkbox", None
         ) or not self.main_viewer.ui_component.enable_downsample_checkbox.value
-        new_factor = calculate_downsample_factor(
-            range_x, range_y, disable_ds, max_dimension=DOWNSAMPLE_MAX_DIMENSION
+        # Match the render to one pane's size on screen (device pixels).
+        bbox = getattr(self.axes[0], "bbox", None) if getattr(self, "axes", None) else None
+        new_factor = screen_downsample_factor(
+            range_x, range_y,
+            getattr(bbox, "width", None), getattr(bbox, "height", None),
+            disable_ds, max_dimension=DOWNSAMPLE_MAX_DIMENSION,
         )
 
         if new_factor != self.main_viewer.current_downsample_factor:
             self.main_viewer.on_downsample_factor_changed(new_factor)
 
     def _on_draw(self, event):
-        """Triggered after each matplotlib draw (pan/zoom/resize).
+        """Triggered before each draw (pre-draw hook) and after it (``draw_event``).
 
         Syncs ``image_display.ax`` limits so existing padding helpers work,
         then asks the viewer to re-render all channel panes.

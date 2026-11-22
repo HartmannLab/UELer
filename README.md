@@ -161,6 +161,10 @@ For more details, see the [user guide](https://hartmannlab.github.io/UELer/lates
 
 - **The image now uses the whole width of the notebook.** It used to be a fixed 6 × 6 inch square with the side panels right next to it and empty space beyond. It is now a square as wide as the space the left panel and the side panels leave, so the side panels sit at the right edge, and it resizes with the window or the editor. You can also hide the side panels with the small « / » button right next to them; the image then grows into their space. UELer remembers whether they were hidden the next time you open the viewer.
 
+- **Panning and zooming no longer show a blurred frame first.** Each pan, zoom or FOV switch used to send the browser an outdated image and then the correct one; it now sends only the correct one, halving what goes over the wire. The hover tooltip and the status indicator also stop redrawing when nothing has changed.
+
+- **Panning, zooming, adding markers and switching FOVs are about twice as fast.** Blending the channels into the displayed image is roughly nine times faster, and the viewer no longer renders more pixels than your screen can show. On a 2048 × 2048, 10-channel dataset, one pan step went from about 0.75 s to 0.33 s on a Retina screen (0.66 s to 0.16 s on a standard one), and adding a marker from 0.9 s to 0.5 s.
+
 _Earlier changes (v0.5.1 and before) are in the [update log](https://github.com/HartmannLab/UELer/blob/main/doc/log.md)._
 
 ## License

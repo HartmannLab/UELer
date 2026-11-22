@@ -1,4 +1,22 @@
 ### v0.5.2-alpha1
+**Rendering is about twice as fast: a float32 composite and a downsample factor that follows the screen**
+
+- **Blending the channels was ~9× slower than it needed to be.** `_composite_channels` promoted each channel to float64 (`uint16 − float`) and built a full H × W × 3 temporary per channel. It now works in float32 in place and adds each channel only to the colour planes it uses: 2048² × 10 channels ~570 → ~60 ms, identical output to 2 × 10⁻⁷. The main viewer, map tiles, Cell Gallery and export all render through it.
+- **The downsample factor now follows the canvas's size on screen.** The new `image_utils.screen_downsample_factor` renders at least one image pixel per device pixel (never blurrier than the screen) and never more than the 2048 px budget (never slower than before). It helps standard-DPI screens (a 2048² FOV renders at half resolution on a 600 px canvas) and the channel grid, whose panes are small; on a Retina screen a 2048² FOV still renders at full resolution.
+- **Measured against v0.5.2-alpha1's baseline commit 3c80506** with `tools/benchmark/compare.py` (2048² × 10 channels, 12 000 cells/FOV; this and the previous entry together): a pan step 747 → 326 ms on a Retina canvas and 664 → 164 ms on a standard one; adding a marker 905 → 467 / 806 → 240 ms; switching to a new FOV 1 676 → 920 / 1 521 → 647 ms. Full tables in `dev_note/benchmarks/`.
+- **Files:** edited `ueler/rendering/engine.py`, `ueler/image_utils.py`, `ueler/viewer/image_display.py`, `ueler/viewer/channel_grid_view.py`, `tests/test_channel_grid_view.py` (two expectations follow the new rule), `dev_note/main_viewer.md`, `README.md`; added `tests/test_screen_downsample_factor.py` (9 tests), `dev_note/benchmarks/`.
+- Verified: `python -m unittest discover -s tests -t .` → **1444 tests, OK**.
+
+**Pan, zoom and FOV switches send one up-to-date frame instead of a stale one followed by the right one**
+
+- **Every view change was drawn and sent to the browser twice, and the first frame showed the old image.** `ImageDisplay.on_draw` re-rendered from `draw_event`, which matplotlib fires after the figure is rasterised, so the PNG ipympl sent for that draw was already out of date. The right image only arrived through a second draw, issued by IPython's `post_execute` hook, which ipykernel runs after every comm message. In a Retina session a zoom produced a 2.2 MB stale frame and the correct one 350 ms later — the brief blur after zooming.
+- **The render now runs before rasterising.** The new `ueler/viewer/predraw.py` wraps `canvas.draw` so `_render_if_view_changed` runs first; ipympl's draws go through it, so one frame carries the new render. `draw_idle` is a no-op while the hook runs. `on_draw` remains as a fallback that finds nothing to do. The channel grid view uses the same hook.
+- **The status bar only switches to "processing" when a render happens**, not on every draw; this removes most of the brief reflow of the status checkmark (the remaining part is the next fix).
+- **The hover tooltip only redraws when it changes.** The 300 ms hover timer and every mouse move outside the image used to redraw the whole figure.
+- **Measured with the new benchmark harness (`tools/benchmark/`):** a 10-step pan now sends 11 frames instead of 21, none of them stale; a rectangle zoom or FOV switch sends 1 instead of 2. Kernel time per pan step drops by about 15–30 ms (2048² × 10 channels: 581 → 553 ms); the larger saving is the browser-side decode and round trip, which the harness does not time. Design notes in `dev_note/main_viewer.md`.
+- **Files:** added `ueler/viewer/predraw.py`, `tests/test_predraw_render.py` (11 tests), `tools/benchmark/` (synthetic data generator and harness); edited `ueler/viewer/image_display.py`, `ueler/viewer/channel_grid_view.py`, `dev_note/main_viewer.md`, `README.md`.
+- Verified: `python -m unittest discover -s tests -t .` → **1435 tests, OK**. Checked by hand in a browser: a pan sends one frame, with no second draw.
+
 **A full-screen button for the viewer (#104)**
 
 - **The viewer could only be as large as its notebook output cell.** A button at the top-left of the viewer now takes the whole viewer (left panel, canvas, side and footer plugins, and its dialogs) full screen; the button or Esc brings it back.

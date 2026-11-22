@@ -46,6 +46,47 @@ def calculate_downsample_factor(width, height, ignore_zoom=False, max_dimension=
 	return factor
 
 
+def screen_downsample_factor(
+	width,
+	height,
+	screen_width,
+	screen_height,
+	ignore_zoom=False,
+	max_dimension=DOWNSAMPLE_MAX_DIMENSION,
+	min_screen_px=64,
+):
+	"""Downsample factor for a view of *width* × *height* image pixels shown in
+	*screen_width* × *screen_height* device pixels.
+
+	Returns the largest power of two that still renders at least one image
+	pixel per device pixel along both axes, so the result is never blurrier
+	than the screen can show; and never less than
+	:func:`calculate_downsample_factor`'s, so it never renders more than the
+	``max_dimension`` budget either. Rendering more pixels than the screen has
+	only costs time: the Agg renderer resamples them down again.
+
+	The screen size is in *device* pixels (under ipympl the figure dpi already
+	includes the browser's device pixel ratio, so ``ax.bbox`` is). A screen
+	size below *min_screen_px* (canvas not laid out yet) is ignored.
+	"""
+
+	cap = calculate_downsample_factor(width, height, ignore_zoom, max_dimension=max_dimension)
+	if ignore_zoom:
+		return 1
+	try:
+		sw = float(screen_width)
+		sh = float(screen_height)
+	except (TypeError, ValueError):
+		return cap
+	if not (sw >= min_screen_px and sh >= min_screen_px):
+		return cap
+	ratio = min(abs(float(width)) / sw, abs(float(height)) / sh)
+	factor = 1
+	while factor * 2 <= ratio:
+		factor *= 2
+	return max(cap, factor)
+
+
 def select_downsample_factor(
 	width,
 	height,

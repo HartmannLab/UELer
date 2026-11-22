@@ -216,7 +216,13 @@ class GridChannelDisplayTests(unittest.TestCase):
         grid.axes[0].set_xlim((0.0, 3000.0))
         grid.axes[0].set_ylim((3000.0, 0.0))
         grid._on_draw(None)
-        self.assertEqual(self.viewer.current_downsample_factor, 2)
+        # The factor also follows the pane's size on screen: never more image
+        # pixels than the pane shows, but never fewer than the 2048 budget would give (2 here).
+        from ueler.image_utils import screen_downsample_factor
+        bbox = grid.axes[0].bbox
+        expected = screen_downsample_factor(3000.0, 3000.0, bbox.width, bbox.height)
+        self.assertGreaterEqual(expected, 2)
+        self.assertEqual(self.viewer.current_downsample_factor, expected)
 
 
 # ---------------------------------------------------------------------------
@@ -533,7 +539,11 @@ class GridSetViewportTests(unittest.TestCase):
     def test_recomputes_downsample_factor(self):
         # A 3000 px window downsamples by 2 under DOWNSAMPLE_MAX_DIMENSION (2048).
         self.grid.set_viewport((0.0, 3000.0), (3000.0, 0.0))
-        self.assertEqual(self.viewer.current_downsample_factor, 2)
+        from ueler.image_utils import screen_downsample_factor
+        bbox = self.grid.axes[0].bbox
+        expected = screen_downsample_factor(3000.0, 3000.0, bbox.width, bbox.height)
+        self.assertGreaterEqual(expected, 2)
+        self.assertEqual(self.viewer.current_downsample_factor, expected)
 
     def test_subsequent_draw_event_does_not_reenter(self):
         """The draw scheduled by set_viewport must not trigger a second render."""
