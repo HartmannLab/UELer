@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Mapping, Optional, Sequence, Tuple
+from typing import Callable, Iterable, Mapping, Optional, Sequence, Tuple
 
 import math
 
@@ -30,6 +30,11 @@ import numpy as np
 
 ColorTuple = Tuple[float, float, float]
 Region = Tuple[int, int, int, int]
+
+#: ``reader(channel, source, region_xy, downsample) -> array | None``. Returns
+#: ``source[ymin:ymax:d, xmin:xmax:d]`` from somewhere faster than ``source``
+#: (see ``ueler.rendering.channel_cache``), or ``None`` to read ``source``.
+ChannelReader = Callable[[str, object, Region, int], Optional[np.ndarray]]
 
 
 def _to_numpy(array) -> np.ndarray:
@@ -384,6 +389,7 @@ def _composite_channels(
     downsample_factor: int,
     canvas_shape: Tuple[int, int],
     region_ds: Optional[Region] = None,
+    channel_reader: Optional[ChannelReader] = None,
 ) -> np.ndarray:
     composite = np.zeros((canvas_shape[0], canvas_shape[1], 3), dtype=np.float32)
 
@@ -394,9 +400,12 @@ def _composite_channels(
         if settings is None:
             raise KeyError(f"Missing render settings for channel '{channel}'")
 
+        region_array = None
         if is_ome_tiff and region_ds is not None:
             region_array = _slice_downsampled(channel_arrays[channel], region_ds)
-        else:
+        elif channel_reader is not None:
+            region_array = channel_reader(channel, channel_arrays[channel], region_xy, downsample_factor)
+        if region_array is None:
             region_array = _slice_and_materialise(channel_arrays[channel], region_xy, downsample_factor)
         
         min_val = float(settings.contrast_min)
@@ -505,6 +514,7 @@ def render_fov_to_array(
     annotation: Optional[AnnotationRenderSettings] = None,
     masks: Optional[Iterable[MaskRenderSettings]] = None,
     skip_image_layer: bool = False,
+    channel_reader: Optional[ChannelReader] = None,
 ) -> np.ndarray:
     if downsample_factor < 1:
         raise ValueError("downsample_factor must be >= 1")
@@ -542,6 +552,7 @@ def render_fov_to_array(
             downsample_factor,
             (height, width),
             region_ds=region_ds,
+            channel_reader=channel_reader,
         )
     composite = _apply_annotation_overlay(composite, annotation, region_ds)
     composite = _apply_mask_overlays(composite, masks, region_ds)

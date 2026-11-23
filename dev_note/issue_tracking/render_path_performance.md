@@ -69,7 +69,7 @@ Pan frames include the second, post-message draw and PNG (see the first finding)
 
 1. **Done (Fix 1).** Render on a view change before the draw, not in `on_draw` after it; tooltip redraws only on change.
 2. **Done (Fix 2).** Float32 composite and screen-aware downsample factor (canvas size × device pixel ratio).
-3. In-memory channel cache with a byte budget and per-factor levels. This is the one fix that adds memory by design; report its memory next to its timings.
+3. **Done (Fix 3).** In-memory channel cache with a byte budget: full resolution when a channel fits, the viewed downsampled level when it does not. This is the one fix that adds memory by design; its memory is reported next to its timings.
 4. Remove the redundant `update_display` calls on channel add and FOV switch.
 5. Status bar `hold_sync()`.
 6. Re-measure, then decide on the composite itself (uint8 path), the PNG compression level and the remaining items from the suspected-cost list.
@@ -196,3 +196,63 @@ Small dataset (1024² × 5): −10 to −43 %. Where the remaining Retina pan st
 python -m unittest discover -s tests -t .
 ```
 - ✅ 1444 tests, OK
+
+---
+
+## **Update Summary: Fix 3 — decoded channel cache with a byte budget (commit pending)**
+
+After Fix 2, re-reading the channels was the largest single stage of a pan step: ~127 ms of a 319 ms Retina step at 2048² × 10 channels. In folder mode each channel is a Dask array over one compressed TIFF page, and the page is one Dask task, so slicing even a small zoomed-in region decompressed the whole file again on every render. Fix 3 decodes each channel once and serves every later render from memory.
+
+---
+
+### **Actions Taken**
+- **`ChannelLevelCache` (`ueler/rendering/channel_cache.py`).**
+  A least-recently-used cache keyed by `(fov, channel, factor)` with a total byte budget (512 MiB by default) and a per-entry cap of an eighth of the budget (64 MiB). `read_region(fov, channel, source, region_xy, factor)` returns exactly `source[ymin:ymax:f, xmin:xmax:f]`, or `None` when it does not handle the read and the caller keeps its lazy path.
+- **Two kinds of entry.**
+  A channel that fits the cap is kept at full resolution, and every region at every factor is a NumPy view of it: no copy, no alignment condition, and changing zoom never decodes again. A larger channel keeps only the downsampled level being viewed (`source[::f, ::f]`); it serves factor-aligned regions, which is what `get_axis_limits_with_padding` produces, and zooming to full resolution on it falls back to the lazy read.
+- **Engine hook, not a new render path.**
+  `render_fov_to_array` and `_composite_channels` take an optional `channel_reader`; without one they behave as before. `_compose_fov_image` passes a reader bound to the FOV (`_cached_channel_reader`), so the main view, map tiles and the channel grid all use the cache. Cell Gallery and export call the engine with their own arrays and are unchanged.
+- **Correctness guards.**
+  Each entry keeps the array it was decoded from and is discarded when `image_cache` holds a different one, so a reloaded channel is never served stale. Evicting a FOV from `image_cache` drops its entries. OME-TIFF FOVs (`OMEFovWrapper`, which read their own pyramid levels) and arrays already in memory are not cached. `set_max_bytes(0)` disables the cache.
+- **Ruled out:** caching every factor level next to full resolution. With full resolution in memory a level is a strided view, so a second copy would only add memory. Caching the rendered composite instead of the channels would have saved the composite as well, but it is invalidated by every contrast, colour or channel change, which are the interactions that most need to be fast.
+
+---
+
+### **Results**
+
+`compare.py` against 69e4247 (Fix 2), median of 3 interleaved runs, latency the user waits on. Full output: [`dev_note/benchmarks/compare_fix3_vs_69e4247.md`](../benchmarks/compare_fix3_vs_69e4247.md). Large dataset (3 FOVs, 2048² px, 10 channels, 12 000 cells/FOV):
+
+| Operation | Retina (1 200 px): before → after | Standard (600 px): before → after |
+| --- | --- | --- |
+| Pan, one step (whole FOV) | 319 → 203 ms (−36 %) | 164 → 56 ms (−66 %) |
+| Pan, one step (zoomed 4×) | 195 → 94 ms (−52 %) | 135 → 32 ms (−76 %) |
+| Pan, one step (mask outlines) | 437 → 310 ms (−29 %) | 215 → 100 ms (−54 %) |
+| Zoom to a rectangle | 220 → 116 ms (−47 %) | 153 → 47 ms (−70 %) |
+| Add a marker channel | 443 → 310 ms (−30 %) | 237 → 118 ms (−50 %) |
+| Show mask outlines | 415 → 288 ms (−31 %) | 210 → 98 ms (−53 %) |
+| Switch FOV (first visit) | 888 → 708 ms (−20 %) | 647 → 499 ms (−23 %) |
+| Switch FOV (visited before) | 359 → 232 ms (−35 %) | 186 → 74 ms (−60 %) |
+
+Small dataset (1024² × 5): −4 to −39 %. A first FOV visit gains too, because a cold switch renders more than once (fix 4) and only the first render decodes now. Where the Retina pan step goes now (203 ms): PNG encode ~80 ms and Agg draw ~58 ms (both scale with device pixels), composite ~54 ms (up ~13 ms, since it now copies a strided view rather than receiving a fresh array); channel reads are gone from it (~127 ms before).
+
+**Memory.** As planned, this fix adds memory. The cache holds at most its budget (512 MiB by default); a 2048² uint16 channel is 8 MiB at full resolution, so a 10-channel FOV is 80 MiB. Process RSS at the end of a run (median of 3), with the benchmark visiting all three FOVs: 2048² × 10 at standard DPI 819 → 954 MB (+135 MB), on Retina 1 016 → 1 162 MB (+146 MB); the small dataset +1 MB at standard DPI and +25 MB on Retina. The budget bounds the growth when more FOVs are visited; lower it with `viewer.channel_level_cache.set_max_bytes(n)` on a machine with little memory.
+
+**Not done here:** the first visit to a FOV still reads each channel twice, once for the display statistics (`_update_channel_max`) and once for the cache. Computing the statistics from the decoded array would remove the second read; it touches the loader and the map-mode statistics path, so it is left for a separate change.
+
+---
+
+### **Files Changed**
+- `ueler/rendering/channel_cache.py` — new; `ChannelLevelCache`.
+- `ueler/rendering/engine.py` — optional `channel_reader` on `render_fov_to_array` and `_composite_channels`.
+- `ueler/viewer/main_viewer.py` — `channel_level_cache`, `_cached_channel_reader`, entries dropped on FOV eviction.
+- `tests/test_channel_level_cache.py` — new (12 tests).
+- `dev_note/main_viewer.md` — channel cache paragraph.
+- `dev_note/benchmarks/compare_fix3_vs_69e4247.{md,json}` — comparison output.
+
+---
+
+### **Tests**
+```bash
+python -m unittest discover -s tests -t .
+```
+- ✅ 1456 tests, OK

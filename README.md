@@ -157,6 +157,8 @@ For more details, see the [user guide](https://hartmannlab.github.io/UELer/lates
 ## New Update  
 ### **UELer v0.6.0-alpha1 Summary**
 
+- **Panning, zooming and going back to a FOV you visited no longer re-read the image files.** Each channel is decoded once and kept in memory, so a pan step on a 2048 × 2048 px, 10-channel FOV drops from about 320 to 200 ms on a Retina screen and from about 160 to 60 ms on a standard one. The cache uses at most 512 MiB by default; change it with `viewer.channel_level_cache.set_max_bytes(n)`, or set `0` to turn it off.
+
 - **Panning and zooming no longer show a blurred frame first.** Each pan, zoom or FOV switch used to send the browser an outdated image and then the correct one; it now sends only the correct one, halving what goes over the wire. The hover tooltip and the status indicator also stop redrawing when nothing has changed.
 
 - **Panning, zooming, adding markers and switching FOVs are about twice as fast.** Blending the channels into the displayed image is roughly nine times faster, and the viewer no longer renders more pixels than your screen can show. On a 2048 × 2048, 10-channel dataset, one pan step went from about 0.75 s to 0.33 s on a Retina screen (0.66 s to 0.16 s on a standard one), and adding a marker from 0.9 s to 0.5 s.

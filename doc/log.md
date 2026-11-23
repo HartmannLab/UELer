@@ -1,4 +1,13 @@
 ### v0.6.0-alpha1
+**Pan, zoom and FOV revisits no longer re-read the channel files: decoded channels are cached within a memory budget**
+
+- **Every render decompressed each channel's TIFF again.** In folder mode a channel is a Dask array over one compressed TIFF page, and the page is one Dask task, so even a small zoomed-in region read the whole file: ~127 ms of a 319 ms pan step at 2048² × 10 channels on a Retina canvas, more on network storage.
+- **Each channel is now decoded once.** The new `ueler/rendering/channel_cache.py` (`ChannelLevelCache`, `viewer.channel_level_cache`) keeps a channel at full resolution when it fits, so every region at every zoom is a view of it, identical to the lazy slice; a channel too large for that keeps the downsampled level being viewed. The engine takes it as an optional `channel_reader`, and `_compose_fov_image` passes it, so the main view, map tiles and the channel grid use it. OME-TIFF FOVs and in-memory arrays are not cached.
+- **Memory is bounded.** 512 MiB by default, least recently used channels evicted first; `viewer.channel_level_cache.set_max_bytes(n)` changes it and `0` turns the cache off. A cached entry is discarded when its channel is reloaded, and a FOV's entries go when the FOV leaves the image cache. Measured: +135 MB RSS (standard DPI) and +146 MB (Retina) after visiting all three FOVs of the 2048² × 10 dataset.
+- **Measured against v0.6.0-alpha1's previous state (69e4247)** with `tools/benchmark/compare.py` (2048² × 10 channels, 12 000 cells/FOV): a pan step 319 → 203 ms on a Retina canvas and 164 → 56 ms on a standard one; zoomed in 4×, 195 → 94 / 135 → 32 ms; adding a marker 443 → 310 / 237 → 118 ms; returning to a visited FOV 359 → 232 / 186 → 74 ms; a first FOV visit −20 %. Full tables in `dev_note/benchmarks/compare_fix3_vs_69e4247.md`.
+- **Files:** added `ueler/rendering/channel_cache.py`, `tests/test_channel_level_cache.py` (12 tests), `dev_note/benchmarks/compare_fix3_vs_69e4247.{md,json}`; edited `ueler/rendering/engine.py`, `ueler/viewer/main_viewer.py`, `dev_note/main_viewer.md`, `dev_note/issue_tracking/render_path_performance.md`, `README.md`.
+- Verified: `python -m unittest discover -s tests -t .` → **1456 tests, OK**.
+
 **Rendering is about twice as fast: a float32 composite and a downsample factor that follows the screen**
 
 - **Blending the channels was ~9× slower than it needed to be.** `_composite_channels` promoted each channel to float64 (`uint16 − float`) and built a full H × W × 3 temporary per channel. It now works in float32 in place and adds each channel only to the colour planes it uses: 2048² × 10 channels ~570 → ~60 ms, identical output to 2 × 10⁻⁷. The main viewer, map tiles, Cell Gallery and export all render through it.

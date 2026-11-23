@@ -80,6 +80,7 @@ from ueler.viewer.color_palettes import (
     normalize_hex_color,
 )
 from ueler.viewer.mask_color_overlay import apply_registry_colors, collect_mask_regions
+from ueler.rendering.channel_cache import ChannelLevelCache
 from ueler.rendering import (
     AnnotationOverlaySnapshot,
     AnnotationRenderSettings,
@@ -264,6 +265,18 @@ def _dedupe_channel_sequence(channels: Sequence[str]) -> Tuple[str, ...]:
         seen.add(name)
         ordered.append(name)
     return tuple(ordered)
+
+
+def _cached_channel_reader(cache, fov_name):
+    """Engine ``channel_reader`` serving *fov_name*'s channels from *cache*."""
+    if cache is None:
+        return None
+
+    def reader(channel, source, region_xy, downsample_factor):
+        return cache.read_region(fov_name, channel, source, region_xy, downsample_factor)
+
+    return reader
+
 
 class ImageMaskViewer:
     def __init__(self, base_folder, masks_folder=None, annotations_folder=None, debug=False,
@@ -465,6 +478,10 @@ class ImageMaskViewer:
         self.current_downsample_factor = 8  # Initial downsample factor
 
         self.image_cache = OrderedDict()
+        # Decoded channel rasters, so pan/zoom do not re-read and re-decompress
+        # each TIFF on every render. Byte-budgeted (``set_max_bytes``); see
+        # ueler/rendering/channel_cache.py.
+        self.channel_level_cache = ChannelLevelCache()
         self.mask_cache = OrderedDict()
         self.edge_masks_cache = {}
         self.label_masks_cache = {}
@@ -2136,6 +2153,7 @@ class ImageMaskViewer:
         while len(self.image_cache) > self.max_cache_size:
             removed_fov, resource = self.image_cache.popitem(last=False)
             self._close_image_resource(resource)
+            self._drop_cached_channels(removed_fov)
             logger.info(f"Removed FOV '{removed_fov}' from image cache due to cache size limit.")
 
         while len(self.mask_cache) > self.max_cache_size:
@@ -2270,6 +2288,7 @@ class ImageMaskViewer:
         while len(self.image_cache) > self.max_cache_size:
             removed_fov, resource = self.image_cache.popitem(last=False)
             self._close_image_resource(resource)
+            self._drop_cached_channels(removed_fov)
             logger.info(f"Removed FOV '{removed_fov}' from image cache.")
             self._invalidate_map_tiles_for_fov(removed_fov)
 
@@ -4175,6 +4194,11 @@ class ImageMaskViewer:
             except Exception:
                 pass
 
+    def _drop_cached_channels(self, fov_name: str) -> None:
+        cache = getattr(self, "channel_level_cache", None)
+        if cache is not None:
+            cache.drop_fov(fov_name)
+
     def _compose_fov_image(
         self,
         fov_name: str,
@@ -4334,6 +4358,7 @@ class ImageMaskViewer:
             annotation=annotation_settings,
             masks=mask_settings,
             skip_image_layer=skip_image_layer,
+            channel_reader=_cached_channel_reader(getattr(self, "channel_level_cache", None), fov_name),
         )
 
         if painter_controls_primary_mask and mask_regions:
