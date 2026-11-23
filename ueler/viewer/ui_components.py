@@ -106,6 +106,7 @@ from .confirm_dialog import ConfirmDialog  # type: ignore[import-error]
 from .data_mapping import KEY_FIELDS, build_key_widget  # type: ignore[import-error]
 from .fullscreen_toggle import HOST_CLASS as FULLSCREEN_HOST_CLASS, attach_canvas_fit, build_fullscreen_toggle  # type: ignore[import-error]
 from .setup_dialog import SetupDialog  # type: ignore[import-error]
+from ueler.viewer.decorators import set_status_ready
 
 
 #: Width of the side accordions (``Layout(width='6in')``) in CSS pixels.
@@ -496,6 +497,14 @@ def display_ui(viewer):
         viewer._widget_displayed = True
 
     display(root)
+
+    # The status widget is created showing the "processing" spinner, and only
+    # renders started by a view change switch it back (``_render_for_view``).
+    # When the browser's first draw finds the view unchanged, nothing else
+    # clears it, and the spinner stays next to a fully loaded image until the
+    # first pan or zoom. Both entry points (``run_viewer(auto_display=True)``
+    # and ``viewer.display()``) come through here.
+    set_status_ready(viewer)
 
 class SidePlots:
     def __init__(self):

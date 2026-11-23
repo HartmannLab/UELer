@@ -1,4 +1,13 @@
 ### v0.6.0-alpha1
+**The status bar no longer keeps showing the busy spinner after the image has loaded, and shows it again while a FOV or channel loads**
+
+- **The spinner could stay on next to a fully loaded image (user report).** The status widget starts out showing the spinner. Before the render-path change in 69e4247 every draw switched it to ready; since then only a render caused by a view change does, so when the browser's first draw found the view unchanged, nothing cleared it until the first pan or zoom.
+- **`display_ui` now switches the status to ready** once the viewer is shown (`decorators.set_status_ready`). It is the path both `run_viewer(auto_display=True)` and `viewer.display()` take.
+- **Switching FOV and changing channels show the spinner again (user report).** Neither handler had its own status; the spinner used to flash only because the draw that followed toggled it. `on_image_change` and `on_channel_selection_change` now carry `@update_status_bar`, so the spinner covers the load itself.
+- **A status change is one widget message.** `_set_status_bar` sets size, format and image inside `hold_sync()`, so the browser no longer applies them one at a time. This also removes the brief reflow where the ready checkmark appeared at the spinner's 225 px width.
+- **Files:** edited `ueler/viewer/decorators.py`, `ueler/viewer/ui_components.py`, `ueler/viewer/main_viewer.py`, `dev_note/issue_tracking/render_path_performance.md`, `README.md`; added `tests/test_status_bar.py` (6 tests).
+- Verified: `python -m unittest discover -s tests -t .` → **1462 tests, OK**. Not yet checked in a browser.
+
 **Pan, zoom and FOV revisits no longer re-read the channel files: decoded channels are cached within a memory budget**
 
 - **Every render decompressed each channel's TIFF again.** In folder mode a channel is a Dask array over one compressed TIFF page, and the page is one Dask task, so even a small zoomed-in region read the whole file: ~127 ms of a 319 ms pan step at 2048² × 10 channels on a Retina canvas, more on network storage.

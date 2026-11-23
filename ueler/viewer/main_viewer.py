@@ -2367,6 +2367,7 @@ class ImageMaskViewer:
                 removed_fov, _ = self.annotation_cache.popitem(last=False)
                 self.annotation_label_cache.pop(removed_fov, None)
 
+    @update_status_bar
     def on_image_change(self, change):
         previous_channels = self.ui_component.channel_selector.value  # Keep previous channel selections
 
@@ -2567,6 +2568,7 @@ class ImageMaskViewer:
         if heatmap_linked and heatmap_plugin is not None:
             heatmap_plugin.highlight_cells()
 
+    @update_status_bar
     def on_channel_selection_change(self, change):
         self.update_controls(None)
         self.setup_widget_observers()

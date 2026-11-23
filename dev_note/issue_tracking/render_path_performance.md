@@ -71,7 +71,7 @@ Pan frames include the second, post-message draw and PNG (see the first finding)
 2. **Done (Fix 2).** Float32 composite and screen-aware downsample factor (canvas size × device pixel ratio).
 3. **Done (Fix 3).** In-memory channel cache with a byte budget: full resolution when a channel fits, the viewed downsampled level when it does not. This is the one fix that adds memory by design; its memory is reported next to its timings.
 4. Remove the redundant `update_display` calls on channel add and FOV switch.
-5. Status bar `hold_sync()`.
+5. **Done (Fix 5).** Status bar `hold_sync()`, plus the spinner cleared once the viewer is shown (it could stay on next to a loaded image after Fixes 1–2).
 6. Re-measure, then decide on the composite itself (uint8 path), the PNG compression level and the remaining items from the suspected-cost list.
 
 ### Still to do on the harness
@@ -199,7 +199,7 @@ python -m unittest discover -s tests -t .
 
 ---
 
-## **Update Summary: Fix 3 — decoded channel cache with a byte budget (commit pending)**
+## **Update Summary: Fix 3 — decoded channel cache with a byte budget (commit 0bc36f2)**
 
 After Fix 2, re-reading the channels was the largest single stage of a pan step: ~127 ms of a 319 ms Retina step at 2048² × 10 channels. In folder mode each channel is a Dask array over one compressed TIFF page, and the page is one Dask task, so slicing even a small zoomed-in region decompressed the whole file again on every render. Fix 3 decodes each channel once and serves every later render from memory.
 
@@ -256,3 +256,38 @@ Small dataset (1024² × 5): −4 to −39 %. A first FOV visit gains too, becau
 python -m unittest discover -s tests -t .
 ```
 - ✅ 1456 tests, OK
+
+---
+
+## **Update Summary: Fix 5 — status spinner left on next to a loaded image, missing on FOV switch; one-message status updates (commit pending)**
+
+After the Fix 1–2 commit (69e4247) the status bar could keep showing the "processing" spinner while the image was already loaded (user report). Fix 5 was planned for the related reflow (the ready checkmark briefly drawn at the spinner's 225 px width) and is done together with it.
+
+---
+
+### **Actions Taken**
+- **Cause: the spinner is the status widget's initial value, and Fix 1 changed what clears it.**
+  `ui_components` creates `status_bar` showing the spinner. Before Fix 1, `ImageDisplay.on_draw` carried `@update_status_bar`, so the first draw after the viewer appeared, of any kind, switched it to ready. Fix 1 moved the decorator to `_render_for_view`, which runs only when the view has changed since the last render; a first draw that finds the view unchanged leaves the spinner on. Reproduced headless with the notebook's entry point: after `run_viewer(..., auto_display=True)` the widget still held the spinner, and only a later view-changing draw (the first pan or zoom) cleared it.
+- **`display_ui` now ends with `set_status_ready(viewer)`,** right after `display(root)`. It is the path both entry points share: `run_viewer(auto_display=True)` calls `display_ui` directly, and `viewer.display()` calls it too. A first attempt put the reset at the end of `viewer.display()` only; that passed headless through `display()` but changed nothing in a notebook started with `run_viewer`, which never calls `display()`. The spinner still shows while the widget tree and plugins are built.
+- **FOV switches and channel changes show the spinner again (user report on the first version of this fix).**
+  Neither `on_image_change` nor `on_channel_selection_change` was decorated; before Fix 1 the spinner only flashed because the draw that followed went through the decorated `on_draw`. Now that draws no longer toggle the status, both handlers carry `@update_status_bar` themselves, so the spinner covers the actual load and render rather than flashing after it. `update_status_bar` now uses `functools.wraps`, so decorated methods keep their name and expose `__wrapped__`.
+- **`_set_status_bar` sends one widget update.**
+  The four traits are set inside `status_bar.hold_sync()`, size and format before the image, so the browser receives them as a single message instead of three or four. Checked with ipywidgets 8.1.8: one `send_state` carrying `value`, `format` and `width` (`height` is unchanged between the two states and is not sent). Objects without `hold_sync` (test doubles) are updated as before.
+- **Kernel state verified for every interaction.** The benchmark harness's full scenario set (channel adds, pans, zoom, masks, FOV switches) ends with the widget in the ready state on the kernel side; `update_status_bar` resets it in a `finally`, including when the wrapped call raises.
+
+---
+
+### **Files Changed**
+- `ueler/viewer/decorators.py` — `hold_sync` in `_set_status_bar`; new `set_status_ready`; `functools.wraps` in `update_status_bar`.
+- `ueler/viewer/main_viewer.py` — `@update_status_bar` on `on_image_change` and `on_channel_selection_change`.
+- `ueler/viewer/ui_components.py` — `display_ui` clears the spinner once the widget tree is shown.
+- `tests/test_status_bar.py` — new (6 tests).
+
+---
+
+### **Tests**
+```bash
+python -m unittest discover -s tests -t .
+```
+- ✅ 1462 tests, OK
+- Not yet checked in a browser.

@@ -157,6 +157,8 @@ For more details, see the [user guide](https://hartmannlab.github.io/UELer/lates
 ## New Update  
 ### **UELer v0.6.0-alpha1 Summary**
 
+- **The status bar no longer keeps showing the busy spinner after the image has loaded.** It switches to the ready checkmark once the viewer is shown, shows the spinner while a FOV or channel loads, and changes in one step instead of briefly resizing.
+
 - **Panning, zooming and going back to a FOV you visited no longer re-read the image files.** Each channel is decoded once and kept in memory, so a pan step on a 2048 × 2048 px, 10-channel FOV drops from about 320 to 200 ms on a Retina screen and from about 160 to 60 ms on a standard one. The cache uses at most 512 MiB by default; change it with `viewer.channel_level_cache.set_max_bytes(n)`, or set `0` to turn it off.
 
 - **Panning and zooming no longer show a blurred frame first.** Each pan, zoom or FOV switch used to send the browser an outdated image and then the correct one; it now sends only the correct one, halving what goes over the wire. The hover tooltip and the status indicator also stop redrawing when nothing has changed.
