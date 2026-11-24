@@ -1,4 +1,10 @@
 ### v0.6.0-alpha1
+**The status bar shows the spinner while switching to map mode or between maps**
+
+- **Switching to map mode left the ready checkmark showing (user report)** while the map's tiles were loaded and rendered. Since the status no longer follows every draw, each handler that loads and renders has to show it; the FOV and channel handlers did, the map handlers did not. `on_map_mode_toggle` and `on_map_selector_change` now carry `@update_status_bar`.
+- **Files:** edited `ueler/viewer/main_viewer.py`, `tests/test_status_bar.py`, `dev_note/issue_tracking/render_path_performance.md`.
+- Verified: `python -m unittest discover -s tests -t .` → **1506 tests, OK**.
+
 **Frames can be sent as JPEG or WebP: Advanced Settings → Frame format**
 
 - **Measured on a remote session** with the live timer (VS Code on a Surface Pro, kernel on a remote server, 1 337 px canvas): the sharp frame after a drag was a 2.48 MB PNG and reached the screen 5.5 s after the release, against 1.1 s in the kernel, so the link (~0.5 MB/s) and the frame size set the lag; decode (37 ms) and render (15 ms) did not.

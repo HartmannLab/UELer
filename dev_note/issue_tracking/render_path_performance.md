@@ -455,7 +455,7 @@ python -m unittest discover -s tests -t .
 
 ---
 
-## **Update Summary: Fix 8 — selectable frame format (PNG, JPEG, WebP) and timer grouping for slow links (commit pending)**
+## **Update Summary: Fix 8 — selectable frame format (PNG, JPEG, WebP) and timer grouping for slow links (commit 7a11959)**
 
 The first real-device numbers (`LatencyTimer`, VS Code on a Surface Pro, kernel on a remote Linux server, a 1 605 CSS px canvas at pixel ratio 0.833, so 1 337 device px) located the lag: the browser decoded a frame in 37 ms and the kernel rendered in 15 ms, but the sharp frame after a drag (2.48 MB PNG) reached the screen 5.5 s after the release while the kernel had sent it after 1.1 s. That is ~0.5 MB/s (4–5 Mbit/s) of effective bandwidth, and 225 KB drag frames at that rate account for the 420–500 ms between drag frames on both sides. Bytes per frame are the bottleneck on such a link, and PNG, being lossless, is the wrong format for a full frame of a multiplexed image.
 
@@ -513,3 +513,29 @@ python -m unittest discover -s tests -t .
 ```
 - ✅ 1506 tests, OK
 - Frame format saved and restored across two viewer sessions sharing a settings folder.
+
+---
+
+## **Update Summary: Fix 5 follow-up — spinner when switching to map mode or between maps (commit pending)**
+
+Reported after Fix 8: switching to map mode left the status at the ready checkmark while the map rendered. Fix 5 had moved the spinner from the draw to the handlers that load and render, but only to the FOV and channel handlers; `on_map_mode_toggle` and `on_map_selector_change`, which activate a map and render its tiles, were missed.
+
+---
+
+### **Actions Taken**
+- **Decorated both map handlers with `@update_status_bar`.**
+  The spinner now covers activating a map, computing its channel statistics and rendering its tiles, and also deactivating it (back to the single FOV). The first draw after activation still renders through `_render_for_view`, which has its own status.
+
+---
+
+### **Files Changed**
+- `ueler/viewer/main_viewer.py` — `@update_status_bar` on `on_map_mode_toggle` and `on_map_selector_change`.
+- `tests/test_status_bar.py` — the handler check covers both map handlers.
+
+---
+
+### **Tests**
+```bash
+python -m unittest discover -s tests -t .
+```
+- ✅ 1506 tests, OK

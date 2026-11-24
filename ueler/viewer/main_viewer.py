@@ -1058,6 +1058,7 @@ class ImageMaskViewer:
         new_view["ylim"] = ax.get_ylim()
         nav_entry[ax] = (new_view, existing_bboxes)
 
+    @update_status_bar
     def on_map_mode_toggle(self, change):
         new_value = bool(change.get("new"))
         if self._debug:
@@ -1098,6 +1099,7 @@ class ImageMaskViewer:
         self.update_display(self.current_downsample_factor)
         self.inform_plugins('on_fov_change')
 
+    @update_status_bar
     def on_map_selector_change(self, change):
         new_value = change.get("new") if isinstance(change, dict) else None
         if not new_value:

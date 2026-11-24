@@ -87,12 +87,12 @@ class DisplayEndsReadyTests(unittest.TestCase):
 
 
 class LoadingShowsSpinnerTests(unittest.TestCase):
-    def test_fov_switch_and_channel_change_show_the_spinner(self):
+    def test_fov_switch_channel_change_and_map_mode_show_the_spinner(self):
         # Draws no longer toggle the status, so the handlers that load and
         # render must show it themselves.
         from ueler.viewer.main_viewer import ImageMaskViewer
 
-        for name in ("on_image_change", "on_channel_selection_change"):
+        for name in ("on_image_change", "on_channel_selection_change", "on_map_mode_toggle", "on_map_selector_change"):
             with self.subTest(handler=name):
                 handler = getattr(ImageMaskViewer, name)
                 self.assertTrue(hasattr(handler, "__wrapped__"), f"{name} is not wrapped by update_status_bar")
