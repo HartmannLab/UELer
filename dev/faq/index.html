@@ -1303,6 +1303,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#the-viewer-lags-when-the-kernel-runs-on-a-remote-machine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The viewer lags when the kernel runs on a remote machine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#map-mode-renders-slowly-for-large-datasets" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2055,6 +2066,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#the-viewer-lags-when-the-kernel-runs-on-a-remote-machine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The viewer lags when the kernel runs on a remote machine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#map-mode-renders-slowly-for-large-datasets" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2320,6 +2342,8 @@ present, the <strong>Map mode</strong> toggle and <strong>Select map:</strong> d
 <p><strong>Set it before <code>import ueler</code>.</strong> The flag is read once at import time, so setting it after UELer is
 imported has no effect — even if you set it before calling <code>run_viewer</code>. Set it in the shell before
 starting the kernel, or restart the kernel after setting it.</p>
+<h3 id="the-viewer-lags-when-the-kernel-runs-on-a-remote-machine">The viewer lags when the kernel runs on a remote machine<a class="headerlink" href="#the-viewer-lags-when-the-kernel-runs-on-a-remote-machine" title="Permanent link">&para;</a></h3>
+<p>Every frame travels from the kernel to your browser, and on a slow link that transfer dominates. Set <strong>Advanced Settings → Frame format:</strong> to <strong>JPEG</strong> or <strong>WebP</strong>: frames shrink to about a third of their PNG size. Exported images are not affected. See <a href="../tutorials/display-settings/#remote-sessions-frame-format">Display Settings</a>.</p>
 <h3 id="map-mode-renders-slowly-for-large-datasets">Map mode renders slowly for large datasets<a class="headerlink" href="#map-mode-renders-slowly-for-large-datasets" title="Permanent link">&para;</a></h3>
 <p>Map mode limits how many <em>uncached</em> tiles it draws per frame (default 80), keeping the ones nearest
 the viewport. You can lower this on the viewer object:</p>

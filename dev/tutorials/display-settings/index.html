@@ -880,6 +880,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#remote-sessions-frame-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remote Sessions: Frame Format
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#when-it-feels-slow" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1669,6 +1680,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#remote-sessions-frame-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remote Sessions: Frame Format
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#when-it-feels-slow" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1817,11 +1839,22 @@
 <p>Because restoration is automatic and covers nearly everything, a session that ended in a strange state comes back in that same strange state. To start clean, close the viewer and delete <code>&lt;base_folder&gt;/.UELer/widget_states.json</code>. Your ROIs, palettes, marker sets, and export configs live in separate files under <code>.UELer/</code> and are not affected — see <a href="../../faq/#where-does-ueler-store-my-work">Where does UELer store my work?</a>.</p>
 </div>
 <hr />
+<h2 id="remote-sessions-frame-format">Remote Sessions: Frame Format<a class="headerlink" href="#remote-sessions-frame-format" title="Permanent link">&para;</a></h2>
+<p>When the kernel runs on another machine (a server, an HPC node, a remote VS Code session), every image you see is sent to your browser over that connection, and on a slow link the transfer, not the rendering, is what you wait for. <strong>Advanced Settings → Frame format:</strong> chooses the image format of those frames:</p>
+<ul>
+<li><strong>PNG (lossless)</strong> — the default. Exact pixels; the right choice when the kernel runs on your own machine.</li>
+<li><strong>JPEG (smaller, lossy)</strong> — about a third of the PNG size (for example 1.4 MB → 0.44 MB per FOV switch on a large canvas).</li>
+<li><strong>WebP (smallest, lossy)</strong> — similar to or smaller than JPEG. Listed only if your Pillow installation supports it.</li>
+</ul>
+<p>Only frames that replace most of the image go lossy: zooming, switching FOV, changing channels or contrast, and the sharp frame after you let go of a drag. Small updates (the hover tooltip, a selection outline) and the coarse preview shown while you drag stay PNG, so they keep crisp edges. The setting affects what the browser displays and nothing else: exported images and figures are rendered separately and stay lossless. It is saved with the rest of the <a href="#saving-and-reusing-a-view">widget state</a>.</p>
+<p>Lossy frames can show faint blocking around dim, fine structure. If you are judging such detail by eye, switch back to PNG for the moment, or zoom in.</p>
+<hr />
 <h2 id="when-it-feels-slow">When It Feels Slow<a class="headerlink" href="#when-it-feels-slow" title="Permanent link">&para;</a></h2>
 <p>In rough order of effect:</p>
 <ol>
 <li><strong>Check Downsample is on.</strong> Off plus a large image means every pan re-reads full-resolution data.</li>
 <li><strong>Lower Cache Size.</strong> If the kernel is swapping, nothing else you do will help. Use the arithmetic above to sanity-check the cache against your RAM.</li>
+<li><strong>On a remote kernel, switch the frame format to JPEG or WebP</strong> (<a href="#remote-sessions-frame-format">above</a>). If the delay grows with the size of the viewer on screen, the connection is the bottleneck.</li>
 <li><strong>Open fewer channels.</strong> Compositing cost is linear in the number of visible channels, and every channel you open is held in memory for each cached FOV. Note that unchecking a channel's visibility skips its compositing but does not release it: loaded channel data stays with its cached FOV until that FOV is evicted from the cache.</li>
 <li>
 <p><strong>In map mode, lower the tile limit.</strong> UELer draws at most 80 uncached tiles per frame, nearest the viewport first. On a slow machine, fewer is smoother:</p>
