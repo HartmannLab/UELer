@@ -54,6 +54,7 @@ from ueler.viewer.plugin.roi_manager_plugin import ROIManagerPlugin
 import json
 
 from .image_display import DRAG_PREVIEW_PX, ImageDisplay, adopt_current_view
+from .frame_encoding import available_frame_formats, install_frame_encoder
 from .ipympl_guard import install_canvas_message_guard
 from .widget_frontend_check import warn_about_widget_frontend
 from .confirm_dialog import confirm_via, escape_name
@@ -519,6 +520,9 @@ class ImageMaskViewer:
         # are cheaper to composite and much smaller to send to the browser.
         # Set to 0 (or None) to keep every drag frame sharp.
         self.drag_preview_px = DRAG_PREVIEW_PX
+        # Image format of the frames that replace most of the canvas (see
+        # ueler/viewer/frame_encoding.py); set from Advanced Settings.
+        self.frame_format = "png"
 
         self.image_cache = OrderedDict()
         # Decoded channel rasters, so pan/zoom do not re-read and re-decompress
@@ -621,6 +625,13 @@ class ImageMaskViewer:
         with self.image_output:
             self.image_display = ImageDisplay(self.width, self.height)
             self.image_display.main_viewer = self
+            canvas = getattr(getattr(self.image_display, "fig", None), "canvas", None)
+            if canvas is not None and hasattr(canvas, "get_diff_image"):
+                install_frame_encoder(
+                    canvas,
+                    lambda: getattr(self, "frame_format", "png"),
+                    lambda: bool(getattr(self.image_display, "_coarse_view_rendered", False)),
+                )
             plt.show()
         if self._debug:
             logger.debug("[INIT DEBUG] ImageDisplay created")
@@ -2638,6 +2649,11 @@ class ImageMaskViewer:
                 new_channels = list(change.get('new', ())) if isinstance(change, dict) else []
                 self._batch_compute_channel_stats(tile_names, new_channels)
     
+    def on_frame_format_change(self, change):
+        """Advanced Settings → Frame format: applies from the next frame on."""
+        value = change.get("new") if isinstance(change, dict) else getattr(change, "new", None)
+        self.frame_format = value if value in available_frame_formats() else "png"
+
     def on_pixel_size_change(self, change):
         if self._suspend_pixel_size_observer:
             return

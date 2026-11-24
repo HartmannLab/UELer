@@ -74,6 +74,7 @@ Pan frames include the second, post-message draw and PNG (see the first finding)
 5. **Done (Fix 5).** Status bar `hold_sync()`, plus the spinner cleared once the viewer is shown (it could stay on next to a loaded image after Fixes 1–2).
 6. Re-measure, then decide on the composite itself (uint8 path), the PNG compression level and the remaining items from the suspected-cost list.
 7. **Done (Fix 7).** Coarse preview while the view is dragged, one sharp frame on release. Aimed at remote sessions and slower clients, where the PNG transfer and browser decode of each full-size frame dominate (0.5–1 s per pan step reported on a Surface Pro). A kernel-side cap on the device pixel ratio was ruled out: ipympl's front end sizes its canvas from the browser's own ratio and draws each frame unscaled, so a smaller frame would fill only part of the canvas.
+8. **Done (Fix 8).** Frames that replace most of the canvas can be sent as JPEG or WebP (Advanced Settings → Frame format), after the live timer showed a remote session spending ~4.4 s moving one 2.5 MB PNG frame.
 
 ### Still to do on the harness
 
@@ -421,7 +422,7 @@ python -m unittest discover -s tests -t .
 
 ---
 
-## **Update Summary: live latency timer for real devices (commit pending)**
+## **Update Summary: live latency timer for real devices (commit a6ad780)**
 
 The harness measures kernel time and bytes on the development machine. What the 0.5–1 s lag reported on a Surface Pro and on a remote session consists of — kernel, network or the client's decode — cannot be read from it, and a larger canvas makes every frame bigger (on the large dataset at Retina, going from a 600 to a 1 000 CSS px canvas raised a sharp frame from ~1.1 to ~2.8 MB and its PNG encode from ~85 to ~230 ms). `LatencyTimer` measures a live session on the device itself, so the next fix can target the part that dominates there.
 
@@ -451,3 +452,64 @@ python -m unittest discover -s tests -t .
 ```
 - ✅ 1495 tests, OK
 - Kernel side run against the harness's simulated browser (drags and a FOV change through the comm path); the browser script parsed with `node --check` and its summary checked against the Python one on the same events. Not yet run in a real browser.
+
+---
+
+## **Update Summary: Fix 8 — selectable frame format (PNG, JPEG, WebP) and timer grouping for slow links (commit pending)**
+
+The first real-device numbers (`LatencyTimer`, VS Code on a Surface Pro, kernel on a remote Linux server, a 1 605 CSS px canvas at pixel ratio 0.833, so 1 337 device px) located the lag: the browser decoded a frame in 37 ms and the kernel rendered in 15 ms, but the sharp frame after a drag (2.48 MB PNG) reached the screen 5.5 s after the release while the kernel had sent it after 1.1 s. That is ~0.5 MB/s (4–5 Mbit/s) of effective bandwidth, and 225 KB drag frames at that rate account for the 420–500 ms between drag frames on both sides. Bytes per frame are the bottleneck on such a link, and PNG, being lossless, is the wrong format for a full frame of a multiplexed image.
+
+---
+
+### **Actions Taken**
+- **Measured the formats at that canvas first.**
+  A sharp 1 337 px frame of the synthetic 2048² data: PNG 1 510 KB / 138 ms encode, PNG at compression level 1 3 168 KB / 37 ms, JPEG q85 398 KB / 19 ms, JPEG q70 277 KB / 19 ms, WebP q80 258 KB / 46 ms. For a drag preview frame PNG won (142 KB, against 488 KB JPEG and 313 KB WebP), because its repeated pixels suit PNG's filters and the block edges suit JPEG badly.
+- **`ueler/viewer/frame_encoding.py`.**
+  `install_frame_encoder(canvas, get_format, is_preview)` replaces the canvas's `get_diff_image` on the instance. With `png` it calls matplotlib's own method unchanged. With `jpeg` or `webp` a frame goes lossy only when it replaces most of the canvas (a forced full frame, a size change, or at least 25 % of pixels changed); it is then sent in `full` image mode, since a lossy frame has no transparency to overlay a diff with, and the same bookkeeping as matplotlib's (`_last_buff`, `_force_full`, `_png_is_old`) is done. Small updates (tooltip, highlight) stay PNG diffs, and drag preview frames (`image_display._coarse_view_rendered`) stay PNG. Any encoder error falls back to PNG.
+- **The front end needs no change.**
+  ipympl wraps every frame in a `Blob` typed `image/png`, but browsers choose the image decoder from the data's signature, not the declared type, so a JPEG or WebP frame displays like a PNG. This is the one assumption to confirm on each client; the timer shows it (frames keep arriving and decoding).
+- **Advanced Settings → Frame format.**
+  A dropdown with PNG (lossless, the default), JPEG (q85) and WebP (q80, `method=0`), listing only what the installed Pillow can encode. `on_frame_format_change` sets `viewer.frame_format`, read at every frame, so a change applies to the next one. The value is saved and restored with the other widget states. PNG stays the default because the lossy formats soften thin outlines and text slightly and the decoder assumption is not yet confirmed on every client.
+- **Timer grouping fixed for slow links.**
+  The first rule closed an interaction after 1.5 s without input or frame, so a sharp frame still in transit for 4 s fell outside its drag (and the report showed a 234 KB "last frame"). An interaction now runs until the next press, scroll or widget change (bursts of scroll or widget inputs under 0.5 s apart count once; frames more than 30 s after the last input are ignored), and its settled frame is the largest one after the release or input, not the last, so a later tooltip update does not count. Python and JavaScript implement the same rule and were checked on the same slow-link event log. The kernel report now includes the frame format.
+- **Harness.** `run.py --frame-format` and `compare.py --frame-format` set the format (a version without the setting ignores it).
+
+---
+
+### **Results**
+
+`compare.py` against 4ff01d0 with `--frame-format jpeg`, at the measured client's canvas (1 605 CSS px × 0.833 = 1 337 px), large dataset, median of 3 runs. Full output: [`dev_note/benchmarks/compare_fix8_vs_4ff01d0.md`](../benchmarks/compare_fix8_vs_4ff01d0.md).
+
+| Operation | Kernel ms, before → after | KB sent, before → after |
+| --- | --- | --- |
+| Sharp frame after letting go of a pan | 214 → 126 | 1 264 → 423 |
+| Zoom to a rectangle | 138 → 50 | 988 → 233 |
+| Add a marker channel | 273 → 167 | 1 459 → 439 |
+| Show mask outlines | 298 → 250 | 1 953 → 1 017 |
+| Switch FOV (first visit) | 647 → 553 | 1 405 → 442 |
+| Switch FOV (visited before) | 256 → 150 | 1 404 → 442 |
+
+Pan steps are unchanged (PNG previews, 99–131 KB). Full updates send about a third of the bytes and the kernel saves the PNG encode (~90 ms each). At the measured ~0.5 MB/s a sharp frame of this size arrives ~1.7 s sooner; the real data's 2.5 MB PNG frames should shrink by a similar or larger factor. Mask outlines compress least (high-frequency edges), about half. WebP is ~35 % smaller again than JPEG at roughly twice JPEG's encode time.
+
+**Not verified yet:** the frames displaying in the client browsers (VS Code on Windows in particular), and the effect on the real link; to be measured with the timer.
+
+---
+
+### **Files Changed**
+- `ueler/viewer/frame_encoding.py` — new; `install_frame_encoder`, `available_frame_formats`, `encode_lossy`.
+- `ueler/viewer/main_viewer.py` — encoder installed on the main canvas; `frame_format`; `on_frame_format_change`.
+- `ueler/viewer/ui_components.py` — `frame_format_dropdown` in Advanced Settings.
+- `ueler/viewer/latency_timer.py` — interaction grouping by start input, largest frame as settled frame, frame format in the environment line.
+- `tools/benchmark/run.py`, `tools/benchmark/compare.py` — `--frame-format`.
+- `tests/test_frame_encoding.py` — new (9 tests); `tests/test_latency_timer.py` — grouping tests for slow links.
+- `dev_note/main_viewer.md` — frame format paragraph.
+- `dev_note/benchmarks/compare_fix8_vs_4ff01d0.{md,json}` — comparison output.
+
+---
+
+### **Tests**
+```bash
+python -m unittest discover -s tests -t .
+```
+- ✅ 1506 tests, OK
+- Frame format saved and restored across two viewer sessions sharing a settings folder.

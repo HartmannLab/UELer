@@ -38,14 +38,28 @@ class DragTests(unittest.TestCase):
 
 
 class GroupingTests(unittest.TestCase):
-    def test_quiet_gap_separates_interactions(self):
-        events = [_in(0.0, "widget"), _frame(0.3), _in(5.0, "widget"), _frame(5.5), _frame(5.6)]
-        first, second = summarise_interactions(events, quiet_s=1.5)
+    def test_next_start_input_separates_interactions(self):
+        events = [_in(0.0, "widget"), _frame(0.3), _in(5.0, "widget"), _frame(5.5, 50), _frame(5.6, 200)]
+        first, second = summarise_interactions(events)
         self.assertEqual((first["kind"], first["first_frame_ms"], first["last_frame_ms"]), ("widget", 300.0, 300.0))
         self.assertEqual((second["frames"], second["first_frame_ms"], second["last_frame_ms"]), (2, 500.0, 600.0))
 
-    def test_frames_nobody_asked_for_are_ignored(self):
-        events = [_frame(0.0), _frame(0.2), _in(3.0, "scroll"), _frame(3.1)]
+    def test_a_slow_sharp_frame_still_belongs_to_its_drag(self):
+        # On a slow link the full-size frame lands seconds after the release.
+        events = [_in(0.0, "press"), _in(0.05, "drag"), _frame(0.4, 220), _in(0.5, "release"),
+                  _frame(0.9, 230), _frame(6.0, 2500), _frame(6.3, 3)]
+        (it,) = summarise_interactions(events)
+        self.assertEqual(it["release_to_frame_ms"], 5500.0)  # the largest frame, not the tooltip after it
+        self.assertEqual(it["release_frame_kb"], 2500)
+
+    def test_bursts_of_widget_or_scroll_inputs_count_once(self):
+        events = [_in(0.0, "scroll"), _in(0.1, "scroll"), _in(0.2, "scroll"), _frame(0.5), _in(3.0, "widget"), _in(3.2, "widget"), _frame(3.6)]
+        scroll, widget = summarise_interactions(events)
+        self.assertEqual((scroll["kind"], scroll["last_frame_ms"]), ("scroll", 500.0))
+        self.assertEqual((widget["kind"], widget["first_frame_ms"]), ("widget", 600.0))
+
+    def test_frames_before_any_input_or_long_after_are_ignored(self):
+        events = [_frame(0.0), _frame(0.2), _in(3.0, "scroll"), _frame(3.1), _frame(100.0, 5000)]
         (it,) = summarise_interactions(events)
         self.assertEqual((it["kind"], it["frames"], it["last_frame_ms"]), ("scroll", 1, 100.0))
 

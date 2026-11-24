@@ -23,8 +23,12 @@ Usage in a notebook::
     timer.stop()                   # remove the hooks
 
 Inputs are grouped into interactions: a press-to-release drag, a scroll, or a
-widget change, closed after ``quiet_s`` seconds without input or frame. Mouse
-movement without a pressed button (hover) is not an input.
+widget change. An interaction lasts until the next press, scroll or widget
+change (scroll or widget inputs less than ``merge_s`` apart count as one), so
+a frame still in transit on a slow link is not cut off. Its "settled" frame is
+the largest one after the release (drag) or after the input: the full-size
+frame, not a later tooltip update. Mouse movement without a pressed button
+(hover) is not an input. Leave a few seconds between actions.
 """
 
 from __future__ import annotations
@@ -37,7 +41,10 @@ from typing import Dict, List, Optional
 
 __all__ = ["LatencyTimer", "summarise_interactions"]
 
-QUIET_S = 1.5
+MERGE_S = 0.5
+#: Frames later than this after an interaction's last input are not counted.
+MAX_SETTLE_S = 30.0
+START_KINDS = ("press", "scroll", "widget")
 
 
 def _median(values) -> Optional[float]:
@@ -45,29 +52,42 @@ def _median(values) -> Optional[float]:
     return round(statistics.median(values), 1) if values else None
 
 
-def summarise_interactions(events: List[Dict], quiet_s: float = QUIET_S) -> List[Dict]:
+def summarise_interactions(events: List[Dict], merge_s: float = MERGE_S) -> List[Dict]:
     """Group a time-ordered event log into interactions and time each one.
 
     Each event is ``{"t": seconds, "type": "input" | "frame", ...}``. Inputs
     carry ``kind`` (``press``, ``drag``, ``release``, ``scroll`` or
-    ``widget``); frames carry ``kb`` and may carry ``render_ms`` and
-    ``encode_ms``. Frames outside any interaction (e.g. a tooltip redraw) are
-    ignored. The browser panel implements the same rules in JavaScript.
+    ``widget``); frames carry ``kb`` and may carry ``render_ms``,
+    ``encode_ms`` or ``decode_ms``. A press, scroll or widget input starts a
+    new interaction, except a scroll or widget input less than *merge_s* after
+    an input of the same kind. Frames before the first input, or more than
+    ``MAX_SETTLE_S`` after an interaction's last input, are ignored. The
+    browser panel implements the same rules in JavaScript.
     """
     groups: List[List[Dict]] = []
     current: List[Dict] = []
-    last_t = None
+    last_input = None
     for ev in sorted(events, key=lambda e: e["t"]):
-        if last_t is not None and ev["t"] - last_t > quiet_s and current:
-            groups.append(current)
-            current = []
-        if not current and ev["type"] != "input":
-            continue  # a frame nobody asked for
-        current.append(ev)
-        last_t = ev["t"]
+        if ev["type"] == "input":
+            starts = ev["kind"] in START_KINDS
+            if starts and last_input is not None and ev["kind"] in ("scroll", "widget") \
+                    and last_input["kind"] == ev["kind"] and ev["t"] - last_input["t"] < merge_s:
+                starts = False
+            if starts or not current:
+                if current:
+                    groups.append(current)
+                current = []
+            current.append(ev)
+            last_input = ev
+        elif current and ev["t"] - last_input["t"] <= MAX_SETTLE_S:
+            current.append(ev)
     if current:
         groups.append(current)
     return [_summarise_group(g) for g in groups]
+
+
+def _largest(frames: List[Dict]) -> Optional[Dict]:
+    return max(frames, key=lambda f: f.get("kb", 0)) if frames else None
 
 
 def _summarise_group(group: List[Dict]) -> Dict:
@@ -101,14 +121,16 @@ def _summarise_group(group: List[Dict]) -> Dict:
             drag_frame_interval_ms=_median(intervals),
             drag_lag_ms=_median(lags),
             drag_frame_kb=_median(f.get("kb") for f in steps),
-            release_to_frame_ms=round((after[-1]["t"] - release_t) * 1000, 1) if after else None,
-            release_frame_kb=after[-1].get("kb") if after else None,
+            release_to_frame_ms=round((_largest(after)["t"] - release_t) * 1000, 1) if after else None,
+            release_frame_kb=_largest(after).get("kb") if after else None,
         )
     else:
+        settled = _largest(frames)
         out.update(
             kind="scroll" if kinds[0] == "scroll" else ("widget" if kinds[0] == "widget" else "click"),
             first_frame_ms=round((frames[0]["t"] - t0) * 1000, 1) if frames else None,
-            last_frame_ms=round((frames[-1]["t"] - t0) * 1000, 1) if frames else None,
+            last_frame_ms=round((settled["t"] - t0) * 1000, 1) if frames else None,
+            settled_frame_kb=settled.get("kb") if frames else None,
         )
     return out
 
@@ -118,12 +140,12 @@ _ROWS = [
     ("Drag: frame interval while dragging", "drag", "drag_frame_interval_ms", "ms"),
     ("Drag: input → frame while dragging", "drag", "drag_lag_ms", "ms"),
     ("Drag: frame size while dragging", "drag", "drag_frame_kb", "KB"),
-    ("Drag: release → last frame", "drag", "release_to_frame_ms", "ms"),
-    ("Drag: last frame size", "drag", "release_frame_kb", "KB"),
+    ("Drag: release → sharp frame", "drag", "release_to_frame_ms", "ms"),
+    ("Drag: sharp frame size", "drag", "release_frame_kb", "KB"),
     ("Widget change: input → first frame", "widget", "first_frame_ms", "ms"),
-    ("Widget change: input → last frame", "widget", "last_frame_ms", "ms"),
-    ("Widget change: KB sent", "widget", "kb", "KB"),
-    ("Scroll: input → last frame", "scroll", "last_frame_ms", "ms"),
+    ("Widget change: input → full frame", "widget", "last_frame_ms", "ms"),
+    ("Widget change: full frame size", "widget", "settled_frame_kb", "KB"),
+    ("Scroll: input → full frame", "scroll", "last_frame_ms", "ms"),
     ("Render per frame", None, "render_ms", "ms"),
     ("PNG encode per frame", None, "encode_ms", "ms"),
 ]
@@ -146,10 +168,10 @@ def format_summary(interactions: List[Dict], header: str) -> str:
 class LatencyTimer:
     """Hook a live viewer and time its interactions; see the module docstring."""
 
-    def __init__(self, viewer, *, show_browser_panel: bool = True, quiet_s: float = QUIET_S):
+    def __init__(self, viewer, *, show_browser_panel: bool = True, merge_s: float = MERGE_S):
         self.viewer = viewer
         self.canvas = viewer.image_display.fig.canvas
-        self.quiet_s = quiet_s
+        self.merge_s = merge_s
         self.events: List[Dict] = []
         self._restore = []
         self._frame_render_ms = 0.0
@@ -272,10 +294,11 @@ class LatencyTimer:
             "canvas_device_px": device_px,
             "device_pixel_ratio": getattr(self.canvas, "device_pixel_ratio", None),
             "drag_preview_px": getattr(self.viewer, "drag_preview_px", None),
+            "frame_format": getattr(self.viewer, "frame_format", "png"),
         }
 
     def interactions(self) -> List[Dict]:
-        return summarise_interactions(self.events, self.quiet_s)
+        return summarise_interactions(self.events, self.merge_s)
 
     def report(self, print_it: bool = True) -> str:
         env = self.environment()
@@ -293,7 +316,7 @@ class LatencyTimer:
             w, h = self.canvas.get_width_height(physical=True)
         except Exception:
             w = h = 0
-        config = {"mainCanvasDevicePx": [int(w), int(h)], "quietMs": int(self.quiet_s * 1000)}
+        config = {"mainCanvasDevicePx": [int(w), int(h)], "mergeMs": int(self.merge_s * 1000), "maxSettleMs": int(MAX_SETTLE_S * 1000)}
         panel_id = f"ueler-latency-{int(time.time() * 1000)}"
         display(HTML(_BROWSER_PANEL.replace("__PANEL_ID__", panel_id).replace("__CONFIG__", json.dumps(config))))
 
@@ -368,15 +391,21 @@ _BROWSER_PANEL = r"""
       return Math.round((xs.length % 2 ? xs[m] : (xs[m - 1] + xs[m]) / 2) * 10) / 10;
     };
     T.summarise = function () {
-      const quiet = T.config.quietMs / 1000;
+      const merge = T.config.mergeMs / 1000, maxSettle = T.config.maxSettleMs / 1000;
       const evs = T.events.slice().sort((a, b) => a.t - b.t);
-      const groups = []; let cur = []; let last = null;
+      const groups = []; let cur = []; let lastIn = null;
       for (const ev of evs) {
-        if (last !== null && ev.t - last > quiet && cur.length) { groups.push(cur); cur = []; }
-        if (!cur.length && ev.type !== "input") continue;
-        cur.push(ev); last = ev.t;
+        if (ev.type === "input") {
+          let starts = ["press", "scroll", "widget"].includes(ev.kind);
+          if (starts && lastIn && (ev.kind === "scroll" || ev.kind === "widget") && lastIn.kind === ev.kind && ev.t - lastIn.t < merge) starts = false;
+          if (starts || !cur.length) { if (cur.length) groups.push(cur); cur = []; }
+          cur.push(ev); lastIn = ev;
+        } else if (cur.length && ev.t - lastIn.t <= maxSettle) {
+          cur.push(ev);
+        }
       }
       if (cur.length) groups.push(cur);
+      const largest = (fs) => fs.reduce((m, f) => (m === null || f.kb > m.kb ? f : m), null);
       return groups.map((g) => {
         const inputs = g.filter((e) => e.type === "input"), frames = g.filter((e) => e.type === "frame");
         const kinds = inputs.map((e) => e.kind), t0 = inputs[0].t;
@@ -391,14 +420,17 @@ _BROWSER_PANEL = r"""
             answered = f.t;
           }
           const iv = []; for (let i = 1; i < steps.length; i++) iv.push((steps[i].t - steps[i - 1].t) * 1000);
+          const sharp = largest(after);
           Object.assign(out, { kind: "drag", drag_frames: steps.length, drag_frame_interval_ms: median(iv), drag_lag_ms: median(lags),
             drag_frame_kb: median(steps.map((f) => f.kb)),
-            release_to_frame_ms: after.length ? Math.round((after[after.length - 1].t - rel) * 10000) / 10 : null,
-            release_frame_kb: after.length ? after[after.length - 1].kb : null });
+            release_to_frame_ms: sharp ? Math.round((sharp.t - rel) * 10000) / 10 : null,
+            release_frame_kb: sharp ? sharp.kb : null });
         } else {
+          const settled = largest(frames);
           Object.assign(out, { kind: kinds[0] === "scroll" ? "scroll" : (kinds[0] === "widget" ? "widget" : "click"),
             first_frame_ms: frames.length ? Math.round((frames[0].t - t0) * 10000) / 10 : null,
-            last_frame_ms: frames.length ? Math.round((frames[frames.length - 1].t - t0) * 10000) / 10 : null });
+            last_frame_ms: settled ? Math.round((settled.t - t0) * 10000) / 10 : null,
+            settled_frame_kb: settled ? settled.kb : null });
         }
         return out;
       });
@@ -407,12 +439,12 @@ _BROWSER_PANEL = r"""
       ["Drag: frame interval while dragging", "drag", "drag_frame_interval_ms", "ms"],
       ["Drag: input → frame on screen while dragging", "drag", "drag_lag_ms", "ms"],
       ["Drag: frame size while dragging", "drag", "drag_frame_kb", "KB"],
-      ["Drag: release → last frame on screen", "drag", "release_to_frame_ms", "ms"],
-      ["Drag: last frame size", "drag", "release_frame_kb", "KB"],
+      ["Drag: release → sharp frame on screen", "drag", "release_to_frame_ms", "ms"],
+      ["Drag: sharp frame size", "drag", "release_frame_kb", "KB"],
       ["Widget change: input → first frame on screen", "widget", "first_frame_ms", "ms"],
-      ["Widget change: input → last frame on screen", "widget", "last_frame_ms", "ms"],
-      ["Widget change: KB received", "widget", "kb", "KB"],
-      ["Scroll: input → last frame on screen", "scroll", "last_frame_ms", "ms"],
+      ["Widget change: input → full frame on screen", "widget", "last_frame_ms", "ms"],
+      ["Widget change: full frame size", "widget", "settled_frame_kb", "KB"],
+      ["Scroll: input → full frame on screen", "scroll", "last_frame_ms", "ms"],
       ["Browser decode per frame", null, "decode_ms", "ms"],
     ];
     T.report = function () {

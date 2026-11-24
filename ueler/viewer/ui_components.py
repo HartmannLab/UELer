@@ -107,6 +107,7 @@ from .data_mapping import KEY_FIELDS, build_key_widget  # type: ignore[import-er
 from .fullscreen_toggle import HOST_CLASS as FULLSCREEN_HOST_CLASS, attach_canvas_fit, build_fullscreen_toggle  # type: ignore[import-error]
 from .setup_dialog import SetupDialog  # type: ignore[import-error]
 from ueler.viewer.decorators import set_status_ready
+from .frame_encoding import available_frame_formats  # type: ignore[import-error]
 
 
 #: Width of the side accordions (``Layout(width='6in')``) in CSS pixels.
@@ -808,6 +809,18 @@ class uicomponents:
             disabled=False,
             style={'description_width': 'auto'}
         )
+        # Image format of the frames that replace most of the canvas. PNG is
+        # lossless; JPEG and WebP are several times smaller, which matters on
+        # a slow link to a remote kernel (ueler/viewer/frame_encoding.py).
+        frame_formats = available_frame_formats()
+        self.frame_format_dropdown = Dropdown(
+            options=[(label, value) for value, label in frame_formats.items()],
+            value="png",
+            description='Frame format:',
+            style={'description_width': 'auto'},
+            tooltip="Format of the image frames sent to the browser. JPEG/WebP: much smaller, slightly lossy; for remote sessions.",
+        )
+        self.frame_format_dropdown.observe(viewer.on_frame_format_change, names='value')
 
         # The data-mapping keys are dropdowns, not free text (#142). Each one
         # starts holding only its own default -- a Dropdown rejects a value
@@ -841,7 +854,8 @@ class uicomponents:
         main_viewer_VBox = VBox([
             self.cache_size_input,
             self.pixel_size_inttext,
-            self.enable_downsample_checkbox
+            self.enable_downsample_checkbox,
+            self.frame_format_dropdown,
         ])
 
         self.advanced_settings_tabs = Tab(

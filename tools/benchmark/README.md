@@ -95,3 +95,7 @@ timer.stop()
 ```
 
 The browser panel times each input until its frame is decoded on screen; `timer.report()` times the same interactions in the kernel. The difference is network plus browser.
+
+### Frame format
+
+`--frame-format png|jpeg|webp` (both `run.py` and `compare.py`) sets the viewer's frame format (Advanced Settings → Frame format). A version without the setting ignores it, so `compare.py` against an older commit compares PNG before with the chosen format after.

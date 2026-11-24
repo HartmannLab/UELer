@@ -157,6 +157,8 @@ For more details, see the [user guide](https://hartmannlab.github.io/UELer/lates
 ## New Update  
 ### **UELer v0.6.0-alpha1 Summary**
 
+- **Faster over slow remote connections: choose JPEG or WebP frames.** `Advanced Settings → Frame format` sends zooms, FOV switches, channel changes and the sharp frame after a drag as JPEG or WebP, about a third of the PNG size (for example 1.4 MB → 0.44 MB per FOV switch on a large canvas). PNG stays the lossless default.
+
 - **Panning stays responsive on high-DPI screens and remote connections.** While you drag, the viewer shows a coarser preview and sharpens the image when you let go. On a 2048 × 2048 px, 10-channel image on a Retina screen each pan step drops from about 200 to 35 ms and from about 1.1 MB to 160 KB sent to the browser. Set `viewer.drag_preview_px = 0` to keep every frame sharp.
 
 - **Adding a marker or switching FOV no longer renders the image twice.** Adding a channel on a 2048 × 2048 px, 10-channel dataset drops from about 320 to 260 ms on a Retina screen, and a first visit to a FOV while zoomed in from about 730 to 650 ms; the viewer also renders once at start-up.

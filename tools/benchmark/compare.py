@@ -134,6 +134,7 @@ def main(argv=None):
     p.add_argument("--canvas-px", type=int, help="square canvas edge in CSS px (default: the viewer's 600)")
     p.add_argument("--runs", type=int, default=3)
     p.add_argument("--repeats", type=int, default=3, help="drag repeats within one run (passed to run.py)")
+    p.add_argument("--frame-format", choices=["png", "jpeg", "webp"], help="frame format for both versions (passed to run.py; a version without the setting ignores it)")
     p.add_argument("--out", required=True, help="output folder")
     a = p.parse_args(argv)
 
@@ -154,6 +155,8 @@ def main(argv=None):
                     cmd = [sys.executable, str(HERE / "run.py"), "--data", data, "--repeats", str(a.repeats), "--dpr", str(dpr), "--label", tag, "--out", str(raw / f"{tag}.json")]
                     if a.canvas_px:
                         cmd += ["--canvas-px", str(a.canvas_px)]
+                    if a.frame_format:
+                        cmd += ["--frame-format", a.frame_format]
                     if side == "before":
                         cmd += ["--ueler-src", str(src), "--ueler-ref", commit]
                     print("running", tag, flush=True)

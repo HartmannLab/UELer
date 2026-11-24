@@ -1,4 +1,13 @@
 ### v0.6.0-alpha1
+**Frames can be sent as JPEG or WebP: Advanced Settings → Frame format**
+
+- **Measured on a remote session** with the live timer (VS Code on a Surface Pro, kernel on a remote server, 1 337 px canvas): the sharp frame after a drag was a 2.48 MB PNG and reached the screen 5.5 s after the release, against 1.1 s in the kernel, so the link (~0.5 MB/s) and the frame size set the lag; decode (37 ms) and render (15 ms) did not.
+- **New setting `Frame format`** under Advanced Settings: PNG (lossless, default), JPEG or WebP. With a lossy format, frames that replace most of the canvas (zoom, FOV switch, channel change, the sharp frame after a drag) are sent as JPEG/WebP in full-image mode; small updates and drag previews stay PNG. Browsers pick the decoder from the image data, so ipympl's front end needs no change. Saved with the other widget states (`ueler/viewer/frame_encoding.py`).
+- **Result** at that canvas size (2048² px, 10 channels, JPEG, against 4ff01d0): sharp frame after a pan 1 264 → 423 KB and 214 → 126 ms in the kernel; zoom 988 → 233 KB; FOV switch 1 405 → 442 KB; mask outlines 1 953 → 1 017 KB.
+- **Timer:** an interaction now lasts until the next press, scroll or widget change, and its settled frame is the largest one, so a frame that takes seconds to arrive is no longer cut off. The kernel report lists the frame format.
+- **Files:** added `ueler/viewer/frame_encoding.py`, `tests/test_frame_encoding.py` (9 tests), `dev_note/benchmarks/compare_fix8_vs_4ff01d0.{md,json}`; edited `ueler/viewer/main_viewer.py`, `ueler/viewer/ui_components.py`, `ueler/viewer/latency_timer.py`, `tests/test_latency_timer.py`, `tools/benchmark/run.py`, `tools/benchmark/compare.py`, `tools/benchmark/README.md`, `dev_note/main_viewer.md`, `dev_note/issue_tracking/render_path_performance.md`, `README.md`.
+- Verified: `python -m unittest discover -s tests -t .` → **1506 tests, OK**.
+
 **A live latency timer for measuring the viewer on the device you use it on**
 
 - **`ueler.viewer.latency_timer.LatencyTimer(viewer)`** times a live session at both ends. In the browser (a script in the cell output) it measures each press, drag, release, scroll or widget change until the resulting frame of the main canvas is decoded, with each frame's size and decode time; in the kernel it measures the same interactions until the frame is sent, with render and PNG-encode time. The difference is network transfer plus the browser's work, which the benchmark harness cannot see.

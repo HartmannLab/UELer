@@ -569,6 +569,7 @@ def main(argv=None):
     p.add_argument("--ueler-ref", help="label for --ueler-src in the report (e.g. the commit it was extracted from)")
     p.add_argument("--dpr", type=float, default=1.0, help="browser device pixel ratio (2 on a Retina screen)")
     p.add_argument("--canvas-px", type=int, help="square canvas edge in CSS px (default: the viewer's 600)")
+    p.add_argument("--frame-format", choices=["png", "jpeg", "webp"], help="set the viewer's frame_format (Advanced Settings → Frame format); default: the viewer's own")
     p.add_argument("--drag-preview-px", type=int, help="set the viewer's drag_preview_px (0 = sharp frames while dragging); default: the viewer's own")
     p.add_argument("--no-interactive", action="store_true", help="matplotlib interactive mode off (default on, as under %%matplotlib widget)")
     a = p.parse_args(argv)
@@ -591,6 +592,8 @@ def main(argv=None):
     with tempfile.TemporaryDirectory() as settings:
         rss0 = rss_mb()
         s = Session(str(images), masks=masks, settings=settings, interactive=not a.no_interactive, dpr=a.dpr, canvas_px=a.canvas_px)
+        if a.frame_format is not None:
+            s.viewer.frame_format = a.frame_format
         if a.drag_preview_px is not None:
             s.viewer.drag_preview_px = a.drag_preview_px
         scenarios = run_scenarios(s, a.channels, a.repeats)
