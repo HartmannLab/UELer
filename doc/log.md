@@ -1,4 +1,24 @@
 ### v0.6.1-alpha1
+**One current selection, shown in an in-line selection bar above the image**
+
+- **A selection had no single home.** The image (click, lasso), the scatter plot, the histogram gate and the heatmap each kept their own copy and forwarded it through link boxes, so a histogram gate could go straight to the Gallery while the image showed nothing and said nothing. Nowhere could say what was selected last, or send it on.
+- **`SelectionHub`** (`ueler/viewer/selection.py`, `viewer.selection_hub`): the latest selection from any view, as cell-table row indices with its source and the views that already show it. Every source publishes after a selection the user made:
+  - **Image:** a click, ctrl-click, background click or right-click, and a lasso (`ImageDisplay._publish_selection` → `viewer.publish_image_selection`).
+  - **Scatter:** a lasso or click in a plot, and its **Clear selection** button.
+  - **Histogram:** a brush, a cutoff tap, a cleared gate and **Clear selection** (`_apply_gate(publish=True)`). The re-apply after a FOV switch passes `publish=False` and does not count.
+  - **Heatmap:** a cluster sent to the Gallery (`display_cells`).
+  
+  The views' own copies and the link boxes are unchanged; the hub sits beside them.
+- **The selection bar** (`ueler/viewer/selection_bar.py`) shares the Lasso Select row, which now has a fixed height so it never reflows:
+  - **Text:** count, source and how many cells are in the FOV shown, with "not outlined in the image" when the selection bypassed it.
+  - **Buttons:** **Image**, **Gallery** and **Plots** send the selection there once; **✕** clears it everywhere. A button already showing the selection carries a ✓.
+  - **Messages:** the same row carries the lasso and Trace messages. The separate lasso hint and the scatter count line from the earlier v0.6.1-alpha1 entries are folded into it; the scatter panel keeps only its lasso tip and the widget front-end warning.
+  - **FOV switch:** a selection made in the image is cleared with the FOV; one from a plot stays and its count follows the FOV.
+- **Fixed on the way:** the lasso hint was an `HTML` widget on `ui_component`, so `save_widget_states` would have saved and restored its text. The bar is a plain object holding its widgets, as the confirm dialog is, so it never enters `widget_states.json`.
+- **Manual:** new section "The selection bar" in `docs/tutorials/user-interface.md`; the lasso, scatter and FAQ text now point to it.
+- **Files:** added `ueler/viewer/selection.py`, `ueler/viewer/selection_bar.py`, `tests/test_selection_hub.py` (28 tests); edited `ueler/viewer/main_viewer.py`, `ueler/viewer/image_display.py`, `ueler/viewer/ui_components.py`, `ueler/viewer/plugin/_chart_common.py`, `ueler/viewer/plugin/chart.py`, `ueler/viewer/plugin/histogram.py`, `ueler/viewer/plugin/heatmap_layers.py`, `tests/test_lasso_hint.py`, `tests/test_fullscreen_toggle.py`, the docs above, `dev_note/issue_tracking/selection_design.md`, `README.md`; removed `tests/test_scatter_selection_status.py` (its cases moved to `tests/test_selection_hub.py`).
+- Verified: `python -m unittest discover -s tests -t .` → **1564 tests, OK**; `mkdocs build --strict` passes. On the real viewer with a cell table, the sequence image lasso → Gallery button → histogram gate to the Gallery only → Image button → ✕ gave the expected bar text and ✓ marks at each step.
+
 **Scatter plot: a status line for selections, Trace failures and a missing widget front end**
 
 - **The scatter lasso had the same silent failures as the image lasso.** The plots open in pan/zoom mode, so a plain drag pans and nothing said how to lasso. A lasso whose cells all lie in other FOVs outlined nothing in the image. **Trace** reported its failures ("No cells selected.") only to the logger. An anywidget front end that the editor could not find left the plots as empty boxes, with the cause only in a start-up log warning.

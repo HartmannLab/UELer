@@ -555,6 +555,7 @@ class ImageDisplay:
         if hit is None:
             _logger.debug("No mask at click location")
             self.clear_patches()
+            self._publish_selection("image click")
             return
 
         selection = MaskSelection(fov=str(hit.fov_name), mask=str(hit.mask_name), mask_id=int(hit.mask_id))
@@ -571,8 +572,16 @@ class ImageDisplay:
             self._forget_linked_selection()
             self.update_patches(do_not_reset=multi_select)
             self.main_viewer.inform_plugins("on_selection_change")
+            self._publish_selection("image click")
         elif event.button in {MouseButton.RIGHT, 3}:  # Right click fallback to legacy value
             self.clear_patches()
+            self._publish_selection("image click")
+
+    def _publish_selection(self, source):
+        """Report a selection the user made in the image to the viewer's hub."""
+        publish = getattr(self.main_viewer, "publish_image_selection", None)
+        if callable(publish):
+            publish(source)
 
     def _forget_linked_selection(self):
         """Drop the viewer's memory of the plot-driven cell selection (#119).
@@ -972,6 +981,8 @@ class ImageDisplay:
         if on_complete is not None:
             on_complete()
 
+        if new_selections:
+            self._publish_selection("image lasso")
         # After on_complete, which releases the toggle, so the result stays.
         report = getattr(self.main_viewer, "report_lasso_result", None)
         if callable(report):

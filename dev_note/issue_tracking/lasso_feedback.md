@@ -109,3 +109,7 @@ python -m unittest discover -s tests -t .
 ```
 - ✅ 1548 tests, OK
 - `mkdocs build --strict` passes.
+
+## Superseded: the hint line and the scatter count line
+
+Both lines described above were folded into the in-line selection bar before release. The cause detection stays: no mask shown, no masks loaded, static canvas, Trace failures and the widget front-end warning. It now writes the bar's message, and the selection count comes from the global selection. The scatter panel keeps only its lasso tip and the front-end warning. See `selection_design.md`.

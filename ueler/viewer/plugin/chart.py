@@ -158,7 +158,7 @@ class ChartDisplay(PluginBase):
             self._clear_all_scatter_views
         )
         self.ui_component.clear_selection_button.on_click(
-            lambda _btn: self._apply_external_selection(set())
+            lambda _btn: self._commit_scatter_selection(set(), origin="scatter")
         )
         self.ui_component.scatter_set_selector.observe(
             self._on_scatter_selector_change, names="value"
@@ -414,6 +414,15 @@ class ChartDisplay(PluginBase):
             if focus_single and len(normalized) == 1:
                 self._focus_main_viewer(next(iter(normalized)))
             self._sync_mask_highlights_from_selection(normalized)
+        if origin == "scatter":
+            ui = self.ui_component
+            _chart_common.publish_selection(
+                self.main_viewer,
+                normalized,
+                "scatter",
+                image=bool(push_highlight and ui.mv_linked_checkbox.value),
+                gallery=bool(ui.cell_gallery_linked_checkbox.value),
+            )
         self._update_selection_status(normalized, origin)
         return normalized
 
@@ -437,53 +446,20 @@ class ChartDisplay(PluginBase):
             + html_lib.escape(str(getattr(status, "message", "")))
         )
 
-    def _cells_in_shown_fov(self, indices: Set[Union[int, str]]) -> Optional[int]:
-        """How many of *indices* belong to the FOV on screen; ``None`` if unknown."""
-        viewer = self.main_viewer
-        if getattr(viewer, "_map_mode_active", False):
-            return None
-        try:
-            current = viewer.ui_component.image_selector.value
-            table = viewer.cell_table
-            rows = table.loc[table.index.isin(list(indices)), viewer.fov_key]
-            return int((rows.astype(str) == str(current)).sum())
-        except Exception:
-            return None
-
     def _update_selection_status(self, indices: Set[Union[int, str]], origin: str) -> None:
-        """Say what a selection reached, or how to make one.
+        """How to lasso, or why the plots may be blank.
 
-        *origin* is ``"scatter"`` (a lasso or click in a plot), ``"image"``
-        (Follow main viewer) or ``"external"`` (Trace, heatmap, a linked plot).
+        What a selection holds and where it went is shown by the selection bar
+        above the image (``ueler/viewer/selection_bar.py``), whichever view made
+        it; this line covers only what is particular to the scatter plots.
         """
         problem = self._frontend_problem()
         if problem and self._scatter_views:
             self._set_selection_status(problem, warning=True)
-            return
-        if not indices:
-            self._set_selection_status(_LASSO_TIP if self._scatter_views else "")
-            return
-        count = len(indices)
-        text = f"<b>{count} {'cell' if count == 1 else 'cells'} selected.</b>"
-        if origin == "image":
-            self._set_selection_status(text + " They are the cells selected in the image.")
-            return
-        ui = self.ui_component
-        image_linked = bool(ui.mv_linked_checkbox.value)
-        gallery_linked = bool(ui.cell_gallery_linked_checkbox.value)
-        if image_linked:
-            in_fov = self._cells_in_shown_fov(indices)
-            if in_fov is None:
-                text += " Outlined in the image."
-            elif in_fov == 0:
-                text += " None of them is in the FOV shown, so the image outlines nothing; switch FOV to see them."
-            else:
-                text += f" {in_fov} of them {'is' if in_fov == 1 else 'are'} in the FOV shown and outlined in the image."
-        if gallery_linked:
-            text += " Shown in the Gallery."
-        if not image_linked and not gallery_linked:
-            text += " To see them in the image or the Gallery, tick the boxes under <b>Linked plugins</b>."
-        self._set_selection_status(text)
+        elif self._scatter_views and not indices:
+            self._set_selection_status(_LASSO_TIP)
+        else:
+            self._set_selection_status("")
 
     def apply_color_mapping(
         self,
@@ -551,13 +527,13 @@ class ChartDisplay(PluginBase):
         selections = list(self.main_viewer.image_display.selected_masks_label)
         if not selections:
             _logger.warning("No cells selected.")
-            self._set_selection_status("Trace found no cells: select cells in the image first (click, or <b>Lasso Select</b>).", warning=True)
+            _chart_common.show_selection_message(self.main_viewer, "Trace found no cells: select cells in the image first (click, or <b>Lasso Select</b>).", warning=True)
             return
         x_col = self.ui_component.x_axis_selector.value
         y_col = self.ui_component.y_axis_selector.value
         if x_col == "None" or y_col == "None":
             _logger.warning("Please select both x and y axes to trace cells.")
-            self._set_selection_status("Trace needs both axes: choose X and Y under <b>Single-pair</b>.", warning=True)
+            _chart_common.show_selection_message(self.main_viewer, "Trace needs both axes: choose X and Y under <b>Single-pair</b> in the scatter plot.", warning=True)
             return
         current_fov = self.main_viewer.ui_component.image_selector.value
         mask_ids = [
@@ -567,7 +543,7 @@ class ChartDisplay(PluginBase):
         ]
         if not mask_ids:
             _logger.warning("No cells selected for tracing.")
-            self._set_selection_status("Trace found no cells: none of the cells selected in the image is in the FOV shown.", warning=True)
+            _chart_common.show_selection_message(self.main_viewer, "Trace found no cells: none of the cells selected in the image is in the FOV shown.", warning=True)
             return
         cell_table = self.main_viewer.cell_table
         in_fov = cell_table[self.main_viewer.fov_key] == current_fov
@@ -576,7 +552,7 @@ class ChartDisplay(PluginBase):
         ]
         if traced.empty:
             _logger.warning("No matching cells found in the current FOV.")
-            self._set_selection_status("Trace found no cells: the selected cells have no rows in the cell table for the FOV shown.", warning=True)
+            _chart_common.show_selection_message(self.main_viewer, "Trace found no cells: the selected cells have no rows in the cell table for the FOV shown.", warning=True)
             return
         self._apply_external_selection(traced.index)
 

@@ -174,9 +174,9 @@ The [setup dialog](tutorials/setup-dialog.md) asks for exactly these when a tabl
 
 ### The lasso selects nothing
 
-**In a scatter plot:** the plots open in pan/zoom mode, so a plain drag pans. Pick the lasso in the plot's toolbar, or hold **Shift** and drag. The line above the plots then reports the selection. If it says none of the cells is in the FOV shown, the image has nothing to outline until you switch FOV. If the plots are empty boxes, the same line names the widget front-end problem found at start-up (see [My editor cannot find the widget `anywidget`](#my-editor-cannot-find-the-widget-anywidget)).
+**In a scatter plot:** the plots open in pan/zoom mode, so a plain drag pans. Pick the lasso in the plot's toolbar, or hold **Shift** and drag. The selection bar above the image then reports the selection. If it says the cells are "not outlined in the image", the plot's **Main viewer** link is off: press **Image** in the bar. If none of the cells is in the FOV shown, the image has nothing to outline until you switch FOV. If the plots are empty boxes, the line above the plots names the widget front-end problem found at start-up (see [My editor cannot find the widget `anywidget`](#my-editor-cannot-find-the-widget-anywidget)).
 
-**In the image (Lasso Select):** the line beside the toggle names the cause. The three common ones:
+**In the image (Lasso Select):** the selection bar beside the toggle names the cause. The three common ones:
 
 - **No mask is shown.** The lasso searches only the masks ticked under **Masks** in the left panel, and none is ticked when the viewer starts. Tick one, then draw the loop again.
 - **No masks are loaded.** The lasso selects cells of a segmentation mask; start the viewer with a masks folder.

@@ -157,7 +157,7 @@ For more details, see the [user guide](https://hartmannlab.github.io/UELer/lates
 ## New Update  
 ### **UELer v0.6.1-alpha1 Summary**
 
-- **The scatter plot says what a selection reached.** A line above the plots explains how to lasso (the plots open in pan/zoom mode: use the toolbar lasso or Shift+drag), then reports how many cells are selected, how many of them are in the FOV shown, and where they went. A lasso that only catches cells of other FOVs no longer looks like a broken link. **Trace** failures and a missing widget front end (plots shown as empty boxes) are reported in the same place instead of only in the log.
+- **One place shows what is selected, wherever you selected it.** A bar above the image shows the latest selection: from an image click or lasso, a scatter lasso, a histogram gate or a heatmap cluster. It gives how many cells, where they were selected and how many are in the FOV shown. **Image**, **Gallery** and **Plots** send the selection there with one click, and **✕** clears it everywhere. A histogram gate sent straight to the Gallery no longer leaves the image silent: the bar says the cells are not outlined and **Image** outlines them. The scatter plot also explains how to lasso (toolbar lasso or Shift+drag), and an empty plot caused by a missing widget front end now says so.
 
 - **Lasso Select now says what it did, and why it selected nothing.** A line beside the toggle tells you to draw a loop once it is armed, then how many cells the loop selected and what you can do with them. When a loop cannot select anything it says why: no mask is shown (none is ticked when the viewer starts, and the lasso searches only the masks shown), no masks are loaded, or the canvas is a static image because `%matplotlib widget` was not run.
 

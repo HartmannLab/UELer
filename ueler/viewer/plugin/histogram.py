@@ -1009,6 +1009,14 @@ class HistogramDisplay(PluginBase):
             self.selected_indices.value = indices
         if highlight:
             _chart_common.sync_mask_highlights_from_selection(self.main_viewer, indices)
+        if publish:
+            _chart_common.publish_selection(
+                self.main_viewer,
+                indices,
+                "histogram",
+                image=bool(highlight),
+                gallery=bool(self.ui_component.cell_gallery_linked_checkbox.value),
+            )
         self._refresh_overlays(indices)
         self._refresh_gate_markers()
 
@@ -1083,6 +1091,7 @@ class HistogramDisplay(PluginBase):
 
     def clear_selection(self) -> None:
         """Drop every gate term (both kinds) and the selection it produced."""
+        _chart_common.publish_selection(self.main_viewer, (), "histogram")
         self._gates = {}
         self.cutoff = None
         self._active_histogram_column = None

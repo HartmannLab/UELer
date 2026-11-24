@@ -1,4 +1,4 @@
-"""The hint beside Lasso Select: armed, result, and why a loop selects nothing."""
+"""Lasso messages in the selection bar: armed, and why a loop selects nothing."""
 
 import unittest
 from types import SimpleNamespace
@@ -9,6 +9,7 @@ from matplotlib.figure import Figure
 
 from ueler.viewer.image_display import ImageDisplay, MaskSelection, canvas_is_interactive
 from ueler.viewer.main_viewer import ImageMaskViewer
+from ueler.viewer.selection_bar import SelectionBar
 
 
 class _InteractiveCanvas(FigureCanvasAgg):
@@ -52,10 +53,12 @@ def _viewer(*, interactive=True, masks=("cells",), shown=("cells",)):
     viewer.masks_available = bool(masks)
     viewer.mask_names = list(masks)
     viewer.ui_component = SimpleNamespace(
-        lasso_hint=SimpleNamespace(value=""),
         mask_display_controls={name: SimpleNamespace(value=name in shown) for name in masks},
     )
     viewer.ui_component.lasso_select_toggle = _Toggle(viewer)
+    viewer.ui_component.selection_bar = SelectionBar(SimpleNamespace())
+    # The tests read the bar's text where they used to read the hint widget.
+    viewer.ui_component.lasso_hint = viewer.ui_component.selection_bar.text
     return viewer
 
 
@@ -103,19 +106,13 @@ class LassoToggleHintTests(unittest.TestCase):
         viewer.ui_component.lasso_select_toggle.value = False
         self.assertEqual(viewer.ui_component.lasso_hint.value, "")
 
-    def test_result_survives_the_toggle_release(self):
+    def test_successful_loop_hands_over_to_the_selection_summary(self):
         viewer = _viewer()
         viewer.ui_component.lasso_select_toggle.value = True
         # The order ImageDisplay uses: release the toggle, then report.
         viewer._on_lasso_complete()
         viewer.report_lasso_result(3, 3)
-        self.assertIn("3 cells selected", viewer.ui_component.lasso_hint.value)
-        self.assertNotIn("in total", viewer.ui_component.lasso_hint.value)
-
-    def test_result_counts(self):
-        viewer = _viewer()
-        viewer.report_lasso_result(1, 4)
-        self.assertIn("1 cell selected (4 in total)", viewer.ui_component.lasso_hint.value)
+        self.assertEqual(viewer.ui_component.selection_bar.message, "")
 
     def test_empty_result_with_a_mask_shown(self):
         viewer = _viewer()

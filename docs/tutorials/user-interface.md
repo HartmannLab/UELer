@@ -98,11 +98,27 @@ Two tabs inside one accordion section:
 ## Main Viewer
 
 - **Image canvas** — the composited multi-channel image with any active overlays.
-- **Lasso Select** (top of the viewer) — a one-shot toggle: draw a freehand loop to add every cell with part of its mask inside it to the selection. Only the masks ticked under **Masks** are searched, so show one first. The toggle resets itself after each loop, and the line beside it says how many cells were selected, or why none were. (Selection drives the linked plots — see [Working with a Cell Table](cell-table.md).)
+- **Lasso Select** (top of the viewer) — a one-shot toggle: draw a freehand loop to add every cell with part of its mask inside it to the selection. Only the masks ticked under **Masks** are searched, so show one first. The toggle resets itself after each loop, and the selection bar beside it shows the result, or why there was none.
 - **Zoom and pan** — scroll to zoom, drag to pan.
 - **Scale bar** — computed from the **Pixel Size (nm):** value when available (there is no separate
   on/off toggle; set the pixel size to 0 to omit it).
 - **No image (masks only)** — hide the channel image to inspect overlays on a blank background.
+
+### The selection bar
+
+The row with **Lasso Select** also shows the current cell selection, whichever view made it: a click or lasso in the image, a scatter lasso, a histogram gate, or a heatmap cluster sent to the Gallery. The most recent selection wins.
+
+```
+[Lasso Select]  23 cells · histogram gate · 23 in this FOV, not outlined in the image   [Image] [Gallery ✓] [Plots] [✕]
+```
+
+- **The text:** how many cells, where they were selected, and how many are in the FOV shown (left out in map mode). "Not outlined in the image" means the selection went elsewhere, for example straight from a histogram to the Gallery.
+- **Image:** outlines the cells in the image.
+- **Gallery:** shows them in the Gallery.
+- **Plots:** selects them in the scatter plot and histogram.
+- **✕:** clears the selection in the image, the plots and the bar.
+
+A button with **✓** already shows the selection, through a link box or an earlier click. The buttons are one-off; the **Linked plugins** boxes in each plot keep forwarding every new selection automatically. A selection made in the image belongs to its FOV and is cleared on a FOV switch; one from a plot stays, and the bar's FOV count follows the FOV shown. The same row carries messages, such as the lasso instructions or why a loop or **Trace** found no cells.
 
 ---
 

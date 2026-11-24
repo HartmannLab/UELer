@@ -105,6 +105,7 @@ from .annotation_display import AnnotationDisplay  # type: ignore[import-error]
 from .confirm_dialog import ConfirmDialog  # type: ignore[import-error]
 from .data_mapping import KEY_FIELDS, build_key_widget  # type: ignore[import-error]
 from .fullscreen_toggle import HOST_CLASS as FULLSCREEN_HOST_CLASS, attach_canvas_fit, build_fullscreen_toggle  # type: ignore[import-error]
+from .selection_bar import SelectionBar  # type: ignore[import-error]
 from .setup_dialog import SetupDialog  # type: ignore[import-error]
 from ueler.viewer.decorators import set_status_ready
 from .frame_encoding import available_frame_formats  # type: ignore[import-error]
@@ -399,10 +400,7 @@ def display_ui(viewer):
 
     # Lasso Select lives at the top of the middle (viewer) panel so it reads
     # as a control that acts on the image, not a stray left-panel button (#111).
-    lasso_toolbar = HBox(
-        [viewer.ui_component.lasso_select_toggle, viewer.ui_component.lasso_hint],
-        layout=Layout(justify_content='flex-start', align_items='center', padding='0 0 4px 0'),
-    )
+    lasso_toolbar = viewer.ui_component.selection_bar.row
     center_area = VBox(
         [lasso_toolbar, viewer.image_output, viewer.grid_output],
         layout=Layout()
@@ -546,9 +544,9 @@ class uicomponents:
             layout=Layout(width='auto', height='28px'),
         )
         self.lasso_select_toggle.observe(viewer.on_lasso_select_toggle, names='value')
-        # What to do once the lasso is armed, what a loop selected, and why it
-        # selected nothing (no mask shown, static canvas); empty when idle.
-        self.lasso_hint = HTML(value='', layout=Layout(margin='0 0 0 8px', flex='1 1 auto'))
+        # The in-line selection bar shares the toggle's row: what is selected,
+        # where it went, and lasso messages (ueler/viewer/selection_bar.py).
+        self.selection_bar = SelectionBar(self.lasso_select_toggle)
 
         # Hides the side plugin column (#104 follow-up). It lives on
         # ``ui_component`` so ``widget_states.json`` remembers it like any

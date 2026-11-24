@@ -55,6 +55,7 @@ from ueler.viewer.plugin.roi_manager_plugin import ROIManagerPlugin
 import json
 
 from .image_display import DRAG_PREVIEW_PX, ImageDisplay, adopt_current_view, canvas_is_interactive
+from .selection import SelectionHub
 from .frame_encoding import available_frame_formats, install_frame_encoder
 from .ipympl_guard import install_canvas_message_guard
 from .widget_frontend_check import warn_about_widget_frontend
@@ -669,6 +670,7 @@ class ImageMaskViewer:
         if self._debug:
             logger.debug("[INIT DEBUG] calling create_widgets")
         create_widgets(self)
+        self._wire_selection_bar()
         if self._debug:
             logger.debug("[INIT DEBUG] create_widgets done; calling _refresh_map_controls")
         self._refresh_map_controls()
@@ -1570,39 +1572,147 @@ class ImageMaskViewer:
         return ""
 
     def set_lasso_hint(self, text: str, *, warning: bool = False) -> None:
-        """Show *text* (HTML) beside the Lasso Select toggle; ``""`` hides it."""
-        hint = getattr(getattr(self, "ui_component", None), "lasso_hint", None)
+        """Show a lasso message (HTML) in the selection bar; ``""`` removes it."""
         self._lasso_hint_armed = bool(text) and getattr(getattr(self, "image_display", None), "_lasso_active", False)
-        if hint is None:
-            return
-        if not text:
-            hint.value = ""
-            return
-        color = "var(--jp-warn-color0, #b45309)" if warning else "var(--jp-ui-font-color2, #616161)"
-        hint.value = f'<span style="color: {color}; font-size: 12px; line-height: 1.3;">{text}</span>'
+        bar = getattr(getattr(self, "ui_component", None), "selection_bar", None)
+        if bar is not None:
+            bar.set_message(text, warning=warning)
 
     def report_lasso_result(self, added: int, total: int) -> None:
-        """Tell the user what a finished lasso selected and what to do next."""
-        if added == 0:
-            if not self._selected_mask_names():
-                self.set_lasso_hint(
-                    "No cells selected: no mask is shown. Tick one under <b>Masks</b> and draw the loop again.",
-                    warning=True,
-                )
-            else:
-                self.set_lasso_hint(
-                    "No cells inside the loop. Turn on <b>Lasso Select</b> and draw a loop around the cells.",
-                    warning=True,
-                )
+        """After a loop: the bar shows the selection; an empty loop gets its reason."""
+        if added:
+            self.set_lasso_hint("")  # the selection summary takes over
             return
-        noun = "cell" if added == 1 else "cells"
-        count = f"{added} {noun} selected"
-        if total != added:
-            count += f" ({total} in total)"
-        self.set_lasso_hint(
-            f"<b>{count}.</b> Ctrl+click adds or removes a cell; a click on the background clears the selection. "
-            "The <b>Cell Table Editor</b> can annotate these cells, and plots with <b>Follow main viewer</b> ticked highlight them."
-        )
+        if not self._selected_mask_names():
+            self.set_lasso_hint("No cells selected: no mask is shown. Tick one under <b>Masks</b> and draw the loop again.", warning=True)
+        else:
+            self.set_lasso_hint("No cells inside the loop. Turn on <b>Lasso Select</b> and draw around the cells.", warning=True)
+
+    # ------------------------------------------------------------------
+    # The current selection (ueler/viewer/selection.py) and its bar
+    # ------------------------------------------------------------------
+    @property
+    def selection_hub(self) -> SelectionHub:
+        """The current selection, whichever view made it; created on first use."""
+        hub = self.__dict__.get("_selection_hub")
+        if hub is None:
+            hub = SelectionHub()
+            hub.subscribe(self._on_selection_hub_change)
+            self.__dict__["_selection_hub"] = hub
+        return hub
+
+    def _plots_follow_image(self) -> bool:
+        """Whether any plot follows the image selection (Follow main viewer)."""
+        side = getattr(self, "SidePlots", None)
+        for name in ("chart_output", "histogram_output", "heatmap_output"):
+            plugin = getattr(side, name, None)
+            box = getattr(getattr(plugin, "ui_component", None), "follow_mv_checkbox", None)
+            if box is not None and bool(getattr(box, "value", False)):
+                return True
+        return False
+
+    def publish_image_selection(self, source: str) -> None:
+        """Publish the image's selection after a click or a lasso."""
+        image_display = getattr(self, "image_display", None)
+        if image_display is None:
+            return
+        if not image_display.selected_masks_label:
+            self.selection_hub.clear()
+            return
+        from ueler.viewer.plugin import _chart_common
+
+        indices = _chart_common.viewer_selection_indices(self)
+        delivered = {"image"} | ({"plots"} if self._plots_follow_image() else set())
+        self.selection_hub.publish(indices, source, delivered)
+
+    def cells_in_shown_fov(self, indices) -> Optional[int]:
+        """How many of *indices* belong to the FOV on screen; ``None`` in map mode or if unknown."""
+        if getattr(self, "_map_mode_active", False):
+            return None
+        try:
+            current = self.ui_component.image_selector.value
+            table = self.cell_table
+            rows = table.loc[table.index.isin(list(indices)), self.fov_key]
+            return int((rows.astype(str) == str(current)).sum())
+        except Exception:
+            return None
+
+    def _selection_summary(self, selection) -> str:
+        count = len(selection)
+        if not count:
+            return ""
+        text = f"<b>{count:,} {'cell' if count == 1 else 'cells'}</b> · {html_lib.escape(selection.source_label)}"
+        in_fov = self.cells_in_shown_fov(selection.indices)
+        if in_fov is not None:
+            text += f" · {in_fov:,} in this FOV"
+            if in_fov and "image" not in selection.delivered:
+                text += ", not outlined in the image"
+        return text
+
+    def _on_selection_hub_change(self, selection) -> None:
+        bar = getattr(getattr(self, "ui_component", None), "selection_bar", None)
+        if bar is None:
+            return
+        if selection.indices and not getattr(getattr(self, "image_display", None), "_lasso_active", False):
+            bar.set_message("")  # a new selection supersedes an older message
+        bar.show_selection(self._selection_summary(selection), selection.delivered, bool(selection.indices))
+
+    def refresh_selection_bar(self) -> None:
+        """Re-read the counts, e.g. after a FOV switch."""
+        self._on_selection_hub_change(self.selection_hub.current)
+
+    def _wire_selection_bar(self) -> None:
+        bar = getattr(getattr(self, "ui_component", None), "selection_bar", None)
+        if bar is None:
+            return
+        bar.on_action("image", self.send_selection_to_image)
+        bar.on_action("gallery", self.send_selection_to_gallery)
+        bar.on_action("plots", self.send_selection_to_plots)
+        bar.on_action("clear", self.clear_selection_everywhere)
+
+    def send_selection_to_image(self) -> None:
+        selection = self.selection_hub.current
+        if not selection.indices:
+            return
+        from ueler.viewer.plugin import _chart_common
+
+        _chart_common.sync_mask_highlights_from_selection(self, set(selection.indices))
+        self.selection_hub.mark_delivered("image")
+
+    def send_selection_to_gallery(self) -> None:
+        selection = self.selection_hub.current
+        gallery = getattr(getattr(self, "SidePlots", None), "cell_gallery_output", None)
+        if not selection.indices or gallery is None:
+            return
+        gallery.set_selected_cells(sorted(selection.indices, key=str))
+        self.selection_hub.mark_delivered("gallery")
+
+    def send_selection_to_plots(self) -> None:
+        selection = self.selection_hub.current
+        if not selection.indices:
+            return
+        side = getattr(self, "SidePlots", None)
+        chart = getattr(side, "chart_output", None)
+        if chart is not None and hasattr(chart, "_commit_scatter_selection"):
+            chart._commit_scatter_selection(set(selection.indices), push_highlight=False, origin="hub")
+        histogram = getattr(side, "histogram_output", None)
+        if histogram is not None and hasattr(histogram, "show_external_selection"):
+            histogram.show_external_selection(set(selection.indices), push_highlight=False)
+        self.selection_hub.mark_delivered("plots")
+
+    def clear_selection_everywhere(self) -> None:
+        """The bar's ✕: clear the image, the plots and the current selection."""
+        image_display = getattr(self, "image_display", None)
+        if image_display is not None and image_display.selected_masks_label:
+            image_display.clear_patches()
+        side = getattr(self, "SidePlots", None)
+        chart = getattr(side, "chart_output", None)
+        if chart is not None and hasattr(chart, "_commit_scatter_selection"):
+            chart._commit_scatter_selection(set(), push_highlight=False, origin="hub")
+        histogram = getattr(side, "histogram_output", None)
+        if histogram is not None and hasattr(histogram, "clear_selection"):
+            histogram.clear_selection()
+        self.selection_hub.clear()
 
     def _map_state_signature(
         self,
@@ -2753,6 +2863,15 @@ class ImageMaskViewer:
 
         if heatmap_linked and heatmap_plugin is not None:
             heatmap_plugin.highlight_cells()
+
+        # A selection made in the image went with the FOV it was made in; one
+        # from a plot stays and only its per-FOV count changes.
+        hub = getattr(self, "selection_hub", None)
+        if hub is not None:
+            if not heatmap_linked and hub.current.source.startswith("image"):
+                hub.clear()
+            else:
+                self._on_selection_hub_change(hub.current)
 
     @update_status_bar
     def on_channel_selection_change(self, change):

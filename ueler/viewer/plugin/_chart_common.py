@@ -268,6 +268,31 @@ def viewer_selection_indices(viewer) -> Set[Union[int, str]]:
         return set()
 
 
+def publish_selection(viewer, indices, source: str, *, image: bool = False, gallery: bool = False) -> None:
+    """Report a selection the user made in a plot to the viewer's selection hub.
+
+    *image* and *gallery* say whether the plot's link boxes already forwarded it
+    there, so the selection bar can mark those targets as done. An empty
+    *indices* clears the hub only if the current selection came from *source*.
+    """
+    hub = getattr(viewer, "selection_hub", None)
+    if hub is None:
+        return
+    indices = set(indices)
+    if not indices:
+        hub.clear(source)
+        return
+    delivered = {name for name, done in (("image", image), ("gallery", gallery)) if done}
+    hub.publish(indices, source, delivered)
+
+
+def show_selection_message(viewer, text: str, *, warning: bool = False) -> None:
+    """Show *text* in the selection bar above the image, if there is one."""
+    bar = getattr(getattr(viewer, "ui_component", None), "selection_bar", None)
+    if bar is not None:
+        bar.set_message(text, warning=warning)
+
+
 def normalize_indices(indices: Iterable[Union[int, str]]) -> Set[Union[int, str]]:
     """Coerce numpy integers to plain ints while leaving other ids untouched."""
     return {int(idx) if isinstance(idx, np.integer) else idx for idx in indices}
