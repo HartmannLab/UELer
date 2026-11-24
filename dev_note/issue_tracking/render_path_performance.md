@@ -70,7 +70,7 @@ Pan frames include the second, post-message draw and PNG (see the first finding)
 1. **Done (Fix 1).** Render on a view change before the draw, not in `on_draw` after it; tooltip redraws only on change.
 2. **Done (Fix 2).** Float32 composite and screen-aware downsample factor (canvas size × device pixel ratio).
 3. **Done (Fix 3).** In-memory channel cache with a byte budget: full resolution when a channel fits, the viewed downsampled level when it does not. This is the one fix that adds memory by design; its memory is reported next to its timings.
-4. Remove the redundant `update_display` calls on channel add and FOV switch.
+4. **Done (Fix 4).** One render per channel change, FOV switch and start-up: render requests are batched, and a render no longer starts a nested one.
 5. **Done (Fix 5).** Status bar `hold_sync()`, plus the spinner cleared once the viewer is shown (it could stay on next to a loaded image after Fixes 1–2).
 6. Re-measure, then decide on the composite itself (uint8 path), the PNG compression level and the remaining items from the suspected-cost list.
 
@@ -259,7 +259,7 @@ python -m unittest discover -s tests -t .
 
 ---
 
-## **Update Summary: Fix 5 — status spinner left on next to a loaded image, missing on FOV switch; one-message status updates (commit pending)**
+## **Update Summary: Fix 5 — status spinner left on next to a loaded image, missing on FOV switch; one-message status updates (commit bd0549e)**
 
 After the Fix 1–2 commit (69e4247) the status bar could keep showing the "processing" spinner while the image was already loaded (user report). Fix 5 was planned for the related reflow (the ready checkmark briefly drawn at the spinner's 225 px width) and is done together with it.
 
@@ -290,4 +290,66 @@ After the Fix 1–2 commit (69e4247) the status bar could keep showing the "proc
 python -m unittest discover -s tests -t .
 ```
 - ✅ 1462 tests, OK
-- Not yet checked in a browser.
+- ✅ Checked in a notebook (VS Code): the checkmark appears once the viewer is shown, and the spinner shows while a FOV switch loads.
+
+---
+
+## **Update Summary: Fix 4 — one render per channel change and FOV switch (commit pending)**
+
+Adding a channel rendered twice, and a first FOV visit rendered twice on the large dataset and whenever the view was zoomed in. After Fix 3 the repeated render no longer decodes anything, so it cost a composite, mask outlines and plugin hooks rather than a file read, but it was still pure overhead. A call-stack trace of every `update_display` in the harness showed three sources.
+
+---
+
+### **Actions Taken**
+- **Found the nested render on channel add.**
+  The render itself loads a newly selected channel (`_compose_fov_image` → `load_fov`). A first load computes the channel's statistics and `_sync_channel_controls` clamps its contrast sliders to the new range; each slider's observer calls `update_display`, so a second render ran *inside* the first. The outer render reads the slider values after the load and installs its image last, so the nested one was never seen.
+- **Found the extra render on a zoomed FOV switch.**
+  `on_image_change` resets the axes to the whole image and renders, but at the downsample factor of the previous, zoomed view. The pre-draw hook (Fix 1) then saw a changed view and rendered again at the right factor; the first render was both wasted and the expensive one (full view at factor 1).
+- **Found the observer cascade.**
+  `update_controls` gives reused sliders the new FOV's range, which can move their values; every moved slider asked for a render, and so did the channel-selection observer that `on_image_change` triggers, before `update_controls` asked again.
+- **`_batched_display_updates(viewer, render=True)` (`main_viewer.py`).**
+  A context manager around a group of widget changes. Inside it `update_display` only records that a render was asked for and at which factor (last wins); the outermost block renders once on exit. Blocks nest. With `render=False` the requests made inside are dropped, keeping any that were pending before. A block that exits with an error does not render, so a half-updated state is not drawn and the error is not masked by a render error. It is a depth counter, not a flag, so it composes with the existing `_suspend_display_updates` (which still wins: a suspended call records nothing).
+- **Applied it in four places.**
+  `update_controls` (body moved to `_rebuild_controls`); `on_image_change`, whose work up to and including `update_controls` moved to `_load_selected_fov_and_controls` and is flushed *before* `_reapply_selection_highlights`, which must follow the render; viewer start-up, from the first `update_controls` to the render after the widget states are restored; and, with `render=False`, the `load_fov` calls on the render path (`_compose_fov_image`, and `render_image` when called without a viewport).
+- **`adopt_current_view(display)` (`image_display.py`).**
+  After `on_image_change` resets the limits it picks the downsample factor for the whole-image view and records that view as rendered, so the batched render uses the right factor and the pre-draw hook finds nothing to redo. It does nothing before start-up finishes: there the first draw must still pick the screen-aware factor (Fix 2) and render. `_render_if_view_changed` was split into `_view_geometry`, `_remember_view` and `_apply_downsample_factor_for_view` so both paths share the same code.
+- **Harness counts real renders.**
+  `run.py` now counts `render_image` calls as renders, because a batched `update_display` call no longer renders. For the earlier versions the two counts are the same.
+- **Ruled out:** a generic re-entrancy guard that defers a nested `update_display` to after the outer render. It would keep the second render (the deferred one), since the guard cannot know whether the outer render already read the changed state. On the render path it does know, because the settings are read after `load_fov`, so dropping is safe exactly there and nowhere else. Removing the slider observers' renders altogether was also ruled out: they are how a user's contrast change reaches the screen.
+- **Left as is:** in channel-grid mode `on_image_change` still calls `_update_grid_display` after the highlights, although the batched `update_display` has already routed to it. Grid mode is outside the harness, and the second call follows the highlights, which a grid refresh may depend on; it needs its own check.
+
+---
+
+### **Results**
+
+Renders per operation (harness, all runs and both screens): adding a channel 2 → 1 (from the second channel on); first FOV visit 2 → 1 on the large dataset; first FOV visit while zoomed 2 → 1 on both datasets; a revisit stays at 1.
+
+`compare.py` against bd0549e (Fixes 1–3 and 5), median of 3 interleaved runs. Full output: [`dev_note/benchmarks/compare_fix4_vs_bd0549e.md`](../benchmarks/compare_fix4_vs_bd0549e.md). Large dataset (3 FOVs, 2048² px, 10 channels):
+
+| Operation | Retina (1 200 px): before → after | Standard (600 px): before → after |
+| --- | --- | --- |
+| Add a marker channel | 317 → 256 ms (−19 %) | 122 → 106 ms (−13 %) |
+| Switch FOV (first visit) | 740 → 657 ms (−11 %) | 521 → 501 ms (−4 %) |
+| Switch FOV while zoomed in (first visit) | 732 → 648 ms (−11 %) | 568 → 498 ms (−12 %) |
+| Switch FOV (visited before) | 244 → 240 ms (−2 %) | 76 → 74 ms (−2 %) |
+
+Small dataset (1024² × 5), standard screen: add a channel −12 %, first FOV visit −19 %, zoomed first visit −26 %; on Retina −5 % and within noise for the switches. Pan and zoom do not go through these paths; their rows move within run-to-run noise (±10 % on the small dataset at standard DPI). Viewer construction is ~5 % faster (large dataset 1 307 → 1 214 ms at standard DPI) because start-up now renders once. The gains are smaller than the render counts suggest because, since Fix 3, the second render was a warm one: the time saved is one composite, outline pass and plugin round, not a file read. A first FOV visit is now dominated by reading the channels (and reading them twice, see Fix 3).
+
+---
+
+### **Files Changed**
+- `ueler/viewer/main_viewer.py` — `_batched_display_updates`; the guard in `update_display`; `update_controls` → `_rebuild_controls`; `on_image_change` → `_load_selected_fov_and_controls` plus `adopt_current_view`; batched start-up; absorbed loads in `_compose_fov_image` and `render_image`.
+- `ueler/viewer/image_display.py` — `adopt_current_view`; view tracking split into shared helpers.
+- `tools/benchmark/run.py`, `tools/benchmark/README.md` — renders counted as `render_image` calls.
+- `tests/test_render_batching.py` — new (12 tests).
+- `tests/test_initial_display.py`, `tests/test_map_mode_initial_display.py` — the `MagicMock` viewers run the real `_load_selected_fov_and_controls`.
+- `dev_note/FOV_load_cycle.md` — batching paragraph under `update_display`.
+- `dev_note/benchmarks/compare_fix4_vs_bd0549e.{md,json}` — comparison output.
+
+---
+
+### **Tests**
+```bash
+python -m unittest discover -s tests -t .
+```
+- ✅ 1474 tests, OK

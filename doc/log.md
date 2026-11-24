@@ -1,4 +1,13 @@
 ### v0.6.0-alpha1
+**Adding a channel and switching FOV render once instead of twice**
+
+- **Adding a channel rendered twice.** The render loads the new channel, the first load clamps the channel's contrast sliders, and each slider's observer started a second render nested inside the first. The render path now drops render requests made while it loads channels (it reads the slider values after the load, so its own image already includes the change).
+- **A FOV switch rendered twice when zoomed in, or when the new FOV's ranges moved the sliders.** The switch rendered at the zoomed view's downsample factor and the next draw rendered again for the reset view; moved sliders and the channel-selection observer each asked for a render too. `on_image_change` now picks the factor for the reset view first and records it (`image_display.adopt_current_view`), and its widget changes are batched into one render.
+- **`_batched_display_updates` (`main_viewer.py`)** turns the `update_display` calls made inside it into one render when the outermost block exits; it is used in `update_controls`, `on_image_change` and viewer start-up, which now also renders once.
+- **Result** (2048² px, 10 channels, against bd0549e): adding a channel 317 → 256 ms on a Retina screen and 122 → 106 ms on a standard one; a first FOV visit while zoomed 732 → 648 ms and 568 → 498 ms. The benchmark harness now counts renders as `render_image` calls.
+- **Files:** edited `ueler/viewer/main_viewer.py`, `ueler/viewer/image_display.py`, `tools/benchmark/run.py`, `tools/benchmark/README.md`, `tests/test_initial_display.py`, `tests/test_map_mode_initial_display.py`, `dev_note/FOV_load_cycle.md`, `dev_note/issue_tracking/render_path_performance.md`, `README.md`; added `tests/test_render_batching.py` (12 tests), `dev_note/benchmarks/compare_fix4_vs_bd0549e.{md,json}`.
+- Verified: `python -m unittest discover -s tests -t .` → **1474 tests, OK**.
+
 **The status bar no longer keeps showing the busy spinner after the image has loaded, and shows it again while a FOV or channel loads**
 
 - **The spinner could stay on next to a fully loaded image (user report).** The status widget starts out showing the spinner. Before the render-path change in 69e4247 every draw switched it to ready; since then only a render caused by a view change does, so when the browser's first draw found the view unchanged, nothing cleared it until the first pan or zoom.
@@ -6,7 +15,7 @@
 - **Switching FOV and changing channels show the spinner again (user report).** Neither handler had its own status; the spinner used to flash only because the draw that followed toggled it. `on_image_change` and `on_channel_selection_change` now carry `@update_status_bar`, so the spinner covers the load itself.
 - **A status change is one widget message.** `_set_status_bar` sets size, format and image inside `hold_sync()`, so the browser no longer applies them one at a time. This also removes the brief reflow where the ready checkmark appeared at the spinner's 225 px width.
 - **Files:** edited `ueler/viewer/decorators.py`, `ueler/viewer/ui_components.py`, `ueler/viewer/main_viewer.py`, `dev_note/issue_tracking/render_path_performance.md`, `README.md`; added `tests/test_status_bar.py` (6 tests).
-- Verified: `python -m unittest discover -s tests -t .` → **1462 tests, OK**. Not yet checked in a browser.
+- Verified: `python -m unittest discover -s tests -t .` → **1462 tests, OK**. Checked in a notebook: the checkmark appears once the viewer is shown, and the spinner shows during a FOV switch.
 
 **Pan, zoom and FOV revisits no longer re-read the channel files: decoded channels are cached within a memory budget**
 

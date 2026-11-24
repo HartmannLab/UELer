@@ -36,50 +36,26 @@ from .tooltip_utils import format_tooltip_value, resolve_cell_record
 _logger = logging.getLogger(__name__)
 
 
-def _render_if_view_changed(display) -> bool:
-    """Re-render the main view if the axis limits changed since the last render.
-
-    Called before each draw (pre-draw hook) and from ``on_draw``. Returns True
-    when a render was started. The status bar only flips to "processing" when
-    a render actually happens, not on every draw.
-    """
-    # ``main_viewer`` is attached by ImageMaskViewer after construction, but a
-    # draw can already happen before that (any draw_idle() during setup is
-    # processed synchronously by non-interactive backends).
-    if getattr(display, "main_viewer", None) is None:
-        return False
-
-    xlim = display.ax.get_xlim()
-    ylim = display.ax.get_ylim()
-    current_center_x = (xlim[0] + xlim[1]) / 2
-    current_center_y = (ylim[0] + ylim[1]) / 2
-    current_viewport_width = xlim[1] - xlim[0]
-    current_viewport_height = abs(ylim[0] - ylim[1])
-
-    # After every map activation _set_map_canvas_dimensions sets this flag
-    # so that the first draw after the widget is shown always triggers a
-    # real tile render, even when center/size appear unchanged (because the
-    # prev values were seeded to match the full canvas dimensions).
-    if getattr(display, '_map_needs_initial_render', False):
-        display._map_needs_initial_render = False
-    elif hasattr(display, "prev_center_x") and hasattr(display, "prev_center_y"):
-        if (math.isclose(current_center_x, display.prev_center_x)
-                and math.isclose(current_center_y, display.prev_center_y)
-                and math.isclose(current_viewport_width, display.prev_viewport_width)
-                and math.isclose(current_viewport_height, display.prev_viewport_height)):
-            return False
-
-    display.prev_center_x = current_center_x
-    display.prev_center_y = current_center_y
-    display.prev_viewport_width = current_viewport_width
-    display.prev_viewport_height = current_viewport_height
-    _render_for_view(display, xlim, ylim)
-    return True
+def _view_geometry(xlim, ylim):
+    """Centre and size of a view, the values compared between draws."""
+    return (
+        (xlim[0] + xlim[1]) / 2,
+        (ylim[0] + ylim[1]) / 2,
+        xlim[1] - xlim[0],
+        abs(ylim[0] - ylim[1]),
+    )
 
 
-@update_status_bar
-def _render_for_view(display, xlim, ylim) -> None:
-    """Adjust the downsample factor for the zoom level, then re-render."""
+def _remember_view(display, xlim, ylim) -> None:
+    centre_x, centre_y, width, height = _view_geometry(xlim, ylim)
+    display.prev_center_x = centre_x
+    display.prev_center_y = centre_y
+    display.prev_viewport_width = width
+    display.prev_viewport_height = height
+
+
+def _apply_downsample_factor_for_view(display, xlim, ylim) -> None:
+    """Set the viewer's downsample factor for this view on this screen."""
     viewer = display.main_viewer
     if viewer.initialized:
         # Match the render to the axes' size on screen (device pixels).
@@ -98,6 +74,69 @@ def _render_for_view(display, xlim, ylim) -> None:
     if new_downsample_factor != viewer.current_downsample_factor:
         viewer.on_downsample_factor_changed(new_downsample_factor)
 
+
+def _render_if_view_changed(display) -> bool:
+    """Re-render the main view if the axis limits changed since the last render.
+
+    Called before each draw (pre-draw hook) and from ``on_draw``. Returns True
+    when a render was started. The status bar only flips to "processing" when
+    a render actually happens, not on every draw.
+    """
+    # ``main_viewer`` is attached by ImageMaskViewer after construction, but a
+    # draw can already happen before that (any draw_idle() during setup is
+    # processed synchronously by non-interactive backends).
+    if getattr(display, "main_viewer", None) is None:
+        return False
+
+    xlim = display.ax.get_xlim()
+    ylim = display.ax.get_ylim()
+
+    # After every map activation _set_map_canvas_dimensions sets this flag
+    # so that the first draw after the widget is shown always triggers a
+    # real tile render, even when center/size appear unchanged (because the
+    # prev values were seeded to match the full canvas dimensions).
+    if getattr(display, '_map_needs_initial_render', False):
+        display._map_needs_initial_render = False
+    elif hasattr(display, "prev_center_x") and hasattr(display, "prev_center_y"):
+        previous = (
+            display.prev_center_x,
+            display.prev_center_y,
+            display.prev_viewport_width,
+            display.prev_viewport_height,
+        )
+        if all(math.isclose(a, b) for a, b in zip(_view_geometry(xlim, ylim), previous)):
+            return False
+
+    _remember_view(display, xlim, ylim)
+    _render_for_view(display, xlim, ylim)
+    return True
+
+
+def adopt_current_view(display) -> None:
+    """Treat the current axis limits as the rendered view, without rendering.
+
+    For a caller that has just set new limits and is about to render them
+    itself (a FOV switch resets the view to the whole image). It picks the
+    downsample factor for those limits first, so that render is made at the
+    right resolution, and records the view, so the pre-draw hook does not
+    render the same view a second time before the next frame.
+    """
+    viewer = getattr(display, "main_viewer", None)
+    if viewer is None or not viewer.initialized:
+        # During start-up the first draw picks the screen-aware factor and
+        # renders; leave that to it.
+        return
+    xlim = display.ax.get_xlim()
+    ylim = display.ax.get_ylim()
+    _remember_view(display, xlim, ylim)
+    _apply_downsample_factor_for_view(display, xlim, ylim)
+
+
+@update_status_bar
+def _render_for_view(display, xlim, ylim) -> None:
+    """Adjust the downsample factor for the zoom level, then re-render."""
+    viewer = display.main_viewer
+    _apply_downsample_factor_for_view(display, xlim, ylim)
     if viewer.initialized and getattr(viewer, '_widget_displayed', False):
         viewer.update_display(viewer.current_downsample_factor)
 

@@ -1,5 +1,6 @@
 # viewer.py
 
+import contextlib
 import logging
 import html as html_lib
 import math
@@ -52,7 +53,7 @@ from .settings_paths import resolve_settings_root
 from ueler.viewer.plugin.roi_manager_plugin import ROIManagerPlugin
 import json
 
-from .image_display import ImageDisplay
+from .image_display import ImageDisplay, adopt_current_view
 from .ipympl_guard import install_canvas_message_guard
 from .widget_frontend_check import warn_about_widget_frontend
 from .confirm_dialog import confirm_via, escape_name
@@ -276,6 +277,43 @@ def _cached_channel_reader(cache, fov_name):
         return cache.read_region(fov_name, channel, source, region_xy, downsample_factor)
 
     return reader
+
+
+_NO_PENDING_RENDER = object()
+
+
+@contextlib.contextmanager
+def _batched_display_updates(viewer, render=True):
+    """Turn the ``update_display`` calls made inside the block into one render.
+
+    Changing a FOV or the channel selection sets many widgets, and each one's
+    observer asks for a render; without batching a single user action rendered
+    two or three times. Inside the block ``update_display`` only records that a
+    render was asked for (and at which downsample factor, the last one wins).
+    When the outermost block exits, one render runs if any was asked for.
+
+    With ``render=False`` the requests made inside the block are dropped. That
+    is for a block whose caller is already rendering and will pick up the
+    changes itself; requests that were pending before the block are kept.
+    """
+    depth = getattr(viewer, "_display_batch_depth", 0)
+    pending_before = getattr(viewer, "_pending_display_factor", _NO_PENDING_RENDER)
+    viewer._display_batch_depth = depth + 1
+    completed = False
+    try:
+        yield
+        completed = True
+    finally:
+        viewer._display_batch_depth = depth
+        if not render:
+            viewer._pending_display_factor = pending_before
+        elif depth == 0:
+            factor = getattr(viewer, "_pending_display_factor", _NO_PENDING_RENDER)
+            viewer._pending_display_factor = _NO_PENDING_RENDER
+            # After an error the state may be half-updated; let the error
+            # surface rather than render it (or mask it with a render error).
+            if completed and factor is not _NO_PENDING_RENDER:
+                viewer.update_display(factor)
 
 
 class ImageMaskViewer:
@@ -640,53 +678,57 @@ class ImageMaskViewer:
         if self._debug:
             logger.debug("[INIT DEBUG] calling update_marker_set_dropdown")
         self.update_marker_set_dropdown()
-        if self._debug:
-            logger.debug("[INIT DEBUG] calling update_controls")
-        self.update_controls(None)
-        if self._debug:
-            logger.debug("[INIT DEBUG] update_controls done; calling on_image_change")
-        self.on_image_change(None)
-        if self._debug:
-            logger.debug("[INIT DEBUG] on_image_change done; calling update_display")
-        self.update_display(self.current_downsample_factor)
-        if self._debug:
-            logger.debug("[INIT DEBUG] update_display done")
+        # Start-up sets up the controls, loads the first FOV, restores the
+        # saved widget states and reconciles the downsample factor; each step
+        # asks for a render. Batched, the viewer renders once, at the end.
+        with _batched_display_updates(self):
+            if self._debug:
+                logger.debug("[INIT DEBUG] calling update_controls")
+            self.update_controls(None)
+            if self._debug:
+                logger.debug("[INIT DEBUG] update_controls done; calling on_image_change")
+            self.on_image_change(None)
+            if self._debug:
+                logger.debug("[INIT DEBUG] on_image_change done; calling update_display")
+            self.update_display(self.current_downsample_factor)
+            if self._debug:
+                logger.debug("[INIT DEBUG] update_display done")
 
-        self.SidePlots = SimpleNamespace()
-        self.BottomPlots = SimpleNamespace()
-        if self._debug:
-            logger.debug("[INIT DEBUG] SidePlots/BottomPlots set")
+            self.SidePlots = SimpleNamespace()
+            self.BottomPlots = SimpleNamespace()
+            if self._debug:
+                logger.debug("[INIT DEBUG] SidePlots/BottomPlots set")
 
-        # Suppress the per-widget update_display observers that fire while
-        # restoring saved states, then do exactly one render at the end.
-        if self._debug:
-            logger.debug("[INIT DEBUG] entering load_widget_states")
-        self._suspend_display_updates = True
-        try:
-            self.load_widget_states(os.path.join(str(self.settings_folder), 'widget_states.json'))
-        finally:
-            self._suspend_display_updates = False
-        # Reconcile the initial downsample factor now that the saved
-        # "Downsample" preference has been restored.  select_downsample_factor
-        # runs at init before create_widgets, so it cannot see the checkbox and
-        # always downsamples by image size; without this the viewer downsamples
-        # on load even when Downsample is off (reply to #116).  When Downsample
-        # is on the reconciled value matches the size-based factor; when off the
-        # viewer starts at native resolution, matching the zoom (on_draw) path.
-        enable_ds = getattr(self.ui_component, "enable_downsample_checkbox", None)
-        if enable_ds is not None and not getattr(enable_ds, "value", True):
-            reconciled_factor = 1
-        else:
-            reconciled_factor = select_downsample_factor(
-                self.width,
-                self.height,
-                max_dimension=DOWNSAMPLE_MAX_DIMENSION,
-                allowed_factors=self.downsample_factors,
-            )
-        self.on_downsample_factor_changed(reconciled_factor)
-        # One render after widget-state restoration so the display reflects
-        # the restored channel/contrast/FOV selections (fixes #84).
-        self.update_display(self.current_downsample_factor)
+            # Suppress the per-widget update_display observers that fire while
+            # restoring saved states, then do exactly one render at the end.
+            if self._debug:
+                logger.debug("[INIT DEBUG] entering load_widget_states")
+            self._suspend_display_updates = True
+            try:
+                self.load_widget_states(os.path.join(str(self.settings_folder), 'widget_states.json'))
+            finally:
+                self._suspend_display_updates = False
+            # Reconcile the initial downsample factor now that the saved
+            # "Downsample" preference has been restored.  select_downsample_factor
+            # runs at init before create_widgets, so it cannot see the checkbox and
+            # always downsamples by image size; without this the viewer downsamples
+            # on load even when Downsample is off (reply to #116).  When Downsample
+            # is on the reconciled value matches the size-based factor; when off the
+            # viewer starts at native resolution, matching the zoom (on_draw) path.
+            enable_ds = getattr(self.ui_component, "enable_downsample_checkbox", None)
+            if enable_ds is not None and not getattr(enable_ds, "value", True):
+                reconciled_factor = 1
+            else:
+                reconciled_factor = select_downsample_factor(
+                    self.width,
+                    self.height,
+                    max_dimension=DOWNSAMPLE_MAX_DIMENSION,
+                    allowed_factors=self.downsample_factors,
+                )
+            self.on_downsample_factor_changed(reconciled_factor)
+            # One render after widget-state restoration so the display reflects
+            # the restored channel/contrast/FOV selections (fixes #84).
+            self.update_display(self.current_downsample_factor)
         if self._debug:
             logger.debug(
                 f"[INIT DEBUG] load_widget_states done; reconciled downsample factor={self.current_downsample_factor}"
@@ -2369,6 +2411,43 @@ class ImageMaskViewer:
 
     @update_status_bar
     def on_image_change(self, change):
+        # Setting the channel selection and rebuilding the controls each ask
+        # for a render; the batch makes the switch render once. It is flushed
+        # before the selection highlights are re-applied below, which must
+        # follow the render.
+        with _batched_display_updates(self):
+            self._load_selected_fov_and_controls()
+
+        if self.initialized:
+            self._reapply_selection_highlights()
+
+        ax = self.image_display.ax
+
+        toolbar = getattr(self.image_display.fig.canvas, "toolbar", None)
+        nav_stack = getattr(toolbar, "_nav_stack", None) if toolbar is not None else None
+        elements = getattr(nav_stack, "_elements", None) if nav_stack is not None else None
+
+        if elements:
+            nav_stack_element = elements[0]
+            try:
+                existing_view, existing_bboxes = nav_stack_element[ax]
+            except KeyError:
+                existing_view, existing_bboxes = ({}, ())
+            existing_view = dict(existing_view)
+            existing_view['xlim'] = ax.get_xlim()
+            existing_view['ylim'] = ax.get_ylim()
+            nav_stack_element[ax] = (existing_view, existing_bboxes)
+        elif toolbar is not None and hasattr(toolbar, "push_current"):
+            toolbar.push_current()
+
+        # Refresh grid panes when a new FOV is loaded in grid mode
+        if self._grid_display is not None and self.initialized:
+            self._update_grid_display(self.current_downsample_factor)
+
+        self.inform_plugins('on_fov_change')
+
+    def _load_selected_fov_and_controls(self):
+        """Load the FOV chosen in the selector and rebuild the controls for it."""
         previous_channels = self.ui_component.channel_selector.value  # Keep previous channel selections
 
         # Load the selected FOV
@@ -2411,6 +2490,9 @@ class ImageMaskViewer:
             # Update axis limits
             self.image_display.ax.set_xlim(0, self.width)
             self.image_display.ax.set_ylim(self.height, 0)
+            # Render the new FOV at the factor for its whole view, and record
+            # that view so the pre-draw hook does not render it again.
+            adopt_current_view(self.image_display)
 
         # Update channel names
         new_channel_options = list(fov_images.keys())
@@ -2486,34 +2568,6 @@ class ImageMaskViewer:
             self._refresh_annotation_control_states()
 
         self.update_controls(None)
-
-        if self.initialized:
-            self._reapply_selection_highlights()
-
-        ax = self.image_display.ax
-
-        toolbar = getattr(self.image_display.fig.canvas, "toolbar", None)
-        nav_stack = getattr(toolbar, "_nav_stack", None) if toolbar is not None else None
-        elements = getattr(nav_stack, "_elements", None) if nav_stack is not None else None
-
-        if elements:
-            nav_stack_element = elements[0]
-            try:
-                existing_view, existing_bboxes = nav_stack_element[ax]
-            except KeyError:
-                existing_view, existing_bboxes = ({}, ())
-            existing_view = dict(existing_view)
-            existing_view['xlim'] = ax.get_xlim()
-            existing_view['ylim'] = ax.get_ylim()
-            nav_stack_element[ax] = (existing_view, existing_bboxes)
-        elif toolbar is not None and hasattr(toolbar, "push_current"):
-            toolbar.push_current()
-
-        # Refresh grid panes when a new FOV is loaded in grid mode
-        if self._grid_display is not None and self.initialized:
-            self._update_grid_display(self.current_downsample_factor)
-
-        self.inform_plugins('on_fov_change')
 
     def _reapply_selection_highlights(self):
         """Re-apply the cell-selection highlight to the newly active FOV (#119).
@@ -3006,7 +3060,16 @@ class ImageMaskViewer:
         self._grid_display.update_panes(arrays_by_channel, region_xy)
 
     def update_controls(self, change):
-        """Create widgets dynamically based on selected channels and masks, and attach update callbacks."""
+        """Create widgets dynamically based on selected channels and masks, and attach update callbacks.
+
+        Reused sliders get a new range for the current FOV, which can move
+        their values and fire their render observers; the batch turns those
+        and the final render into a single render.
+        """
+        with _batched_display_updates(self):
+            self._rebuild_controls()
+
+    def _rebuild_controls(self):
         channel_widgets = []
         color_options = tuple(self.predefined_colors.keys())
 
@@ -4216,7 +4279,12 @@ class ImageMaskViewer:
             return np.zeros((height, width, 3), dtype=np.float32)
 
         if selected_channels:
-            self.load_fov(fov_name, selected_channels)
+            # Loading a channel for the first time can clamp its contrast
+            # sliders, whose observers ask for a render. This render reads the
+            # slider values below, after the load, so it already shows the
+            # change; a second, nested render would only repeat it.
+            with _batched_display_updates(self, render=False):
+                self.load_fov(fov_name, selected_channels)
             fov_images = self.image_cache[fov_name]
         else:
             fov_images = self.image_cache.get(fov_name, {})
@@ -4394,7 +4462,10 @@ class ImageMaskViewer:
         if xym is not None:
             xmin, xmax, ymin, ymax = (int(v) for v in xym)
         else:
-            self.load_fov(current_fov, tuple(selected_channels))
+            # As in _compose_fov_image: this render reads the settings after
+            # the load, so render requests made by the load are dropped.
+            with _batched_display_updates(self, render=False):
+                self.load_fov(current_fov, tuple(selected_channels))
             fov_images = self.image_cache.get(current_fov, {})
             first_channel = next(iter(fov_images.values()), None)
             if first_channel is None:
@@ -4832,6 +4903,9 @@ class ImageMaskViewer:
     def update_display(self, downsample_factor=8):
         """Update the display with the current downsample factor and visible area."""
         if getattr(self, '_suspend_display_updates', False):
+            return
+        if getattr(self, '_display_batch_depth', 0) > 0:
+            self._pending_display_factor = downsample_factor
             return
         # Route to grid display when channel grid mode is active
         if self._grid_display is not None:

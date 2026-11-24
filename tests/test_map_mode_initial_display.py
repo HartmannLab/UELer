@@ -561,6 +561,10 @@ class TestOnImageChangeMapModeGuard(unittest.TestCase):
         viewer.ui_component = _StubUI(channel_options=("DAPI",))
         viewer.ui_component.image_selector.value = "FOV_0"
         viewer.ui_component.channel_selector.value = ("DAPI",)
+        # on_image_change does its work in this helper; run the real one.
+        viewer._load_selected_fov_and_controls = (
+            lambda: ImageMaskViewer._load_selected_fov_and_controls(viewer)
+        )
 
         return viewer, img_display_stub, xlim_calls, ylim_calls
 

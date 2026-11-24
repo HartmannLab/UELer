@@ -395,7 +395,11 @@ class TestInitialChannelSelectionSimpleViewer(unittest.TestCase):
         from collections import OrderedDict
         viewer.image_cache = OrderedDict({"FOV_1": {"DAPI": np.zeros((4, 4))}})
 
-        # Run the real method on the mock (binding it explicitly).
+        # Run the real method on the mock (binding it explicitly), including
+        # the helper that does the FOV load and channel selection.
+        viewer._load_selected_fov_and_controls = (
+            lambda: ImageMaskViewer._load_selected_fov_and_controls(viewer)
+        )
         ImageMaskViewer.on_image_change(viewer, {"new": "FOV_1"})
 
         # For an initialized viewer with no cell_table, value should stay ().

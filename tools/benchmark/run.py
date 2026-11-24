@@ -146,7 +146,7 @@ class Session:
         self.construct_ms = (time.perf_counter() - t) * 1000
         v._widget_displayed = True  # display_ui() would set this
 
-        for attr, name in (("update_display", "update_display"), ("load_fov", "load_fov"), ("inform_plugins", "plugin_hooks"), ("update_scale_bar", "scale_bar")):
+        for attr, name in (("update_display", "update_display"), ("render_image", "render_image"), ("load_fov", "load_fov"), ("inform_plugins", "plugin_hooks"), ("update_scale_bar", "scale_bar")):
             st.wrap(v, attr, name)
         st.wrap(v.image_display, "update_patches", "selection_outlines")
         canvas = self.canvas = v.image_display.fig.canvas
@@ -318,9 +318,11 @@ class Session:
         record["wall_ms"] = round((time.perf_counter() - t) * 1000, 2)
         record["inputs"] = list(self.inputs)
         summarise_latency(record)
-        # A render is one update_display (re-read + composite); set_data is
-        # called more often (the selection repaint re-installs the array).
-        record["renders"] = self.stages.counts["update_display"]
+        # A render is one render_image (re-read + composite). update_display
+        # is called more often than it renders (a batched call only records
+        # the request), and so is set_data (the selection repaint
+        # re-installs the array).
+        record["renders"] = self.stages.counts["render_image"]
         record["png_frames"] = self.browser.pngs
         record["png_kb"] = round(self.browser.png_bytes / 1024, 1)
         record["dropped_draw_requests"] = self.browser.dropped
