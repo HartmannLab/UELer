@@ -1,4 +1,14 @@
 ### v0.6.0-alpha1
+**Panning sends a coarse preview while you drag and one sharp frame when you let go**
+
+- **Each pan step sent a full-size frame.** On a high-DPI screen that was 1–2.4 MB per step for a 2048² image; over a remote connection or on a slower client (0.5–1 s per step reported on a Surface Pro) the transfer and decode dominated.
+- **While the view is dragged with the pan tool it renders at most `viewer.drag_preview_px` pixels across (256 by default)**, via `image_utils.drag_preview_factor`. On release, if the last frame was coarse, `ImageDisplay` requests one render of the same view at the normal screen-aware factor; it also marks the axes stale, so the request survives a draw request the browser drops while it is still receiving the previous frame. `drag_preview_px = 0` turns the preview off; with Downsample off there is no preview.
+- **Rendering at a lower device pixel ratio was ruled out:** ipympl's front end sizes its canvas from the browser's ratio and draws frames unscaled.
+- **Result** (2048² px, 10 channels, Retina canvas, against 5e43164): a pan step 201 → 36 ms and 1 088 → 156 KB; with mask outlines 310 → 55 ms and 2 374 → 131 KB; the sharp frame after release 188 ms, 1 060 KB, once per drag. On a standard 600 px canvas steps are 33–50 % faster but barely smaller.
+- **Harness:** pan records report the release frame (`release_latency_ms`, `release_kb`), `compare.md` lists KB sent per operation, and `run.py --drag-preview-px` sets the preview.
+- **Files:** edited `ueler/image_utils.py`, `ueler/viewer/image_display.py`, `ueler/viewer/main_viewer.py`, `tools/benchmark/run.py`, `tools/benchmark/compare.py`, `tools/benchmark/README.md`, `dev_note/main_viewer.md`, `dev_note/issue_tracking/render_path_performance.md`, `README.md`; added `tests/test_drag_preview.py` (15 tests), `dev_note/benchmarks/compare_fix7_vs_5e43164.{md,json}`.
+- Verified: `python -m unittest discover -s tests -t .` → **1489 tests, OK**.
+
 **Adding a channel and switching FOV render once instead of twice**
 
 - **Adding a channel rendered twice.** The render loads the new channel, the first load clamps the channel's contrast sliders, and each slider's observer started a second render nested inside the first. The render path now drops render requests made while it loads channels (it reads the slider values after the load, so its own image already includes the change).

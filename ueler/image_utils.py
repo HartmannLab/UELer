@@ -87,6 +87,31 @@ def screen_downsample_factor(
 	return max(cap, factor)
 
 
+def drag_preview_factor(width, height, max_px):
+	"""Downsample factor that keeps a *width* × *height* view under *max_px*.
+
+	The smallest power of two for which the longer side of the view, in image
+	pixels, comes to at most *max_px* rendered pixels. Used while the user
+	drags the view: a coarse frame is cheaper to composite, and its repeated
+	pixels make the PNG sent to the browser several times smaller. Returns 1
+	when *max_px* is not a positive number.
+	"""
+	try:
+		limit = float(max_px)
+	except (TypeError, ValueError):
+		return 1
+	if not limit > 0:
+		return 1
+	extent = max(abs(float(width)), abs(float(height)))
+	# The tolerance keeps a pan's float drift in the limits (2048.0000001)
+	# from tipping the factor over to the next power of two mid-drag.
+	limit *= 1 + 1e-6
+	factor = 1
+	while extent / factor > limit:
+		factor *= 2
+	return factor
+
+
 def select_downsample_factor(
 	width,
 	height,

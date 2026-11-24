@@ -73,6 +73,7 @@ Pan frames include the second, post-message draw and PNG (see the first finding)
 4. **Done (Fix 4).** One render per channel change, FOV switch and start-up: render requests are batched, and a render no longer starts a nested one.
 5. **Done (Fix 5).** Status bar `hold_sync()`, plus the spinner cleared once the viewer is shown (it could stay on next to a loaded image after Fixes 1–2).
 6. Re-measure, then decide on the composite itself (uint8 path), the PNG compression level and the remaining items from the suspected-cost list.
+7. **Done (Fix 7).** Coarse preview while the view is dragged, one sharp frame on release. Aimed at remote sessions and slower clients, where the PNG transfer and browser decode of each full-size frame dominate (0.5–1 s per pan step reported on a Surface Pro). A kernel-side cap on the device pixel ratio was ruled out: ipympl's front end sizes its canvas from the browser's own ratio and draws each frame unscaled, so a smaller frame would fill only part of the canvas.
 
 ### Still to do on the harness
 
@@ -294,7 +295,7 @@ python -m unittest discover -s tests -t .
 
 ---
 
-## **Update Summary: Fix 4 — one render per channel change and FOV switch (commit pending)**
+## **Update Summary: Fix 4 — one render per channel change and FOV switch (commit 5e43164)**
 
 Adding a channel rendered twice, and a first FOV visit rendered twice on the large dataset and whenever the view was zoomed in. After Fix 3 the repeated render no longer decodes anything, so it cost a composite, mask outlines and plugin hooks rather than a file read, but it was still pure overhead. A call-stack trace of every `update_display` in the harness showed three sources.
 
@@ -353,3 +354,65 @@ Small dataset (1024² × 5), standard screen: add a channel −12 %, first FOV v
 python -m unittest discover -s tests -t .
 ```
 - ✅ 1474 tests, OK
+
+---
+
+## **Update Summary: Fix 7 — coarse preview while dragging, sharp frame on release (commit pending)**
+
+On a Surface Pro the viewer was reported to lag 0.5–1 s behind each pan step, and on remote sessions too. By then the kernel spent about 200 ms on a Retina pan step of the large dataset, but every step still sent a full-size PNG of about 1–2.4 MB (frames are rendered at CSS size × device pixel ratio). On a remote link, and for a slower client that has to decode each frame, that transfer and decode dominate. A pan step only has to show where the view is going; the detail matters once the view stops.
+
+---
+
+### **Actions Taken**
+- **Ruled out first: capping the device pixel ratio in the kernel.**
+  ipympl's front end sizes its offscreen canvas from the browser's own `devicePixelRatio` and draws each frame onto it unscaled (`drawImage(image, 0, 0)`), so a frame rendered at ratio 1 would fill a quarter of the canvas, and mouse coordinates would no longer match. Doing it properly means patching ipympl's JavaScript.
+- **Measured what a coarse frame saves before building it.**
+  1 200 px frames from the 2048² synthetic channels, PNG at matplotlib's level: factor 2 (sharp on Retina) 2 352 KB / 84 ms encode, factor 4 884 KB / 43 ms, factor 8 267 KB / 28 ms. A coarse render upscaled to the canvas repeats pixels, which PNG's filters and deflate compress far better.
+- **`image_utils.drag_preview_factor(width, height, max_px)`.**
+  The smallest power of two that keeps the longer side of the view at or under `max_px` rendered pixels, with a 1e-6 tolerance so float drift in the limits during a pan (2048.0000001) does not flip the factor mid-drag; that flip was seen in the first trace.
+- **Drag state in `ImageDisplay`.**
+  A press with the pan tool inside the axes sets `_view_drag_active`; release or leaving the figure clears it. While it is set, `_apply_downsample_factor_for_view` uses the coarser of the screen factor and the preview factor and records `_coarse_view_rendered`. The preview never makes a render sharper than the screen factor, and with Downsample off (native pixels requested) there is no preview.
+- **Sharp frame on release.**
+  If the last frame was coarse, release sets `_sharp_render_requested`, marks the axes stale and calls `draw_idle()`. `_render_if_view_changed` renders when that flag is set even though the view has not moved. The stale mark matters: if the browser is still waiting for the last preview frame it drops the draw request (`waiting_for_image`), and the stale figure is then redrawn by the post-message `draw_all` after the browser's next message (see the first finding of the baseline).
+- **Setting.**
+  `viewer.drag_preview_px` (default `DRAG_PREVIEW_PX = 256`); `0` or `None` keeps every drag frame sharp. No widget yet; it can be added to Advanced Settings if it needs to be switched often.
+- **Harness.**
+  Pan records gain `release_latency_ms` / `release_kb` (the frame sent on release), `compare.md` gains a "sharp frame after letting go" row and a column with the KB sent until the correct image, and `run.py --drag-preview-px` sets the preview (0 = off).
+
+---
+
+### **Results**
+
+`compare.py` against 5e43164 (Fix 4), median of 3 interleaved runs. Full output: [`dev_note/benchmarks/compare_fix7_vs_5e43164.md`](../benchmarks/compare_fix7_vs_5e43164.md). Large dataset (3 FOVs, 2048² px, 10 channels), Retina canvas (1 200 px):
+
+| Operation | Kernel ms, before → after | KB per frame, before → after |
+| --- | --- | --- |
+| Pan, one step (whole FOV) | 201 → 36 (−82 %) | 1 088 → 156 |
+| Pan, one step (zoomed 4×) | 94 → 33 (−65 %) | 686 → 117 |
+| Pan, one step (mask outlines) | 310 → 55 (−82 %) | 2 374 → 131 |
+| Sharp frame after letting go (whole FOV) | — → 188 | — → 1 060 |
+
+Each drag step now sends about 7–18× fewer bytes and costs a sixth of the kernel time; the full-size frame is sent once per drag instead of once per step. Before, the release sent only a tiny diff frame (1–6 KB), since the last step was already sharp. Operations other than pan are unchanged within noise.
+
+On a standard 600 px canvas the steps are 33–50 % faster but barely smaller (whole FOV 353 → 332 KB): a 256 px preview upscaled 2.3× to the canvas does not repeat pixels in whole blocks, and Agg's resampling leaves little for PNG to exploit. The gain in bytes is a high-DPI effect, which is where the frames were largest. A zoomed-in view whose sharp factor already gives ≤ 256 px of detail gets no preview (small dataset zoomed 4× at standard DPI).
+
+**Not verified yet:** the feel in a real browser, on the Surface and over a remote connection; the harness measures kernel time and bytes, not transfer or decode.
+
+---
+
+### **Files Changed**
+- `ueler/image_utils.py` — `drag_preview_factor`.
+- `ueler/viewer/image_display.py` — `DRAG_PREVIEW_PX`; drag start/end handlers; preview factor in `_apply_downsample_factor_for_view`; sharp render on request in `_render_if_view_changed`.
+- `ueler/viewer/main_viewer.py` — `drag_preview_px` setting.
+- `tools/benchmark/run.py`, `tools/benchmark/compare.py`, `tools/benchmark/README.md` — release-frame metrics, KB column, `--drag-preview-px`.
+- `tests/test_drag_preview.py` — new (15 tests).
+- `dev_note/main_viewer.md` — drag preview paragraph.
+- `dev_note/benchmarks/compare_fix7_vs_5e43164.{md,json}` — comparison output.
+
+---
+
+### **Tests**
+```bash
+python -m unittest discover -s tests -t .
+```
+- ✅ 1489 tests, OK

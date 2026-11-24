@@ -34,6 +34,7 @@ OPERATIONS = [
     ("Pan, one step (whole FOV in view)", "pan_full_view", None),
     ("Pan, one step (zoomed in 4×)", "pan_zoomed_4x", None),
     ("Pan, one step (mask outlines shown)", "pan_full_view_with_masks", None),
+    ("Pan, sharp frame after letting go (whole FOV)", "pan_full_view", "release"),
     ("Zoom to a rectangle", "zoom_rectangle", None),
     ("Add a marker channel", "add_channel", "median_after_first"),
     ("Show mask outlines", "mask_overlay_on", None),
@@ -66,6 +67,11 @@ def pick(scenarios, key, how):
             "frames_until_correct": statistics.median(a["frames_until_correct"] for a in adds if a.get("frames_until_correct") is not None),
             "kb_until_correct": statistics.median(a["kb_until_correct"] for a in adds if a.get("kb_until_correct") is not None),
         }
+    if how == "release":
+        # Only a pan that previews coarse frames sends a frame on release.
+        if r.get("release_latency_ms") is None:
+            return None
+        return {"latency_ms": r["release_latency_ms"], "frames_until_correct": 1, "kb_until_correct": r["release_kb"]}
     return r
 
 
@@ -105,13 +111,17 @@ def to_markdown(result):
     ]
     for block in result["blocks"]:
         lines += [f"## {block['dataset']} · canvas {block['display']}", ""]
-        lines += ["| Operation | Before (ms) | After (ms) | Change | Frames until correct image, before → after |", "| --- | --- | --- | --- | --- |"]
+        lines += ["| Operation | Before (ms) | After (ms) | Change | Frames until correct image, before → after | KB sent until correct, before → after |", "| --- | --- | --- | --- | --- | --- |"]
         for label, _key, _how in OPERATIONS:
             b, a = block["before"].get(label), block["after"].get(label)
-            if not b or not a:
+            if not a:
+                continue
+            if not b:
+                # e.g. the release frame of a pan, which only a coarse drag preview sends.
+                lines.append(f"| {label} | — | {a['latency_ms']:.0f} | — | — → {a['frames_until_correct']:g} | — → {a['kb_until_correct']:.0f} |")
                 continue
             change = (a["latency_ms"] - b["latency_ms"]) / b["latency_ms"] * 100
-            lines.append(f"| {label} | {b['latency_ms']:.0f} | {a['latency_ms']:.0f} | {change:+.0f} % | {b['frames_until_correct']:g} → {a['frames_until_correct']:g} |")
+            lines.append(f"| {label} | {b['latency_ms']:.0f} | {a['latency_ms']:.0f} | {change:+.0f} % | {b['frames_until_correct']:g} → {a['frames_until_correct']:g} | {b['kb_until_correct']:.0f} → {a['kb_until_correct']:.0f} |")
         lines.append("")
     return "\n".join(lines)
 

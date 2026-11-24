@@ -77,3 +77,7 @@ Drags report the median of `--repeats` runs.
 ## Not measured
 
 Network round-trip time, browser-side PNG decode and paint, and front-end widget rendering. On a remote setup each PNG frame additionally costs its transfer time (PNG KB ÷ bandwidth) plus one round trip. Run the benchmark on the machine that holds the data to include its storage.
+
+### Drag preview
+
+While a pan drag is in progress the viewer renders a coarse preview (`drag_preview_px`, 256 px across the view by default) and one sharp frame when the mouse is released. The pan rows therefore time the preview frames, and `release_latency_ms` / `release_kb` in the JSON (the "sharp frame after letting go" row in `compare.md`) time the sharp frame. `--drag-preview-px 0` turns the preview off, for a comparison with sharp frames throughout. `compare.md` also lists the KB sent until the correct image, the figure that matters on a remote connection.

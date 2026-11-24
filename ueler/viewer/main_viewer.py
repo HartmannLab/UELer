@@ -53,7 +53,7 @@ from .settings_paths import resolve_settings_root
 from ueler.viewer.plugin.roi_manager_plugin import ROIManagerPlugin
 import json
 
-from .image_display import ImageDisplay, adopt_current_view
+from .image_display import DRAG_PREVIEW_PX, ImageDisplay, adopt_current_view
 from .ipympl_guard import install_canvas_message_guard
 from .widget_frontend_check import warn_about_widget_frontend
 from .confirm_dialog import confirm_via, escape_name
@@ -514,6 +514,11 @@ class ImageMaskViewer:
         # Initialize current downsample factor
         self.downsample_factors = DOWNSAMPLE_FACTORS
         self.current_downsample_factor = 8  # Initial downsample factor
+        # While the view is dragged with the pan tool, render at most this many
+        # pixels across it; the frame on release is sharp again. Coarse frames
+        # are cheaper to composite and much smaller to send to the browser.
+        # Set to 0 (or None) to keep every drag frame sharp.
+        self.drag_preview_px = DRAG_PREVIEW_PX
 
         self.image_cache = OrderedDict()
         # Decoded channel rasters, so pan/zoom do not re-read and re-decompress

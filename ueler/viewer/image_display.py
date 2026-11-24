@@ -16,6 +16,7 @@ from matplotlib.colors import to_rgb
 from ueler.constants import DOWNSAMPLE_MAX_DIMENSION
 from ueler.image_utils import (
     calculate_downsample_factor,
+    drag_preview_factor,
     generate_edges,
     screen_downsample_factor,
     get_axis_limits_with_padding,
@@ -54,22 +55,45 @@ def _remember_view(display, xlim, ylim) -> None:
     display.prev_viewport_height = height
 
 
+#: Default for ``ImageMaskViewer.drag_preview_px``: while the view is dragged,
+#: render at most this many pixels across it (0 or None turns the preview off).
+DRAG_PREVIEW_PX = 256
+
+
 def _apply_downsample_factor_for_view(display, xlim, ylim) -> None:
-    """Set the viewer's downsample factor for this view on this screen."""
+    """Set the viewer's downsample factor for this view on this screen.
+
+    While the user drags the view (``display._view_drag_active``) the factor
+    is coarsened to the drag preview; ``display._coarse_view_rendered`` then
+    records that the image on screen needs a sharp render once the drag ends.
+    """
     viewer = display.main_viewer
+    coarse = False
     if viewer.initialized:
         # Match the render to the axes' size on screen (device pixels).
         bbox = getattr(display.ax, "bbox", None)
+        view_width = np.abs(xlim[1] - xlim[0])
+        view_height = np.abs(ylim[1] - ylim[0])
+        native = not viewer.ui_component.enable_downsample_checkbox.value
         new_downsample_factor = screen_downsample_factor(
-            np.abs(xlim[1] - xlim[0]),
-            np.abs(ylim[1] - ylim[0]),
+            view_width,
+            view_height,
             getattr(bbox, "width", None),
             getattr(bbox, "height", None),
-            not viewer.ui_component.enable_downsample_checkbox.value,
+            native,
             max_dimension=DOWNSAMPLE_MAX_DIMENSION,
         )
+        # No preview when Downsample is off: the user asked for native pixels.
+        if getattr(display, "_view_drag_active", False) and not native:
+            preview = drag_preview_factor(
+                view_width, view_height, getattr(viewer, "drag_preview_px", DRAG_PREVIEW_PX)
+            )
+            if preview > new_downsample_factor:
+                new_downsample_factor = preview
+                coarse = True
     else:
         new_downsample_factor = 8
+    display._coarse_view_rendered = coarse
 
     if new_downsample_factor != viewer.current_downsample_factor:
         viewer.on_downsample_factor_changed(new_downsample_factor)
@@ -97,6 +121,9 @@ def _render_if_view_changed(display) -> bool:
     # prev values were seeded to match the full canvas dimensions).
     if getattr(display, '_map_needs_initial_render', False):
         display._map_needs_initial_render = False
+    elif getattr(display, '_sharp_render_requested', False):
+        # A drag just ended on a coarse preview: render the same view sharp.
+        pass
     elif hasattr(display, "prev_center_x") and hasattr(display, "prev_center_y"):
         previous = (
             display.prev_center_x,
@@ -107,6 +134,7 @@ def _render_if_view_changed(display) -> bool:
         if all(math.isclose(a, b) for a, b in zip(_view_geometry(xlim, ylim), previous)):
             return False
 
+    display._sharp_render_requested = False
     _remember_view(display, xlim, ylim)
     _render_for_view(display, xlim, ylim)
     return True
@@ -356,6 +384,36 @@ class ImageDisplay:
         self.fig.canvas.callbacks.connect('draw_event', self.on_draw)
         self.fig.canvas.mpl_connect('motion_notify_event', self.on_mouse_move)
         self.fig.canvas.mpl_connect('button_press_event', self.on_mouse_click)
+        # Coarse preview while the view is dragged, sharp frame on release.
+        self._view_drag_active = False
+        self._coarse_view_rendered = False
+        self._sharp_render_requested = False
+        self.fig.canvas.mpl_connect('button_press_event', self._on_view_drag_start)
+        self.fig.canvas.mpl_connect('button_release_event', self._on_view_drag_end)
+        self.fig.canvas.mpl_connect('figure_leave_event', self._on_view_drag_end)
+
+    def _on_view_drag_start(self, event):
+        """A press with the pan tool starts a drag that moves the view."""
+        toolbar = getattr(self.fig.canvas, "toolbar", None)
+        mode = getattr(toolbar, "mode", "")
+        is_pan = getattr(mode, "name", None) == "PAN" or str(mode) == "pan/zoom"
+        self._view_drag_active = bool(is_pan and event.inaxes == self.ax)
+
+    def _on_view_drag_end(self, _event=None):
+        """End a drag; if a coarse preview is on screen, ask for a sharp frame.
+
+        The axes are marked stale as well as redrawn: if the browser is still
+        waiting for the last preview frame it drops this draw request, and the
+        stale figure is then redrawn after the next message from the browser.
+        """
+        if not self._view_drag_active:
+            return
+        self._view_drag_active = False
+        if not self._coarse_view_rendered:
+            return
+        self._sharp_render_requested = True
+        self.ax.stale = True
+        self.fig.canvas.draw_idle()
 
     def on_draw(self, event):
         """Fallback for draws that bypass ``canvas.draw`` (normally a no-op).

@@ -1,0 +1,865 @@
+{
+  "before": {
+    "ref": "5e43164",
+    "commit": "5e43164"
+  },
+  "runs": 3,
+  "environment": {
+    "platform": "macOS-26.5.2-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "cpu_count": 12,
+    "ram_gb": 18.0,
+    "python": "3.10.20",
+    "packages": {
+      "numpy": "2.2.6",
+      "dask": "2026.7.1",
+      "matplotlib": "3.10.9",
+      "ipympl": "0.10.0",
+      "ipywidgets": "8.1.8",
+      "tifffile": "2025.5.10",
+      "anndata": "0.11.4"
+    },
+    "ueler_commit": "5e43164",
+    "ueler_dirty": true,
+    "ueler_src": "external",
+    "data_storage": {
+      "mountpoint": "/",
+      "fstype": "apfs"
+    }
+  },
+  "blocks": [
+    {
+      "dataset": "4 FOVs, 1024\u00d71024 px, 5 channels, 3,000 cells/FOV",
+      "display": "600 CSS px \u00d7 1 = 600 px",
+      "before": {
+        "Pan, one step (whole FOV in view)": {
+          "latency_ms": 51.7,
+          "latency_ms_runs": [
+            52.29,
+            51.31,
+            51.7
+          ],
+          "frames_until_correct": 1.0,
+          "kb_until_correct": 356.0
+        },
+        "Pan, one step (zoomed in 4\u00d7)": {
+          "latency_ms": 32.8,
+          "latency_ms_runs": [
+            33.0,
+            32.58,
+            32.83
+          ],
+          "frames_until_correct": 1.0,
+          "kb_until_correct": 281.6
+        },
+        "Pan, one step (mask outlines shown)": {
+          "latency_ms": 76.2,
+          "latency_ms_runs": [
+            84.69,
+            75.91,
+            76.2
+          ],
+          "frames_until_correct": 1.0,
+          "kb_until_correct": 688.6
+        },
+        "Pan, sharp frame after letting go (whole FOV)": {
+          "latency_ms": 15.3,
+          "latency_ms_runs": [
+            15.14,
+            15.26,
+            15.35
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 1.4
+        },
+        "Zoom to a rectangle": {
+          "latency_ms": 36.9,
+          "latency_ms_runs": [
+            41.26,
+            36.71,
+            36.89
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 287.7
+        },
+        "Add a marker channel": {
+          "latency_ms": 69.8,
+          "latency_ms_runs": [
+            76.02000000000001,
+            69.78999999999999,
+            69.515
+          ],
+          "frames_until_correct": 1.0,
+          "kb_until_correct": 305.2
+        },
+        "Show mask outlines": {
+          "latency_ms": 69.9,
+          "latency_ms_runs": [
+            81.5,
+            69.9,
+            69.46
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 553.9
+        },
+        "Switch FOV (first visit)": {
+          "latency_ms": 133.3,
+          "latency_ms_runs": [
+            152.82,
+            132.28,
+            133.26
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 331.8
+        },
+        "Switch FOV while zoomed in (first visit)": {
+          "latency_ms": 132.4,
+          "latency_ms_runs": [
+            148.36,
+            132.38,
+            129.08
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 330.3
+        },
+        "Switch FOV (visited before)": {
+          "latency_ms": 60.9,
+          "latency_ms_runs": [
+            64.79,
+            60.87,
+            59.29
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 332.5
+        }
+      },
+      "after": {
+        "Pan, one step (whole FOV in view)": {
+          "latency_ms": 34.6,
+          "latency_ms_runs": [
+            37.86,
+            34.26,
+            34.61
+          ],
+          "frames_until_correct": 1.0,
+          "kb_until_correct": 328.0
+        },
+        "Pan, one step (zoomed in 4\u00d7)": {
+          "latency_ms": 32.4,
+          "latency_ms_runs": [
+            35.2,
+            32.35,
+            32.38
+          ],
+          "frames_until_correct": 1.0,
+          "kb_until_correct": 281.6
+        },
+        "Pan, one step (mask outlines shown)": {
+          "latency_ms": 38.4,
+          "latency_ms_runs": [
+            39.27,
+            38.43,
+            38.01
+          ],
+          "frames_until_correct": 1.0,
+          "kb_until_correct": 588.9
+        },
+        "Pan, sharp frame after letting go (whole FOV)": {
+          "latency_ms": 50.9,
+          "latency_ms_runs": [
+            54.71,
+            50.61,
+            50.91
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 354.5
+        },
+        "Zoom to a rectangle": {
+          "latency_ms": 36.4,
+          "latency_ms_runs": [
+            37.64,
+            36.41,
+            36.41
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 287.7
+        },
+        "Add a marker channel": {
+          "latency_ms": 69.3,
+          "latency_ms_runs": [
+            75.27,
+            69.30000000000001,
+            69.22999999999999
+          ],
+          "frames_until_correct": 1.0,
+          "kb_until_correct": 305.2
+        },
+        "Show mask outlines": {
+          "latency_ms": 66.2,
+          "latency_ms_runs": [
+            70.67,
+            66.1,
+            66.17
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 553.9
+        },
+        "Switch FOV (first visit)": {
+          "latency_ms": 131.0,
+          "latency_ms_runs": [
+            132.9,
+            131.02,
+            129.49
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 331.8
+        },
+        "Switch FOV while zoomed in (first visit)": {
+          "latency_ms": 129.5,
+          "latency_ms_runs": [
+            129.46,
+            130.24,
+            126.72
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 330.3
+        },
+        "Switch FOV (visited before)": {
+          "latency_ms": 61.0,
+          "latency_ms_runs": [
+            60.24,
+            61.61,
+            60.96
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 332.5
+        }
+      }
+    },
+    {
+      "dataset": "4 FOVs, 1024\u00d71024 px, 5 channels, 3,000 cells/FOV",
+      "display": "600 CSS px \u00d7 2 = 1200 px",
+      "before": {
+        "Pan, one step (whole FOV in view)": {
+          "latency_ms": 139.0,
+          "latency_ms_runs": [
+            140.3,
+            138.88,
+            139.01
+          ],
+          "frames_until_correct": 1.0,
+          "kb_until_correct": 1282.7
+        },
+        "Pan, one step (zoomed in 4\u00d7)": {
+          "latency_ms": 29.9,
+          "latency_ms_runs": [
+            30.77,
+            29.89,
+            29.66
+          ],
+          "frames_until_correct": 1.0,
+          "kb_until_correct": 150.3
+        },
+        "Pan, one step (mask outlines shown)": {
+          "latency_ms": 161.0,
+          "latency_ms_runs": [
+            161.07,
+            160.97,
+            160.7
+          ],
+          "frames_until_correct": 1.0,
+          "kb_until_correct": 2037.8
+        },
+        "Pan, sharp frame after letting go (whole FOV)": {
+          "latency_ms": 27.2,
+          "latency_ms_runs": [
+            28.34,
+            27.2,
+            26.4
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 5.5
+        },
+        "Zoom to a rectangle": {
+          "latency_ms": 114.7,
+          "latency_ms_runs": [
+            116.28,
+            114.7,
+            114.29
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 852.4
+        },
+        "Add a marker channel": {
+          "latency_ms": 161.6,
+          "latency_ms_runs": [
+            161.62,
+            161.675,
+            161.225
+          ],
+          "frames_until_correct": 1.0,
+          "kb_until_correct": 1125.8
+        },
+        "Show mask outlines": {
+          "latency_ms": 105.7,
+          "latency_ms_runs": [
+            105.04,
+            107.7,
+            105.7
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 1113.1
+        },
+        "Switch FOV (first visit)": {
+          "latency_ms": 223.7,
+          "latency_ms_runs": [
+            225.87,
+            223.65,
+            223.23
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 1193.3
+        },
+        "Switch FOV while zoomed in (first visit)": {
+          "latency_ms": 219.8,
+          "latency_ms_runs": [
+            220.55,
+            217.22,
+            219.84
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 1180.1
+        },
+        "Switch FOV (visited before)": {
+          "latency_ms": 149.2,
+          "latency_ms_runs": [
+            148.58,
+            149.23,
+            149.36
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 1194.1
+        }
+      },
+      "after": {
+        "Pan, one step (whole FOV in view)": {
+          "latency_ms": 31.3,
+          "latency_ms_runs": [
+            30.97,
+            32.17,
+            31.27
+          ],
+          "frames_until_correct": 1.0,
+          "kb_until_correct": 166.3
+        },
+        "Pan, one step (zoomed in 4\u00d7)": {
+          "latency_ms": 30.0,
+          "latency_ms_runs": [
+            29.5,
+            30.58,
+            29.98
+          ],
+          "frames_until_correct": 1.0,
+          "kb_until_correct": 150.3
+        },
+        "Pan, one step (mask outlines shown)": {
+          "latency_ms": 40.3,
+          "latency_ms_runs": [
+            40.65,
+            40.22,
+            40.34
+          ],
+          "frames_until_correct": 1.0,
+          "kb_until_correct": 155.7
+        },
+        "Pan, sharp frame after letting go (whole FOV)": {
+          "latency_ms": 136.9,
+          "latency_ms_runs": [
+            136.91,
+            137.74,
+            135.57
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 1299.0
+        },
+        "Zoom to a rectangle": {
+          "latency_ms": 115.1,
+          "latency_ms_runs": [
+            114.3,
+            116.6,
+            115.11
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 852.4
+        },
+        "Add a marker channel": {
+          "latency_ms": 161.4,
+          "latency_ms_runs": [
+            160.665,
+            161.98000000000002,
+            161.42000000000002
+          ],
+          "frames_until_correct": 1.0,
+          "kb_until_correct": 1125.8
+        },
+        "Show mask outlines": {
+          "latency_ms": 106.0,
+          "latency_ms_runs": [
+            109.74,
+            106.05,
+            105.15
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 1113.1
+        },
+        "Switch FOV (first visit)": {
+          "latency_ms": 219.4,
+          "latency_ms_runs": [
+            221.16,
+            219.36,
+            219.21
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 1193.3
+        },
+        "Switch FOV while zoomed in (first visit)": {
+          "latency_ms": 216.8,
+          "latency_ms_runs": [
+            217.84,
+            216.8,
+            216.39
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 1180.1
+        },
+        "Switch FOV (visited before)": {
+          "latency_ms": 149.4,
+          "latency_ms_runs": [
+            148.88,
+            155.91,
+            149.41
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 1194.1
+        }
+      }
+    },
+    {
+      "dataset": "3 FOVs, 2048\u00d72048 px, 10 channels, 12,000 cells/FOV",
+      "display": "600 CSS px \u00d7 1 = 600 px",
+      "before": {
+        "Pan, one step (whole FOV in view)": {
+          "latency_ms": 54.9,
+          "latency_ms_runs": [
+            52.33,
+            56.56,
+            54.91
+          ],
+          "frames_until_correct": 1.0,
+          "kb_until_correct": 353.3
+        },
+        "Pan, one step (zoomed in 4\u00d7)": {
+          "latency_ms": 32.3,
+          "latency_ms_runs": [
+            30.61,
+            32.47,
+            32.33
+          ],
+          "frames_until_correct": 1.0,
+          "kb_until_correct": 228.2
+        },
+        "Pan, one step (mask outlines shown)": {
+          "latency_ms": 100.3,
+          "latency_ms_runs": [
+            100.44,
+            100.07,
+            100.35
+          ],
+          "frames_until_correct": 1.0,
+          "kb_until_correct": 791.5
+        },
+        "Pan, sharp frame after letting go (whole FOV)": {
+          "latency_ms": 16.3,
+          "latency_ms_runs": [
+            15.34,
+            16.29,
+            16.29
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 1.4
+        },
+        "Zoom to a rectangle": {
+          "latency_ms": 45.2,
+          "latency_ms_runs": [
+            44.17,
+            45.16,
+            46.4
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 273.0
+        },
+        "Add a marker channel": {
+          "latency_ms": 101.4,
+          "latency_ms_runs": [
+            101.39,
+            100.77,
+            102.02
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 373.1
+        },
+        "Show mask outlines": {
+          "latency_ms": 100.4,
+          "latency_ms_runs": [
+            102.01,
+            100.1,
+            100.41
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 767.4
+        },
+        "Switch FOV (first visit)": {
+          "latency_ms": 487.4,
+          "latency_ms_runs": [
+            492.16,
+            475.65,
+            487.39
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 373.3
+        },
+        "Switch FOV while zoomed in (first visit)": {
+          "latency_ms": 467.6,
+          "latency_ms_runs": [
+            499.43,
+            467.39,
+            467.58
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 361.7
+        },
+        "Switch FOV (visited before)": {
+          "latency_ms": 72.6,
+          "latency_ms_runs": [
+            70.23,
+            75.09,
+            72.6
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 372.6
+        }
+      },
+      "after": {
+        "Pan, one step (whole FOV in view)": {
+          "latency_ms": 35.2,
+          "latency_ms_runs": [
+            34.11,
+            35.49,
+            35.25
+          ],
+          "frames_until_correct": 1.0,
+          "kb_until_correct": 332.4
+        },
+        "Pan, one step (zoomed in 4\u00d7)": {
+          "latency_ms": 28.8,
+          "latency_ms_runs": [
+            27.55,
+            28.79,
+            28.77
+          ],
+          "frames_until_correct": 1.0,
+          "kb_until_correct": 213.8
+        },
+        "Pan, one step (mask outlines shown)": {
+          "latency_ms": 50.2,
+          "latency_ms_runs": [
+            50.69,
+            49.4,
+            50.2
+          ],
+          "frames_until_correct": 1.0,
+          "kb_until_correct": 522.9
+        },
+        "Pan, sharp frame after letting go (whole FOV)": {
+          "latency_ms": 55.2,
+          "latency_ms_runs": [
+            55.0,
+            55.93,
+            55.21
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 355.6
+        },
+        "Zoom to a rectangle": {
+          "latency_ms": 46.8,
+          "latency_ms_runs": [
+            47.08,
+            46.57,
+            46.84
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 273.0
+        },
+        "Add a marker channel": {
+          "latency_ms": 105.1,
+          "latency_ms_runs": [
+            109.51,
+            105.14,
+            100.86
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 373.1
+        },
+        "Show mask outlines": {
+          "latency_ms": 97.4,
+          "latency_ms_runs": [
+            97.76,
+            95.9,
+            97.43
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 767.4
+        },
+        "Switch FOV (first visit)": {
+          "latency_ms": 470.2,
+          "latency_ms_runs": [
+            482.78,
+            470.22,
+            469.24
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 373.3
+        },
+        "Switch FOV while zoomed in (first visit)": {
+          "latency_ms": 465.6,
+          "latency_ms_runs": [
+            476.55,
+            465.37,
+            465.57
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 361.7
+        },
+        "Switch FOV (visited before)": {
+          "latency_ms": 70.7,
+          "latency_ms_runs": [
+            73.33,
+            70.08,
+            70.71
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 372.6
+        }
+      }
+    },
+    {
+      "dataset": "3 FOVs, 2048\u00d72048 px, 10 channels, 12,000 cells/FOV",
+      "display": "600 CSS px \u00d7 2 = 1200 px",
+      "before": {
+        "Pan, one step (whole FOV in view)": {
+          "latency_ms": 200.7,
+          "latency_ms_runs": [
+            198.69,
+            200.69,
+            203.27
+          ],
+          "frames_until_correct": 1.0,
+          "kb_until_correct": 1088.5
+        },
+        "Pan, one step (zoomed in 4\u00d7)": {
+          "latency_ms": 93.7,
+          "latency_ms_runs": [
+            93.97,
+            89.69,
+            93.73
+          ],
+          "frames_until_correct": 1.0,
+          "kb_until_correct": 685.9
+        },
+        "Pan, one step (mask outlines shown)": {
+          "latency_ms": 309.5,
+          "latency_ms_runs": [
+            321.62,
+            309.5,
+            305.86
+          ],
+          "frames_until_correct": 1.0,
+          "kb_until_correct": 2374.1
+        },
+        "Pan, sharp frame after letting go (whole FOV)": {
+          "latency_ms": 55.8,
+          "latency_ms_runs": [
+            56.25,
+            55.41,
+            55.8
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 5.5
+        },
+        "Zoom to a rectangle": {
+          "latency_ms": 115.9,
+          "latency_ms_runs": [
+            121.75,
+            110.62,
+            115.93
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 843.2
+        },
+        "Add a marker channel": {
+          "latency_ms": 248.4,
+          "latency_ms_runs": [
+            245.0,
+            258.97,
+            248.36
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 1211.4
+        },
+        "Show mask outlines": {
+          "latency_ms": 283.4,
+          "latency_ms_runs": [
+            370.34,
+            283.35,
+            280.62
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 1789.8
+        },
+        "Switch FOV (first visit)": {
+          "latency_ms": 680.9,
+          "latency_ms_runs": [
+            694.64,
+            680.87,
+            640.01
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 1175.9
+        },
+        "Switch FOV while zoomed in (first visit)": {
+          "latency_ms": 642.2,
+          "latency_ms_runs": [
+            650.0,
+            642.18,
+            621.36
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 1109.5
+        },
+        "Switch FOV (visited before)": {
+          "latency_ms": 230.3,
+          "latency_ms_runs": [
+            230.33,
+            234.57,
+            229.63
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 1174.6
+        }
+      },
+      "after": {
+        "Pan, one step (whole FOV in view)": {
+          "latency_ms": 35.9,
+          "latency_ms_runs": [
+            38.41,
+            35.89,
+            35.89
+          ],
+          "frames_until_correct": 1.0,
+          "kb_until_correct": 155.7
+        },
+        "Pan, one step (zoomed in 4\u00d7)": {
+          "latency_ms": 32.8,
+          "latency_ms_runs": [
+            34.08,
+            32.84,
+            32.75
+          ],
+          "frames_until_correct": 1.0,
+          "kb_until_correct": 117.0
+        },
+        "Pan, one step (mask outlines shown)": {
+          "latency_ms": 54.7,
+          "latency_ms_runs": [
+            57.92,
+            54.68,
+            54.11
+          ],
+          "frames_until_correct": 1.0,
+          "kb_until_correct": 130.8
+        },
+        "Pan, sharp frame after letting go (whole FOV)": {
+          "latency_ms": 188.1,
+          "latency_ms_runs": [
+            207.25,
+            188.14,
+            187.04
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 1059.7
+        },
+        "Zoom to a rectangle": {
+          "latency_ms": 111.0,
+          "latency_ms_runs": [
+            117.93,
+            110.99,
+            110.3
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 843.2
+        },
+        "Add a marker channel": {
+          "latency_ms": 246.4,
+          "latency_ms_runs": [
+            246.38,
+            247.51,
+            244.75
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 1211.4
+        },
+        "Show mask outlines": {
+          "latency_ms": 285.6,
+          "latency_ms_runs": [
+            298.9,
+            283.63,
+            285.63
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 1789.8
+        },
+        "Switch FOV (first visit)": {
+          "latency_ms": 637.1,
+          "latency_ms_runs": [
+            667.15,
+            637.07,
+            622.93
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 1175.9
+        },
+        "Switch FOV while zoomed in (first visit)": {
+          "latency_ms": 612.6,
+          "latency_ms_runs": [
+            675.98,
+            612.62,
+            611.57
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 1109.5
+        },
+        "Switch FOV (visited before)": {
+          "latency_ms": 224.1,
+          "latency_ms_runs": [
+            241.29,
+            224.1,
+            222.78
+          ],
+          "frames_until_correct": 1,
+          "kb_until_correct": 1174.6
+        }
+      }
+    }
+  ]
+}

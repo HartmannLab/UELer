@@ -419,13 +419,19 @@ def summarise_latency(record):
     record["latency_ms"] = _median(i["latency_ms"] for i in target)
     record["frames_until_correct"] = _median(i["frames_until_correct"] for i in target)
     record["kb_until_correct"] = _median(i["kb_until_correct"] for i in target)
+    # A pan that previews coarse frames while dragging sends one more, sharp
+    # frame on release; without the preview the release sends nothing.
+    sent_on_release = [i for i in release if i["frames"]] if target is steps else []
+    record["release_latency_ms"] = _median(i["latency_ms"] for i in sent_on_release)
+    record["release_kb"] = _median(i["kb_until_correct"] for i in sent_on_release)
 
 
 def median_record(records):
     out = dict(records[-1])
-    for key in ("wall_ms", "ms_per_motion_event", "latency_ms", "kb_until_correct", "frames_until_correct"):
+    for key in ("wall_ms", "ms_per_motion_event", "latency_ms", "kb_until_correct", "frames_until_correct", "release_latency_ms", "release_kb"):
         if key in out:
-            out[key] = round(statistics.median(r[key] for r in records), 2)
+            values = [r[key] for r in records if r.get(key) is not None]
+            out[key] = round(statistics.median(values), 2) if values else None
     out["repeats"] = len(records)
     return out
 
@@ -563,6 +569,7 @@ def main(argv=None):
     p.add_argument("--ueler-ref", help="label for --ueler-src in the report (e.g. the commit it was extracted from)")
     p.add_argument("--dpr", type=float, default=1.0, help="browser device pixel ratio (2 on a Retina screen)")
     p.add_argument("--canvas-px", type=int, help="square canvas edge in CSS px (default: the viewer's 600)")
+    p.add_argument("--drag-preview-px", type=int, help="set the viewer's drag_preview_px (0 = sharp frames while dragging); default: the viewer's own")
     p.add_argument("--no-interactive", action="store_true", help="matplotlib interactive mode off (default on, as under %%matplotlib widget)")
     a = p.parse_args(argv)
     if a.ueler_src:
@@ -584,6 +591,8 @@ def main(argv=None):
     with tempfile.TemporaryDirectory() as settings:
         rss0 = rss_mb()
         s = Session(str(images), masks=masks, settings=settings, interactive=not a.no_interactive, dpr=a.dpr, canvas_px=a.canvas_px)
+        if a.drag_preview_px is not None:
+            s.viewer.drag_preview_px = a.drag_preview_px
         scenarios = run_scenarios(s, a.channels, a.repeats)
         result = {
             "dataset_label": a.label or data.name,
