@@ -598,7 +598,7 @@ python -m unittest discover -s tests -t .
 
 ---
 
-## **Update Summary: Fix 10 — map activation reads each channel once (commit TBD)**
+## **Update Summary: Fix 10 — map activation reads each channel once (commit 56c8188)**
 
 Reported: switching to map mode still took a while; the guess was the cost of setting up the Dask arrays. Profiling activation with `map_run.py` (25 FOVs of 2048² px, 6 channels) showed 5.8 s, little of it Dask's own overhead: the channel cache logged 300 misses for 150 channels, and the per-tile statistics read every TIFF a third time.
 

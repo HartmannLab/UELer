@@ -155,7 +155,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 For more details, see the [user guide](https://hartmannlab.github.io/UELer/latest/tutorials/user-interface).
 
 ## New Update  
-### **UELer v0.6.0-alpha2 Summary**
+### **UELer v0.6.0 Summary**
 
 - **Map mode opens about three times faster.** Switching to a map reads each image once instead of three times, so a 25-tile map (2048 × 2048 px, 6 channels) now appears in about 2 s instead of 6 s, and the first zoom into new tiles is about a quarter faster.
 
