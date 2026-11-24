@@ -99,3 +99,12 @@ The browser panel times each input until its frame is decoded on screen; `timer.
 ### Frame format
 
 `--frame-format png|jpeg|webp` (both `run.py` and `compare.py`) sets the viewer's frame format (Advanced Settings → Frame format). A version without the setting ignores it, so `compare.py` against an older commit compares PNG before with the chosen format after.
+
+### Map mode
+
+`map_run.py` lays the FOVs of a `synth.py` dataset out on a square grid, writes a map descriptor for them and times map activation, zooming in 4x and back out to the whole map, zooming in 2x and out, and a contrast change at the whole-map view. Each line lists latency, KB sent, the top stages, the channel cache's size and hit/miss counts and the number of cached tiles. Use a dataset larger than the channel cache's budget (512 MiB) to see what a real slide does, for example:
+
+```bash
+python tools/benchmark/synth.py /tmp/ueler_bench/map25 --fovs 25 --size 2048 --channels 6 --cells 2000
+python tools/benchmark/map_run.py --data /tmp/ueler_bench/map25
+```

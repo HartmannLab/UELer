@@ -61,7 +61,8 @@ class FullResolutionPathTests(unittest.TestCase):
         self.assertEqual(source.counter["compute"], 1)
         self.assertEqual(cache.misses, 1)
         self.assertEqual(cache.hits, 2)
-        self.assertEqual(cache.nbytes, 64 * 48 * 2)
+        # Full resolution, plus the small level copy kept for the factor-4 read.
+        self.assertEqual(cache.nbytes, 64 * 48 * 2 + 16 * 12 * 2)
 
     def test_in_memory_source_is_not_cached(self):
         cache = ChannelLevelCache()
@@ -141,6 +142,46 @@ class BudgetTests(unittest.TestCase):
         cache.set_max_bytes(0)
         self.assertEqual(len(cache), 0)
         self.assertIsNone(cache.read_region("fov2", "a", _LazyArray(data), (0, 16, 0, 16), 1))
+
+
+class LevelCopyTests(unittest.TestCase):
+    """Coarse reads keep a small level copy that outlives full resolution."""
+
+    def test_overview_is_served_from_the_level_copy_after_full_resolution_is_evicted(self):
+        data = _image(64, 64)
+        source = _LazyArray(data)
+        cache = ChannelLevelCache(max_entry_fraction=1.0)
+        cache.read_region("tile", "CD3", source, (0, 64, 0, 64), 8)
+        cache._remove(("tile", "CD3", 1))  # full resolution pushed out by other tiles
+        got = cache.read_region("tile", "CD3", source, (0, 64, 0, 64), 8)
+        np.testing.assert_array_equal(got, data[::8, ::8])
+        self.assertEqual(source.counter["compute"], 1)
+
+    def test_no_copy_for_fine_factors_or_misaligned_regions(self):
+        cache = ChannelLevelCache(max_entry_fraction=1.0)
+        source = _LazyArray(_image(64, 64))
+        cache.read_region("tile", "CD3", source, (0, 64, 0, 64), 2)
+        cache.read_region("tile", "CD3", source, (3, 64, 0, 64), 8)
+        self.assertEqual(len(cache._levels), 0)
+
+    def test_level_copies_stay_within_their_share_and_the_total_budget(self):
+        data = _image(64, 64)  # 8 KiB full, 128 B level at factor 8
+        cache = ChannelLevelCache(max_bytes=4 * data.nbytes, max_entry_fraction=1.0, level_fraction=1 / 64)
+        for i in range(8):
+            cache.read_region(f"tile{i}", "CD3", _LazyArray(data), (0, 64, 0, 64), 8)
+        self.assertLessEqual(cache._level_nbytes, cache.max_level_bytes)
+        self.assertLessEqual(cache.nbytes, cache.max_bytes)
+
+    def test_drop_fov_and_replaced_source_drop_the_copy(self):
+        cache = ChannelLevelCache(max_entry_fraction=1.0)
+        old = _LazyArray(_image(64, 64, seed=1))
+        cache.read_region("tile", "CD3", old, (0, 64, 0, 64), 8)
+        cache._remove(("tile", "CD3", 1))
+        new_data = _image(64, 64, seed=2)
+        got = cache.read_region("tile", "CD3", _LazyArray(new_data), (0, 64, 0, 64), 8)
+        np.testing.assert_array_equal(got, new_data[::8, ::8])
+        cache.drop_fov("tile")
+        self.assertEqual((len(cache), cache.nbytes), (0, 0))
 
 
 class EngineIntegrationTests(unittest.TestCase):

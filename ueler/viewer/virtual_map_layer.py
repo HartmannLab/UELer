@@ -61,6 +61,7 @@ class VirtualMapLayer:
         cache: Optional[MutableMapping] = None,
         *,
         cache_capacity: int = 6,
+        cache_max_bytes: Optional[int] = None,
     ) -> None:
         self._viewer = viewer
         self.descriptor = descriptor
@@ -81,6 +82,11 @@ class VirtualMapLayer:
 
         self._cache = cache if cache is not None else OrderedDict()
         self._cache_capacity = max(1, int(cache_capacity))
+        # With a byte budget the rendered tiles are evicted by size, not count:
+        # a whole-map overview at a coarse factor is a few hundred KB per tile,
+        # so the overview survives zooming in, which fills the cache with
+        # larger, finer tiles. Without one, ``cache_capacity`` tiles are kept.
+        self._cache_max_bytes = int(cache_max_bytes) if cache_max_bytes else None
 
         self._tiles: list[MapTileGeometry] = []
         self._tile_lookup: Dict[str, MapTileGeometry] = {}
@@ -448,10 +454,19 @@ class VirtualMapLayer:
 
     def _cache_store(self, key, image: np.ndarray) -> None:
         self._cache[key] = image
-        if hasattr(self._cache, "move_to_end"):
-            self._cache.move_to_end(key)
+        if not hasattr(self._cache, "move_to_end"):
+            return
+        self._cache.move_to_end(key)
+        if self._cache_max_bytes is None:
             while len(self._cache) > self._cache_capacity:
                 self._cache.popitem(last=False)
+            return
+        # The cache may be shared by several layers, so sum it rather than
+        # keep a per-layer count; it holds at most a few thousand tiles.
+        total = sum(int(getattr(v, "nbytes", 0)) for v in self._cache.values())
+        while total > self._cache_max_bytes and len(self._cache) > 1:
+            _, evicted = self._cache.popitem(last=False)
+            total -= int(getattr(evicted, "nbytes", 0))
 
     def tile_geometry(self, fov_name: str) -> Optional[MapTileGeometry]:
         """Return stitched-map geometry for a given FOV."""

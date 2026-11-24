@@ -1,4 +1,14 @@
 ### v0.6.0-alpha1
+**Map mode: zooming back out to the whole map is drawn from memory**
+
+- **Zooming out to the whole map took 1.3–1.5 s every time (user report)** on a 25-tile synthetic map (2048² px, 6 channels): the rendered-tile cache held one entry per tile, so a few zoomed-in tiles evicted the overview, and re-rendering it decoded every channel of every tile from disk, since full-resolution channels for the whole map exceed the channel cache's budget.
+- **The map tile cache is now limited by size (256 MiB) instead of count**, so the overview tiles (about 200 KB each at the whole-map factor) stay cached while zoomed-in tiles come and go (`VirtualMapLayer(cache_max_bytes=...)`, `viewer._map_tile_cache_max_bytes`).
+- **The channel cache keeps a small copy of each coarse level** (factor 4 or coarser, 1/16 of the channel or less) in its own quarter of the budget, so the overview can be redrawn without decoding after the full-resolution channels have been evicted, for example after a contrast change.
+- **Result** (before → after): zoom out to the whole map 1 305 → 42 ms; zoom in 2× after it 568 → 47 ms; contrast change at the whole-map view 1 565 → 46 ms. Map activation and the first zoom into new tiles are unchanged (first read of each tile).
+- **New benchmark:** `tools/benchmark/map_run.py` times map mode on a `synth.py` dataset laid out as a grid.
+- **Files:** edited `ueler/viewer/virtual_map_layer.py`, `ueler/viewer/main_viewer.py`, `ueler/rendering/channel_cache.py`, `tests/test_channel_level_cache.py`, `tools/benchmark/README.md`, `dev_note/main_viewer.md`, `dev_note/FOV_load_cycle.md`, `dev_note/issue_tracking/render_path_performance.md`, `README.md`; added `tools/benchmark/map_run.py`, `tests/test_map_tile_cache_budget.py` (3 tests).
+- Verified: `python -m unittest discover -s tests -t .` → **1513 tests, OK**.
+
 **The status bar shows the spinner while switching to map mode or between maps**
 
 - **Switching to map mode left the ready checkmark showing (user report)** while the map's tiles were loaded and rendered. Since the status no longer follows every draw, each handler that loads and renders has to show it; the FOV and channel handlers did, the map handlers did not. `on_map_mode_toggle` and `on_map_selector_change` now carry `@update_status_bar`.

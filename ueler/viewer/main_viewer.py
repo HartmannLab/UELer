@@ -414,6 +414,10 @@ class ImageMaskViewer:
         self._map_descriptors = {}
         self._map_fov_lookup: Dict[str, str] = {}
         self._map_tile_cache_capacity = 6
+        # Rendered map tiles are kept within this many bytes (see
+        # VirtualMapLayer._cache_store); a count limit evicted the whole-map
+        # overview as soon as a few zoomed-in tiles had been rendered.
+        self._map_tile_cache_max_bytes = 256 * 1024 * 1024
         self._map_tile_cache = OrderedDict()
         self._map_layers = {}
         self._active_map_id = None
@@ -1443,6 +1447,7 @@ class ImageMaskViewer:
                 allowed_downsample=allowed,
                 cache=self._map_tile_cache,
                 cache_capacity=max(self._map_tile_cache_capacity, len(descriptor.fovs)),
+                cache_max_bytes=getattr(self, "_map_tile_cache_max_bytes", None),
             )
             self._map_layers[map_id] = layer
         return layer

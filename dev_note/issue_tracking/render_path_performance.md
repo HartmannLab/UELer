@@ -75,6 +75,7 @@ Pan frames include the second, post-message draw and PNG (see the first finding)
 6. Re-measure, then decide on the composite itself (uint8 path), the PNG compression level and the remaining items from the suspected-cost list.
 7. **Done (Fix 7).** Coarse preview while the view is dragged, one sharp frame on release. Aimed at remote sessions and slower clients, where the PNG transfer and browser decode of each full-size frame dominate (0.5–1 s per pan step reported on a Surface Pro). A kernel-side cap on the device pixel ratio was ruled out: ipympl's front end sizes its canvas from the browser's own ratio and draws each frame unscaled, so a smaller frame would fill only part of the canvas.
 8. **Done (Fix 8).** Frames that replace most of the canvas can be sent as JPEG or WebP (Advanced Settings → Frame format), after the live timer showed a remote session spending ~4.4 s moving one 2.5 MB PNG frame.
+9. **Done (Fix 9).** Map mode: zooming back out to the whole map re-rendered every tile and re-decoded every channel; the tile cache is now budgeted by bytes and the channel cache keeps small level copies for coarse reads.
 
 ### Still to do on the harness
 
@@ -82,6 +83,7 @@ Pan frames include the second, post-message draw and PNG (see the first finding)
 
 - Cell-table operations: selection, Cell Gallery, AnnData write-back; tables over 1 M cells.
 - A run against remote data (e.g. BioImage Archive) and on the cluster, next to the local-SSD numbers.
+- Map mode now has `map_run.py` (Fix 9); the first activation of a map (~5 s for 25 tiles of 2048² × 6 channels, about a third of it the per-tile statistics) is still to be addressed.
 
 ---
 
@@ -516,7 +518,7 @@ python -m unittest discover -s tests -t .
 
 ---
 
-## **Update Summary: Fix 5 follow-up — spinner when switching to map mode or between maps (commit pending)**
+## **Update Summary: Fix 5 follow-up — spinner when switching to map mode or between maps (commit 1ff849b)**
 
 Reported after Fix 8: switching to map mode left the status at the ready checkmark while the map rendered. Fix 5 had moved the spinner from the draw to the handlers that load and render, but only to the FOV and channel handlers; `on_map_mode_toggle` and `on_map_selector_change`, which activate a map and render its tiles, were missed.
 
@@ -539,3 +541,56 @@ Reported after Fix 8: switching to map mode left the status at the ready checkma
 python -m unittest discover -s tests -t .
 ```
 - ✅ 1506 tests, OK
+
+---
+
+## **Update Summary: Fix 9 — map mode: zooming out to the whole map from memory (commit pending)**
+
+Reported: in map mode, zooming back out to the whole map took a long time. Measured on a synthetic map (`tools/benchmark/map_run.py`, 25 FOVs of 2048² px on a 5 × 5 grid, 6 channels, map canvas 10 240 px, whole-map factor 16): 1.3–1.5 s every time the view returned to the whole map after zooming in, while returning to it with nothing in between took 12 ms. The channel cache counters showed ~150 misses per zoom-out, i.e. every channel of every tile decoded from disk again.
+
+---
+
+### **Actions Taken**
+- **Found two caches evicting the overview.**
+  The rendered-tile cache (`_map_tile_cache`) held `max(6, number of FOVs)` tiles, one per tile at most, keyed by factor and region; three 4× zoom-ins filled it with zoomed tiles and pushed the 25 overview tiles out. Re-rendering those then needed every channel, and the channel cache (Fix 3) keeps channels at full resolution: 25 × 6 × 8 MiB = 1.2 GB against a 512 MiB budget, so the overview's channels had long been evicted as well.
+- **Tile cache budgeted by bytes.**
+  `VirtualMapLayer` takes `cache_max_bytes` and evicts least recently used tiles until the shared cache fits; the viewer passes `_map_tile_cache_max_bytes` (256 MiB). A whole-map tile at factor 16 is 128² × 3 float32 = 192 KB, so the overview of even a large map stays cached while zoomed-in tiles come and go. The count limit is kept for layers built without a budget.
+- **Level copies in the channel cache.**
+  A read at factor ≥ 4 from an aligned region also stores `full[::f, ::f]` as a separate entry in its own share of the budget (a quarter, 128 MiB). When the full-resolution entry has been evicted, the next read at that factor is served from the copy without decoding. A copy is 1/16 of the channel or less (32 KB per channel at factor 16), so the whole-map overview of thousands of channel tiles fits. The total stays within `max_bytes`; `drop_fov`, a replaced source and `set_max_bytes(0)` drop copies as they drop entries.
+- **Map benchmark.**
+  `tools/benchmark/map_run.py` writes the grid descriptor, enables map mode and times activation, zooms and a contrast change, with the channel cache's hit and miss counts.
+- **Ruled out:** making the channel cache store only levels in map mode. Zooming in on a tile would then decode it again at every new factor, where a cached full-resolution channel serves all factors; the copies add the overview without giving that up.
+
+---
+
+### **Results**
+
+`map_run.py`, same machine and dataset, before (1ff849b) → after:
+
+| Action | Before | After |
+| --- | --- | --- |
+| Zoom out to the whole map after zooming in | 1 305 / 1 520 ms | 42 / 40 ms |
+| Zoom in 2× after that | 568 ms | 47 ms |
+| Contrast change at the whole-map view | 1 565 ms | 46 ms |
+| First zoom-in 4× (new tiles at a new factor) | 390–565 ms | 405–595 ms (unchanged) |
+| Map activation (first visit of every tile) | 5.1 s | 5.2 s (unchanged) |
+
+The contrast change re-renders every tile (the tile keys include the contrast) and now takes all 150 channel reads from level copies. What remains slow is reading a tile for the first time: decoding its compressed TIFFs, plus, on activation, the per-tile statistics (`_update_stats_for_visited_tile`, ~1.8 s of the 5.2 s), which decode each channel a second time. Memory: up to 256 MiB more for rendered tiles; the level copies live inside the existing 512 MiB channel budget.
+
+---
+
+### **Files Changed**
+- `ueler/viewer/virtual_map_layer.py` — `cache_max_bytes`; byte-based eviction in `_cache_store`.
+- `ueler/viewer/main_viewer.py` — `_map_tile_cache_max_bytes`, passed to each layer.
+- `ueler/rendering/channel_cache.py` — level copies (`_levels`, `level_fraction`, `LEVEL_COPY_MIN_FACTOR`).
+- `tools/benchmark/map_run.py` — new; `tools/benchmark/README.md` — map section.
+- `tests/test_channel_level_cache.py` — level copy tests (4); `tests/test_map_tile_cache_budget.py` — new (3 tests).
+- `dev_note/main_viewer.md`, `dev_note/FOV_load_cycle.md` — cache descriptions.
+
+---
+
+### **Tests**
+```bash
+python -m unittest discover -s tests -t .
+```
+- ✅ 1513 tests, OK

@@ -16,6 +16,14 @@ later render from memory. It holds two kinds of entry:
   what the main viewer requests (``get_axis_limits_with_padding``); anything
   else falls back to the lazy read.
 
+Alongside a full-resolution entry, a read at a coarse factor (``f >= 4``,
+aligned region) also keeps a small copy of that level, in its own share of the
+budget (``level_fraction``, a quarter by default). Full-resolution entries are
+large and churn when many FOVs are in use, as in map mode, where a whole-map
+overview touches every tile; the level copies are 1/16 or less of their size,
+so the overview can be redrawn from memory after the full-resolution entries
+have been evicted.
+
 Entries are evicted least recently used once their total exceeds
 ``max_bytes``. Arrays that are already in memory (NumPy) are not cached, and a
 read that the cache cannot serve returns ``None`` so the caller keeps its
@@ -34,6 +42,8 @@ Region = Tuple[int, int, int, int]
 #: Default total budget. A 2048² uint16 channel is 8 MiB, so this holds about
 #: six FOVs of ten such channels.
 DEFAULT_MAX_BYTES = 512 * 1024 * 1024
+#: Smallest factor for which a level copy is kept next to full resolution.
+LEVEL_COPY_MIN_FACTOR = 4
 
 
 def _is_lazy(source) -> bool:
@@ -56,19 +66,28 @@ class ChannelLevelCache:
     ``image_cache`` invalidates the entry instead of serving stale pixels.
     """
 
-    def __init__(self, max_bytes: int = DEFAULT_MAX_BYTES, max_entry_fraction: float = 1 / 8):
+    def __init__(self, max_bytes: int = DEFAULT_MAX_BYTES, max_entry_fraction: float = 1 / 8, level_fraction: float = 1 / 4):
         self._entries: "OrderedDict[Tuple[Hashable, Hashable, int], Tuple[object, np.ndarray]]" = OrderedDict()
         self._nbytes = 0
+        # Level copies kept next to full-resolution entries (see module doc).
+        self._levels: "OrderedDict[Tuple[Hashable, Hashable, int], Tuple[object, np.ndarray]]" = OrderedDict()
+        self._level_nbytes = 0
         self.max_bytes = int(max_bytes)
         self.max_entry_fraction = float(max_entry_fraction)
+        self.level_fraction = float(level_fraction)
         self.hits = 0
         self.misses = 0
 
     # -- budget ---------------------------------------------------------
     @property
     def nbytes(self) -> int:
-        """Bytes currently held."""
-        return self._nbytes
+        """Bytes currently held (entries and level copies)."""
+        return self._nbytes + self._level_nbytes
+
+    @property
+    def max_level_bytes(self) -> int:
+        """Share of the budget for level copies."""
+        return int(self.max_bytes * self.level_fraction)
 
     @property
     def max_entry_bytes(self) -> int:
@@ -76,7 +95,7 @@ class ChannelLevelCache:
         return int(self.max_bytes * self.max_entry_fraction)
 
     def __len__(self) -> int:
-        return len(self._entries)
+        return len(self._entries) + len(self._levels)
 
     def set_max_bytes(self, max_bytes: int) -> None:
         """Change the budget and evict down to it; ``0`` disables the cache."""
@@ -86,11 +105,15 @@ class ChannelLevelCache:
     def clear(self) -> None:
         self._entries.clear()
         self._nbytes = 0
+        self._levels.clear()
+        self._level_nbytes = 0
 
     def drop_fov(self, fov: Hashable) -> None:
         """Forget every entry of one FOV (called when the viewer evicts it)."""
         for key in [k for k in self._entries if k[0] == fov]:
             self._remove(key)
+        for key in [k for k in self._levels if k[0] == fov]:
+            self._remove_level(key)
 
     # -- reads ----------------------------------------------------------
     def read_region(
@@ -118,13 +141,23 @@ class ChannelLevelCache:
         itemsize = np.dtype(getattr(source, "dtype", np.float64)).itemsize
         height, width = int(shape[0]), int(shape[1])
 
+        aligned = not (xmin % factor or ymin % factor)
+        wants_level_copy = factor >= LEVEL_COPY_MIN_FACTOR and aligned and self.max_level_bytes > 0
+
         full = self._lookup(fov, channel, 1, source)
+        if full is None and wants_level_copy:
+            copy = self._lookup_level(fov, channel, factor, source)
+            if copy is not None:
+                self.hits += 1
+                return self._level_region(copy, factor, xmin, xmax, ymin, ymax)
         if full is None and height * width * itemsize <= self.max_entry_bytes:
             self.misses += 1
             full = self._store(fov, channel, 1, source, _materialise(source))
         elif full is not None:
             self.hits += 1
         if full is not None:
+            if wants_level_copy and self._lookup_level(fov, channel, factor, source) is None:
+                self._store_level(fov, channel, factor, source, np.ascontiguousarray(full[::factor, ::factor]))
             return full[ymin:ymax:factor, xmin:xmax:factor]
 
         # Too large to keep at full resolution: keep the requested level only.
@@ -139,6 +172,11 @@ class ChannelLevelCache:
             level = self._store(fov, channel, factor, source, _materialise(source[::factor, ::factor]))
         else:
             self.hits += 1
+        return self._level_region(level, factor, xmin, xmax, ymin, ymax)
+
+    @staticmethod
+    def _level_region(level, factor, xmin, xmax, ymin, ymax) -> np.ndarray:
+        """``source[ymin:ymax:f, xmin:xmax:f]`` from the level ``source[::f, ::f]``."""
         rows = -(-(ymax - ymin) // factor)
         cols = -(-(xmax - xmin) // factor)
         y0, x0 = ymin // factor, xmin // factor
@@ -170,8 +208,37 @@ class ChannelLevelCache:
         if entry is not None:
             self._nbytes -= int(entry[1].nbytes)
 
+    def _lookup_level(self, fov, channel, factor, source) -> Optional[np.ndarray]:
+        key = (fov, channel, factor)
+        entry = self._levels.get(key)
+        if entry is None:
+            return None
+        if entry[0] is not source:
+            self._remove_level(key)
+            return None
+        self._levels.move_to_end(key)
+        return entry[1]
+
+    def _store_level(self, fov, channel, factor, source, array: np.ndarray) -> None:
+        if array.nbytes > self.max_level_bytes:
+            return
+        key = (fov, channel, factor)
+        self._remove_level(key)
+        self._levels[key] = (source, array)
+        self._level_nbytes += int(array.nbytes)
+        while self._level_nbytes > self.max_level_bytes and self._levels:
+            self._remove_level(next(iter(self._levels)))
+        self._evict()
+
+    def _remove_level(self, key) -> None:
+        entry = self._levels.pop(key, None)
+        if entry is not None:
+            self._level_nbytes -= int(entry[1].nbytes)
+
     def _evict(self, keep=None) -> None:
-        while self._nbytes > self.max_bytes and self._entries:
+        while self._level_nbytes > self.max_level_bytes and self._levels:
+            self._remove_level(next(iter(self._levels)))
+        while self._nbytes + self._level_nbytes > self.max_bytes and self._entries:
             oldest = next(iter(self._entries))
             if oldest == keep:
                 # The entry just stored is in use by the caller; evict it

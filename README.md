@@ -157,6 +157,8 @@ For more details, see the [user guide](https://hartmannlab.github.io/UELer/lates
 ## New Update  
 ### **UELer v0.6.0-alpha1 Summary**
 
+- **Map mode: zooming back out to the whole map is near-instant.** The overview is now kept in memory while you zoom in and out, so returning to it drops from about 1.5 s to 40 ms on a 25-tile map, and changing contrast at the whole-map view from about 1.6 s to 50 ms.
+
 - **Faster over slow remote connections: choose JPEG or WebP frames.** `Advanced Settings → Frame format` sends zooms, FOV switches, channel changes and the sharp frame after a drag as JPEG or WebP, about a third of the PNG size (for example 1.4 MB → 0.44 MB per FOV switch on a large canvas). PNG stays the lossless default.
 
 - **Panning stays responsive on high-DPI screens and remote connections.** While you drag, the viewer shows a coarser preview and sharpens the image when you let go. On a 2048 × 2048 px, 10-channel image on a Retina screen each pan step drops from about 200 to 35 ms and from about 1.1 MB to 160 KB sent to the browser. Set `viewer.drag_preview_px = 0` to keep every frame sharp.
