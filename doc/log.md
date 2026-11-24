@@ -1,4 +1,14 @@
 ### v0.6.0-alpha2
+**Map mode: switching to a map reads each channel once**
+
+- **Activating a map took ~5.8 s (user report)** on a 25-tile synthetic map (2048² px, 6 channels). Every channel was decoded three times: the tiles were rendered at the canvas-size factor and again at the screen factor on the next draw (the full-resolution channels overflow the channel cache in between), and the per-tile contrast statistics read each TIFF once more.
+- **Activation now renders once, at the screen factor**, when the viewer is on screen (`_activate_map_mode` adopts the whole-map view).
+- **The per-tile statistics are computed from the raster the render has just decoded** (`ChannelLevelCache.peek_full`, `data_loader._channel_stat_values`), in parallel threads; the values are the same as before.
+- **The channels a render needs are decoded in parallel** before compositing (`ChannelLevelCache.prefetch`), for map tiles and single FOVs alike.
+- **Result** (before → after): map activation 5.8 → 1.9 s; first zoom-in into new tiles 410–620 → 315–480 ms. A zoom-in 2× right after zooming out (47 → 300 ms) had been fast only because the discarded first render left those tiles cached.
+- **Files:** edited `ueler/viewer/main_viewer.py`, `ueler/rendering/channel_cache.py`, `ueler/data_loader.py`, `tests/test_channel_level_cache.py`, `dev_note/issue_tracking/render_path_performance.md`, `dev_note/main_viewer.md`, `README.md`; added `tests/test_map_activation_reads.py` (5 tests).
+- Verified: `python -m unittest discover -s tests -t .` → **1522 tests, OK**.
+
 **Map mode: zooming back out to the whole map is drawn from memory**
 
 - **Zooming out to the whole map took 1.3–1.5 s every time (user report)** on a 25-tile synthetic map (2048² px, 6 channels): the rendered-tile cache held one entry per tile, so a few zoomed-in tiles evicted the overview, and re-rendering it decoded every channel of every tile from disk, since full-resolution channels for the whole map exceed the channel cache's budget.

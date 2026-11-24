@@ -184,6 +184,54 @@ class LevelCopyTests(unittest.TestCase):
         self.assertEqual((len(cache), cache.nbytes), (0, 0))
 
 
+class PrefetchTests(unittest.TestCase):
+    """Decoding a render's channels up front, through a caller-supplied map."""
+
+    def _sources(self, n=3, size=64):
+        return {f"ch{i}": _LazyArray(_image(size, size, seed=i)) for i in range(n)}
+
+    def test_prefetched_channels_are_served_without_decoding_again(self):
+        sources = self._sources()
+        cache = ChannelLevelCache(max_entry_fraction=1.0)
+        mapped = []
+
+        def map_fn(fn, items):
+            mapped.append(len(items))
+            return [fn(x) for x in items]
+
+        self.assertEqual(cache.prefetch("tile", sources, (0, 64, 0, 64), 4, map_fn), 3)
+        self.assertEqual(mapped, [3])
+        for ch, src in sources.items():
+            got = cache.read_region("tile", ch, src, (0, 64, 0, 64), 4)
+            np.testing.assert_array_equal(got, src._data[::4, ::4])
+            self.assertEqual(src.counter["compute"], 1)
+        self.assertEqual((cache.misses, cache.hits), (3, 3))
+
+    def test_only_channels_the_render_would_decode(self):
+        sources = self._sources()
+        cache = ChannelLevelCache(max_entry_fraction=1.0)
+        cache.read_region("tile", "ch0", sources["ch0"], (0, 64, 0, 64), 8)  # cached at full resolution
+        cache.read_region("tile", "ch1", sources["ch1"], (0, 64, 0, 64), 8)
+        cache._remove(("tile", "ch1", 1))  # only its factor-8 level copy is left
+        sources["mem"] = _image(seed=9)  # already in memory
+        self.assertEqual(cache.prefetch("tile", sources, (0, 64, 0, 64), 8), 0)  # one channel left: not worth it
+        self.assertEqual(sources["ch2"].counter["compute"], 0)
+        self.assertEqual(cache.prefetch("tile", self._sources(), (0, 64, 0, 64), 8), 3)
+
+    def test_disabled_cache_and_oversized_channels_are_skipped(self):
+        self.assertEqual(ChannelLevelCache(max_bytes=0).prefetch("t", self._sources(), (0, 64, 0, 64), 1), 0)
+        self.assertEqual(ChannelLevelCache(max_bytes=64).prefetch("t", self._sources(), None, 1), 0)
+
+    def test_peek_full_returns_the_decoded_raster_only_for_the_same_source(self):
+        src = _LazyArray(_image(64, 64))
+        cache = ChannelLevelCache(max_entry_fraction=1.0)
+        self.assertIsNone(cache.peek_full("tile", "CD3", src))
+        cache.read_region("tile", "CD3", src, (0, 64, 0, 64), 2)
+        np.testing.assert_array_equal(cache.peek_full("tile", "CD3", src), src._data)
+        self.assertIsNone(cache.peek_full("tile", "CD3", _LazyArray(src._data)))
+        self.assertEqual((cache.hits, cache.misses), (0, 1))
+
+
 class EngineIntegrationTests(unittest.TestCase):
     def test_render_is_identical_with_and_without_the_cache(self):
         channels = {"CD3": _image(seed=3), "CD8": _image(seed=4)}

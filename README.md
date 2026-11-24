@@ -157,6 +157,8 @@ For more details, see the [user guide](https://hartmannlab.github.io/UELer/lates
 ## New Update  
 ### **UELer v0.6.0-alpha2 Summary**
 
+- **Map mode opens about three times faster.** Switching to a map reads each image once instead of three times, so a 25-tile map (2048 × 2048 px, 6 channels) now appears in about 2 s instead of 6 s, and the first zoom into new tiles is about a quarter faster.
+
 - **Map mode: zooming back out to the whole map is near-instant.** The overview is now kept in memory while you zoom in and out, so returning to it drops from about 1.5 s to 40 ms on a 25-tile map, and changing contrast at the whole-map view from about 1.6 s to 50 ms.
 
 - **Faster over slow remote connections: choose JPEG or WebP frames.** `Advanced Settings → Frame format` sends zooms, FOV switches, channel changes and the sharp frame after a drag as JPEG or WebP, about a third of the PNG size (for example 1.4 MB → 0.44 MB per FOV switch on a large canvas). PNG stays the lossless default.

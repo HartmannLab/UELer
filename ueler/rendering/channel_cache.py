@@ -182,6 +182,60 @@ class ChannelLevelCache:
         y0, x0 = ymin // factor, xmin // factor
         return level[y0 : y0 + rows, x0 : x0 + cols]
 
+    def prefetch(self, fov: Hashable, sources, region_xy: Region, factor: int, map_fn=map) -> int:
+        """Decode, through *map_fn*, the channels ``read_region`` would decode.
+
+        *sources* maps channel to source array. Only channels that the next
+        ``read_region(fov, channel, source, region_xy, factor)`` would read at
+        full resolution are decoded; passing a thread pool's ``map`` decodes
+        them in parallel (TIFF decompression releases the GIL) instead of one
+        after another during the render. Returns the number decoded.
+        """
+        if self.max_bytes <= 0:
+            return 0
+        factor = max(1, int(factor))
+        xmin, _, ymin, _ = (int(v) for v in region_xy) if region_xy is not None else (0, 0, 0, 0)
+        aligned = not (xmin % factor or ymin % factor)
+        wanted = []
+        for channel, source in sources.items():
+            if source is None or not _is_lazy(source):
+                continue
+            shape = getattr(source, "shape", None)
+            if shape is None or len(shape) != 2:
+                continue
+            itemsize = np.dtype(getattr(source, "dtype", np.float64)).itemsize
+            if int(shape[0]) * int(shape[1]) * itemsize > self.max_entry_bytes:
+                continue
+            entry = self._entries.get((fov, channel, 1))
+            if entry is not None and entry[0] is source:
+                continue
+            level = self._levels.get((fov, channel, factor))
+            if (
+                level is not None and level[0] is source
+                and factor >= LEVEL_COPY_MIN_FACTOR and aligned and self.max_level_bytes > 0
+            ):
+                continue
+            wanted.append((channel, source))
+        if len(wanted) < 2:
+            return 0  # nothing to gain over the render's own read
+        decoded = list(map_fn(_materialise, [source for _, source in wanted]))
+        for (channel, source), array in zip(wanted, decoded):
+            self.misses += 1
+            self._store(fov, channel, 1, source, array)
+        return len(wanted)
+
+    def peek_full(self, fov: Hashable, channel: Hashable, source) -> Optional[np.ndarray]:
+        """The decoded full-resolution raster of *source*, if held; else ``None``.
+
+        For callers that need the whole channel right after a render decoded
+        it (map mode's per-tile contrast statistics), so they do not read the
+        file a second time. It does not count as a hit or a miss.
+        """
+        entry = self._entries.get((fov, channel, 1))
+        if entry is None or entry[0] is not source:
+            return None
+        return entry[1]
+
     # -- internals ------------------------------------------------------
     def _lookup(self, fov, channel, factor, source) -> Optional[np.ndarray]:
         key = (fov, channel, factor)

@@ -76,6 +76,7 @@ Pan frames include the second, post-message draw and PNG (see the first finding)
 7. **Done (Fix 7).** Coarse preview while the view is dragged, one sharp frame on release. Aimed at remote sessions and slower clients, where the PNG transfer and browser decode of each full-size frame dominate (0.5–1 s per pan step reported on a Surface Pro). A kernel-side cap on the device pixel ratio was ruled out: ipympl's front end sizes its canvas from the browser's own ratio and draws each frame unscaled, so a smaller frame would fill only part of the canvas.
 8. **Done (Fix 8).** Frames that replace most of the canvas can be sent as JPEG or WebP (Advanced Settings → Frame format), after the live timer showed a remote session spending ~4.4 s moving one 2.5 MB PNG frame.
 9. **Done (Fix 9).** Map mode: zooming back out to the whole map re-rendered every tile and re-decoded every channel; the tile cache is now budgeted by bytes and the channel cache keeps small level copies for coarse reads.
+10. **Done (Fix 10).** Map activation read every channel three times (two renders at different factors, plus the per-tile statistics); it now renders once at the screen factor, reduces the statistics from the decoded copy and decodes a tile's channels in parallel.
 
 ### Still to do on the harness
 
@@ -83,7 +84,7 @@ Pan frames include the second, post-message draw and PNG (see the first finding)
 
 - Cell-table operations: selection, Cell Gallery, AnnData write-back; tables over 1 M cells.
 - A run against remote data (e.g. BioImage Archive) and on the cluster, next to the local-SSD numbers.
-- Map mode now has `map_run.py` (Fix 9); the first activation of a map (~5 s for 25 tiles of 2048² × 6 channels, about a third of it the per-tile statistics) is still to be addressed.
+- Map mode now has `map_run.py` (Fix 9). Activation of a 25-tile map (2048² × 6 channels) went from ~5.8 s to ~1.9 s in Fix 10; what remains is decoding each channel once and its statistics.
 
 ---
 
@@ -594,3 +595,54 @@ The contrast change re-renders every tile (the tile keys include the contrast) a
 python -m unittest discover -s tests -t .
 ```
 - ✅ 1513 tests, OK
+
+---
+
+## **Update Summary: Fix 10 — map activation reads each channel once (commit TBD)**
+
+Reported: switching to map mode still took a while; the guess was the cost of setting up the Dask arrays. Profiling activation with `map_run.py` (25 FOVs of 2048² px, 6 channels) showed 5.8 s, little of it Dask's own overhead: the channel cache logged 300 misses for 150 channels, and the per-tile statistics read every TIFF a third time.
+
+---
+
+### **Actions Taken**
+- **Found the second render.**
+  `_activate_map_mode` picked the downsample factor from the canvas size alone (`select_downsample_factor`, factor 8 for a 10 240 px map), and `on_map_mode_toggle` rendered every tile at it. The next draw then found `_map_needs_initial_render` set, chose the screen factor (16 on this canvas) and rendered every tile again. By then the full-resolution channels (25 × 6 × 8 MiB = 1.2 GB) had overflowed the 512 MiB channel cache, so each one was decoded a second time.
+- **Activation renders once, at the screen factor, when the widget is on screen.**
+  After the canvas is set up, `_activate_map_mode` calls `adopt_current_view` (Fix 4), which sets the screen factor and records the whole-map view, and clears `_map_needs_initial_render`. The caller's render is then the only one; the next draw sees an unchanged view. Before the widget is shown, the flag is kept, since that render never reaches the browser and the first draw has to render.
+- **Statistics from the decoded copy.**
+  `_update_stats_for_visited_tile` ran `da.nanpercentile`/`da.nanmax` on the lazy channel, which reads the file again (its docstring claimed no I/O). `ChannelLevelCache.peek_full` returns the raster the render has just decoded, and `data_loader._channel_stat_values` reduces it with NumPy: the same 99.9th percentile and max, checked against the Dask tasks in the tests. The channels of a tile are reduced on a shared thread pool (`_channel_thread_pool`), since `np.percentile` releases the GIL (6 channels: 89 ms serial, 24 ms pooled; the Dask path took 53 ms without the read). A channel the cache did not hold keeps the Dask path.
+- **Channels of a tile decoded in parallel.**
+  `ChannelLevelCache.prefetch` decodes, through the same pool, exactly the channels the following `read_region` calls would decode at full resolution, and stores them; `_compose_fov_image` calls it before `render_fov_to_array`. The gain is modest (6 channels: ~65 → ~46 ms per tile), as decoding these TIFFs holds the GIL part of the time. It applies to every first read of a FOV or tile, not only to activation.
+- **Ruled out:** skipping or approximating the per-tile statistics. They set the contrast slider ranges, and a strided or histogram estimate would give different values from single-FOV mode; reducing the decoded copy keeps them identical.
+
+---
+
+### **Results**
+
+`map_run.py`, same machine and dataset, before (7db8e87) → after:
+
+| Action | Before | After |
+| --- | --- | --- |
+| Map activation (first visit of every tile) | 5.8 s | 1.9 s |
+| Channel decodes during activation | 300 | 150 |
+| First zoom-in 4× (new tiles) | 410–620 ms | 315–480 ms |
+| Zoom in 2× after zooming out | 47 ms | 300 ms |
+| Zoom out to the whole map; contrast change | 40–48 ms | 40–46 ms (unchanged) |
+
+The zoom-in 2× was fast before only because activation's wasted first render had left factor-8 tiles in the tile cache; it now costs what any first visit of tiles at a new factor costs. Of the remaining ~1.9 s, about 1.1 s is decoding and downsampling the 150 channels and about 0.6 s the statistics.
+
+---
+
+### **Files Changed**
+- `ueler/viewer/main_viewer.py` — `_activate_map_mode` adopts the screen view when on screen; `_update_stats_for_visited_tile` reduces the decoded copy; `_channel_thread_pool`; prefetch in `_compose_fov_image`.
+- `ueler/rendering/channel_cache.py` — `prefetch`, `peek_full`.
+- `ueler/data_loader.py` — `_channel_stat_values`.
+- `tests/test_channel_level_cache.py` — prefetch and `peek_full` tests (4); `tests/test_map_activation_reads.py` — new (5 tests).
+
+---
+
+### **Tests**
+```bash
+python -m unittest discover -s tests -t .
+```
+- ✅ 1522 tests, OK

@@ -38,6 +38,7 @@ from ueler.data_loader import (
     find_ome_tiff_files,
     _build_channel_stat_tasks,
     _apply_channel_stat_values,
+    _channel_stat_values,
 )
 from ueler.image_utils import (
     calculate_downsample_factor,
@@ -267,6 +268,24 @@ def _dedupe_channel_sequence(channels: Sequence[str]) -> Tuple[str, ...]:
         seen.add(name)
         ordered.append(name)
     return tuple(ordered)
+
+
+_CHANNEL_POOL = None
+
+
+def _channel_thread_pool():
+    """Threads for decoding channels and reducing them to contrast statistics.
+
+    Created on first use and shared. TIFF decompression and NumPy's percentile
+    release the GIL, so the channels of one FOV or map tile are processed in
+    parallel.
+    """
+    global _CHANNEL_POOL
+    if _CHANNEL_POOL is None:
+        from concurrent.futures import ThreadPoolExecutor
+
+        _CHANNEL_POOL = ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 1), thread_name_prefix="ueler-channels")
+    return _CHANNEL_POOL
 
 
 def _cached_channel_reader(cache, fov_name):
@@ -1219,6 +1238,14 @@ class ImageMaskViewer:
             self.on_downsample_factor_changed(factor)
         except Exception:
             pass
+        display = getattr(self, "image_display", None)
+        if display is not None and getattr(self, "initialized", False) and getattr(self, "_widget_displayed", False):
+            # The widget is on screen, so the caller's render reaches the
+            # browser: make it at the factor the screen needs and record the
+            # whole-map view, so the next draw does not render every tile a
+            # second time at another factor (and decode each channel again).
+            display._map_needs_initial_render = False
+            adopt_current_view(display)
         if self._debug:
             logger.debug("[INIT DEBUG] _activate_map_mode: DONE")
 
@@ -1334,8 +1361,10 @@ class ImageMaskViewer:
         """Lazily compute channel display stats for a single tile that has just been rendered.
 
         Called from ``_render_fov_region`` the first time a tile/channel pair is
-        visited.  The data array is already in ``self.image_cache`` so there is no
-        additional I/O — only a fast in-memory Dask reduction.  The resulting max
+        visited.  The render has just decoded each channel into
+        ``self.channel_level_cache``, so the reduction runs on that in-memory
+        copy; only a channel the cache could not hold is read from its lazy
+        array again.  The resulting max
         values are merged via ``merge_channel_max`` (keeps running maximum) and the
         contrast sliders are updated if the range grew.
 
@@ -1356,8 +1385,10 @@ class ImageMaskViewer:
             return
 
         task_list = []
-        task_meta = []  # list of (channel, dtype)
+        task_meta = []  # list of (channel, dtype) for task_list's pairs
+        decoded_meta = []  # list of (channel, dtype, decoded array)
         stats_key_prefix = f"{fov_name}\x00"
+        level_cache = getattr(self, "channel_level_cache", None)
 
         for ch in channels:
             key = stats_key_prefix + ch
@@ -1366,6 +1397,12 @@ class ImageMaskViewer:
             arr = img_entry.get(ch) if isinstance(img_entry, dict) else None
             if arr is None:
                 continue
+            # The render just decoded this channel into the channel cache;
+            # reduce that copy instead of reading the file again.
+            decoded = level_cache.peek_full(fov_name, ch, arr) if level_cache is not None else None
+            if decoded is not None:
+                decoded_meta.append((ch, getattr(arr, "dtype", None), decoded))
+                continue
             try:
                 pt, mt = _build_channel_stat_tasks(arr)
             except Exception:
@@ -1373,18 +1410,28 @@ class ImageMaskViewer:
             task_list.extend([pt, mt])
             task_meta.append((ch, getattr(arr, "dtype", None)))
 
-        if not task_list:
-            return
-
-        try:
-            results = _dask.compute(*task_list)
-        except Exception:
+        stats = []  # list of (channel, dtype, percentile, max)
+        if decoded_meta:
+            try:
+                pairs = list(_channel_thread_pool().map(_channel_stat_values, [d for _, _, d in decoded_meta]))
+            except Exception:
+                pairs = []
+            stats.extend((ch, dtype, pct, mx) for (ch, dtype, _), (pct, mx) in zip(decoded_meta, pairs))
+        if task_list:
+            try:
+                results = _dask.compute(*task_list)
+            except Exception:
+                results = ()
+            stats.extend(
+                (ch, dtype, results[i * 2], results[i * 2 + 1])
+                for i, (ch, dtype) in enumerate(task_meta)
+                if results
+            )
+        if not stats:
             return
 
         changed_channels = set()
-        for i, (ch, dtype) in enumerate(task_meta):
-            percentile_value = results[i * 2]
-            absolute_max = results[i * 2 + 1]
+        for ch, dtype, percentile_value, absolute_max in stats:
             try:
                 prev = self.channel_max_values.get(ch)
                 _apply_channel_stat_values(ch, percentile_value, absolute_max, dtype, self.channel_max_values)
@@ -4444,6 +4491,21 @@ class ImageMaskViewer:
                 downsample_factor,
                 region_ds,
             )
+
+        level_cache = getattr(self, "channel_level_cache", None)
+        if level_cache is not None and not skip_image_layer and isinstance(fov_images, dict):
+            # Decode the channels this render will read in parallel, rather
+            # than one after another inside the compositing loop.
+            try:
+                level_cache.prefetch(
+                    fov_name,
+                    {ch: fov_images.get(ch) for ch in selected_channels},
+                    region_xy,
+                    downsample_factor,
+                    _channel_thread_pool().map,
+                )
+            except Exception:
+                logger.debug("channel prefetch failed for %s", fov_name, exc_info=True)
 
         combined = render_fov_to_array(
             fov_name,

@@ -137,6 +137,19 @@ def _build_channel_stat_tasks(channel_image):
     return percentile_task, max_task
 
 
+def _channel_stat_values(channel_image) -> Tuple[float, float]:
+    """(99.9th percentile, max) of an in-memory channel.
+
+    The same values ``_build_channel_stat_tasks`` computes lazily, for a
+    raster that is already decoded. NumPy releases the GIL here, so several
+    channels can be reduced in parallel threads.
+    """
+    data = np.asarray(channel_image)
+    if np.issubdtype(data.dtype, np.integer):  # no NaN to skip
+        return float(np.percentile(data, 99.9)), float(data.max())
+    return float(np.nanpercentile(data, 99.9)), float(np.nanmax(data))
+
+
 def _apply_channel_stat_values(channel_name, percentile_value, absolute_max, dtype, channel_max_values) -> None:
     """Apply already-computed stat values to channel_max_values (no Dask computation)."""
     if percentile_value is None or np.isnan(percentile_value):
