@@ -155,7 +155,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 For more details, see the [user guide](https://hartmannlab.github.io/UELer/latest/tutorials/user-interface).
 
 ## New Update  
-### **UELer v0.6.0-alpha1 Summary**
+### **UELer v0.6.0-alpha2 Summary**
 
 - **Map mode: zooming back out to the whole map is near-instant.** The overview is now kept in memory while you zoom in and out, so returning to it drops from about 1.5 s to 40 ms on a 25-tile map, and changing contrast at the whole-map view from about 1.6 s to 50 ms.
 

@@ -544,7 +544,7 @@ python -m unittest discover -s tests -t .
 
 ---
 
-## **Update Summary: Fix 9 — map mode: zooming out to the whole map from memory (commit pending)**
+## **Update Summary: Fix 9 — map mode: zooming out to the whole map from memory (commit 1be8820)**
 
 Reported: in map mode, zooming back out to the whole map took a long time. Measured on a synthetic map (`tools/benchmark/map_run.py`, 25 FOVs of 2048² px on a 5 × 5 grid, 6 channels, map canvas 10 240 px, whole-map factor 16): 1.3–1.5 s every time the view returned to the whole map after zooming in, while returning to it with nothing in between took 12 ms. The channel cache counters showed ~150 misses per zoom-out, i.e. every channel of every tile decoded from disk again.
 

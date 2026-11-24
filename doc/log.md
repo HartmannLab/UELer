@@ -1,4 +1,4 @@
-### v0.6.0-alpha1
+### v0.6.0-alpha2
 **Map mode: zooming back out to the whole map is drawn from memory**
 
 - **Zooming out to the whole map took 1.3–1.5 s every time (user report)** on a 25-tile synthetic map (2048² px, 6 channels): the rendered-tile cache held one entry per tile, so a few zoomed-in tiles evicted the overview, and re-rendering it decoded every channel of every tile from disk, since full-resolution channels for the whole map exceed the channel cache's budget.
@@ -41,6 +41,7 @@
 - **Files:** edited `ueler/image_utils.py`, `ueler/viewer/image_display.py`, `ueler/viewer/main_viewer.py`, `tools/benchmark/run.py`, `tools/benchmark/compare.py`, `tools/benchmark/README.md`, `dev_note/main_viewer.md`, `dev_note/issue_tracking/render_path_performance.md`, `README.md`; added `tests/test_drag_preview.py` (15 tests), `dev_note/benchmarks/compare_fix7_vs_5e43164.{md,json}`.
 - Verified: `python -m unittest discover -s tests -t .` → **1489 tests, OK**.
 
+### v0.6.0-alpha1
 **Adding a channel and switching FOV render once instead of twice**
 
 - **Adding a channel rendered twice.** The render loads the new channel, the first load clamps the channel's contrast sliders, and each slider's observer started a second render nested inside the first. The render path now drops render requests made while it loads channels (it reads the slider values after the load, so its own image already includes the change).
