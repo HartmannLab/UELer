@@ -77,6 +77,8 @@ Pan frames include the second, post-message draw and PNG (see the first finding)
 
 ### Still to do on the harness
 
+- Real-device numbers: `ueler.viewer.latency_timer.LatencyTimer` (below, after Fix 7) times live sessions in the browser and the kernel; results from the Surface Pro and the remote setup are pending.
+
 - Cell-table operations: selection, Cell Gallery, AnnData write-back; tables over 1 M cells.
 - A run against remote data (e.g. BioImage Archive) and on the cluster, next to the local-SSD numbers.
 
@@ -357,7 +359,7 @@ python -m unittest discover -s tests -t .
 
 ---
 
-## **Update Summary: Fix 7 — coarse preview while dragging, sharp frame on release (commit pending)**
+## **Update Summary: Fix 7 — coarse preview while dragging, sharp frame on release (commit 4ff01d0)**
 
 On a Surface Pro the viewer was reported to lag 0.5–1 s behind each pan step, and on remote sessions too. By then the kernel spent about 200 ms on a Retina pan step of the large dataset, but every step still sent a full-size PNG of about 1–2.4 MB (frames are rendered at CSS size × device pixel ratio). On a remote link, and for a slower client that has to decode each frame, that transfer and decode dominate. A pan step only has to show where the view is going; the detail matters once the view stops.
 
@@ -416,3 +418,36 @@ On a standard 600 px canvas the steps are 33–50 % faster but barely smaller (w
 python -m unittest discover -s tests -t .
 ```
 - ✅ 1489 tests, OK
+
+---
+
+## **Update Summary: live latency timer for real devices (commit pending)**
+
+The harness measures kernel time and bytes on the development machine. What the 0.5–1 s lag reported on a Surface Pro and on a remote session consists of — kernel, network or the client's decode — cannot be read from it, and a larger canvas makes every frame bigger (on the large dataset at Retina, going from a 600 to a 1 000 CSS px canvas raised a sharp frame from ~1.1 to ~2.8 MB and its PNG encode from ~85 to ~230 ms). `LatencyTimer` measures a live session on the device itself, so the next fix can target the part that dominates there.
+
+---
+
+### **Actions Taken**
+- **Browser side.**
+  A script in the cell output hooks `URL.createObjectURL` and `HTMLImageElement.src`, which ipympl uses for every PNG frame, and records each frame's size, arrival and load (decoded) time; frames much smaller than the main canvas (other figures) are ignored. Capturing listeners on the document record presses, drags, releases and scrolls on an ipympl figure and changes on other widgets, with the event's own timestamp. It shows a live Markdown summary with a text box to copy, and `window.__uelerLatency.report()` in the console returns the same text.
+- **Kernel side.**
+  Wraps the canvas's `handle_event` (mouse input), `send_binary` (frame leaves the kernel, with its size), `get_diff_image` (PNG encode) and the viewer's `update_display` (render), and the comm class's `handle_msg` for widget changes. `stop()` restores all of them.
+- **Same grouping on both sides.**
+  `summarise_interactions` (Python) and its JavaScript twin group inputs into interactions (press-to-release drag, scroll, widget change; closed after 1.5 s quiet) and report for drags the frame interval, input-to-frame lag, frame size and release-to-last-frame time, and for widget changes input to first and last frame. The two were checked against the same event log.
+- **Ruled out:** a single clock for both sides. The kernel and the browser may run on different machines, so the network share is read as the difference between the two summaries, not per frame.
+
+---
+
+### **Files Changed**
+- `ueler/viewer/latency_timer.py` — new; `LatencyTimer`, `summarise_interactions`, `format_summary`, browser panel.
+- `tests/test_latency_timer.py` — new (6 tests).
+- `tools/benchmark/README.md` — pointer to the live timer.
+
+---
+
+### **Tests**
+```bash
+python -m unittest discover -s tests -t .
+```
+- ✅ 1495 tests, OK
+- Kernel side run against the harness's simulated browser (drags and a FOV change through the comm path); the browser script parsed with `node --check` and its summary checked against the Python one on the same events. Not yet run in a real browser.

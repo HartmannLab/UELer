@@ -1,4 +1,11 @@
 ### v0.6.0-alpha1
+**A live latency timer for measuring the viewer on the device you use it on**
+
+- **`ueler.viewer.latency_timer.LatencyTimer(viewer)`** times a live session at both ends. In the browser (a script in the cell output) it measures each press, drag, release, scroll or widget change until the resulting frame of the main canvas is decoded, with each frame's size and decode time; in the kernel it measures the same interactions until the frame is sent, with render and PNG-encode time. The difference is network transfer plus the browser's work, which the benchmark harness cannot see.
+- The browser panel shows a live summary and a text box to copy; `timer.report()` prints the kernel side and `timer.stop()` removes the hooks.
+- **Files:** added `ueler/viewer/latency_timer.py`, `tests/test_latency_timer.py` (6 tests); edited `tools/benchmark/README.md`, `dev_note/issue_tracking/render_path_performance.md`.
+- Verified: `python -m unittest discover -s tests -t .` → **1495 tests, OK**; kernel side run against the harness's simulated browser, browser summary checked against the Python one.
+
 **Panning sends a coarse preview while you drag and one sharp frame when you let go**
 
 - **Each pan step sent a full-size frame.** On a high-DPI screen that was 1–2.4 MB per step for a 2048² image; over a remote connection or on a slower client (0.5–1 s per step reported on a Surface Pro) the transfer and decode dominated.

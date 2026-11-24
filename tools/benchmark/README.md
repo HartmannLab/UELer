@@ -81,3 +81,17 @@ Network round-trip time, browser-side PNG decode and paint, and front-end widget
 ### Drag preview
 
 While a pan drag is in progress the viewer renders a coarse preview (`drag_preview_px`, 256 px across the view by default) and one sharp frame when the mouse is released. The pan rows therefore time the preview frames, and `release_latency_ms` / `release_kb` in the JSON (the "sharp frame after letting go" row in `compare.md`) time the sharp frame. `--drag-preview-px 0` turns the preview off, for a comparison with sharp frames throughout. `compare.md` also lists the KB sent until the correct image, the figure that matters on a remote connection.
+
+### On a real device
+
+The harness does not see network transfer or the browser. To time a live session on the device you use, run in the notebook (after `viewer` is shown):
+
+```python
+from ueler.viewer.latency_timer import LatencyTimer
+timer = LatencyTimer(viewer)   # browser panel appears below the cell
+# pan, zoom, release, switch FOV, add a channel ...
+timer.report()                 # kernel-side summary
+timer.stop()
+```
+
+The browser panel times each input until its frame is decoded on screen; `timer.report()` times the same interactions in the kernel. The difference is network plus browser.
