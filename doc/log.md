@@ -1,4 +1,8 @@
-### v0.6.0
+### v0.6.0-rc1
+**Release candidate for 0.6.0: a faster render path, JPEG/WebP frames for remote sessions, the live latency timer and faster map mode**
+
+- **Collects v0.6.0-alpha1 and v0.6.0-alpha2 plus the changes below** (the map activation speed-up and the frame format section in the manual). This candidate is published to TestPyPI so that the stable v0.6.0 can promote it, as `dev_note/release_procedure.md` requires.
+
 **Manual: the frame format setting**
 
 - **Documented Advanced Settings → Frame format:** in the manual: what PNG, JPEG and WebP trade, which frames go lossy (zoom, FOV switch, channel or contrast change, the sharp frame after a drag) and which stay PNG (tooltip, selection outlines, the drag preview), that exports are unaffected and that the setting is saved with the widget state. The "When It Feels Slow" list and the FAQ now point remote users to it.
