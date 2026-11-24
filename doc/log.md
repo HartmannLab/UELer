@@ -1,4 +1,9 @@
 ### v0.6.0
+**Manual: the frame format setting**
+
+- **Documented Advanced Settings → Frame format:** in the manual: what PNG, JPEG and WebP trade, which frames go lossy (zoom, FOV switch, channel or contrast change, the sharp frame after a drag) and which stay PNG (tooltip, selection outlines, the drag preview), that exports are unaffected and that the setting is saved with the widget state. The "When It Feels Slow" list and the FAQ now point remote users to it.
+- **Files:** edited `docs/tutorials/display-settings.md` (new section "Remote Sessions: Frame Format"), `docs/tutorials/user-interface.md`, `docs/faq.md`.
+
 **Map mode: switching to a map reads each channel once**
 
 - **Activating a map took ~5.8 s (user report)** on a 25-tile synthetic map (2048² px, 6 channels). Every channel was decoded three times: the tiles were rendered at the canvas-size factor and again at the screen factor on the next draw (the full-resolution channels overflow the channel cache in between), and the per-tile contrast statistics read each TIFF once more.

@@ -133,20 +133,35 @@ If the data has changed since — a field of view removed, a marker set deleted 
 
 ---
 
+## Remote Sessions: Frame Format
+
+When the kernel runs on another machine (a server, an HPC node, a remote VS Code session), every image you see is sent to your browser over that connection, and on a slow link the transfer, not the rendering, is what you wait for. **Advanced Settings → Frame format:** chooses the image format of those frames:
+
+- **PNG (lossless)** — the default. Exact pixels; the right choice when the kernel runs on your own machine.
+- **JPEG (smaller, lossy)** — about a third of the PNG size (for example 1.4 MB → 0.44 MB per FOV switch on a large canvas).
+- **WebP (smallest, lossy)** — similar to or smaller than JPEG. Listed only if your Pillow installation supports it.
+
+Only frames that replace most of the image go lossy: zooming, switching FOV, changing channels or contrast, and the sharp frame after you let go of a drag. Small updates (the hover tooltip, a selection outline) and the coarse preview shown while you drag stay PNG, so they keep crisp edges. The setting affects what the browser displays and nothing else: exported images and figures are rendered separately and stay lossless. It is saved with the rest of the [widget state](#saving-and-reusing-a-view).
+
+Lossy frames can show faint blocking around dim, fine structure. If you are judging such detail by eye, switch back to PNG for the moment, or zoom in.
+
+---
+
 ## When It Feels Slow
 
 In rough order of effect:
 
 1. **Check Downsample is on.** Off plus a large image means every pan re-reads full-resolution data.
 2. **Lower Cache Size.** If the kernel is swapping, nothing else you do will help. Use the arithmetic above to sanity-check the cache against your RAM.
-3. **Open fewer channels.** Compositing cost is linear in the number of visible channels, and every channel you open is held in memory for each cached FOV. Note that unchecking a channel's visibility skips its compositing but does not release it: loaded channel data stays with its cached FOV until that FOV is evicted from the cache.
-4. **In map mode, lower the tile limit.** UELer draws at most 80 uncached tiles per frame, nearest the viewport first. On a slow machine, fewer is smoother:
+3. **On a remote kernel, switch the frame format to JPEG or WebP** ([above](#remote-sessions-frame-format)). If the delay grows with the size of the viewer on screen, the connection is the bottleneck.
+4. **Open fewer channels.** Compositing cost is linear in the number of visible channels, and every channel you open is held in memory for each cached FOV. Note that unchecking a channel's visibility skips its compositing but does not release it: loaded channel data stays with its cached FOV until that FOV is evicted from the cache.
+5. **In map mode, lower the tile limit.** UELer draws at most 80 uncached tiles per frame, nearest the viewport first. On a slow machine, fewer is smoother:
 
     ```python
     viewer._map_render_tile_limit = 40
     ```
 
-5. **Expect the first pan across a map to be slower.** Channel statistics are computed per tile on first render, deliberately, rather than up front — computing them for the whole map at launch is what would otherwise exhaust memory on large datasets. It settles once you have covered the ground.
+6. **Expect the first pan across a map to be slower.** Channel statistics are computed per tile on first render, deliberately, rather than up front — computing them for the whole map at launch is what would otherwise exhaust memory on large datasets. It settles once you have covered the ground.
 
 ---
 

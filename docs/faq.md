@@ -208,6 +208,10 @@ present, the **Map mode** toggle and **Select map:** dropdown appear. See
 imported has no effect — even if you set it before calling `run_viewer`. Set it in the shell before
 starting the kernel, or restart the kernel after setting it.
 
+### The viewer lags when the kernel runs on a remote machine
+
+Every frame travels from the kernel to your browser, and on a slow link that transfer dominates. Set **Advanced Settings → Frame format:** to **JPEG** or **WebP**: frames shrink to about a third of their PNG size. Exported images are not affected. See [Display Settings](tutorials/display-settings.md#remote-sessions-frame-format).
+
 ### Map mode renders slowly for large datasets
 
 Map mode limits how many *uncached* tiles it draws per frame (default 80), keeping the ones nearest
