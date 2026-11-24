@@ -26,7 +26,7 @@ __all__ = [
 	"load_bia_cell_table",
 ]
 
-__version__ = "0.6.0rc1"
+__version__ = "0.6.0"
 
 
 def __getattr__(name: str) -> Any:

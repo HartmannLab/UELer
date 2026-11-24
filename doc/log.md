@@ -1,3 +1,8 @@
+### v0.6.0
+**Stable release: a faster render path, JPEG/WebP frames for remote sessions, the live latency timer and faster map mode**
+
+- **Promotes v0.6.0-rc1 unchanged.** Only the version declarations and release notes differ from the candidate on TestPyPI.
+
 ### v0.6.0-rc1
 **Release candidate for 0.6.0: a faster render path, JPEG/WebP frames for remote sessions, the live latency timer and faster map mode**
 
