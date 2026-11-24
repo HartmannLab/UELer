@@ -57,6 +57,12 @@ class SelectionHubTests(unittest.TestCase):
         self.hub.mark_delivered("image")
         self.assertEqual(self.hub.current.delivered, {"gallery", "image"})
 
+    def test_mark_removed(self):
+        self.hub.publish({1}, "heatmap", {"gallery", "image"})
+        self.hub.mark_removed("gallery")
+        self.assertEqual(self.hub.current.delivered, {"image"})
+        self.assertEqual(len(self.hub.current), 1)
+
     def test_mark_delivered_without_a_selection_does_nothing(self):
         self.hub.mark_delivered("image")
         self.assertEqual(self.seen, [])
@@ -75,11 +81,15 @@ class SelectionBarTests(unittest.TestCase):
         self.assertEqual(self.bar.actions.layout.display, "none")
 
     def test_summary_and_delivered_targets(self):
-        self.bar.show_selection("<b>3 cells</b> · scatter plot", {"gallery"}, True)
+        self.bar.show_selection("<b>3 cells</b> · scatter plot", {"gallery"}, True, "plots")
         self.assertIn("3 cells", self.bar.text.value)
         self.assertEqual(self.bar.actions.layout.display, "flex")
-        self.assertEqual(self.bar.buttons["gallery"].description, "Gallery ✓")
-        self.assertEqual(self.bar.buttons["image"].description, "Image")
+        gallery, image, plots = (self.bar.buttons[t] for t in ("gallery", "image", "plots"))
+        self.assertEqual((gallery.description, gallery.disabled), ("Gallery ✓", False))
+        self.assertIn("Remove", gallery.tooltip)
+        self.assertEqual((image.description, image.disabled), ("Image", False))
+        self.assertEqual((plots.description, plots.disabled), ("Plots ✓", True))
+        self.assertIn("Selected in the plots", plots.tooltip)
 
     def test_message_overrides_the_summary_until_removed(self):
         self.bar.show_selection("<b>3 cells</b>", (), True)
@@ -253,6 +263,70 @@ class ViewerSummaryAndActionsTests(unittest.TestCase):
         self.histogram.clear_selection.assert_called_once()
         self.assertEqual(len(self.viewer.selection_hub.current), 0)
         self.assertEqual(self.bar.actions.layout.display, "none")
+
+    def test_second_click_unlinks_the_gallery(self):
+        self.viewer.selection_hub.publish({0}, "histogram")
+        self.viewer.toggle_selection_target("gallery")
+        self.assertEqual(self.bar.buttons["gallery"].description, "Gallery ✓")
+        self.viewer.toggle_selection_target("gallery")
+        self.assertEqual(self.gallery.set_selected_cells.call_args_list[-1], mock.call([]))
+        self.assertNotIn("gallery", self.viewer.selection_hub.current.delivered)
+        self.assertEqual(self.bar.buttons["gallery"].description, "Gallery")
+        self.assertEqual(len(self.viewer.selection_hub.current), 1)  # the selection itself stays
+
+    def test_second_click_unlinks_the_image(self):
+        self.viewer.image_display.selected_masks_label = {_selection("fov1", 1)}
+        self.viewer.selection_hub.publish({0}, "histogram", {"image"})
+        self.viewer.toggle_selection_target("image")
+        self.viewer.image_display.clear_patches.assert_called_once()
+        self.assertIn("not outlined in the image", self.bar.text.value)
+
+    def test_second_click_unlinks_the_plots(self):
+        self.viewer.selection_hub.publish({0}, "image lasso", {"image", "plots"})
+        self.viewer.toggle_selection_target("plots")
+        self.chart._commit_scatter_selection.assert_called_once_with(set(), push_highlight=False, origin="hub")
+        self.histogram.show_external_selection.assert_called_once_with(set(), push_highlight=False)
+        self.assertNotIn("plots", self.viewer.selection_hub.current.delivered)
+
+    def test_the_source_view_cannot_be_unlinked(self):
+        self.viewer.selection_hub.publish({0}, "scatter")
+        button = self.bar.buttons["plots"]
+        self.assertEqual(button.description, "Plots ✓")
+        self.assertTrue(button.disabled)
+        self.viewer.toggle_selection_target("plots")
+        self.chart._commit_scatter_selection.assert_not_called()
+        self.assertFalse(self.bar.buttons["image"].disabled)
+
+    def test_image_source_shows_image_as_selected_there(self):
+        self.viewer.selection_hub.publish({0}, "image click")
+        self.assertTrue(self.bar.buttons["image"].disabled)
+        self.assertNotIn("not outlined", self.bar.text.value)
+
+    def test_clear_asks_first(self):
+        dialog = mock.Mock()
+        self.viewer.ui_component.confirm_dialog = dialog
+        self.viewer.selection_hub.publish({0, 2}, "histogram", {"gallery"})
+        self.viewer.ask_clear_selection()
+        dialog.ask.assert_called_once()
+        message, on_confirm = dialog.ask.call_args.args
+        self.assertIn("2 cells", message)
+        self.assertIn("cannot be undone", message)
+        self.assertEqual(dialog.ask.call_args.kwargs["confirm_label"], "Unselect")
+        self.assertEqual(len(self.viewer.selection_hub.current), 2)  # nothing cleared yet
+        on_confirm()
+        self.assertEqual(len(self.viewer.selection_hub.current), 0)
+        self.assertEqual(self.gallery.set_selected_cells.call_args_list[-1], mock.call([]))
+
+    def test_clear_without_a_dialog_clears_directly(self):
+        self.viewer.selection_hub.publish({0}, "histogram")
+        self.viewer.ask_clear_selection()
+        self.assertEqual(len(self.viewer.selection_hub.current), 0)
+
+    def test_clear_with_nothing_selected_does_not_ask(self):
+        dialog = mock.Mock()
+        self.viewer.ui_component.confirm_dialog = dialog
+        self.viewer.ask_clear_selection()
+        dialog.ask.assert_not_called()
 
     def test_image_selection_publishes_its_cell_indices(self):
         self.viewer.label_key = "label"

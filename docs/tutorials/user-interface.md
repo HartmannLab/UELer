@@ -116,9 +116,9 @@ The row with **Lasso Select** also shows the current cell selection, whichever v
 - **Image:** outlines the cells in the image.
 - **Gallery:** shows them in the Gallery.
 - **Plots:** selects them in the scatter plot and histogram.
-- **✕:** clears the selection in the image, the plots and the bar.
+- **✕:** unselects everything: the image, the plots, the Gallery and the bar. It asks first, because this cannot be undone.
 
-A button with **✓** already shows the selection, through a link box or an earlier click. The buttons are one-off; the **Linked plugins** boxes in each plot keep forwarding every new selection automatically. A selection made in the image belongs to its FOV and is cleared on a FOV switch; one from a plot stays, and the bar's FOV count follows the FOV shown. The same row carries messages, such as the lasso instructions or why a loop or **Trace** found no cells.
+A button with **✓** shows the selection already, through a link box or an earlier click. Click it again to take the selection back out of that view; the selection itself stays in the bar, so you can send it there again. The button of the view the selection was made in shows **✓** greyed out: you cannot unlink a selection from where it was made, only unselect it with **✕**. The buttons act once; the **Linked plugins** boxes in each plot keep forwarding every new selection automatically, so a view you unlinked receives the next selection from a linked plot again. A selection made in the image belongs to its FOV and is cleared on a FOV switch; one from a plot stays, and the bar's FOV count follows the FOV shown. The same row carries messages, such as the lasso instructions or why a loop or **Trace** found no cells.
 
 ---
 

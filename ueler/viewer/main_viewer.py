@@ -1645,7 +1645,7 @@ class ImageMaskViewer:
         in_fov = self.cells_in_shown_fov(selection.indices)
         if in_fov is not None:
             text += f" · {in_fov:,} in this FOV"
-            if in_fov and "image" not in selection.delivered:
+            if in_fov and not selection.shows_in("image"):
                 text += ", not outlined in the image"
         return text
 
@@ -1655,7 +1655,12 @@ class ImageMaskViewer:
             return
         if selection.indices and not getattr(getattr(self, "image_display", None), "_lasso_active", False):
             bar.set_message("")  # a new selection supersedes an older message
-        bar.show_selection(self._selection_summary(selection), selection.delivered, bool(selection.indices))
+        bar.show_selection(
+            self._selection_summary(selection),
+            selection.delivered,
+            bool(selection.indices),
+            selection.source_target,
+        )
 
     def refresh_selection_bar(self) -> None:
         """Re-read the counts, e.g. after a FOV switch."""
@@ -1665,10 +1670,51 @@ class ImageMaskViewer:
         bar = getattr(getattr(self, "ui_component", None), "selection_bar", None)
         if bar is None:
             return
-        bar.on_action("image", self.send_selection_to_image)
-        bar.on_action("gallery", self.send_selection_to_gallery)
-        bar.on_action("plots", self.send_selection_to_plots)
-        bar.on_action("clear", self.clear_selection_everywhere)
+        for target in ("image", "gallery", "plots"):
+            bar.on_action(target, lambda t=target: self.toggle_selection_target(t))
+        bar.on_action("clear", self.ask_clear_selection)
+
+    def toggle_selection_target(self, target: str) -> None:
+        """A bar button: send the selection to *target*, or take it back out.
+
+        The view the selection was made in is never unlinked (its button is
+        disabled); ✕ is the way to drop the selection itself.
+        """
+        selection = self.selection_hub.current
+        if not selection.indices or target == selection.source_target:
+            return
+        actions = {
+            "image": (self.send_selection_to_image, self.remove_selection_from_image),
+            "gallery": (self.send_selection_to_gallery, self.remove_selection_from_gallery),
+            "plots": (self.send_selection_to_plots, self.remove_selection_from_plots),
+        }
+        send, remove = actions[target]
+        if target in selection.delivered:
+            remove()
+        else:
+            send()
+
+    def remove_selection_from_image(self) -> None:
+        image_display = getattr(self, "image_display", None)
+        if image_display is not None and image_display.selected_masks_label:
+            image_display.clear_patches()
+        self.selection_hub.mark_removed("image")
+
+    def remove_selection_from_gallery(self) -> None:
+        gallery = getattr(getattr(self, "SidePlots", None), "cell_gallery_output", None)
+        if gallery is not None:
+            gallery.set_selected_cells([])
+        self.selection_hub.mark_removed("gallery")
+
+    def remove_selection_from_plots(self) -> None:
+        side = getattr(self, "SidePlots", None)
+        chart = getattr(side, "chart_output", None)
+        if chart is not None and hasattr(chart, "_commit_scatter_selection"):
+            chart._commit_scatter_selection(set(), push_highlight=False, origin="hub")
+        histogram = getattr(side, "histogram_output", None)
+        if histogram is not None and hasattr(histogram, "show_external_selection"):
+            histogram.show_external_selection(set(), push_highlight=False)
+        self.selection_hub.mark_removed("plots")
 
     def send_selection_to_image(self) -> None:
         selection = self.selection_hub.current
@@ -1700,8 +1746,34 @@ class ImageMaskViewer:
             histogram.show_external_selection(set(selection.indices), push_highlight=False)
         self.selection_hub.mark_delivered("plots")
 
+    def ask_clear_selection(self) -> None:
+        """The bar's ✕: confirm, then unselect everywhere.
+
+        Clearing drops a selection that may have taken several gates or loops to
+        build, and there is no undo, so it goes through the shared dialog. With
+        no front end to ask with, it clears directly, as deleting a marker set
+        does: the selection lives only in this session.
+        """
+        selection = self.selection_hub.current
+        if not selection.indices:
+            return
+        count = len(selection)
+        asked = self.confirm(
+            f"The selection of <b>{count:,} {'cell' if count == 1 else 'cells'}</b> "
+            f"({html_lib.escape(selection.source_label)}) will be removed from the image, "
+            "the plots and the Gallery. This cannot be undone.",
+            self.clear_selection_everywhere,
+            title="Unselect everything?",
+            confirm_label="Unselect",
+        )
+        if not asked:
+            self.clear_selection_everywhere()
+
     def clear_selection_everywhere(self) -> None:
-        """The bar's ✕: clear the image, the plots and the current selection."""
+        """Clear the image, the plots, the Gallery and the current selection."""
+        gallery = getattr(getattr(self, "SidePlots", None), "cell_gallery_output", None)
+        if gallery is not None and "gallery" in self.selection_hub.current.delivered:
+            gallery.set_selected_cells([])
         image_display = getattr(self, "image_display", None)
         if image_display is not None and image_display.selected_masks_label:
             image_display.clear_patches()

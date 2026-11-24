@@ -149,3 +149,42 @@ The maintainer asked to try the global selection before the colour work, to see 
 - **"Gallery ✓" is only partly true above the Gallery's cell limit.** The Gallery samples a random subset when a selection exceeds **Max displayed cells** and only logs that. The bar should say "Gallery ✓ (20 of 35 shown)".
 - **Annotate… is not in the bar yet.** The Cell Table Editor acts on the image's `selected_masks_label` only. A selection from a plot would have to be pushed into the image first, and in single-FOV mode that keeps only the cells of the FOV shown. This needs the editor to accept cell-table indices, which belongs to phase 2.
 - **The heatmap's image highlight (`highlight_cells`) does not publish:** the FOV-switch re-apply calls it too, and cannot be told apart from a user action without a flag.
+
+## **Update Summary: Unlink by clicking again; ✕ asks first (uncommitted)**
+
+Follow-up after trying the bar: a selection could be sent to a view but not taken back out of it, and ✕ dropped a selection that may have taken several gates to build, without asking.
+
+---
+
+### **Actions Taken**
+- **The target buttons toggle:**
+  `toggle_selection_target(target)` sends the selection when the target does not show it, and removes it when it does:
+  - **Image:** `clear_patches`.
+  - **Gallery:** `set_selected_cells([])`.
+  - **Plots:** scatter and histogram emptied with `origin="hub"` / `push_highlight=False`, so nothing is pushed back.
+  
+  `SelectionHub.mark_removed` drops the target from `delivered`. The selection itself stays in the bar and can be sent again.
+- **The source view is not unlinkable:**
+  `CellSelection.source_target` maps image sources to `image` and scatter/histogram to `plots` (the heatmap is not a target). That button shows ✓, is disabled, and its tooltip says "Selected in the …". Unlinking a selection from where it was made would delete it, which is what ✕ is for. `shows_in()` counts the source view, so an image-made selection is never called "not outlined in the image".
+- **✕ goes through the shared confirmation dialog (#139):**
+  "Unselect everything?", naming the cell count and source, with **Unselect** and **Cancel**. Only **Unselect** runs `clear_selection_everywhere`, which now also empties the Gallery when the selection was delivered there. Without a front end (`confirm` returns `False`) it clears directly, following the marker-set delete: the selection lives only in this session, and a dead button would be worse.
+- **Known interaction, kept:**
+  a plot's link boxes still forward every new selection from that plot. A view unlinked in the bar therefore receives the next selection from a linked plot again. Clearing the plots (unlinking Plots, or ✕) can also empty the Gallery through a plot's Gallery link, because clearing `selected_indices` is forwarded like any other change. Both follow from keeping the link boxes in phase 1.
+
+---
+
+### **Files Changed**
+- `ueler/viewer/selection.py` — `SOURCE_TARGETS`, `CellSelection.source_target` / `shows_in`, `SelectionHub.mark_removed`.
+- `ueler/viewer/selection_bar.py` — per-button state: ✓, disabled for the source, tooltips for send / remove / selected here.
+- `ueler/viewer/main_viewer.py` — `toggle_selection_target`, `remove_selection_from_image` / `_gallery` / `_plots`, `ask_clear_selection`; `clear_selection_everywhere` also clears the Gallery.
+- `tests/test_selection_hub.py` — 37 tests (unlink per target, source disabled, ✕ asks / clears without a dialog / does nothing with no selection).
+- `docs/tutorials/user-interface.md` — the selection bar section.
+
+---
+
+### **Tests**
+```bash
+python -m unittest discover -s tests -t .
+```
+- ✅ 1573 tests, OK
+- Real viewer: the toggle sequence and both dialog answers behaved as described in `doc/log.md`.

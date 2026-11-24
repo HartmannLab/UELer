@@ -9,7 +9,8 @@ latest, so no single place could say what is selected or offer to send it on.
 :class:`SelectionHub` is that record. Every source publishes to it after a
 selection the user made; the most recent one wins, as the image highlight
 already does (#119). It also notes which views have received the selection
-(``delivered``), so the selection bar can show what is already done.
+(``delivered``), so the selection bar can show what is already done and take it
+back out of a view (``mark_removed``).
 
 The hub does not replace the views' own copies (``selected_masks_label``, each
 plot's ``selected_indices``); the link boxes keep forwarding as before. It sits
@@ -33,6 +34,15 @@ SOURCE_LABELS = {
 #: Views a selection can be delivered to.
 TARGETS = ("image", "gallery", "plots")
 
+#: The view each source belongs to. That view holds the selection by making it,
+#: so it cannot be unlinked from it; the heatmap is not one of the targets.
+SOURCE_TARGETS = {
+    "image click": "image",
+    "image lasso": "image",
+    "scatter": "plots",
+    "histogram": "plots",
+}
+
 
 @dataclass(frozen=True)
 class CellSelection:
@@ -48,6 +58,15 @@ class CellSelection:
     @property
     def source_label(self) -> str:
         return SOURCE_LABELS.get(self.source, self.source)
+
+    @property
+    def source_target(self) -> str:
+        """The target view the selection was made in, or ``""``."""
+        return SOURCE_TARGETS.get(self.source, "")
+
+    def shows_in(self, target: str) -> bool:
+        """Whether *target* shows the selection, by delivery or as its source."""
+        return target in self.delivered or target == self.source_target
 
 
 class SelectionHub:
@@ -83,6 +102,15 @@ class SelectionHub:
             return
         self.current = CellSelection(
             self.current.indices, self.current.source, self.current.delivered | {target}
+        )
+        self._notify()
+
+    def mark_removed(self, target: str) -> None:
+        """Record that *target* no longer shows the current selection."""
+        if target not in self.current.delivered:
+            return
+        self.current = CellSelection(
+            self.current.indices, self.current.source, self.current.delivered - {target}
         )
         self._notify()
 

@@ -3,7 +3,8 @@
 One row, shared with the **Lasso Select** toggle: a line of text and four
 buttons. The text says what is selected (count, source, how many in the FOV
 shown) or carries a message (lasso armed, why a loop found nothing). The buttons
-send the current selection to the image, the Gallery or the plots, or clear it.
+send the current selection to the image, the Gallery or the plots, and a second
+click on a linked (✓) button takes it back out of that view; ✕ clears it.
 
 It is a plain object, not a ``Widget`` subclass: ``save_widget_states`` walks
 ``vars(ui_component)`` and persists every widget's ``.value``, and the bar's
@@ -37,18 +38,20 @@ class SelectionBar:
     """Text plus Image / Gallery / Plots / clear buttons; see the module doc."""
 
     LABELS = {"image": "Image", "gallery": "Gallery", "plots": "Plots"}
+    _PLACES = {"image": "image", "gallery": "Gallery", "plots": "plots"}
+    _SEND_TIPS = {
+        "image": "Outline the selected cells in the image",
+        "gallery": "Show the selected cells in the Gallery",
+        "plots": "Highlight the selected cells in the scatter plot and histogram",
+    }
 
     def __init__(self, toggle) -> None:
         self.text = HTML(
             value="",
             layout=Layout(flex="1 1 auto", min_width="0", overflow="hidden", margin="0 0 0 8px"),
         )
-        self.buttons = {
-            "image": _button("Image", "Outline the selected cells in the image"),
-            "gallery": _button("Gallery", "Show the selected cells in the Gallery"),
-            "plots": _button("Plots", "Highlight the selected cells in the scatter plot and histogram"),
-        }
-        self.clear_button = _button("✕", "Clear the selection everywhere")
+        self.buttons = {target: _button(label, self._SEND_TIPS[target]) for target, label in self.LABELS.items()}
+        self.clear_button = _button("✕", "Unselect everything (asks first)")
         self.actions = HBox(
             [*self.buttons.values(), self.clear_button],
             layout=Layout(display="none", gap="4px", flex="0 0 auto"),
@@ -92,14 +95,35 @@ class SelectionBar:
         self._message_is_warning = bool(warning)
         self._render()
 
-    def show_selection(self, summary: str, delivered: Iterable[str] = (), has_selection: Optional[bool] = None) -> None:
-        """Show the selection *summary* and which targets already have it."""
+    def show_selection(
+        self,
+        summary: str,
+        delivered: Iterable[str] = (),
+        has_selection: Optional[bool] = None,
+        source_target: str = "",
+    ) -> None:
+        """Show the selection *summary* and the state of each target button.
+
+        A target in *delivered* is linked: its button shows ✓ and a click takes
+        the selection back out of that view. *source_target* is the view the
+        selection was made in; its button shows ✓ too but is disabled, since
+        unlinking a selection from its own source would delete it (✕ does that).
+        """
         self._summary = summary or ""
         delivered = set(delivered)
         for target, button in self.buttons.items():
-            done = target in delivered
-            button.description = f"{self.LABELS[target]} ✓" if done else self.LABELS[target]
-            button.button_style = "success" if done else ""
+            label = self.LABELS[target]
+            is_source = target == source_target
+            linked = is_source or target in delivered
+            button.description = f"{label} ✓" if linked else label
+            button.button_style = "success" if linked else ""
+            button.disabled = is_source
+            if is_source:
+                button.tooltip = f"Selected in the {self._PLACES[target]}"
+            elif linked:
+                button.tooltip = f"Remove the selection from the {self._PLACES[target]}"
+            else:
+                button.tooltip = self._SEND_TIPS[target]
         active = bool(self._summary) if has_selection is None else bool(has_selection)
         self.actions.layout.display = "flex" if active else "none"
         self._render()
