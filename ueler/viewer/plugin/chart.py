@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html as html_lib
 import itertools
 import logging
 import os
@@ -41,6 +42,13 @@ from .scatter_widget import ScatterPlotWidget
 
 _SELECTION_NOTICE = (
     "<i>No scatter plots generated yet. Choose axes, then click <b>Plot</b>.</i>"
+)
+
+#: Shown above the plots while nothing is selected. The plots open in pan/zoom
+#: mode, so a plain drag pans; this is the one place that says how to lasso.
+_LASSO_TIP = (
+    "To select cells, pick the lasso in a plot's toolbar and drag around the points, "
+    "or hold <b>Shift</b> and drag."
 )
 
 # The pairwise matrix is rendered the same way ``jscatter.compose`` renders its
@@ -116,6 +124,10 @@ class ChartDisplay(PluginBase):
             ),
             layout=Layout(width="100%"),
         )
+
+        # One line above the plots: how to lasso, what a selection reached, or
+        # why the plots may be blank (see _update_selection_status).
+        self._selection_status = HTML(value="", layout=Layout(width="100%"))
 
         self._wire_events()
         self._build_layout()
@@ -255,7 +267,7 @@ class ChartDisplay(PluginBase):
             layout=Layout(width="100%", gap="12px"),
         )
         self.plot_section = VBox(
-            children=[self._plot_host],
+            children=[self._selection_status, self._plot_host],
             layout=Layout(width="100%", flex="1 1 auto"),
         )
 
@@ -364,6 +376,7 @@ class ChartDisplay(PluginBase):
         self._commit_scatter_selection(
             indices,
             focus_single=(origin == "widget"),
+            origin="scatter" if origin == "widget" else "external",
         )
 
     def _on_scatter_hover(self, index: Optional[Union[int, str]]) -> None:
@@ -371,9 +384,9 @@ class ChartDisplay(PluginBase):
         return None
 
     def _apply_external_selection(
-        self, indices: Iterable[Union[int, str]]
+        self, indices: Iterable[Union[int, str]], *, origin: str = "external"
     ) -> None:
-        self._commit_scatter_selection(indices)
+        self._commit_scatter_selection(indices, origin=origin)
 
     def _commit_scatter_selection(
         self,
@@ -381,6 +394,7 @@ class ChartDisplay(PluginBase):
         *,
         focus_single: bool = False,
         push_highlight: bool = True,
+        origin: str = "external",
     ) -> Set[Union[int, str]]:
         """Apply *indices* to every scatter view and publish them.
 
@@ -400,7 +414,76 @@ class ChartDisplay(PluginBase):
             if focus_single and len(normalized) == 1:
                 self._focus_main_viewer(next(iter(normalized)))
             self._sync_mask_highlights_from_selection(normalized)
+        self._update_selection_status(normalized, origin)
         return normalized
+
+    # ------------------------------------------------------------------
+    # Status line above the plots
+    # ------------------------------------------------------------------
+    def _set_selection_status(self, text: str, *, warning: bool = False) -> None:
+        if not text:
+            self._selection_status.value = ""
+            return
+        color = "var(--jp-warn-color0, #b45309)" if warning else "var(--jp-ui-font-color2, #616161)"
+        self._selection_status.value = f'<span style="color: {color}; font-size: 12px; line-height: 1.3;">{text}</span>'
+
+    def _frontend_problem(self) -> str:
+        """The anywidget front-end problem found at start-up, as HTML, or ``""``."""
+        status = getattr(self.main_viewer, "widget_frontend_status", None)
+        if status is None or not getattr(status, "is_problem", False):
+            return ""
+        return (
+            "<b>The plots may show as empty boxes:</b> "
+            + html_lib.escape(str(getattr(status, "message", "")))
+        )
+
+    def _cells_in_shown_fov(self, indices: Set[Union[int, str]]) -> Optional[int]:
+        """How many of *indices* belong to the FOV on screen; ``None`` if unknown."""
+        viewer = self.main_viewer
+        if getattr(viewer, "_map_mode_active", False):
+            return None
+        try:
+            current = viewer.ui_component.image_selector.value
+            table = viewer.cell_table
+            rows = table.loc[table.index.isin(list(indices)), viewer.fov_key]
+            return int((rows.astype(str) == str(current)).sum())
+        except Exception:
+            return None
+
+    def _update_selection_status(self, indices: Set[Union[int, str]], origin: str) -> None:
+        """Say what a selection reached, or how to make one.
+
+        *origin* is ``"scatter"`` (a lasso or click in a plot), ``"image"``
+        (Follow main viewer) or ``"external"`` (Trace, heatmap, a linked plot).
+        """
+        problem = self._frontend_problem()
+        if problem and self._scatter_views:
+            self._set_selection_status(problem, warning=True)
+            return
+        if not indices:
+            self._set_selection_status(_LASSO_TIP if self._scatter_views else "")
+            return
+        count = len(indices)
+        text = f"<b>{count} {'cell' if count == 1 else 'cells'} selected.</b>"
+        if origin == "image":
+            self._set_selection_status(text + " They are the cells selected in the image.")
+            return
+        ui = self.ui_component
+        image_linked = bool(ui.mv_linked_checkbox.value)
+        gallery_linked = bool(ui.cell_gallery_linked_checkbox.value)
+        if image_linked:
+            in_fov = self._cells_in_shown_fov(indices)
+            if in_fov is None:
+                text += " Outlined in the image."
+            elif in_fov == 0:
+                text += " None of them is in the FOV shown, so the image outlines nothing; switch FOV to see them."
+            else:
+                text += f" {in_fov} of them {'is' if in_fov == 1 else 'are'} in the FOV shown and outlined in the image."
+        if gallery_linked:
+            text += " Shown in the Gallery."
+        if not image_linked and not gallery_linked:
+            text += " To see them in the image or the Gallery, tick the boxes under <b>Linked plugins</b>."
+        self._set_selection_status(text)
 
     def apply_color_mapping(
         self,
@@ -449,7 +532,7 @@ class ChartDisplay(PluginBase):
         if not self.ui_component.follow_mv_checkbox.value:
             return
         indices = _chart_common.viewer_selection_indices(self.main_viewer)
-        self._commit_scatter_selection(indices, push_highlight=False)
+        self._commit_scatter_selection(indices, push_highlight=False, origin="image")
 
     def _on_follow_mv_change(self, _change) -> None:
         """Apply the selection already on screen when the link is switched on.
@@ -468,11 +551,13 @@ class ChartDisplay(PluginBase):
         selections = list(self.main_viewer.image_display.selected_masks_label)
         if not selections:
             _logger.warning("No cells selected.")
+            self._set_selection_status("Trace found no cells: select cells in the image first (click, or <b>Lasso Select</b>).", warning=True)
             return
         x_col = self.ui_component.x_axis_selector.value
         y_col = self.ui_component.y_axis_selector.value
         if x_col == "None" or y_col == "None":
             _logger.warning("Please select both x and y axes to trace cells.")
+            self._set_selection_status("Trace needs both axes: choose X and Y under <b>Single-pair</b>.", warning=True)
             return
         current_fov = self.main_viewer.ui_component.image_selector.value
         mask_ids = [
@@ -482,6 +567,7 @@ class ChartDisplay(PluginBase):
         ]
         if not mask_ids:
             _logger.warning("No cells selected for tracing.")
+            self._set_selection_status("Trace found no cells: none of the cells selected in the image is in the FOV shown.", warning=True)
             return
         cell_table = self.main_viewer.cell_table
         in_fov = cell_table[self.main_viewer.fov_key] == current_fov
@@ -490,6 +576,7 @@ class ChartDisplay(PluginBase):
         ]
         if traced.empty:
             _logger.warning("No matching cells found in the current FOV.")
+            self._set_selection_status("Trace found no cells: the selected cells have no rows in the cell table for the FOV shown.", warning=True)
             return
         self._apply_external_selection(traced.index)
 
@@ -522,6 +609,7 @@ class ChartDisplay(PluginBase):
         return base
 
     def _render_scatter_area(self) -> None:
+        self._update_selection_status(set(self.selected_indices.value or ()), "external")
         if not self._scatter_views:
             self._plot_host.children = [self._plot_placeholder]
             return

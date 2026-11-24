@@ -155,27 +155,13 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 For more details, see the [user guide](https://hartmannlab.github.io/UELer/latest/tutorials/user-interface).
 
 ## New Update  
-### **UELer v0.6.0 Summary**
+### **UELer v0.6.1-alpha1 Summary**
 
-- **Map mode opens about three times faster.** Switching to a map reads each image once instead of three times, so a 25-tile map (2048 × 2048 px, 6 channels) now appears in about 2 s instead of 6 s, and the first zoom into new tiles is about a quarter faster.
+- **The scatter plot says what a selection reached.** A line above the plots explains how to lasso (the plots open in pan/zoom mode: use the toolbar lasso or Shift+drag), then reports how many cells are selected, how many of them are in the FOV shown, and where they went. A lasso that only catches cells of other FOVs no longer looks like a broken link. **Trace** failures and a missing widget front end (plots shown as empty boxes) are reported in the same place instead of only in the log.
 
-- **Map mode: zooming back out to the whole map is near-instant.** The overview is now kept in memory while you zoom in and out, so returning to it drops from about 1.5 s to 40 ms on a 25-tile map, and changing contrast at the whole-map view from about 1.6 s to 50 ms.
+- **Lasso Select now says what it did, and why it selected nothing.** A line beside the toggle tells you to draw a loop once it is armed, then how many cells the loop selected and what you can do with them. When a loop cannot select anything it says why: no mask is shown (none is ticked when the viewer starts, and the lasso searches only the masks shown), no masks are loaded, or the canvas is a static image because `%matplotlib widget` was not run.
 
-- **Faster over slow remote connections: choose JPEG or WebP frames.** `Advanced Settings → Frame format` sends zooms, FOV switches, channel changes and the sharp frame after a drag as JPEG or WebP, about a third of the PNG size (for example 1.4 MB → 0.44 MB per FOV switch on a large canvas). PNG stays the lossless default.
-
-- **Panning stays responsive on high-DPI screens and remote connections.** While you drag, the viewer shows a coarser preview and sharpens the image when you let go. On a 2048 × 2048 px, 10-channel image on a Retina screen each pan step drops from about 200 to 35 ms and from about 1.1 MB to 160 KB sent to the browser. Set `viewer.drag_preview_px = 0` to keep every frame sharp.
-
-- **Adding a marker or switching FOV no longer renders the image twice.** Adding a channel on a 2048 × 2048 px, 10-channel dataset drops from about 320 to 260 ms on a Retina screen, and a first visit to a FOV while zoomed in from about 730 to 650 ms; the viewer also renders once at start-up.
-
-- **The status bar no longer keeps showing the busy spinner after the image has loaded.** It switches to the ready checkmark once the viewer is shown, shows the spinner while a FOV or channel loads, and changes in one step instead of briefly resizing.
-
-- **Panning, zooming and going back to a FOV you visited no longer re-read the image files.** Each channel is decoded once and kept in memory, so a pan step on a 2048 × 2048 px, 10-channel FOV drops from about 320 to 200 ms on a Retina screen and from about 160 to 60 ms on a standard one. The cache uses at most 512 MiB by default; change it with `viewer.channel_level_cache.set_max_bytes(n)`, or set `0` to turn it off.
-
-- **Panning and zooming no longer show a blurred frame first.** Each pan, zoom or FOV switch used to send the browser an outdated image and then the correct one; it now sends only the correct one, halving what goes over the wire. The hover tooltip and the status indicator also stop redrawing when nothing has changed.
-
-- **Panning, zooming, adding markers and switching FOVs are about twice as fast.** Blending the channels into the displayed image is roughly nine times faster, and the viewer no longer renders more pixels than your screen can show. On a 2048 × 2048, 10-channel dataset, one pan step went from about 0.75 s to 0.33 s on a Retina screen (0.66 s to 0.16 s on a standard one), and adding a marker from 0.9 s to 0.5 s.
-
-_Earlier changes (v0.5.2 and before) are in the [update log](https://github.com/HartmannLab/UELer/blob/main/doc/log.md)._
+_Earlier changes (v0.6.0 and before) are in the [update log](https://github.com/HartmannLab/UELer/blob/main/doc/log.md)._
 
 ## License
 UELer is released under the **BSD 3-Clause License** — see

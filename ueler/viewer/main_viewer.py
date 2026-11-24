@@ -54,7 +54,7 @@ from .settings_paths import resolve_settings_root
 from ueler.viewer.plugin.roi_manager_plugin import ROIManagerPlugin
 import json
 
-from .image_display import DRAG_PREVIEW_PX, ImageDisplay, adopt_current_view
+from .image_display import DRAG_PREVIEW_PX, ImageDisplay, adopt_current_view, canvas_is_interactive
 from .frame_encoding import available_frame_formats, install_frame_encoder
 from .ipympl_guard import install_canvas_message_guard
 from .widget_frontend_check import warn_about_widget_frontend
@@ -347,7 +347,8 @@ class ImageMaskViewer:
         # Six plugins render as anywidget subclasses, and a frontend that cannot
         # resolve the anywidget JS shows them as empty boxes with nothing in the
         # kernel log.  See ueler/viewer/widget_frontend_check.py.
-        warn_about_widget_frontend()
+        # Kept so the scatter panel can name the problem next to an empty plot.
+        self.widget_frontend_status = warn_about_widget_frontend()
         # Optional remote data source (issue #110, BIA streaming). When set, FOV
         # discovery and per-FOV image/mask reads route through it instead of the
         # local filesystem; ``base_folder`` is then a local workspace directory
@@ -1533,14 +1534,75 @@ class ImageMaskViewer:
         if image_display is None:
             return
         if change.get("new"):
+            blocked = self._lasso_blocked_reason()
+            if blocked:
+                # Nothing a loop could select: say why and release the toggle
+                # instead of arming a selector that ends in an empty result.
+                self._on_lasso_complete()
+                self.set_lasso_hint(blocked, warning=True)
+                return
             image_display.enable_lasso_selector(on_complete=self._on_lasso_complete)
+            if self._selected_mask_names():
+                self.set_lasso_hint("Draw a loop around the cells and release to select them.")
+            else:
+                self.set_lasso_hint(
+                    "No mask is shown, and the lasso selects cells of the masks shown: tick one under <b>Masks</b>, then draw the loop.",
+                    warning=True,
+                )
         else:
             image_display.disable_lasso_selector()
+            if getattr(self, "_lasso_hint_armed", False):
+                self.set_lasso_hint("")
 
     def _on_lasso_complete(self):
         toggle = getattr(getattr(self, "ui_component", None), "lasso_select_toggle", None)
         if toggle is not None:
             toggle.value = False
+
+    def _lasso_blocked_reason(self) -> str:
+        """Why a lasso cannot select anything here, or ``""`` when it can."""
+        image_display = getattr(self, "image_display", None)
+        canvas = getattr(getattr(image_display, "fig", None), "canvas", None)
+        if canvas is not None and not canvas_is_interactive(canvas):
+            return "The canvas is a static image, so it cannot take a lasso. Run <code>%matplotlib widget</code> in the notebook, then start the viewer again."
+        if not getattr(self, "masks_available", False) or not getattr(self, "mask_names", None):
+            return "No segmentation masks are loaded. The lasso selects cells of a mask, so start the viewer with a mask folder to use it."
+        return ""
+
+    def set_lasso_hint(self, text: str, *, warning: bool = False) -> None:
+        """Show *text* (HTML) beside the Lasso Select toggle; ``""`` hides it."""
+        hint = getattr(getattr(self, "ui_component", None), "lasso_hint", None)
+        self._lasso_hint_armed = bool(text) and getattr(getattr(self, "image_display", None), "_lasso_active", False)
+        if hint is None:
+            return
+        if not text:
+            hint.value = ""
+            return
+        color = "var(--jp-warn-color0, #b45309)" if warning else "var(--jp-ui-font-color2, #616161)"
+        hint.value = f'<span style="color: {color}; font-size: 12px; line-height: 1.3;">{text}</span>'
+
+    def report_lasso_result(self, added: int, total: int) -> None:
+        """Tell the user what a finished lasso selected and what to do next."""
+        if added == 0:
+            if not self._selected_mask_names():
+                self.set_lasso_hint(
+                    "No cells selected: no mask is shown. Tick one under <b>Masks</b> and draw the loop again.",
+                    warning=True,
+                )
+            else:
+                self.set_lasso_hint(
+                    "No cells inside the loop. Turn on <b>Lasso Select</b> and draw a loop around the cells.",
+                    warning=True,
+                )
+            return
+        noun = "cell" if added == 1 else "cells"
+        count = f"{added} {noun} selected"
+        if total != added:
+            count += f" ({total} in total)"
+        self.set_lasso_hint(
+            f"<b>{count}.</b> Ctrl+click adds or removes a cell; a click on the background clears the selection. "
+            "The <b>Cell Table Editor</b> can annotate these cells, and plots with <b>Follow main viewer</b> ticked highlight them."
+        )
 
     def _map_state_signature(
         self,

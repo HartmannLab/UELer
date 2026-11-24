@@ -37,6 +37,21 @@ from .tooltip_utils import format_tooltip_value, resolve_cell_record
 _logger = logging.getLogger(__name__)
 
 
+def canvas_is_interactive(canvas) -> bool:
+    """``False`` when *canvas* can only produce a static image.
+
+    Under ``%matplotlib inline`` (or no ``%matplotlib`` line at all) the figure
+    gets a plain Agg canvas: it renders once, as a PNG, and never receives a
+    mouse event, so zoom, pan, clicks and the lasso all do nothing. ipympl's
+    canvas and the desktop backends subclass these, so only the exact base
+    types count as static.
+    """
+    from matplotlib.backend_bases import FigureCanvasBase
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+    return type(canvas) not in (FigureCanvasAgg, FigureCanvasBase)
+
+
 def _view_geometry(xlim, ylim):
     """Centre and size of a view, the values compared between draws."""
     return (
@@ -548,6 +563,7 @@ class ImageDisplay:
             multi_select = event.key == 'control'
             if not multi_select:
                 self.clear_patches()
+            self._clear_lasso_hint()
             if selection in self.selected_masks_label:
                 self.selected_masks_label.discard(selection)
             else:
@@ -572,7 +588,14 @@ class ImageDisplay:
         if viewer is not None:
             viewer.linked_selection_indices = None
 
+    def _clear_lasso_hint(self):
+        """Drop the lasso's result line once the selection changes another way."""
+        set_hint = getattr(self.main_viewer, "set_lasso_hint", None)
+        if callable(set_hint) and not self._lasso_active:
+            set_hint("")
+
     def clear_patches(self):
+        self._clear_lasso_hint()
         self.selected_masks_label.clear()
         self._forget_linked_selection()
         self.update_patches()
@@ -700,6 +723,7 @@ class ImageDisplay:
         # after; the cutoff/cluster ``highlight_cells`` callers do not, and are
         # recomputed per FOV anyway.
         self._forget_linked_selection()
+        self._clear_lasso_hint()
 
         # if mask_ids is empty and no explicit pairs given, clear all selections
         if not mask_ids and not fov_mask_pairs:
@@ -927,6 +951,9 @@ class ImageDisplay:
         if not verts or len(verts) < 3:
             if on_complete is not None:
                 on_complete()
+            report = getattr(self.main_viewer, "report_lasso_result", None)
+            if callable(report):
+                report(0, len(self.selected_masks_label))
             return
 
         try:
@@ -944,6 +971,11 @@ class ImageDisplay:
 
         if on_complete is not None:
             on_complete()
+
+        # After on_complete, which releases the toggle, so the result stays.
+        report = getattr(self.main_viewer, "report_lasso_result", None)
+        if callable(report):
+            report(len(new_selections), len(self.selected_masks_label))
 
         # Schedule deferred cleanup of the selector reference (safe to
         # disconnect outside the event handler context).

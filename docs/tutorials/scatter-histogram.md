@@ -80,9 +80,9 @@ To compare many markers at once, select several channels in the top **Channels:*
 
 ### Brushing
 
-Select cells with the **lasso** tool in the scatter toolbar (pan/zoom and box tools are available
-too). The selection mirrors across all scatter views and, with the **Linked plugins** checkboxes on,
-highlights the cells in the image and gallery. **Clear selection** resets it.
+The plots open in pan/zoom mode, so a plain drag pans. To select cells, pick the **lasso** in a plot's toolbar and drag around the points, or hold **Shift** and drag. The selection mirrors across all scatter views and, with the **Linked plugins** checkboxes on, highlights the cells in the image and gallery. **Clear selection** resets it.
+
+A line above the plots reports each selection: how many cells it holds and where they went. With **Main viewer** ticked it says how many of the cells are in the FOV shown. A lasso that picks only cells of other FOVs outlines nothing in the image, and the line then says to switch FOV. Without any link ticked it points to **Linked plugins**. **Trace** reports its failures on the same line, for example when no cells are selected in the image.
 
 The selection is a set of cells, not a set of pixels, so it **survives a FOV change**: switch FOV in
 **Select Image** and the selected cells belonging to the newly loaded FOV are outlined right away

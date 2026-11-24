@@ -400,8 +400,8 @@ def display_ui(viewer):
     # Lasso Select lives at the top of the middle (viewer) panel so it reads
     # as a control that acts on the image, not a stray left-panel button (#111).
     lasso_toolbar = HBox(
-        [viewer.ui_component.lasso_select_toggle],
-        layout=Layout(justify_content='flex-start', padding='0 0 4px 0'),
+        [viewer.ui_component.lasso_select_toggle, viewer.ui_component.lasso_hint],
+        layout=Layout(justify_content='flex-start', align_items='center', padding='0 0 4px 0'),
     )
     center_area = VBox(
         [lasso_toolbar, viewer.image_output, viewer.grid_output],
@@ -546,6 +546,9 @@ class uicomponents:
             layout=Layout(width='auto', height='28px'),
         )
         self.lasso_select_toggle.observe(viewer.on_lasso_select_toggle, names='value')
+        # What to do once the lasso is armed, what a loop selected, and why it
+        # selected nothing (no mask shown, static canvas); empty when idle.
+        self.lasso_hint = HTML(value='', layout=Layout(margin='0 0 0 8px', flex='1 1 auto'))
 
         # Hides the side plugin column (#104 follow-up). It lives on
         # ``ui_component`` so ``widget_states.json`` remembers it like any

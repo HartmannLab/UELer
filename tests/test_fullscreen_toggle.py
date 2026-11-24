@@ -330,6 +330,7 @@ def _minimal_viewer():
         advanced_settings_accordion=ui_components.Output(),
         status_bar=ui_components.Output(),
         lasso_select_toggle=ui_components.Output(),
+        lasso_hint=ui_components.Output(),
     )
     return SimpleNamespace(
         cell_table=None,

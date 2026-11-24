@@ -1,3 +1,29 @@
+### v0.6.1-alpha1
+**Scatter plot: a status line for selections, Trace failures and a missing widget front end**
+
+- **The scatter lasso had the same silent failures as the image lasso.** The plots open in pan/zoom mode, so a plain drag pans and nothing said how to lasso. A lasso whose cells all lie in other FOVs outlined nothing in the image. **Trace** reported its failures ("No cells selected.") only to the logger. An anywidget front end that the editor could not find left the plots as empty boxes, with the cause only in a start-up log warning.
+- **A line above the plots** (`ChartDisplay._selection_status`, updated by `_update_selection_status` from every `_commit_scatter_selection`):
+  - with plots and nothing selected: how to lasso (the toolbar lasso, or Shift+drag);
+  - after a selection: the cell count; with **Main viewer** linked, how many are in the FOV shown (or that none is, so switch FOV); with **Gallery** linked, that they are shown there; with neither, a pointer to **Linked plugins**; for a selection followed from the image, that it came from there;
+  - **Trace** failures, shown on the same line as well as logged;
+  - when the start-up check (`widget_frontend_check`) found a front-end problem, its message replaces the tip, so an empty plot comes with its cause. The viewer now keeps that result as `widget_frontend_status`.
+- **Nothing switches the scatter to the static backend.** It is the Matplotlib fallback and is only used when `UELER_SCATTER_BACKEND=static` is set by hand. jupyter-scatter ships no browser assets of its own: its JavaScript travels in the widget. Its only front-end dependency is anywidget, whose lab and notebook extensions a normal `pip` or `conda` install places inside the environment, where JupyterLab, Notebook 7 and VS Code's local widget source all look. The remaining failure cases (a `pip install --user` into a read-only environment, overlapping installs) are the ones the start-up check names, and the panel now shows them.
+- **Manual:** `docs/tutorials/scatter-histogram.md` (Brushing: pan/zoom default, toolbar lasso or Shift+drag, the status line) and the FAQ entry "The lasso selects nothing", which now covers the scatter plot too.
+- **Files:** edited `ueler/viewer/plugin/chart.py`, `ueler/viewer/main_viewer.py`, `docs/tutorials/scatter-histogram.md`, `docs/faq.md`, `dev_note/issue_tracking/lasso_feedback.md`, `README.md`; added `tests/test_scatter_selection_status.py` (11 tests).
+- Verified: `python -m unittest discover -s tests -t .` → **1548 tests, OK**; `mkdocs build --strict` passes.
+
+**Lasso Select: feedback after a loop, and the reason when it selects nothing**
+
+- **A lasso on a freshly opened viewer selected nothing and said nothing.** Mask checkboxes start unticked, and the lasso hit-tests only the masks shown (`full_resolution_label_masks` holds the ticked masks only), so the first loop a user drew ended with no highlight, the toggle released and the loop gone. The same silent result came from a viewer without masks, and from a notebook without `%matplotlib widget`, where the canvas is a static PNG that receives no mouse events.
+- **A hint line beside the toggle** (`ui_component.lasso_hint`, set through `ImageMaskViewer.set_lasso_hint`):
+  - when armed: "Draw a loop around the cells and release to select them", or a warning that no mask is shown, naming **Masks**;
+  - after the loop (`report_lasso_result`, called by `ImageDisplay._on_lasso_selected` after it releases the toggle): how many cells the loop added and the total, how to add, remove or clear cells, and where the selection is used (Cell Table Editor, plots with **Follow main viewer**); for an empty loop, the reason;
+  - cleared when the selection changes another way (click, ctrl-click, clear, `set_mask_ids`), so it never shows a stale count.
+- **The toggle refuses to arm when no loop could select anything** — no masks loaded, or a static canvas (`image_display.canvas_is_interactive`: false only for the exact Agg and base canvas types, which is what `%matplotlib inline` gives; ipympl and desktop canvases subclass them) — and says why instead.
+- **Manual:** the lasso descriptions in `docs/tutorials/user-interface.md` and `docs/tutorials/cell-table.md` said cells are selected when their "mask centroids" fall inside the loop; the code selects every cell with any mask pixel inside it, from the masks shown. Corrected, and a FAQ entry "The lasso selects nothing" added to `docs/faq.md`.
+- **Files:** edited `ueler/viewer/main_viewer.py`, `ueler/viewer/image_display.py`, `ueler/viewer/ui_components.py`, `tests/test_fullscreen_toggle.py` (stub widget), the three docs pages above, `README.md`; added `tests/test_lasso_hint.py` (15 tests) and `dev_note/issue_tracking/lasso_feedback.md`.
+- Verified: `python -m unittest discover -s tests -t .` → **1537 tests, OK**; `mkdocs build --strict` passes; on the real viewer (benchmark harness, synthetic FOV) the hint reads correctly through arm without a mask, cancel, arm, a loop selecting 35 cells, and clear.
+
 ### v0.6.0
 **Stable release: a faster render path, JPEG/WebP frames for remote sessions, the live latency timer and faster map mode**
 

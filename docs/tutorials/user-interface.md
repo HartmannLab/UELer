@@ -98,9 +98,7 @@ Two tabs inside one accordion section:
 ## Main Viewer
 
 - **Image canvas** — the composited multi-channel image with any active overlays.
-- **Lasso Select** (top of the viewer) — a one-shot toggle: draw a freehand lasso to select the cells
-  whose mask centroids fall inside it. The toggle resets itself after each lasso. (Selection drives
-  the linked plots and gallery — see [Working with a Cell Table](cell-table.md).)
+- **Lasso Select** (top of the viewer) — a one-shot toggle: draw a freehand loop to add every cell with part of its mask inside it to the selection. Only the masks ticked under **Masks** are searched, so show one first. The toggle resets itself after each loop, and the line beside it says how many cells were selected, or why none were. (Selection drives the linked plots — see [Working with a Cell Table](cell-table.md).)
 - **Zoom and pan** — scroll to zoom, drag to pan.
 - **Scale bar** — computed from the **Pixel Size (nm):** value when available (there is no separate
   on/off toggle; set the pixel size to 0 to omit it).

@@ -172,6 +172,16 @@ Open **Advanced Settings → Data mapping** in the left panel and compare **X ke
 
 The [setup dialog](tutorials/setup-dialog.md) asks for exactly these when a table first loads, and pre-fills the ones it recognises — so if you skipped it, that is the thing to check first.
 
+### The lasso selects nothing
+
+**In a scatter plot:** the plots open in pan/zoom mode, so a plain drag pans. Pick the lasso in the plot's toolbar, or hold **Shift** and drag. The line above the plots then reports the selection. If it says none of the cells is in the FOV shown, the image has nothing to outline until you switch FOV. If the plots are empty boxes, the same line names the widget front-end problem found at start-up (see [My editor cannot find the widget `anywidget`](#my-editor-cannot-find-the-widget-anywidget)).
+
+**In the image (Lasso Select):** the line beside the toggle names the cause. The three common ones:
+
+- **No mask is shown.** The lasso searches only the masks ticked under **Masks** in the left panel, and none is ticked when the viewer starts. Tick one, then draw the loop again.
+- **No masks are loaded.** The lasso selects cells of a segmentation mask; start the viewer with a masks folder.
+- **The canvas is a static image.** Without `%matplotlib widget` in the notebook the figure is a plain PNG and receives no mouse events, so zoom, pan and clicks do nothing either. Run `%matplotlib widget`, then start the viewer again.
+
 ### A setting came back different, with a warning in the log
 
 UELer saves your settings per dataset in `widget_states.json` (inside the `.UELer` folder) and restores them next time. The data can change in between — a field of view removed from the folder, a marker set deleted, a column renamed — and then a saved setting names something that is no longer there.
