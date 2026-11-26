@@ -118,7 +118,8 @@ spatial and stay with the FOV they were drawn in.
 
 You can create a selection several ways:
 
-- **Lasso Select** — the one-shot toggle at the top of the viewer; draw a freehand loop to add every cell with part of its mask inside it. It searches the masks ticked under **Masks**; with none shown it selects nothing, and the selection bar beside the toggle says so.
+- **Click, Ctrl + click, Ctrl + drag** in the image — select one cell, add or remove one cell, or draw a lasso loop; a right click on the background unselects everything. See [The User Interface](user-interface.md#main-viewer).
+- **Lasso Select** — the one-shot toggle at the top of the viewer; draw a freehand loop to add every cell with part of its mask inside it, or, if they are all selected already, to unselect them. It searches the masks ticked under **Masks**; with none shown it selects nothing, and the selection bar beside the toggle says so.
 - **Scatter plot / Histogram** — brush or gate on marker values. See
   [Scatter & Histogram](scatter-histogram.md).
 - **Heatmap / FlowSOM** — trace a cluster or meta-cluster. See

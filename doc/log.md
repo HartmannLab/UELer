@@ -1,4 +1,12 @@
 ### v0.6.1-alpha1
+**Image mouse gestures: a background click no longer clears, Ctrl + drag lassoes, a loop around selected cells unselects them**
+
+- **One mis-click lost the selection.** A left click on the image background cleared it, and clicks and loops disagreed: Ctrl-click toggled one cell, but a loop could only add and needed the **Lasso Select** toggle every time.
+- **Gestures** (`ImageDisplay`): click a cell selects only it; a left click on the background does nothing; Ctrl + click toggles one cell; Ctrl + drag draws a lasso without the toggle (a Ctrl press is decided on release: moved ≥5 screen pixels is a loop, drawn as a line while dragging); a right click on the background unselects everything through `clear_selection_everywhere(recipe=…)`, as ✕ does but without the dialog, since ◀ restores it. A right click on a cell now does nothing.
+- **Loops toggle as a group** (`_select_in_loop`, used by both lassos): if every cell inside is selected already, the loop unselects them; otherwise it adds, so a larger loop extends a selection. The lasso recipe records `action` and `added` / `removed`.
+- **History:** all of these are steps in the selection history; the right-click clear carries its recipe.
+- Docs: the gestures in `user-interface.md`, `cell-table.md` and `cell-sets.md`. Plan: `dev_note/issue_tracking/selection_design.md`. Tests: new `tests/test_image_click_gestures.py` (12), one in `tests/test_selection_hub.py`. Full suite: 1613 tests OK; `mkdocs build --strict` passes.
+
 **Cell sets: selection history, saved tagged sets, and writing to the cell table (replaces the Cell Table Editor)**
 
 - **A selection was gone after the next click.** A population built in steps (a lasso, then a gate, then a second gate) existed only until the next selection; a mis-click lost it, nothing could keep several populations, and nothing recorded how one was made. Writing a label into the cell table was the Cell Table Editor, which acted only on cells selected in the image.

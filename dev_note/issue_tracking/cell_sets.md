@@ -1,6 +1,6 @@
 # Cell sets, tags and selection history
 
-Status: **phase 1 done** (history, save / select, tags, quick write; Cell Table Editor removed). Phases 2 and 3 not started. Builds on the global selection (`SelectionHub`) and the in-line selection bar described in [selection_design.md](selection_design.md).
+Status: **phase 1 done** (history, save / select, tags, quick write; Cell Table Editor removed). Phases 2 and 3 are deferred and kept on the long-term list ([long_term_todo.md](../long_term_todo.md)). Builds on the global selection (`SelectionHub`) and the in-line selection bar described in [selection_design.md](selection_design.md).
 
 ---
 

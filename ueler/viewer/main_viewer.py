@@ -1545,7 +1545,7 @@ class ImageMaskViewer:
                 return
             image_display.enable_lasso_selector(on_complete=self._on_lasso_complete)
             if self._selected_mask_names():
-                self.set_lasso_hint("Draw a loop around the cells and release to select them.")
+                self.set_lasso_hint("Draw a loop around the cells and release to select them; a loop around cells that are all selected unselects them. Holding <b>Ctrl</b> and dragging draws a loop without this toggle.")
             else:
                 self.set_lasso_hint(
                     "No mask is shown, and the lasso selects cells of the masks shown: tick one under <b>Masks</b>, then draw the loop.",
@@ -1586,7 +1586,7 @@ class ImageMaskViewer:
         if not self._selected_mask_names():
             self.set_lasso_hint("No cells selected: no mask is shown. Tick one under <b>Masks</b> and draw the loop again.", warning=True)
         else:
-            self.set_lasso_hint("No cells inside the loop. Turn on <b>Lasso Select</b> and draw around the cells.", warning=True)
+            self.set_lasso_hint("No cells inside the loop. Turn on <b>Lasso Select</b>, or hold <b>Ctrl</b> and drag, and draw around the cells.", warning=True)
 
     # ------------------------------------------------------------------
     # The current selection (ueler/viewer/selection.py) and its bar
@@ -1788,7 +1788,7 @@ class ImageMaskViewer:
         """The bar's ✕: confirm, then unselect everywhere.
 
         Clearing drops a selection that may have taken several gates or loops to
-        build, and there is no undo, so it goes through the shared dialog. With
+        build, so it goes through the shared dialog (◀ brings it back). With
         no front end to ask with, it clears directly, as deleting a marker set
         does: the selection lives only in this session.
         """
@@ -1807,8 +1807,12 @@ class ImageMaskViewer:
         if not asked:
             self.clear_selection_everywhere()
 
-    def clear_selection_everywhere(self) -> None:
-        """Clear the image, the plots, the Gallery and the current selection."""
+    def clear_selection_everywhere(self, recipe=None) -> None:
+        """Clear the image, the plots, the Gallery and the current selection.
+
+        *recipe* says what asked for it (✕, a right click on the background);
+        it goes into the selection history with the clear.
+        """
         gallery = getattr(getattr(self, "SidePlots", None), "cell_gallery_output", None)
         if gallery is not None and "gallery" in self.selection_hub.current.delivered:
             gallery.set_selected_cells([])
@@ -1822,7 +1826,7 @@ class ImageMaskViewer:
         histogram = getattr(side, "histogram_output", None)
         if histogram is not None and hasattr(histogram, "clear_selection"):
             histogram.clear_selection()
-        self.selection_hub.clear()
+        self.selection_hub.clear(recipe=recipe)
 
     def _map_state_signature(
         self,

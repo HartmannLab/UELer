@@ -264,6 +264,14 @@ class ViewerSummaryAndActionsTests(unittest.TestCase):
         self.assertEqual(len(self.viewer.selection_hub.current), 0)
         self.assertEqual(self.bar.actions.layout.display, "none")
 
+    def test_clear_everywhere_logs_what_asked_for_it(self):
+        self.viewer.selection_hub.publish({0}, "image click", {"image"})
+        self.viewer.clear_selection_everywhere(recipe={"action": "right click on background"})
+        step = self.viewer.selection_hub.history[-1]
+        self.assertEqual(step.source, "clear")
+        self.assertEqual(step.recipe["action"], "right click on background")
+        self.assertTrue(self.viewer.selection_hub.can_go_back())
+
     def test_second_click_unlinks_the_gallery(self):
         self.viewer.selection_hub.publish({0}, "histogram")
         self.viewer.toggle_selection_target("gallery")

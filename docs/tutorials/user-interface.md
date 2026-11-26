@@ -98,7 +98,15 @@ Two tabs inside one accordion section:
 ## Main Viewer
 
 - **Image canvas** — the composited multi-channel image with any active overlays.
-- **Lasso Select** (top of the viewer) — a one-shot toggle: draw a freehand loop to add every cell with part of its mask inside it to the selection. Only the masks ticked under **Masks** are searched, so show one first. The toggle resets itself after each loop, and the selection bar beside it shows the result, or why there was none.
+- **Selecting cells with the mouse:**
+  - **Click a cell** to select only that cell.
+  - **Ctrl + click a cell** to add it to the selection, or take it out if it is selected.
+  - **Ctrl + drag** to draw a lasso loop straight away, without the **Lasso Select** toggle.
+  - **Right-click the background** (outside any cell) to unselect everything, as **✕** does but without asking; **◀** in the selection bar brings the selection back.
+  - **A left click on the background does nothing**, so a mis-click never loses a selection.
+  
+  Every one of these is a step in the session's [selection history](cell-sets.md#going-back-to-an-earlier-selection).
+- **Lasso Select** (top of the viewer) — a one-shot toggle: draw a freehand loop to add every cell with part of its mask inside it to the selection. A loop around cells that are all selected already unselects them instead; a loop that also reaches unselected cells adds those, so a larger loop extends a selection. Only the masks ticked under **Masks** are searched, so show one first. The toggle resets itself after each loop, and the selection bar beside it shows the result, or why there was none. **Ctrl + drag** draws the same loop without the toggle.
 - **Zoom and pan** — scroll to zoom, drag to pan.
 - **Scale bar** — computed from the **Pixel Size (nm):** value when available (there is no separate
   on/off toggle; set the pixel size to 0 to omit it).

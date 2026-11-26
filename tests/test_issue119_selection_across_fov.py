@@ -210,6 +210,7 @@ class LinkedSelectionRecordTestCase(unittest.TestCase):
             inaxes=display.ax, xdata=1.0, ydata=1.0, button=MouseButton.LEFT, key="control"
         )
         display.on_mouse_click(event)
+        display.on_mouse_release(event)  # a Ctrl click is decided on release
 
         self.assertIsNone(viewer.linked_selection_indices)
 

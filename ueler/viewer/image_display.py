@@ -399,6 +399,7 @@ class ImageDisplay:
         self.fig.canvas.callbacks.connect('draw_event', self.on_draw)
         self.fig.canvas.mpl_connect('motion_notify_event', self.on_mouse_move)
         self.fig.canvas.mpl_connect('button_press_event', self.on_mouse_click)
+        self.fig.canvas.mpl_connect('button_release_event', self.on_mouse_release)
         # Coarse preview while the view is dragged, sharp frame on release.
         self._view_drag_active = False
         self._coarse_view_rendered = False
@@ -440,6 +441,9 @@ class ImageDisplay:
         _render_if_view_changed(self)
 
     def on_mouse_move(self, event):
+        if getattr(self, "_ctrl_gesture", None) is not None:
+            self._extend_ctrl_gesture(event)
+            return
         if event.inaxes != self.ax:
             self._hide_tooltip()
             return
@@ -526,8 +530,26 @@ class ImageDisplay:
         annotation.set_visible(True)
         self.fig.canvas.draw_idle()
 
+    # Mouse in the image:
+    #   left click on a cell        select only that cell
+    #   left click on background    nothing (a mis-click must not lose a selection)
+    #   Ctrl + left click on a cell add it to the selection, or take it out
+    #   Ctrl + left drag            a lasso, without arming Lasso Select
+    #   right click on background   unselect everything (◀ brings it back)
+    # A loop around cells that are all selected already unselects them.
+    CTRL_DRAG_PIXELS = 5  # a Ctrl press that moves less than this is a click
+
+    @staticmethod
+    def _ctrl_held(event) -> bool:
+        """Whether Ctrl was held for a mouse event (Matplotlib reports it two ways)."""
+        key = str(getattr(event, "key", "") or "").lower()
+        if key in ("control", "ctrl") or key.startswith(("ctrl+", "control+")):
+            return True
+        return "ctrl" in (getattr(event, "modifiers", None) or ())
+
     def on_mouse_click(self, event):
-        """Handle mouse click events to select/unselect masks."""
+        """A mouse press in the image: select, toggle, lasso or unselect (table above)."""
+        self._cancel_ctrl_gesture()
         if event.inaxes != self.ax:
             _logger.debug("Mouse click outside axes")
             return
@@ -551,36 +573,115 @@ class ImageDisplay:
             _logger.debug("Mouse click outside data area")
             return
 
+        is_left = event.button in {MouseButton.LEFT, 1}
+        if is_left and self._ctrl_held(event):
+            # Click or lasso: decided on release, by how far the mouse moved.
+            self._ctrl_gesture = {
+                "start": (x, y),
+                "pixels": (getattr(event, "x", None), getattr(event, "y", None)),
+                "verts": [(x, y)],
+                "moved": False,
+                "line": None,
+            }
+            return
+
         hit = self.main_viewer.resolve_mask_hit_at_viewport(x, y)
         if hit is None:
             _logger.debug("No mask at click location")
-            self.clear_patches()
-            self._publish_selection("image click", {"action": "click on background"})
+            if event.button in {MouseButton.RIGHT, 3}:
+                self._unselect_everything()
             return
 
-        selection = MaskSelection(fov=str(hit.fov_name), mask=str(hit.mask_name), mask_id=int(hit.mask_id))
+        if is_left:
+            self._click_cell(hit, toggle=False)
 
-        if event.button == MouseButton.LEFT:
-            multi_select = event.key == 'control'
-            if not multi_select:
-                self.clear_patches()
-            self._clear_lasso_hint()
-            if selection in self.selected_masks_label:
-                self.selected_masks_label.discard(selection)
-                action = "remove"
-            else:
-                self.selected_masks_label.add(selection)
-                action = "add" if multi_select else "select"
-            self._forget_linked_selection()
-            self.update_patches(do_not_reset=multi_select)
-            self.main_viewer.inform_plugins("on_selection_change")
-            self._publish_selection(
-                "image click",
-                {"action": action, "fov": selection.fov, "mask": selection.mask, "label": selection.mask_id},
-            )
-        elif event.button in {MouseButton.RIGHT, 3}:  # Right click fallback to legacy value
+    def _click_cell(self, hit, *, toggle: bool) -> None:
+        """Select only the cell *hit*, or with *toggle* add it or take it out."""
+        selection = MaskSelection(fov=str(hit.fov_name), mask=str(hit.mask_name), mask_id=int(hit.mask_id))
+        if not toggle:
             self.clear_patches()
-            self._publish_selection("image click", {"action": "right click"})
+        self._clear_lasso_hint()
+        if selection in self.selected_masks_label:
+            self.selected_masks_label.discard(selection)
+            action = "remove"
+        else:
+            self.selected_masks_label.add(selection)
+            action = "add" if toggle else "select"
+        self._forget_linked_selection()
+        self.update_patches(do_not_reset=toggle)
+        self.main_viewer.inform_plugins("on_selection_change")
+        self._publish_selection(
+            "image click",
+            {"action": action, "fov": selection.fov, "mask": selection.mask, "label": selection.mask_id},
+        )
+
+    def _unselect_everything(self) -> None:
+        """Right click on the background: what ✕ does, without asking (◀ undoes it)."""
+        recipe = {"action": "right click on background"}
+        clear_all = getattr(self.main_viewer, "clear_selection_everywhere", None)
+        if callable(clear_all):
+            clear_all(recipe=recipe)
+            return
+        self.clear_patches()
+        self._publish_selection("image click", recipe)
+
+    def on_mouse_release(self, event):
+        """End a Ctrl gesture: a short one toggles the cell, a drag is a lasso."""
+        gesture = getattr(self, "_ctrl_gesture", None)
+        if gesture is None:
+            return
+        self._extend_ctrl_gesture(event)
+        self._cancel_ctrl_gesture()
+        verts = gesture["verts"]
+        if gesture["moved"] and len(verts) >= 3:
+            inside, action = self._select_in_loop(verts)
+            self._report_loop(verts, inside, action)
+            return
+        hit = self.main_viewer.resolve_mask_hit_at_viewport(*gesture["start"])
+        if hit is not None:
+            self._click_cell(hit, toggle=True)
+
+    def _extend_ctrl_gesture(self, event) -> None:
+        """Add the mouse position to the Ctrl gesture and draw its loop once it is a drag."""
+        gesture = getattr(self, "_ctrl_gesture", None)
+        if gesture is None or event.inaxes != self.ax:
+            return
+        x, y = event.xdata, event.ydata
+        if x is None or y is None:
+            return
+        gesture["verts"].append((x, y))
+        if not gesture["moved"]:
+            px0, py0 = gesture["pixels"]
+            px, py = getattr(event, "x", None), getattr(event, "y", None)
+            if None in (px0, py0, px, py):
+                gesture["moved"] = len(gesture["verts"]) >= 3
+            else:
+                gesture["moved"] = max(abs(px - px0), abs(py - py0)) >= self.CTRL_DRAG_PIXELS
+            if not gesture["moved"]:
+                return
+        xs, ys = zip(*gesture["verts"])
+        line = gesture["line"]
+        try:
+            if line is None:
+                (gesture["line"],) = self.ax.plot(
+                    xs, ys, color="white", linewidth=1.5, alpha=0.8, scalex=False, scaley=False
+                )
+            else:
+                line.set_data(xs, ys)
+            self._request_draw()
+        except Exception:
+            _logger.debug("Could not draw the Ctrl lasso loop", exc_info=True)
+
+    def _cancel_ctrl_gesture(self) -> None:
+        """Forget an unfinished Ctrl gesture and remove its loop from the canvas."""
+        gesture = getattr(self, "_ctrl_gesture", None)
+        self._ctrl_gesture = None
+        if gesture is not None and gesture.get("line") is not None:
+            try:
+                gesture["line"].remove()
+                self._request_draw()
+            except Exception:
+                pass
 
     def _publish_selection(self, source, recipe=None):
         """Report a selection the user made in the image to the viewer's hub."""
@@ -949,7 +1050,42 @@ class ImageDisplay:
             except Exception:
                 pass
 
-    def _lasso_recipe(self, verts, new_selections):
+    def _select_in_loop(self, verts):
+        """Apply a lasso loop to the selection; return the cells inside it and what was done.
+
+        The loop adds the cells inside it, or, when every one of them is
+        selected already, takes them out: circling selected cells again
+        unselects them, as a Ctrl-click does for one cell. A loop that reaches
+        any unselected cell adds, so a larger loop around a selection extends it.
+        """
+        try:
+            if getattr(self.main_viewer, "_map_mode_active", False) and getattr(self.main_viewer, "_active_map_id", None):
+                inside = self._find_masks_in_lasso_map_mode(verts)
+            else:
+                inside = self._find_masks_in_lasso_single_fov(verts)
+        except Exception:
+            inside = set()
+
+        if inside and inside <= self.selected_masks_label:
+            self.selected_masks_label.difference_update(inside)
+            action = "remove"
+        else:
+            self.selected_masks_label.update(inside)
+            action = "add"
+        self._forget_linked_selection()
+        self.update_patches()
+        self.main_viewer.inform_plugins("on_selection_change")
+        return inside, action
+
+    def _report_loop(self, verts, inside, action) -> None:
+        """Log a loop in the selection history and tell the bar what it did."""
+        if inside:
+            self._publish_selection("image lasso", self._lasso_recipe(verts, inside, action))
+        report = getattr(self.main_viewer, "report_lasso_result", None)
+        if callable(report):
+            report(len(inside), len(self.selected_masks_label))
+
+    def _lasso_recipe(self, verts, new_selections, action="add"):
         """How a lasso selection was made: where, on which masks, and the loop.
 
         The loop is kept to at most 200 vertices, rounded to 0.1 px, so the
@@ -964,8 +1100,9 @@ class ImageDisplay:
         stride = max(1, -(-len(points) // 200))
         return {
             **where,
+            "action": action,
             "masks": sorted({s.mask for s in new_selections}),
-            "added": len(new_selections),
+            "added" if action == "add" else "removed": len(new_selections),
             "vertices": [[round(float(x), 1), round(float(y), 1)] for x, y in points[::stride]],
         }
 
@@ -990,28 +1127,13 @@ class ImageDisplay:
                 report(0, len(self.selected_masks_label))
             return
 
-        try:
-            if getattr(self.main_viewer, "_map_mode_active", False) and getattr(self.main_viewer, "_active_map_id", None):
-                new_selections = self._find_masks_in_lasso_map_mode(verts)
-            else:
-                new_selections = self._find_masks_in_lasso_single_fov(verts)
-        except Exception:
-            new_selections = set()
-
-        self.selected_masks_label.update(new_selections)
-        self._forget_linked_selection()
-        self.update_patches()
-        self.main_viewer.inform_plugins("on_selection_change")
+        inside, action = self._select_in_loop(verts)
 
         if on_complete is not None:
             on_complete()
 
-        if new_selections:
-            self._publish_selection("image lasso", self._lasso_recipe(verts, new_selections))
         # After on_complete, which releases the toggle, so the result stays.
-        report = getattr(self.main_viewer, "report_lasso_result", None)
-        if callable(report):
-            report(len(new_selections), len(self.selected_masks_label))
+        self._report_loop(verts, inside, action)
 
         # Schedule deferred cleanup of the selector reference (safe to
         # disconnect outside the event handler context).

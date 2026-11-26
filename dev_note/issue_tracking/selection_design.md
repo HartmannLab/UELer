@@ -188,3 +188,41 @@ python -m unittest discover -s tests -t .
 ```
 - ✅ 1573 tests, OK
 - Real viewer: the toggle sequence and both dialog answers behaved as described in `doc/log.md`.
+
+## **Update Summary: Mouse gestures in the image — background clicks, Ctrl-click, Ctrl-drag lasso, loops that unselect (uncommitted)**
+
+Follow-up after using the bar: a left click on the background cleared the whole selection, so one mis-click lost a population that took several steps to build. Clicks and the lasso also behaved differently: a Ctrl-click toggled one cell, but a loop could only add, and a loop needed the **Lasso Select** toggle every time.
+
+---
+
+### **Actions Taken**
+- **One gesture table in `ImageDisplay`:**
+  - left click on a cell: select only that cell (unchanged);
+  - left click on the background: nothing;
+  - Ctrl + left click on a cell: add it, or take it out (unchanged, now decided on release);
+  - Ctrl + left drag: a lasso without arming the toggle;
+  - right click on the background: unselect everything through `clear_selection_everywhere(recipe=…)`, the same path as ✕ but without the dialog, because ◀ restores it. A right click on a cell does nothing (it used to clear everything too).
+- **Ctrl press is decided on release:**
+  `on_mouse_click` records a `_ctrl_gesture` (start point, screen pixels, vertices); `on_mouse_move` extends it and, once the mouse has moved `CTRL_DRAG_PIXELS` (5) screen pixels, draws the loop as a `Line2D`; `on_mouse_release` (newly connected to `button_release_event`) turns a moved gesture with ≥3 vertices into a lasso and anything shorter into the Ctrl-click toggle. Starting a `LassoSelector` mid-press was ruled out: it never sees the press that already fired, so it would only arm for the next drag. Ctrl is read from both `event.key` and `event.modifiers`, since front ends report it differently.
+- **Loops toggle as a group:**
+  `_select_in_loop` (shared by the toggle lasso and Ctrl-drag) unselects the cells inside the loop when every one of them is already selected, and otherwise adds them. Per-cell XOR was ruled out: drawing a larger loop to extend a selection would have unselected the part already selected. The lasso recipe now carries `action` (`add` / `remove`) and `added` or `removed`.
+- **History:**
+  clicks, Ctrl-clicks and both lassos were already published to the hub; the right-click clear now goes in with its recipe (`{"action": "right click on background"}`) instead of a bare clear, so the trail says what unselected.
+- **Hint text:** the armed-lasso and empty-loop messages mention Ctrl + drag and the unselect rule.
+
+---
+
+### **Files Changed**
+- `ueler/viewer/image_display.py` — gesture table, `_ctrl_held`, `_click_cell`, `_unselect_everything`, `on_mouse_release`, `_extend_ctrl_gesture` / `_cancel_ctrl_gesture`, `_select_in_loop` / `_report_loop`, `_lasso_recipe(action=)`.
+- `ueler/viewer/main_viewer.py` — `clear_selection_everywhere(recipe=None)`; lasso hint wording.
+- `tests/test_image_click_gestures.py` — new, 12 tests; `tests/test_selection_hub.py` — the clear recipe in the history; `tests/test_issue119_selection_across_fov.py` — the Ctrl-click test sends the release.
+- `docs/tutorials/user-interface.md`, `docs/tutorials/cell-table.md`, `docs/tutorials/cell-sets.md` — the gestures.
+
+---
+
+### **Tests**
+```bash
+python -m unittest discover -s tests -t .
+```
+- ✅ 1613 tests, OK; `mkdocs build --strict` passes.
+- Not yet tried in a browser: Ctrl + drag through ipympl, and macOS Ctrl-click (which browsers also treat as a context-menu click).
