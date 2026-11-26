@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Iterable, List, Sequence, Set, Union
+from typing import Iterable, List, Optional, Sequence, Set, Union
 
 import numpy as np
 import pandas as pd
@@ -153,7 +153,7 @@ def subset_options_for(viewer, selected_column) -> list:
 
 
 def sync_mask_highlights_from_selection(
-    viewer, indices: Set[Union[int, str]]
+    viewer, indices: Set[Union[int, str]], *, mask_name: Optional[str] = None
 ) -> None:
     """Translate a set of cell-table row indices into mask highlights in the viewer.
 
@@ -167,12 +167,16 @@ def sync_mask_highlights_from_selection(
     switch (#119).  It is written *after* ``set_mask_ids``, which clears it, so
     the cutoff/cluster ``highlight_cells`` methods that call ``set_mask_ids``
     directly take the highlight over cleanly (last writer wins).
+
+    *mask_name* outlines on another mask layer than ``mask_key`` (a cell set
+    made on the nucleus layer); it is remembered with the indices so a FOV
+    switch keeps the layer.
     """
     try:
         image_display = getattr(viewer, "image_display", None)
         if image_display is None:
             return
-        mask_key = getattr(viewer, "mask_key", None)
+        mask_key = mask_name or getattr(viewer, "mask_key", None)
         if not mask_key:
             return
 
@@ -209,6 +213,7 @@ def sync_mask_highlights_from_selection(
 
         # Remember the selection in the form that survives a FOV change (#119).
         viewer.linked_selection_indices = set(valid_indices)
+        viewer.linked_selection_mask = mask_name
     except Exception:
         if getattr(viewer, "_debug", False):
             import traceback
@@ -268,12 +273,15 @@ def viewer_selection_indices(viewer) -> Set[Union[int, str]]:
         return set()
 
 
-def publish_selection(viewer, indices, source: str, *, image: bool = False, gallery: bool = False) -> None:
+def publish_selection(
+    viewer, indices, source: str, *, image: bool = False, gallery: bool = False, recipe=None
+) -> None:
     """Report a selection the user made in a plot to the viewer's selection hub.
 
     *image* and *gallery* say whether the plot's link boxes already forwarded it
     there, so the selection bar can mark those targets as done. An empty
     *indices* clears the hub only if the current selection came from *source*.
+    *recipe* says how the selection was made, for the session log.
     """
     hub = getattr(viewer, "selection_hub", None)
     if hub is None:
@@ -283,7 +291,7 @@ def publish_selection(viewer, indices, source: str, *, image: bool = False, gall
         hub.clear(source)
         return
     delivered = {name for name, done in (("image", image), ("gallery", gallery)) if done}
-    hub.publish(indices, source, delivered)
+    hub.publish(indices, source, delivered, recipe)
 
 
 def show_selection_message(viewer, text: str, *, warning: bool = False) -> None:

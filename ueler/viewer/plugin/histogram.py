@@ -171,6 +171,13 @@ _BOUNDS_SLIDER_STEPS = 500
 #   ("range",  lo,        hi)     — brushed [lo, hi] on that channel
 #   ("cutoff", direction, value)  — "above"/"below" *value* on that channel
 _RANGE = "range"
+
+
+def _plain(value):
+    """A gate term value as plain JSON (numpy floats become floats)."""
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
 _CUTOFF = "cutoff"
 
 
@@ -1016,6 +1023,7 @@ class HistogramDisplay(PluginBase):
                 "histogram",
                 image=bool(highlight),
                 gallery=bool(self.ui_component.cell_gallery_linked_checkbox.value),
+                recipe={"gates": {str(ch): [_plain(v) for v in term] for ch, term in self._gates.items()}},
             )
         self._refresh_overlays(indices)
         self._refresh_gate_markers()

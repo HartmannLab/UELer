@@ -21,7 +21,7 @@ load_cell_table(viewer, cell_table=cell_table, auto_display=True, after_plugins=
 
 See [Get Started](../getting-started.md) for the full launch flow. Once the table is loaded, the
 analytical plugins appear — most in the right-panel accordion (**Histogram**, **Gallery**,
-**FlowSOM**, **Cell Annotation**, **Mask painter**, **Go to**, **Cell Table Editor**, **Cell tooltip
+**FlowSOM**, **Cell Annotation**, **Mask painter**, **Go to**, **Cell sets**, **Cell tooltip
 label**), and two in the wide footer below the viewer (**Scatter plot** and **Heatmap**, which need
 the full window width). See the [User Interface](user-interface.md#right-panel-plugins) reference.
 
@@ -69,7 +69,7 @@ Two optional arguments:
 ### Getting your annotations back out
 
 The object you passed in is kept, and anything the plugins add to the table — FlowSOM clusters,
-heatmap meta-clusters, manual labels from the **Cell Table Editor** — is written back into its `obs`:
+heatmap meta-clusters, labels written from the **Cell sets** plugin — is written back into its `obs`:
 
 ```python
 adata = viewer.get_cell_table_adata()
@@ -147,9 +147,7 @@ Three plugins consume the current selection directly:
 
 - **Go to** — jump and zoom to a specific cell. Pick the **FOV:** and **Cell ID:**, set **Width
   (pixel):** (the crop width, default 150), and click **Go to**.
-- **Cell Table Editor** — write a value onto the selected cells. Enter a **Column:** (new or
-  existing) and a **Value:**, then click **Apply to selected cells** (the button is enabled only when
-  a selection exists). This is handy for manual gating/labelling.
+- **Cell sets** — write a value into a column for the cells of the current selection, whichever view made it, and keep selections as named, tagged sets. See [Cell Sets](cell-sets.md).
 - **Cell tooltip label** — tick the cell-table columns you want to appear in the image hover tooltip.
   It reacts live to each checkbox.
 

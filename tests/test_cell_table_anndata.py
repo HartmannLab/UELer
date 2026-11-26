@@ -202,7 +202,7 @@ class TestCategoricalColumns(unittest.TestCase):
             self.assertIn(column, categorical_columns(frame))
 
     def test_widened_frame_supports_assigning_an_unseen_class(self):
-        # What the Cell Table Editor does; a Categorical would raise TypeError.
+        # What a Cell sets write does; a Categorical would raise TypeError.
         adata, _ = _roundtripped(_adata())
         frame, _ = flatten_anndata(adata)
 

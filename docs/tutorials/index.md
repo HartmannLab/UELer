@@ -45,6 +45,7 @@ These features require a **cell table** (a per-cell feature CSV, e.g. from `ark-
 |---|---|
 | [Working with a Cell Table](cell-table.md) | Load a table, understand linked selection, and use the cell gallery |
 | [Scatter & Histogram](scatter-histogram.md) | Explore marker distributions with linked brushing |
+| [Cell Sets](cell-sets.md) | Step back through selections, save them as tagged sets, and write labels into the cell table |
 | [Clustering & Annotation](clustering-annotation.md) | Heatmaps, FlowSOM clustering, and saving annotation checkpoints |
 
 ---

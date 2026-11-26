@@ -259,8 +259,8 @@ def _decategorise(obs: pd.DataFrame) -> List[str]:
 
         TypeError: Cannot setitem on a Categorical with a new category
 
-    That is exactly what the Cell Table Editor does
-    (``ct.loc[mask, column] = value``), so keeping the dtype would break manual
+    That is exactly what writing a value from the Cell sets plugin does
+    (``ct.loc[rows, column] = value``), so keeping the dtype would break manual
     labelling on any AnnData table.  The derived frame therefore behaves like a
     CSV-loaded one; ``write_h5ad`` re-categorises strings on the way out, so the
     round-trip is not lossy.  Numeric categories become a real numeric column,

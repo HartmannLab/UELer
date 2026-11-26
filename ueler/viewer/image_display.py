@@ -555,7 +555,7 @@ class ImageDisplay:
         if hit is None:
             _logger.debug("No mask at click location")
             self.clear_patches()
-            self._publish_selection("image click")
+            self._publish_selection("image click", {"action": "click on background"})
             return
 
         selection = MaskSelection(fov=str(hit.fov_name), mask=str(hit.mask_name), mask_id=int(hit.mask_id))
@@ -567,21 +567,26 @@ class ImageDisplay:
             self._clear_lasso_hint()
             if selection in self.selected_masks_label:
                 self.selected_masks_label.discard(selection)
+                action = "remove"
             else:
                 self.selected_masks_label.add(selection)
+                action = "add" if multi_select else "select"
             self._forget_linked_selection()
             self.update_patches(do_not_reset=multi_select)
             self.main_viewer.inform_plugins("on_selection_change")
-            self._publish_selection("image click")
+            self._publish_selection(
+                "image click",
+                {"action": action, "fov": selection.fov, "mask": selection.mask, "label": selection.mask_id},
+            )
         elif event.button in {MouseButton.RIGHT, 3}:  # Right click fallback to legacy value
             self.clear_patches()
-            self._publish_selection("image click")
+            self._publish_selection("image click", {"action": "right click"})
 
-    def _publish_selection(self, source):
+    def _publish_selection(self, source, recipe=None):
         """Report a selection the user made in the image to the viewer's hub."""
         publish = getattr(self.main_viewer, "publish_image_selection", None)
         if callable(publish):
-            publish(source)
+            publish(source, recipe)
 
     def _forget_linked_selection(self):
         """Drop the viewer's memory of the plot-driven cell selection (#119).
@@ -944,6 +949,26 @@ class ImageDisplay:
             except Exception:
                 pass
 
+    def _lasso_recipe(self, verts, new_selections):
+        """How a lasso selection was made: where, on which masks, and the loop.
+
+        The loop is kept to at most 200 vertices, rounded to 0.1 px, so the
+        session log and the cell sets that store it stay small.
+        """
+        viewer = self.main_viewer
+        if getattr(viewer, "_map_mode_active", False):
+            where = {"map": getattr(viewer, "_active_map_id", None)}
+        else:
+            where = {"fov": sorted({s.fov for s in new_selections})[0] if new_selections else None}
+        points = list(verts)
+        stride = max(1, -(-len(points) // 200))
+        return {
+            **where,
+            "masks": sorted({s.mask for s in new_selections}),
+            "added": len(new_selections),
+            "vertices": [[round(float(x), 1), round(float(y), 1)] for x, y in points[::stride]],
+        }
+
     def _on_lasso_selected(self, verts):
         """Callback fired when the user completes a lasso gesture."""
         on_complete = self._lasso_on_complete
@@ -982,7 +1007,7 @@ class ImageDisplay:
             on_complete()
 
         if new_selections:
-            self._publish_selection("image lasso")
+            self._publish_selection("image lasso", self._lasso_recipe(verts, new_selections))
         # After on_complete, which releases the toggle, so the result stays.
         report = getattr(self.main_viewer, "report_lasso_result", None)
         if callable(report):

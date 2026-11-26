@@ -422,6 +422,12 @@ class ChartDisplay(PluginBase):
                 "scatter",
                 image=bool(push_highlight and ui.mv_linked_checkbox.value),
                 gallery=bool(ui.cell_gallery_linked_checkbox.value),
+                recipe={
+                    "plots": [
+                        str(getattr(getattr(view, "state", None), "title", "") or key)
+                        for key, view in self._scatter_views.items()
+                    ]
+                },
             )
         self._update_selection_status(normalized, origin)
         return normalized

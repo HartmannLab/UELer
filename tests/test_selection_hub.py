@@ -245,7 +245,7 @@ class ViewerSummaryAndActionsTests(unittest.TestCase):
         self.viewer.selection_hub.publish({0}, "heatmap", {"gallery"})
         with mock.patch.object(_chart_common, "sync_mask_highlights_from_selection") as sync:
             self.viewer.send_selection_to_image()
-        sync.assert_called_once_with(self.viewer, {0})
+        sync.assert_called_once_with(self.viewer, {0}, mask_name=None)
         self.assertIn("image", self.viewer.selection_hub.current.delivered)
 
     def test_plots_button_selects_without_pushing_back(self):
@@ -310,7 +310,7 @@ class ViewerSummaryAndActionsTests(unittest.TestCase):
         dialog.ask.assert_called_once()
         message, on_confirm = dialog.ask.call_args.args
         self.assertIn("2 cells", message)
-        self.assertIn("cannot be undone", message)
+        self.assertIn("brings it back", message)  # ◀ restores it
         self.assertEqual(dialog.ask.call_args.kwargs["confirm_label"], "Unselect")
         self.assertEqual(len(self.viewer.selection_hub.current), 2)  # nothing cleared yet
         on_confirm()

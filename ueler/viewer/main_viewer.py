@@ -1611,19 +1611,23 @@ class ImageMaskViewer:
                 return True
         return False
 
-    def publish_image_selection(self, source: str) -> None:
-        """Publish the image's selection after a click or a lasso."""
+    def publish_image_selection(self, source: str, recipe=None) -> None:
+        """Publish the image's selection after a click or a lasso.
+
+        *recipe* says how it was made (see :mod:`ueler.viewer.selection`); it is
+        what the session log and a saved cell set keep.
+        """
         image_display = getattr(self, "image_display", None)
         if image_display is None:
             return
         if not image_display.selected_masks_label:
-            self.selection_hub.clear()
+            self.selection_hub.clear(recipe=recipe)
             return
         from ueler.viewer.plugin import _chart_common
 
         indices = _chart_common.viewer_selection_indices(self)
         delivered = {"image"} | ({"plots"} if self._plots_follow_image() else set())
-        self.selection_hub.publish(indices, source, delivered)
+        self.selection_hub.publish(indices, source, delivered, recipe)
 
     def cells_in_shown_fov(self, indices) -> Optional[int]:
         """How many of *indices* belong to the FOV on screen; ``None`` in map mode or if unknown."""
@@ -1661,6 +1665,11 @@ class ImageMaskViewer:
             bool(selection.indices),
             selection.source_target,
         )
+        set_history = getattr(bar, "set_history", None)
+        if callable(set_history):
+            hub = self.__dict__.get("_selection_hub")
+            if hub is not None:
+                set_history(hub.can_go_back(), hub.can_go_forward())
 
     def refresh_selection_bar(self) -> None:
         """Re-read the counts, e.g. after a FOV switch."""
@@ -1673,6 +1682,33 @@ class ImageMaskViewer:
         for target in ("image", "gallery", "plots"):
             bar.on_action(target, lambda t=target: self.toggle_selection_target(t))
         bar.on_action("clear", self.ask_clear_selection)
+        bar.on_action("back", lambda: self.step_selection(-1))
+        bar.on_action("forward", lambda: self.step_selection(+1))
+
+    def step_selection(self, direction: int) -> None:
+        """◀ (``-1``) or ▶ (``+1``): restore the previous or next selection.
+
+        The restored selection replaces the current one in every view that
+        showed the current one, so going back looks like undo: a selection
+        outlined in the image is replaced by the earlier one there. It also goes
+        back to the view it was made in (an image lasso is outlined again).
+        Other views are left alone, and the bar buttons send it on as usual.
+        """
+        from ueler.viewer.selection import SOURCE_TARGETS
+
+        hub = self.selection_hub
+        shown = [target for target in ("image", "gallery", "plots") if hub.current.shows_in(target)]
+        if hub.go(direction) is None:
+            return
+        restored = bool(hub.current.indices)
+        home = SOURCE_TARGETS.get(hub.current.recipe.get("source", ""), "")
+        if restored and home and home not in shown:
+            shown.append(home)
+        for target in shown:
+            if restored:
+                getattr(self, f"send_selection_to_{target}")()
+            else:
+                getattr(self, f"remove_selection_from_{target}")()
 
     def toggle_selection_target(self, target: str) -> None:
         """A bar button: send the selection to *target*, or take it back out.
@@ -1722,7 +1758,9 @@ class ImageMaskViewer:
             return
         from ueler.viewer.plugin import _chart_common
 
-        _chart_common.sync_mask_highlights_from_selection(self, set(selection.indices))
+        # A cell set outlines on the mask layer it was made on.
+        mask = selection.recipe.get("mask") if selection.source == "set" else None
+        _chart_common.sync_mask_highlights_from_selection(self, set(selection.indices), mask_name=mask)
         self.selection_hub.mark_delivered("image")
 
     def send_selection_to_gallery(self) -> None:
@@ -1761,7 +1799,7 @@ class ImageMaskViewer:
         asked = self.confirm(
             f"The selection of <b>{count:,} {'cell' if count == 1 else 'cells'}</b> "
             f"({html_lib.escape(selection.source_label)}) will be removed from the image, "
-            "the plots and the Gallery. This cannot be undone.",
+            "the plots and the Gallery. <b>◀</b> in the selection bar brings it back.",
             self.clear_selection_everywhere,
             title="Unselect everything?",
             confirm_label="Unselect",
@@ -2907,7 +2945,11 @@ class ImageMaskViewer:
         if indices:
             from ueler.viewer.plugin import _chart_common
 
-            _chart_common.sync_mask_highlights_from_selection(self, indices)
+            _chart_common.sync_mask_highlights_from_selection(
+                self, indices, mask_name=getattr(self, "linked_selection_mask", None)
+            )
+            if "_selection_hub" in self.__dict__:
+                self.refresh_selection_bar()  # the per-FOV count changed
             return
 
         if not getattr(self, "SidePlots", None):
@@ -2941,7 +2983,7 @@ class ImageMaskViewer:
         hub = getattr(self, "selection_hub", None)
         if hub is not None:
             if not heatmap_linked and hub.current.source.startswith("image"):
-                hub.clear()
+                hub.clear(recipe={"reason": "FOV switch"})
             else:
                 self._on_selection_hub_change(hub.current)
 

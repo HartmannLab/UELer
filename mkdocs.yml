@@ -91,6 +91,7 @@ nav:
       - Single-Cell Analysis:
           - Working with a Cell Table: tutorials/cell-table.md
           - Scatter & Histogram: tutorials/scatter-histogram.md
+          - Cell Sets: tutorials/cell-sets.md
           - Clustering & Annotation: tutorials/clustering-annotation.md
   - FAQ: faq.md
   - Developer Notes:

@@ -21,7 +21,7 @@ from typing import Dict, List, Optional
 
 import ueler
 
-__all__ = ["CheckpointStore", "empty_manifest"]
+__all__ = ["CheckpointStore", "dataset_storage_dir", "empty_manifest"]
 
 
 def _now_utc() -> str:
@@ -32,6 +32,18 @@ def _dataset_hash(root: Path) -> str:
     """Return a short stable identifier derived from the resolved dataset root."""
     canonical = str(root.resolve())
     return hashlib.sha1(canonical.encode()).hexdigest()[:12]
+
+
+def dataset_storage_dir(dataset_root: "str | Path", storage_root: "str | Path | None" = None) -> Path:
+    """Return ``<storage>/.UELer/dataset_<sha1>/``, the per-dataset folder for saved state.
+
+    The dataset identity always hashes *dataset_root*, but the files themselves
+    can live under a separately relocated *storage_root* (#137). Checkpoints and
+    cell sets both live here.
+    """
+    root = Path(dataset_root).expanduser().resolve()
+    storage_base = Path(storage_root).expanduser().resolve() if storage_root is not None else root
+    return storage_base / ".UELer" / f"dataset_{_dataset_hash(root)}"
 
 
 def empty_manifest(dataset_id: str) -> dict:
@@ -47,12 +59,8 @@ class CheckpointStore:
     """Read/write heatmap checkpoints atomically under ``<root>/.UELer/dataset_*/``."""
 
     def __init__(self, dataset_root: "str | Path", storage_root: "str | Path | None" = None) -> None:
-        root = Path(dataset_root).expanduser().resolve()
-        dataset_id = f"dataset_{_dataset_hash(root)}"
-        # issue #137: dataset identity always hashes dataset_root, but the files
-        # themselves can live under a separately relocated storage_root.
-        storage_base = Path(storage_root).expanduser().resolve() if storage_root is not None else root
-        self._dataset_dir = storage_base / ".UELer" / dataset_id
+        self._dataset_dir = dataset_storage_dir(dataset_root, storage_root)
+        dataset_id = self._dataset_dir.name
         self._checkpoints_dir = self._dataset_dir / "checkpoints"
         self._manifest_path = self._dataset_dir / "manifest.json"
         self._dataset_id = dataset_id

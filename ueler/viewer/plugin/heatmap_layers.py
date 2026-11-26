@@ -1167,7 +1167,17 @@ class InteractionLayer:
             ].index.tolist()
 
         self.main_viewer.SidePlots.cell_gallery_output.set_selected_cells(row_indices)
-        _chart_common.publish_selection(self.main_viewer, row_indices, "heatmap", gallery=True)
+        _chart_common.publish_selection(
+            self.main_viewer,
+            row_indices,
+            "heatmap",
+            gallery=True,
+            recipe={
+                "column": str(high_level_cluster),
+                "cluster": str(cluster_label),
+                "current_fov_only": bool(self.ui_component.current_fov_checkbox.value),
+            },
+        )
 
     def highlight_cells(self):
         cluster_label = self._current_cluster_label()

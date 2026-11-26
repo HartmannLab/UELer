@@ -411,6 +411,16 @@ highlight back**: `set_mask_ids` *replaces* `selected_masks_label` with the curr
 projection of what it was given, so echoing a received selection would overwrite the user's
 own — which is why the scatter and histogram entry points carry a `push_highlight` flag.
 
+### Pattern 6 — Publish to, or read from, the current selection
+
+`viewer.selection_hub` (`ueler/viewer/selection.py`) holds the latest selection from any view, as cell-table row indices, and logs every selection for ◀ ▶ and for saved cell sets. A plugin that lets the user select cells publishes after a selection the user made, with a JSON-ready *recipe* saying how it was made:
+
+```python
+_chart_common.publish_selection(self.main_viewer, indices, "my source", gallery=linked, recipe={"column": col, "value": v})
+```
+
+Never publish on a re-apply (a FOV switch, a selection pushed in from the hub with `origin="hub"`): that would add a step the user did not make. A plugin that acts on "the selected cells" reads `viewer.selection_hub.current.indices` and subscribes with `hub.subscribe(callback)` for changes; something it does with the selection that is not a selection (a write, a save) goes into the log with `hub.note(action, recipe, count=n)`. The Cell sets plugin (`plugin/cell_sets.py`) is the example of both.
+
 ---
 
 ## Linking Two Plugins — Worked Example
