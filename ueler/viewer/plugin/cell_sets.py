@@ -1,18 +1,25 @@
-"""Cell sets: keep selections as named, tagged populations and write labels to the cell table.
+"""Cell sets: keep selections as named, tagged populations, collect cells in carts, and write labels to the cell table.
 
-The plugin has three parts:
+The plugin has four parts:
 
-* **Save the current selection**: a name and ``key:value`` tags; the set keeps
+* **Save the current selection**: a name and free-form tags; the set keeps
   the cells, how the selection was made and the session's selection history
   (see :mod:`ueler.viewer.selection` and :mod:`ueler.viewer.cell_set_store`).
   The selection bar's **Save as set…** does the same from above the image.
+  **New empty cart** makes a set with no cells, to fill later.
+* **Active cart**: one set chosen to collect cells. While it is set, the
+  selection bar shows **+ Cart** / **− Cart**, and Shift-click on a cell in the
+  image puts it in the cart or takes it out. Without one, Shift-click says so in
+  the bar and does nothing else.
 * **Write to the cell table**: put a value into a column for the cells of the
   current selection, whichever view made it. This replaces the Cell Table
   Editor, which could only act on cells selected in the image. A write changes
   the cell table in memory and is noted in the session log; saving the selection
   as a set tagged ``column:value`` is what keeps it.
-* **Saved sets**: filter by name or tag, select a set's cells, edit its name,
-  tags and note, or delete it (asks first).
+* **Saved sets**: filter by name or tag, select a set's cells (or its ★
+  favourites), star or unstar the selected cells in it, make it the active
+  cart, take a frozen **Snapshot** of it, edit its name, tags and note, or delete
+  it with its stars (asks first).
 
 Selecting a set moves the view to its cells unless the FOV shown already holds
 some of them: to the FOV with most of its cells, or to the stitched map when all
@@ -27,10 +34,14 @@ import logging
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
-from ipywidgets import HTML, Button, Combobox, HBox, Layout, Select, Text, Textarea, VBox
+from datetime import datetime
+
+import pandas as pd
+from ipywidgets import HTML, Button, Combobox, Dropdown, HBox, Layout, Select, Text, Textarea, VBox
 
 from ueler.viewer.selection import CellSelection
 from ueler.viewer.cell_set_store import (
+    FAVOURITES,
     CellSetStore,
     cells_from_indices,
     format_tags,
@@ -68,6 +79,8 @@ class CellSetsPlugin(PluginBase):
         self.main_viewer = main_viewer
         self.store: Optional[CellSetStore] = None
         self._sets: List[Dict[str, Any]] = []
+        self.active_cart: Optional[str] = None
+        self._updating_cart = False
         self.ui_component = SimpleNamespace()
         self._build_widgets()
         self._build_layout()
@@ -86,10 +99,16 @@ class CellSetsPlugin(PluginBase):
         ui.current_label = HTML(value=self._current_text())
 
         ui.save_name = Text(value="", placeholder="Name of the cell set", description="Name:", style=auto, layout=Layout(**full))
-        ui.save_tags = Text(value="", placeholder="key:value, … e.g. celltype:CD8 T", description="Tags:", style=auto, layout=Layout(**full))
+        ui.save_tags = Text(value="", placeholder="Tags, comma-separated, e.g. pilot, figure 2", description="Tags:", style=auto, layout=Layout(**full))
         ui.save_button = Button(description="Save as set", icon="save", button_style="primary", disabled=True, layout=Layout(width="auto"),
                                 tooltip="Keep the current selection as a named cell set")
         ui.save_button.on_click(lambda _b: self._on_save_clicked())
+        ui.new_cart_button = Button(description="New empty cart", icon="shopping-cart", disabled=True, layout=Layout(width="auto"),
+                                    tooltip="Make a set with no cells under this name and make it the active cart")
+        ui.new_cart_button.on_click(lambda _b: self._on_new_cart_clicked())
+
+        ui.cart_dropdown = Dropdown(options=[("None", None)], value=None, description="Active cart:", style=auto, layout=Layout(**full))
+        ui.cart_dropdown.observe(lambda change: self.set_active_cart(change["new"]), names="value")
 
         ui.column_combo = Combobox(options=self._column_options(), value="", placeholder="Column (new or existing)", description="Column:",
                                    ensure_option=False, style=auto, layout=Layout(**full))
@@ -104,7 +123,7 @@ class CellSetsPlugin(PluginBase):
         ui.set_list.observe(lambda _change: self._on_set_picked(), names="value")
 
         ui.edit_name = Text(value="", description="Name:", style=auto, layout=Layout(**full))
-        ui.edit_tags = Text(value="", placeholder="key:value, …", description="Tags:", style=auto, layout=Layout(**full))
+        ui.edit_tags = Text(value="", placeholder="Tags, comma-separated", description="Tags:", style=auto, layout=Layout(**full))
         ui.edit_note = Textarea(value="", placeholder="Note", description="Note:", style=auto, layout=Layout(height="48px", **full))
         ui.select_button = Button(description="Select cells", icon="crosshairs", button_style="info", disabled=True, layout=Layout(width="auto"),
                                   tooltip="Make this set the current selection and outline it in the image")
@@ -112,7 +131,22 @@ class CellSetsPlugin(PluginBase):
                                   tooltip="Save the name, tags and note (the cells never change)")
         ui.delete_button = Button(description="Delete", icon="trash", button_style="danger", disabled=True, layout=Layout(width="auto"),
                                   tooltip="Delete this set (asks first)")
+        ui.select_stars_button = Button(description="Select ★", disabled=True, layout=Layout(width="auto"),
+                                        tooltip="Make this set's starred cells the current selection")
+        ui.star_button = Button(description="★ Star selection", disabled=True, layout=Layout(width="auto"),
+                                tooltip="Star the selected cells in this set (cells not in it are added)")
+        ui.unstar_button = Button(description="☆ Unstar", disabled=True, layout=Layout(width="auto"),
+                                  tooltip="Take the star off the selected cells; they stay in the set")
+        ui.make_cart_button = Button(description="Make active cart", icon="shopping-cart", disabled=True, layout=Layout(width="auto"),
+                                     tooltip="Collect cells in this set with + Cart and Shift-click")
+        ui.snapshot_button = Button(description="Snapshot", icon="camera", disabled=True, layout=Layout(width="auto"),
+                                    tooltip="Save a frozen copy of this set, with its stars")
         ui.select_button.on_click(lambda _b: self.select_set(self._picked_id()))
+        ui.select_stars_button.on_click(lambda _b: self.select_stars(self._picked_id()))
+        ui.star_button.on_click(lambda _b: self.star_selection(self._picked_id()))
+        ui.unstar_button.on_click(lambda _b: self.star_selection(self._picked_id(), unstar=True))
+        ui.make_cart_button.on_click(lambda _b: self._make_picked_active())
+        ui.snapshot_button.on_click(lambda _b: self.snapshot_set(self._picked_id()))
         ui.update_button.on_click(lambda _b: self._on_update_clicked())
         ui.delete_button.on_click(lambda _b: self.ask_delete_set(self._picked_id()))
         ui.details = HTML(value="")
@@ -128,7 +162,9 @@ class CellSetsPlugin(PluginBase):
                 _heading("Save the current selection"),
                 ui.save_name,
                 ui.save_tags,
-                ui.save_button,
+                HBox([ui.save_button, ui.new_cart_button], layout=Layout(**row)),
+                _heading("Active cart"),
+                ui.cart_dropdown,
                 _heading("Write to the cell table"),
                 ui.column_combo,
                 ui.value_input,
@@ -140,7 +176,8 @@ class CellSetsPlugin(PluginBase):
                 ui.edit_name,
                 ui.edit_tags,
                 ui.edit_note,
-                HBox([ui.select_button, ui.update_button, ui.delete_button], layout=Layout(**row)),
+                HBox([ui.select_button, ui.select_stars_button, ui.star_button, ui.unstar_button], layout=Layout(**row)),
+                HBox([ui.make_cart_button, ui.snapshot_button, ui.update_button, ui.delete_button], layout=Layout(**row)),
                 ui.status,
             ],
             layout=Layout(width="100%", gap="4px", padding="4px"),
@@ -164,9 +201,15 @@ class CellSetsPlugin(PluginBase):
         hub = getattr(viewer, "selection_hub", None)
         if hub is not None:
             hub.subscribe(lambda _selection: self._on_selection())
-        bar = getattr(getattr(viewer, "ui_component", None), "selection_bar", None)
+        bar = self._bar
         if bar is not None and self.store is not None and hasattr(bar, "on_save"):
             bar.on_save(self.save_selection)
+            if hasattr(bar, "set_cart"):
+                bar.on_action("cart_add", self.add_selection_to_cart)
+                bar.on_action("cart_remove", lambda: self.add_selection_to_cart(remove=True))
+        display = getattr(viewer, "image_display", None)
+        if display is not None and self.store is not None:
+            display.shift_click_handler = self.toggle_cell_in_cart
         self._on_selection()
         self.refresh_sets()
 
@@ -179,6 +222,16 @@ class CellSetsPlugin(PluginBase):
     @property
     def _hub(self):
         return getattr(self.main_viewer, "selection_hub", None)
+
+    @property
+    def _bar(self):
+        return getattr(getattr(self.main_viewer, "ui_component", None), "selection_bar", None)
+
+    def _tell(self, text: str, color: str = _OK, *, bar: bool = True) -> None:
+        """Say *text* in the plugin, and in the selection bar until the next selection."""
+        self._status(text, color)
+        if bar and self._bar is not None:
+            self._bar.set_message(text, warning=color != _OK)
 
     def _current(self):
         hub = self._hub
@@ -206,7 +259,9 @@ class CellSetsPlugin(PluginBase):
         has = bool(current is not None and current.indices)
         ui.current_label.value = self._current_text()
         ui.save_button.disabled = not has or self.store is None
+        ui.new_cart_button.disabled = self.store is None
         ui.write_button.disabled = not has
+        self._refresh_set_buttons()
 
     def _image_masks(self, current) -> Optional[Dict]:
         """``(fov, label) -> mask`` for cells selected in the image, if it shows the selection."""
@@ -316,23 +371,44 @@ class CellSetsPlugin(PluginBase):
     def _picked_id(self) -> Optional[str]:
         return self.ui_component.set_list.value or None
 
-    def _picked(self) -> Optional[Dict[str, Any]]:
-        set_id = self._picked_id()
+    def _entry(self, set_id: Optional[str]) -> Optional[Dict[str, Any]]:
         return next((entry for entry in self._sets if entry.get("id") == set_id), None)
 
-    @staticmethod
-    def _row_label(entry: Dict[str, Any]) -> str:
+    def _picked(self) -> Optional[Dict[str, Any]]:
+        return self._entry(self._picked_id())
+
+    def _display_name(self, entry: Dict[str, Any]) -> str:
+        """A set's name; a ★ favourites child is named after its set ("★ CD8 T")."""
+        if entry.get("role") == FAVOURITES:
+            parent = self._entry(entry.get("container"))
+            return f"★ {parent.get('name', '?')}" if parent else str(entry.get("name", "?"))
+        return str(entry.get("name", "?"))
+
+    def _stars(self, set_id: Optional[str]) -> Optional[Dict[str, Any]]:
+        return next((e for e in self._sets if e.get("container") == set_id and e.get("role") == FAVOURITES), None)
+
+    def _row_label(self, entry: Dict[str, Any]) -> str:
+        stars = self._stars(entry.get("id"))
+        marks = ""
+        if entry.get("id") == self.active_cart:
+            marks += "🛒 "
+        if entry.get("frozen"):
+            marks += "🔒 "
+        star_text = f" · ★ {int(stars.get('count', 0))}" if stars and stars.get("count") else ""
         tags = f" · {format_tags(entry.get('tags', []))}" if entry.get("tags") else ""
-        return f"{entry.get('name', '?')} — {_cells(int(entry.get('count', 0)))}{tags}"
+        return f"{marks}{entry.get('name', '?')} — {_cells(int(entry.get('count', 0)))}{star_text}{tags}"
 
     def refresh_sets(self, select: Optional[str] = None) -> None:
-        """Re-read the index and show the sets that match the filter."""
+        """Re-read the index and show the top-level sets that match the filter."""
         ui = self.ui_component
         self._sets = self.store.list_sets() if self.store is not None else []
+        if self.active_cart and self._entry(self.active_cart) is None:
+            self.active_cart = None
+        top = [entry for entry in self._sets if entry.get("container") is None]
         needle = (ui.filter_input.value or "").strip().casefold()
         shown = [
             entry
-            for entry in self._sets
+            for entry in top
             if not needle
             or needle in str(entry.get("name", "")).casefold()
             or any(needle in str(tag).casefold() for tag in entry.get("tags", []))
@@ -341,13 +417,43 @@ class CellSetsPlugin(PluginBase):
         ui.set_list.options = [(self._row_label(entry), entry["id"]) for entry in shown]
         ids = [entry["id"] for entry in shown]
         ui.set_list.value = keep if keep in ids else None
+        self._refresh_cart_choices()
         self._on_set_picked()
+
+    def _refresh_cart_choices(self) -> None:
+        """The active-cart dropdown: the top-level sets that are not snapshots."""
+        ui = self.ui_component
+        carts = [e for e in self._sets if e.get("container") is None and not e.get("frozen")]
+        options = [("None", None)] + [(str(e.get("name", "?")), e["id"]) for e in carts]
+        self._updating_cart = True
+        try:
+            ui.cart_dropdown.options = options
+            ui.cart_dropdown.value = self.active_cart if self.active_cart in [o[1] for o in options] else None
+        finally:
+            self._updating_cart = False
+        bar = self._bar
+        if bar is not None and hasattr(bar, "set_cart"):
+            cart = self._entry(self.active_cart)
+            bar.set_cart(cart.get("name") if cart else None)
+
+    def _refresh_set_buttons(self) -> None:
+        ui = self.ui_component
+        entry = self._picked()
+        current = self._current()
+        has_selection = bool(current is not None and current.indices)
+        editable = entry is not None and not entry.get("frozen")
+        for button in (ui.select_button, ui.update_button, ui.delete_button, ui.snapshot_button):
+            button.disabled = entry is None
+        stars = self._stars(entry.get("id")) if entry else None
+        ui.select_stars_button.disabled = not (stars and stars.get("count"))
+        ui.star_button.disabled = not (editable and has_selection)
+        ui.unstar_button.disabled = not (editable and has_selection and stars and stars.get("count"))
+        ui.make_cart_button.disabled = not editable or entry.get("id") == self.active_cart
 
     def _on_set_picked(self) -> None:
         ui = self.ui_component
         entry = self._picked()
-        for button in (ui.select_button, ui.update_button, ui.delete_button):
-            button.disabled = entry is None
+        self._refresh_set_buttons()
         if entry is None:
             ui.edit_name.value = ui.edit_tags.value = ui.edit_note.value = ""
             ui.details.value = ""
@@ -358,11 +464,22 @@ class CellSetsPlugin(PluginBase):
         steps = sum(1 for step in entry.get("trail", []) if step.get("kind") == "selection")
         made = html.escape(CellSelection(frozenset(), str(entry.get("source", "")), recipe=entry.get("recipe") or {}).source_label)
         fovs = int(entry.get("fovs", 0))
-        ui.details.value = (
-            f"<span style='color: {_MUTED}; font-size: 12px;'>{_cells(int(entry.get('count', 0)))} in "
-            f"{fovs} {'FOV' if fovs == 1 else 'FOVs'} · from {made or 'a selection'} · saved {html.escape(str(entry.get('created', '')))}"
-            f" · {steps} selection {'step' if steps == 1 else 'steps'} recorded</span>"
-        )
+        stars = self._stars(entry.get("id"))
+        parts = [
+            f"{_cells(int(entry.get('count', 0)))} in {fovs} {'FOV' if fovs == 1 else 'FOVs'}",
+            f"★ {int(stars.get('count', 0))}" if stars and stars.get("count") else "",
+            f"from {made or 'a selection'}",
+            f"saved {html.escape(str(entry.get('created', '')))}",
+            f"{steps} selection {'step' if steps == 1 else 'steps'} recorded",
+        ]
+        edits = entry.get("edits") or []
+        if edits:
+            parts.append(f"edited {len(edits)} {'time' if len(edits) == 1 else 'times'}, last {html.escape(str(edits[-1].get('time', '')))}")
+        if entry.get("frozen"):
+            parts.append("snapshot: its cells cannot change")
+        if entry.get("id") == self.active_cart:
+            parts.append("the active cart")
+        ui.details.value = f"<span style='color: {_MUTED}; font-size: 12px;'>{' · '.join(p for p in parts if p)}</span>"
 
     def _on_update_clicked(self) -> None:
         ui = self.ui_component
@@ -382,11 +499,13 @@ class CellSetsPlugin(PluginBase):
         self._status(f"Saved the changes to <b>{html.escape(meta['name'])}</b>.", _OK)
 
     def ask_delete_set(self, set_id: Optional[str]) -> None:
-        entry = next((e for e in self._sets if e.get("id") == set_id), None)
+        entry = self._entry(set_id)
         if entry is None or self.store is None:
             return
+        stars = self._stars(set_id)
+        star_text = f", its {int(stars.get('count', 0))} stars" if stars and stars.get("count") else ""
         asked = self.confirm(
-            f"The cell set <b>{html.escape(entry['name'])}</b> ({_cells(int(entry.get('count', 0)))}) "
+            f"The cell set <b>{html.escape(entry['name'])}</b> ({_cells(int(entry.get('count', 0)))}){star_text} "
             "and its recorded history will be deleted from disk. This cannot be undone.",
             lambda: self._delete_confirmed(set_id),
             title="Delete cell set?",
@@ -396,14 +515,179 @@ class CellSetsPlugin(PluginBase):
             self._status("Not deleted: there is no dialog to confirm with.", _WARN)
 
     def _delete_confirmed(self, set_id: str) -> None:
-        entry = next((e for e in self._sets if e.get("id") == set_id), None)
+        entry = self._entry(set_id)
         try:
             self.store.delete_set(set_id)
         except (KeyError, OSError) as exc:
             self._status(html.escape(str(exc)), _ERROR)
             return
+        if self.active_cart == set_id:
+            self.active_cart = None
         self.refresh_sets()
         self._status(f"Deleted <b>{html.escape(entry['name'] if entry else set_id)}</b>.", _OK)
+
+    # ------------------------------------------------------------------
+    # Carts
+    # ------------------------------------------------------------------
+    def set_active_cart(self, set_id: Optional[str]) -> None:
+        """Collect cells in *set_id* with + Cart / − Cart and Shift-click; ``None`` stops."""
+        if getattr(self, "_updating_cart", False):
+            return
+        entry = self._entry(set_id) if set_id else None
+        if entry is not None and entry.get("frozen"):
+            self._status(f"<b>{html.escape(entry['name'])}</b> is a snapshot; its cells cannot change.", _ERROR)
+            entry = None
+        self.active_cart = entry["id"] if entry else None
+        self.refresh_sets()
+        if entry:
+            self._status(f"Collecting cells in <b>{html.escape(entry['name'])}</b>: + Cart in the bar, or Shift-click a cell in the image.", _OK)
+
+    def _make_picked_active(self) -> None:
+        self.set_active_cart(self._picked_id())
+
+    def _on_new_cart_clicked(self) -> None:
+        ui = self.ui_component
+        error = self.create_cart(ui.save_name.value, ui.save_tags.value)
+        if error:
+            self._status(error, _ERROR)
+            return
+        ui.save_name.value = ""
+        ui.save_tags.value = ""
+
+    def create_cart(self, name: str, tags_text: str = "") -> str:
+        """Make an empty set named *name* and make it the active cart; return an error, or ``""``."""
+        if self.store is None:
+            return "Cell sets cannot be saved without a dataset folder."
+        tags, _ = parse_tags(tags_text)
+        try:
+            meta = self.store.save_set(name, None, tags=tags, source="cart", allow_empty=True)
+        except (ValueError, OSError) as exc:
+            return html.escape(str(exc))
+        hub = self._hub
+        if hub is not None:
+            hub.note("new cart", {"set_id": meta["id"], "name": meta["name"]}, count=0)
+        self.active_cart = meta["id"]
+        self.refresh_sets(select=meta["id"])
+        self._status(f"Made the empty cart <b>{html.escape(meta['name'])}</b> and made it active.", _OK)
+        return ""
+
+    def _edit_cells(self, set_id: str, cells, recipe: Dict[str, Any], *, remove: bool = False) -> Optional[int]:
+        """Add *cells* to the set or remove them; note it in the session log. ``None`` on failure."""
+        entry = self._entry(set_id)
+        try:
+            if remove:
+                changed = self.store.remove_cells(set_id, cells, recipe)
+            else:
+                changed = self.store.add_cells(set_id, cells, recipe)
+        except (ValueError, KeyError, OSError) as exc:
+            self._tell(html.escape(str(exc)), _ERROR)
+            return None
+        hub = self._hub
+        if hub is not None:
+            hub.note("removed from cart" if remove else "added to cart", {"set_id": set_id, "name": entry["name"] if entry else ""}, count=changed)
+        self.refresh_sets()
+        return changed
+
+    def add_selection_to_cart(self, remove: bool = False) -> Optional[int]:
+        """**+ Cart** / **− Cart**: put the current selection in the active cart or take it out."""
+        cart = self._entry(self.active_cart)
+        if cart is None or self.store is None:
+            self._tell("No active cart. Choose one in the Cell sets plugin.", _WARN)
+            return None
+        current = self._current()
+        if current is None or not current.indices:
+            self._tell("Nothing is selected.", _WARN)
+            return None
+        cells = cells_from_indices(self.main_viewer, current.indices, self._image_masks(current))
+        if not len(cells):
+            self._tell("None of the selected cells is in the cell table.", _WARN)
+            return None
+        recipe = {"source": current.source, "recipe": dict(current.recipe or {})}
+        changed = self._edit_cells(cart["id"], cells, recipe, remove=remove)
+        if changed is None:
+            return None
+        total = _cells(int((self._entry(cart["id"]) or {}).get("count", 0)))
+        name = html.escape(cart["name"])
+        if remove:
+            self._tell(f"Took {_cells(changed)} out of the cart <b>{name}</b> (now {total}).")
+        elif changed < len(cells):
+            self._tell(f"Added {_cells(changed)} to the cart <b>{name}</b> ({len(cells) - changed:,} already in it; now {total}).")
+        else:
+            self._tell(f"Added {_cells(changed)} to the cart <b>{name}</b> (now {total}).")
+        return changed
+
+    def toggle_cell_in_cart(self, hit) -> Optional[str]:
+        """Shift-click in the image: put the cell in the active cart, or take it out.
+
+        Returns ``"added"`` or ``"removed"``, or ``None`` when nothing changed.
+        """
+        cart = self._entry(self.active_cart)
+        if cart is None or self.store is None:
+            self._tell("Shift-click puts a cell in the active cart, and there is none. Choose one in the Cell sets plugin.", _WARN)
+            return None
+        cell = pd.DataFrame({"fov": [str(hit.fov_name)], "mask": [str(hit.mask_name)], "label": [int(hit.mask_id)]})
+        try:
+            inside = bool(self.store.contains(cart["id"], cell).iloc[0])
+        except (KeyError, OSError, ValueError) as exc:
+            self._tell(html.escape(str(exc)), _ERROR)
+            return None
+        recipe = {"source": "image shift-click", "fov": str(hit.fov_name), "mask": str(hit.mask_name), "label": int(hit.mask_id)}
+        if self._edit_cells(cart["id"], cell, recipe, remove=inside) is None:
+            return None
+        total = _cells(int((self._entry(cart["id"]) or {}).get("count", 0)))
+        what = f"cell {int(hit.mask_id)} ({html.escape(str(hit.fov_name))})"
+        name = html.escape(cart["name"])
+        if inside:
+            self._tell(f"Took {what} out of the cart <b>{name}</b> (now {total}).")
+            return "removed"
+        self._tell(f"Added {what} to the cart <b>{name}</b> (now {total}).")
+        return "added"
+
+    # ------------------------------------------------------------------
+    # Stars and snapshots
+    # ------------------------------------------------------------------
+    def star_selection(self, set_id: Optional[str], unstar: bool = False) -> Optional[int]:
+        """Star (or unstar) the current selection's cells in the set."""
+        entry = self._entry(set_id)
+        current = self._current()
+        if entry is None or self.store is None or current is None or not current.indices:
+            return None
+        cells = cells_from_indices(self.main_viewer, current.indices, self._image_masks(current))
+        recipe = {"source": current.source, "recipe": dict(current.recipe or {})}
+        try:
+            changed = self.store.unstar(set_id, cells, recipe) if unstar else self.store.star(set_id, cells, recipe)
+        except (ValueError, KeyError, OSError) as exc:
+            self._status(html.escape(str(exc)), _ERROR)
+            return None
+        hub = self._hub
+        if hub is not None:
+            hub.note("unstarred" if unstar else "starred", {"set_id": set_id, "name": entry["name"]}, count=changed)
+        self.refresh_sets(select=set_id)
+        name = html.escape(entry["name"])
+        self._status(f"{'Unstarred' if unstar else 'Starred'} {_cells(changed)} in <b>{name}</b>.", _OK)
+        return changed
+
+    def select_stars(self, set_id: Optional[str]) -> bool:
+        stars = self._stars(set_id)
+        return self.select_set(stars["id"]) if stars else False
+
+    def snapshot_set(self, set_id: Optional[str]) -> Optional[Dict[str, Any]]:
+        """Save a frozen copy of the set, named after it and the time."""
+        entry = self._entry(set_id)
+        if entry is None or self.store is None:
+            return None
+        name = f"{entry['name']} (snapshot {datetime.now().strftime('%Y-%m-%d %H:%M')})"
+        try:
+            meta = self.store.snapshot(set_id, name)
+        except (ValueError, KeyError, OSError) as exc:
+            self._status(html.escape(str(exc)), _ERROR)
+            return None
+        hub = self._hub
+        if hub is not None:
+            hub.note("snapshot", {"set_id": meta["id"], "of": set_id, "name": meta["name"]}, count=meta.get("count", 0))
+        self.refresh_sets(select=meta["id"])
+        self._status(f"Saved the snapshot <b>{html.escape(meta['name'])}</b>; rename it below if you like.", _OK)
+        return meta
 
     # ------------------------------------------------------------------
     # Selecting a set
@@ -415,21 +699,25 @@ class CellSetsPlugin(PluginBase):
         entry = next((e for e in self._sets if e.get("id") == set_id), None) or self.store.get(set_id)
         if entry is None:
             return False
+        name = self._display_name(entry)
         viewer = self.main_viewer
         try:
             cells = self.store.read_cells(set_id)
         except (KeyError, OSError, ValueError) as exc:
             self._status(f"Cannot read the set: {html.escape(str(exc))}", _ERROR)
             return False
+        if not len(cells):
+            self._status(f"<b>{html.escape(name)}</b> has no cells yet.", _WARN)
+            return False
         indices, missing = indices_from_cells(viewer, cells)
         if not indices:
-            self._status(f"None of the {_cells(len(cells))} of <b>{html.escape(entry['name'])}</b> is in the cell table any more.", _ERROR)
+            self._status(f"None of the {_cells(len(cells))} of <b>{html.escape(name)}</b> is in the cell table any more.", _ERROR)
             return False
         self.move_view_to(cells)
         masks = entry.get("masks") or sorted(cells["mask"].unique().tolist())
         known = set(getattr(viewer, "mask_names", ()) or ())
         mask = masks[0] if len(masks) == 1 and (not known or masks[0] in known) else None
-        recipe = {"set_id": set_id, "name": entry["name"]}
+        recipe = {"set_id": set_id, "name": name}
         if mask:
             recipe["mask"] = mask
         self._hub.publish(indices, "set", (), recipe)
@@ -437,9 +725,9 @@ class CellSetsPlugin(PluginBase):
         if callable(send):
             send()
         if missing:
-            self._status(f"{_cells(missing)} of <b>{html.escape(entry['name'])}</b> are no longer in the cell table.", _WARN)
+            self._status(f"{_cells(missing)} of <b>{html.escape(name)}</b> are no longer in the cell table.", _WARN)
         else:
-            self._status(f"Selected <b>{html.escape(entry['name'])}</b>.", _OK)
+            self._status(f"Selected <b>{html.escape(name)}</b>.", _OK)
         return True
 
     def move_view_to(self, cells) -> None:

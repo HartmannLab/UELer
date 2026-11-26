@@ -4,6 +4,7 @@ A left click on the background does nothing, so a mis-click keeps the
 selection; a right click on the background unselects everything. Ctrl + click
 toggles one cell, Ctrl + drag draws a lasso without the Lasso Select toggle,
 and a loop around cells that are all selected already unselects them.
+Shift + click on a cell goes to the cart handler and leaves the selection alone.
 """
 from __future__ import annotations
 
@@ -101,6 +102,32 @@ class ImageGestureTests(unittest.TestCase):
         for x, y in points[1:]:
             self.display.on_mouse_move(self._event(x, y, key="control"))
         self.display.on_mouse_release(self._event(*points[-1], key="control"))
+
+    # -- Shift-click: the active cart ----------------------------------------
+    def test_shift_click_on_a_cell_goes_to_the_cart_handler_only(self):
+        hits = []
+        self.display.shift_click_handler = hits.append
+        self.display.selected_masks_label = {_cell(1)}
+        self._click(15, key="shift")
+        self.assertEqual([h.mask_id for h in hits], [2])
+        self.assertEqual(self.display.selected_masks_label, {_cell(1)})
+        self.assertEqual(self.published, [])
+
+    def test_shift_click_on_background_or_without_a_handler_does_nothing(self):
+        hits = []
+        self._click(15, key="shift")  # no handler: no selection either
+        self.assertEqual(self.display.selected_masks_label, set())
+        self.display.shift_click_handler = hits.append
+        self._click(50, key="shift")
+        self.assertEqual(hits, [])
+        self.assertEqual(self.cleared, [])
+
+    def test_ctrl_shift_click_is_a_ctrl_click(self):
+        hits = []
+        self.display.shift_click_handler = hits.append
+        self._click(5, key="ctrl+shift")
+        self.assertEqual(hits, [])
+        self.assertEqual(self.display.selected_masks_label, {_cell(1)})
 
     # -- clicks --------------------------------------------------------------
     def test_left_click_on_background_keeps_the_selection(self):

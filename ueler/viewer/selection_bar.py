@@ -6,7 +6,8 @@ is selected (count, source, how many in the FOV shown) or carries a message
 (lasso armed, why a loop found nothing). The buttons send the current selection
 to the image, the Gallery or the plots, and a second click on a linked (✓)
 button takes it back out of that view; **Save as set…** keeps it as a named cell
-set, and ✕ clears it.
+set, and ✕ clears it. While a cell set is the active cart, **+ Cart** and
+**− Cart** add the selection to it or take it out; their tooltips name the cart.
 
 **Save as set…** swaps the text and buttons for a name field, a tags field and
 Save / Cancel in the same row, so the bar keeps its one-line height.
@@ -44,7 +45,7 @@ def _show(widget, visible: bool, display: str = "flex") -> None:
 
 
 class SelectionBar:
-    """◀ ▶, text, Image / Gallery / Plots / Save as set… / ✕; see the module doc."""
+    """◀ ▶, text, Image / Gallery / Plots / + Cart / − Cart / Save as set… / ✕; see the module doc."""
 
     LABELS = {"image": "Image", "gallery": "Gallery", "plots": "Plots"}
     _PLACES = {"image": "image", "gallery": "Gallery", "plots": "plots"}
@@ -64,10 +65,12 @@ class SelectionBar:
             layout=Layout(flex="1 1 auto", min_width="0", overflow="hidden", margin="0 0 0 8px"),
         )
         self.buttons = {target: _button(label, self._SEND_TIPS[target]) for target, label in self.LABELS.items()}
+        self.cart_add_button = _button("+ Cart", "Add the selection to the active cart", display="none")
+        self.cart_remove_button = _button("− Cart", "Take the selection out of the active cart", display="none")
         self.save_button = _button("Save as set…", "Keep the selection as a named cell set", display="none")
         self.clear_button = _button("✕", "Unselect everything (asks first)")
         self.actions = HBox(
-            [*self.buttons.values(), self.save_button, self.clear_button],
+            [*self.buttons.values(), self.cart_add_button, self.cart_remove_button, self.save_button, self.clear_button],
             layout=Layout(display="none", gap="4px", flex="0 0 auto"),
         )
         self.name_input = Text(
@@ -77,7 +80,7 @@ class SelectionBar:
         )
         self.tags_input = Text(
             value="",
-            placeholder="Tags: key:value, … (optional)",
+            placeholder="Tags, comma-separated (optional)",
             layout=Layout(flex="1 1 auto", min_width="120px", height="26px"),
         )
         self.save_confirm = _button("Save", "Save the selection as a cell set")
@@ -114,10 +117,16 @@ class SelectionBar:
         """Run *callback* when the button for *target* is clicked.
 
         *target* is a view (``"image"``, ``"gallery"``, ``"plots"``), ``"clear"``
-        (✕), ``"back"`` (◀) or ``"forward"`` (▶).
+        (✕), ``"back"`` (◀), ``"forward"`` (▶), ``"cart_add"`` or ``"cart_remove"``.
         """
         self._callbacks[target] = callback
-        extra = {"clear": self.clear_button, "back": self.back_button, "forward": self.forward_button}
+        extra = {
+            "clear": self.clear_button,
+            "back": self.back_button,
+            "forward": self.forward_button,
+            "cart_add": self.cart_add_button,
+            "cart_remove": self.cart_remove_button,
+        }
         button = extra[target] if target in extra else self.buttons[target]
         button.on_click(lambda _button, t=target: self.trigger(t))
 
@@ -167,6 +176,16 @@ class SelectionBar:
 
     def _refresh_save_button(self) -> None:
         _show(self.save_button, self._save_callback is not None, "inline-flex")
+
+    # -- the active cart -------------------------------------------------
+    def set_cart(self, name: Optional[str]) -> None:
+        """Show **+ Cart** / **− Cart** for the cart *name*, or hide them with ``None``."""
+        visible = bool(name)
+        for button in (self.cart_add_button, self.cart_remove_button):
+            _show(button, visible, "inline-flex")
+        if visible:
+            self.cart_add_button.tooltip = f"Add the selection to the cart '{name}'"
+            self.cart_remove_button.tooltip = f"Take the selection out of the cart '{name}'"
 
     # -- history ---------------------------------------------------------
     def set_history(self, can_back: bool, can_forward: bool) -> None:

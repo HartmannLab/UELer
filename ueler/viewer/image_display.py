@@ -535,9 +535,22 @@ class ImageDisplay:
     #   left click on background    nothing (a mis-click must not lose a selection)
     #   Ctrl + left click on a cell add it to the selection, or take it out
     #   Ctrl + left drag            a lasso, without arming Lasso Select
+    #   Shift + left click on a cell put it in the active cart, or take it out
+    #                               (``shift_click_handler``, set by the Cell sets plugin)
     #   right click on background   unselect everything (◀ brings it back)
     # A loop around cells that are all selected already unselects them.
     CTRL_DRAG_PIXELS = 5  # a Ctrl press that moves less than this is a click
+
+    #: ``handler(hit)`` for a Shift-click on a cell; the selection is not touched.
+    shift_click_handler = None
+
+    @staticmethod
+    def _shift_held(event) -> bool:
+        """Whether Shift (and not Ctrl) was held for a mouse event."""
+        key = str(getattr(event, "key", "") or "").lower()
+        if key == "shift" or key.startswith("shift+"):
+            return True
+        return "shift" in (getattr(event, "modifiers", None) or ())
 
     @staticmethod
     def _ctrl_held(event) -> bool:
@@ -583,6 +596,13 @@ class ImageDisplay:
                 "moved": False,
                 "line": None,
             }
+            return
+
+        if is_left and self._shift_held(event):
+            handler = getattr(self, "shift_click_handler", None)
+            hit = self.main_viewer.resolve_mask_hit_at_viewport(x, y)
+            if hit is not None and callable(handler):
+                handler(hit)
             return
 
         hit = self.main_viewer.resolve_mask_hit_at_viewport(x, y)

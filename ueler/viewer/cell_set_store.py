@@ -18,10 +18,17 @@ reading any cells; the cells go to Parquet because a set can hold hundreds of
 thousands of them. Every write goes to a temporary file first and is then
 renamed over the old one, so an interrupted write never leaves a half file.
 
-**Tags** are ``key:value`` pairs (``celltype:CD8 T``). The key names a
-cell-table column and the value is what the set's cells get in it, so one rule
-covers every write: :func:`write_column` puts *value* into column *key* for the
-given rows.
+**Sets are editable.** Cells can be added and removed at any time, so a set
+also works as a *cart* that collects cells over several sessions; every change
+is logged in the set's ``edits``. **Snapshot** makes a frozen copy that refuses
+edits. A set can hold children (``container`` names the set a child belongs
+to), and a child is always a subset of its parent: adding to a child adds to the
+parent, removing from a parent removes from its children. The one child built
+so far is a set's **★ favourites** (``role: "favourites"``).
+
+**Tags** are free-form labels for organising the list (``pilot``, ``todo``,
+``celltype:CD8 T``). They are not read as column names; :func:`write_column`
+is the explicit way to put a value into the cell table.
 """
 
 from __future__ import annotations
@@ -48,7 +55,9 @@ __all__ = [
     "write_column",
 ]
 
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
+FAVOURITES = "favourites"
+FAVOURITES_NAME = "★ favourites"
 CELL_COLUMNS = ("fov", "mask", "label")
 
 
@@ -60,31 +69,18 @@ def _now() -> str:
 # Tags
 # ---------------------------------------------------------------------------
 def parse_tags(text: str) -> Tuple[List[str], List[str]]:
-    """Split comma-separated ``key:value`` tags; return ``(tags, problems)``.
+    """Split comma-separated tags; return ``(tags, problems)``.
 
-    Whitespace around the key and value is dropped (``celltype : CD8 T`` becomes
-    ``celltype:CD8 T``). A tag without a ``:``, with an empty side, or a second
-    value for a key already given is reported as a problem and left out.
+    Tags are free-form: whitespace around each is dropped, empty ones and exact
+    repeats are left out. *problems* is always empty; it is kept so callers can
+    report one if a rule is added later.
     """
     tags: List[str] = []
-    problems: List[str] = []
-    seen: Dict[str, str] = {}
     for raw in (text or "").split(","):
-        raw = raw.strip()
-        if not raw:
-            continue
-        key, colon, value = raw.partition(":")
-        key, value = key.strip(), value.strip()
-        if not colon or not key or not value:
-            problems.append(f"'{raw}' is not key:value")
-            continue
-        if key in seen:
-            if seen[key] != value:
-                problems.append(f"'{key}' is given two values ({seen[key]}, {value})")
-            continue
-        seen[key] = value
-        tags.append(f"{key}:{value}")
-    return tags, problems
+        tag = " ".join(raw.split())
+        if tag and tag not in tags:
+            tags.append(tag)
+    return tags, []
 
 
 def format_tags(tags: Iterable[str]) -> str:
@@ -206,6 +202,45 @@ def write_column(viewer, indices: Iterable[Hashable], column: str, value: str) -
 # ---------------------------------------------------------------------------
 # The store
 # ---------------------------------------------------------------------------
+_ENTRY_DEFAULTS: Dict[str, Any] = {
+    "tags": [],
+    "note": "",
+    "container": None,
+    "role": None,
+    "frozen": False,
+    "edits": [],
+    "parents": [],
+    "trail": [],
+    "recipe": {},
+    "source": "",
+}
+
+
+def _empty_cells() -> pd.DataFrame:
+    return pd.DataFrame({"fov": pd.Series(dtype=object), "mask": pd.Series(dtype=object), "label": pd.Series(dtype="int64")})
+
+
+def _clean_cells(cells: Optional[pd.DataFrame]) -> pd.DataFrame:
+    """*cells* with the three identity columns typed as stored, without repeats."""
+    if cells is None or not len(cells):
+        return _empty_cells()
+    cells = cells[list(CELL_COLUMNS)].copy()
+    cells["fov"] = cells["fov"].astype(str)
+    cells["mask"] = cells["mask"].astype(str)
+    cells["label"] = _label_series(cells["label"])
+    cells = cells.dropna(subset=["label"])
+    cells["label"] = cells["label"].astype("int64")
+    return cells.drop_duplicates(subset=list(CELL_COLUMNS)).reset_index(drop=True)
+
+
+def _in(cells: pd.DataFrame, other: pd.DataFrame) -> pd.Series:
+    """For each row of *cells*, whether *other* holds the same cell."""
+    if not len(cells) or not len(other):
+        return pd.Series(False, index=cells.index)
+    keys = pd.MultiIndex.from_frame(other[list(CELL_COLUMNS)])
+    return pd.Series(pd.MultiIndex.from_frame(cells[list(CELL_COLUMNS)]).isin(keys), index=cells.index)
+
+
 class CellSetStore:
     """Read and write cell sets under ``<storage>/.UELer/dataset_*/cell_sets/``."""
 
@@ -220,6 +255,7 @@ class CellSetStore:
 
     # -- index -----------------------------------------------------------
     def _load_index(self) -> Dict[str, Any]:
+        """The index, with the fields added after format 1 filled in."""
         if not self._index_path.exists():
             return {"format": FORMAT_VERSION, "sets": []}
         try:
@@ -229,6 +265,10 @@ class CellSetStore:
             return {"format": FORMAT_VERSION, "sets": []}
         if not isinstance(data, dict) or not isinstance(data.get("sets"), list):
             return {"format": FORMAT_VERSION, "sets": []}
+        for entry in data["sets"]:
+            for key, default in _ENTRY_DEFAULTS.items():
+                if key not in entry:
+                    entry[key] = list(default) if isinstance(default, list) else (dict(default) if isinstance(default, dict) else default)
         return data
 
     def _save_index(self, index: Dict[str, Any]) -> None:
@@ -241,6 +281,7 @@ class CellSetStore:
         os.replace(partial, self._index_path)
 
     def list_sets(self) -> List[Dict[str, Any]]:
+        """Every set, children included (``container`` tells them apart)."""
         return [dict(entry) for entry in self._load_index()["sets"]]
 
     def get(self, set_id: str) -> Optional[Dict[str, Any]]:
@@ -249,14 +290,56 @@ class CellSetStore:
                 return dict(entry)
         return None
 
-    def _check_name(self, index: Dict[str, Any], name: str, own_id: str = "") -> str:
+    def children(self, set_id: str) -> List[Dict[str, Any]]:
+        return [dict(entry) for entry in self._load_index()["sets"] if entry.get("container") == set_id]
+
+    def favourites(self, set_id: str) -> Optional[Dict[str, Any]]:
+        """The set's ★ favourites child, or ``None`` before the first star."""
+        return next((c for c in self.children(set_id) if c.get("role") == FAVOURITES), None)
+
+    @staticmethod
+    def _entry(index: Dict[str, Any], set_id: str) -> Dict[str, Any]:
+        for entry in index["sets"]:
+            if entry.get("id") == set_id:
+                return entry
+        raise KeyError(set_id)
+
+    def _check_name(self, index: Dict[str, Any], name: str, own_id: str = "", container: Optional[str] = None) -> str:
+        """*name*, stripped; refused if empty or used by a set with the same container."""
         name = (name or "").strip()
         if not name:
             raise ValueError("A cell set needs a name.")
         for entry in index["sets"]:
-            if entry.get("id") != own_id and str(entry.get("name", "")).casefold() == name.casefold():
+            if (
+                entry.get("id") != own_id
+                and entry.get("container") == container
+                and str(entry.get("name", "")).casefold() == name.casefold()
+            ):
                 raise ValueError(f"A cell set named '{name}' already exists.")
         return name
+
+    # -- cells on disk ---------------------------------------------------
+    def read_cells(self, set_id: str) -> pd.DataFrame:
+        entry = self.get(set_id)
+        if entry is None:
+            raise KeyError(set_id)
+        return self._read_file(entry["file"])
+
+    def _read_file(self, filename: str) -> pd.DataFrame:
+        path = self._dir / filename
+        if not path.exists():
+            return _empty_cells()
+        return pd.read_parquet(path)
+
+    def _write_cells(self, entry: Dict[str, Any], cells: pd.DataFrame) -> None:
+        """Replace the entry's cells on disk and its counts in the index entry."""
+        partial = self._dir / f"{entry['file']}.partial"
+        cells.to_parquet(partial, index=False)
+        os.replace(partial, self._dir / entry["file"])
+        entry["count"] = int(len(cells))
+        entry["fovs"] = int(cells["fov"].nunique()) if len(cells) else 0
+        entry["masks"] = sorted(cells["mask"].unique().tolist()) if len(cells) else []
+        entry["updated"] = _now()
 
     # -- writing ---------------------------------------------------------
     def save_set(
@@ -270,21 +353,24 @@ class CellSetStore:
         source: str = "",
         parents: Sequence[str] = (),
         trail: Sequence[Mapping[str, Any]] = (),
+        container: Optional[str] = None,
+        role: Optional[str] = None,
+        frozen: bool = False,
+        allow_empty: bool = False,
     ) -> Dict[str, Any]:
-        """Store *cells* as a new set and return its metadata."""
+        """Store *cells* as a new set and return its metadata.
+
+        *allow_empty* lets a cart start with no cells. A set with a *container*
+        is its child; its cells are added to the container as well.
+        """
         index = self._load_index()
-        name = self._check_name(index, name)
-        if cells is None or not len(cells):
+        if container is not None:
+            self._entry(index, container)  # KeyError for an unknown container
+        name = self._check_name(index, name, container=container)
+        cells = _clean_cells(cells)
+        if not len(cells) and not allow_empty:
             raise ValueError("A cell set needs at least one cell.")
         set_id = uuid.uuid4().hex[:12]
-        cells = cells[list(CELL_COLUMNS)].reset_index(drop=True).copy()
-        cells["fov"] = cells["fov"].astype(str)
-        cells["mask"] = cells["mask"].astype(str)
-        cells["label"] = _label_series(cells["label"]).astype("int64")
-        filename = f"{set_id}.parquet"
-        partial = self._dir / f"{filename}.partial"
-        cells.to_parquet(partial, index=False)
-        os.replace(partial, self._dir / filename)
         now = _now()
         entry = {
             "id": set_id,
@@ -293,24 +379,23 @@ class CellSetStore:
             "note": note or "",
             "created": now,
             "updated": now,
-            "count": int(len(cells)),
-            "fovs": int(cells["fov"].nunique()),
-            "masks": sorted(cells["mask"].unique().tolist()),
             "source": source,
             "recipe": dict(recipe or {}),
             "parents": list(parents),
             "trail": [dict(step) for step in trail],
-            "file": filename,
+            "container": container,
+            "role": role,
+            "frozen": bool(frozen),
+            "edits": [],
+            "file": f"{set_id}.parquet",
         }
+        self._write_cells(entry, cells)
+        entry["updated"] = now
         index["sets"].append(entry)
+        if container is not None and len(cells):
+            self._add_upward(index, container, cells, recipe)
         self._save_index(index)
         return dict(entry)
-
-    def read_cells(self, set_id: str) -> pd.DataFrame:
-        entry = self.get(set_id)
-        if entry is None:
-            raise KeyError(set_id)
-        return pd.read_parquet(self._dir / entry["file"])
 
     def update_set(
         self,
@@ -320,31 +405,144 @@ class CellSetStore:
         tags: Optional[Sequence[str]] = None,
         note: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Change a set's name, tags or note; its cells never change."""
+        """Change a set's name, tags or note; :meth:`add_cells` and :meth:`remove_cells` change its cells."""
         index = self._load_index()
-        for entry in index["sets"]:
-            if entry.get("id") != set_id:
-                continue
-            if name is not None:
-                entry["name"] = self._check_name(index, name, set_id)
-            if tags is not None:
-                entry["tags"] = list(tags)
-            if note is not None:
-                entry["note"] = note
-            entry["updated"] = _now()
-            self._save_index(index)
-            return dict(entry)
-        raise KeyError(set_id)
-
-    def delete_set(self, set_id: str) -> None:
-        index = self._load_index()
-        kept = [entry for entry in index["sets"] if entry.get("id") != set_id]
-        if len(kept) == len(index["sets"]):
-            raise KeyError(set_id)
-        removed = next(entry for entry in index["sets"] if entry.get("id") == set_id)
-        index["sets"] = kept
+        entry = self._entry(index, set_id)
+        if name is not None:
+            entry["name"] = self._check_name(index, name, set_id, entry.get("container"))
+        if tags is not None:
+            entry["tags"] = list(tags)
+        if note is not None:
+            entry["note"] = note
+        entry["updated"] = _now()
         self._save_index(index)
-        try:
-            (self._dir / removed["file"]).unlink()
-        except OSError:
-            pass
+        return dict(entry)
+
+    # -- editing the cells -----------------------------------------------
+    @staticmethod
+    def _log_edit(entry: Dict[str, Any], op: str, count: int, recipe: Optional[Mapping[str, Any]]) -> None:
+        entry.setdefault("edits", []).append({"time": _now(), "op": op, "count": int(count), "recipe": dict(recipe or {})})
+
+    @staticmethod
+    def _refuse_frozen(entry: Dict[str, Any]) -> None:
+        if entry.get("frozen"):
+            raise ValueError(f"'{entry.get('name')}' is a snapshot; its cells cannot change.")
+
+    def _add_upward(self, index, set_id, cells, recipe) -> int:
+        """Add *cells* to the set and to every set it is part of; return how many were new to it."""
+        entry = self._entry(index, set_id)
+        current = self._read_file(entry["file"])
+        new = cells[~_in(cells, current)]
+        if len(new):
+            self._refuse_frozen(entry)  # only when something would change
+            self._write_cells(entry, pd.concat([current, new], ignore_index=True))
+            self._log_edit(entry, "add", len(new), recipe)
+        container = entry.get("container")
+        if container is not None:
+            self._add_upward(index, container, cells, recipe)
+        return int(len(new))
+
+    def _remove_downward(self, index, set_id, cells, recipe) -> int:
+        """Remove *cells* from the set and every set inside it; return how many it lost."""
+        entry = self._entry(index, set_id)
+        current = self._read_file(entry["file"])
+        gone = _in(current, cells)
+        if gone.any():
+            self._refuse_frozen(entry)
+            self._write_cells(entry, current[~gone].reset_index(drop=True))
+            self._log_edit(entry, "remove", int(gone.sum()), recipe)
+        for child in [e for e in index["sets"] if e.get("container") == set_id]:
+            if not child.get("frozen"):
+                self._remove_downward(index, child["id"], cells, recipe)
+        return int(gone.sum())
+
+    def add_cells(self, set_id: str, cells: pd.DataFrame, recipe: Optional[Mapping[str, Any]] = None) -> int:
+        """Add *cells* to the set (and to its container); return how many were new.
+
+        Refused (``ValueError``) on a snapshot. *recipe* says how the added cells
+        were selected and goes into the set's ``edits``.
+        """
+        index = self._load_index()
+        self._refuse_frozen(self._entry(index, set_id))
+        added = self._add_upward(index, set_id, _clean_cells(cells), recipe)
+        self._save_index(index)
+        return added
+
+    def remove_cells(self, set_id: str, cells: pd.DataFrame, recipe: Optional[Mapping[str, Any]] = None) -> int:
+        """Remove *cells* from the set and from its children; return how many it lost."""
+        index = self._load_index()
+        self._refuse_frozen(self._entry(index, set_id))
+        removed = self._remove_downward(index, set_id, _clean_cells(cells), recipe)
+        self._save_index(index)
+        return removed
+
+    def contains(self, set_id: str, cells: pd.DataFrame) -> pd.Series:
+        """For each row of *cells*, whether the set holds it."""
+        cells = _clean_cells(cells)
+        return _in(cells, self.read_cells(set_id))
+
+    # -- stars -----------------------------------------------------------
+    def star(self, set_id: str, cells: pd.DataFrame, recipe: Optional[Mapping[str, Any]] = None) -> int:
+        """Star *cells* in the set; a cell not in the set yet is added to it first.
+
+        The stars are the set's ★ favourites child, made on the first star.
+        Returns how many cells were newly starred.
+        """
+        parent = self.get(set_id)
+        if parent is None:
+            raise KeyError(set_id)
+        self._refuse_frozen(parent)
+        child = self.favourites(set_id)
+        if child is None:
+            child = self.save_set(FAVOURITES_NAME, _empty_cells(), container=set_id, role=FAVOURITES, allow_empty=True,
+                                  source="star", recipe={"favourites_of": set_id})
+        return self.add_cells(child["id"], cells, recipe)
+
+    def unstar(self, set_id: str, cells: pd.DataFrame, recipe: Optional[Mapping[str, Any]] = None) -> int:
+        """Take the star off *cells*; they stay in the set. Returns how many lost it."""
+        child = self.favourites(set_id)
+        if child is None:
+            return 0
+        return self.remove_cells(child["id"], cells, recipe)
+
+    # -- snapshots -------------------------------------------------------
+    def snapshot(self, set_id: str, name: str) -> Dict[str, Any]:
+        """A frozen copy of the set, with its stars; the copy names the set in ``parents``."""
+        source = self.get(set_id)
+        if source is None:
+            raise KeyError(set_id)
+        copy = self.save_set(
+            name,
+            self.read_cells(set_id),
+            tags=source.get("tags", []),
+            note=source.get("note", ""),
+            recipe={"snapshot_of": set_id, "name": source.get("name", "")},
+            source="snapshot",
+            parents=[set_id],
+            trail=source.get("trail", []),
+            frozen=True,
+            allow_empty=True,
+        )
+        stars = self.favourites(set_id)
+        if stars is not None and stars.get("count"):
+            self.save_set(FAVOURITES_NAME, self.read_cells(stars["id"]), container=copy["id"], role=FAVOURITES,
+                          frozen=True, source="snapshot", recipe={"favourites_of": copy["id"]})
+        return self.get(copy["id"]) or copy
+
+    # -- deleting --------------------------------------------------------
+    def delete_set(self, set_id: str) -> List[str]:
+        """Delete the set and every set inside it; return the deleted ids."""
+        index = self._load_index()
+        self._entry(index, set_id)
+        doomed = [set_id]
+        for current in doomed:
+            doomed.extend(e["id"] for e in index["sets"] if e.get("container") == current)
+        removed = [e for e in index["sets"] if e.get("id") in doomed]
+        index["sets"] = [e for e in index["sets"] if e.get("id") not in doomed]
+        self._save_index(index)
+        for entry in removed:
+            try:
+                (self._dir / entry["file"]).unlink()
+            except OSError:
+                pass
+        return doomed

@@ -1,11 +1,13 @@
-"""Selection history, saved cell sets, key:value tags and writing to the cell table.
+"""Selection history, saved cell sets, carts, stars, tags and writing to the cell table.
 
 Covers the session log in ``SelectionHub`` (◀ ▶, the cell limit that leaves the
-log whole), ``CellSetStore`` and the cell-identity helpers, and the Cell sets
-plugin that replaced the Cell Table Editor.
+log whole), ``CellSetStore`` (editing, the subset rule, snapshots, ★ favourites)
+and the cell-identity helpers, the bar's cart buttons, Shift-click in the image,
+and the Cell sets plugin that replaced the Cell Table Editor.
 """
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -132,15 +134,14 @@ class HistoryTests(unittest.TestCase):
 # Tags, cell identity, writing
 # ---------------------------------------------------------------------------
 class TagTests(unittest.TestCase):
-    def test_parse(self):
-        tags, problems = parse_tags(" celltype : CD8 T , region:tumour")
-        self.assertEqual(tags, ["celltype:CD8 T", "region:tumour"])
+    def test_tags_are_free_form(self):
+        tags, problems = parse_tags(" pilot , celltype:CD8 T,  figure   2 , pilot, ")
+        self.assertEqual(tags, ["pilot", "celltype:CD8 T", "figure 2"])
         self.assertEqual(problems, [])
 
-    def test_plain_tags_and_two_values_for_a_key_are_refused(self):
-        tags, problems = parse_tags("interesting, celltype:A, celltype:B, :x")
-        self.assertEqual(tags, ["celltype:A"])
-        self.assertEqual(len(problems), 3)
+    def test_two_values_for_one_key_are_two_tags(self):
+        tags, _ = parse_tags("celltype:A, celltype:B")
+        self.assertEqual(tags, ["celltype:A", "celltype:B"])
 
 
 class CellIdentityTests(unittest.TestCase):
@@ -229,6 +230,108 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(list(self.store.folder.glob("*.parquet")), [])
 
 
+def _cells(*triples):
+    return pd.DataFrame(list(triples), columns=["fov", "mask", "label"])
+
+
+class EditableSetTests(unittest.TestCase):
+    """Sets as carts: adding, removing, the subset rule, stars and snapshots."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.store = CellSetStore(Path(self._tmp.name))
+        self.cart = self.store.save_set("cart", None, allow_empty=True)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _labels(self, set_id):
+        return sorted(self.store.read_cells(set_id)["label"].tolist())
+
+    def test_an_empty_cart_needs_allow_empty(self):
+        with self.assertRaises(ValueError):
+            self.store.save_set("x", None)
+        self.assertEqual(self.store.get(self.cart["id"])["count"], 0)
+        self.assertEqual(len(self.store.read_cells(self.cart["id"])), 0)
+
+    def test_add_and_remove_are_logged_and_counted(self):
+        added = self.store.add_cells(self.cart["id"], _cells(("f1", "cells", 1), ("f2", "cells", 2)), {"source": "scatter"})
+        self.assertEqual(added, 2)
+        self.assertEqual(self.store.add_cells(self.cart["id"], _cells(("f1", "cells", 1), ("f1", "cells", 3))), 1)
+        self.assertEqual(self.store.remove_cells(self.cart["id"], _cells(("f2", "cells", 2), ("f9", "cells", 9))), 1)
+        meta = self.store.get(self.cart["id"])
+        self.assertEqual((meta["count"], meta["fovs"]), (2, 1))
+        self.assertEqual([(e["op"], e["count"]) for e in meta["edits"]], [("add", 2), ("add", 1), ("remove", 1)])
+        self.assertEqual(meta["edits"][0]["recipe"], {"source": "scatter"})
+
+    def test_the_mask_layer_is_part_of_a_cell(self):
+        self.store.add_cells(self.cart["id"], _cells(("f1", "cells", 1)))
+        self.assertEqual(self.store.add_cells(self.cart["id"], _cells(("f1", "nuclei", 1))), 1)
+        self.assertEqual(self.store.contains(self.cart["id"], _cells(("f1", "nuclei", 1), ("f1", "nuclei", 2))).tolist(), [True, False])
+
+    def test_star_adds_to_the_set_and_unstar_keeps_the_cell(self):
+        self.store.add_cells(self.cart["id"], _cells(("f1", "cells", 1)))
+        self.assertIsNone(self.store.favourites(self.cart["id"]))
+        self.assertEqual(self.store.star(self.cart["id"], _cells(("f1", "cells", 1), ("f1", "cells", 5))), 2)
+        stars = self.store.favourites(self.cart["id"])
+        self.assertEqual(stars["container"], self.cart["id"])
+        self.assertEqual(self._labels(stars["id"]), [1, 5])
+        self.assertEqual(self._labels(self.cart["id"]), [1, 5])  # a starred cell is always in the set
+        self.assertEqual(self.store.unstar(self.cart["id"], _cells(("f1", "cells", 5))), 1)
+        self.assertEqual(self._labels(stars["id"]), [1])
+        self.assertEqual(self._labels(self.cart["id"]), [1, 5])
+
+    def test_removing_from_a_set_removes_the_star(self):
+        self.store.star(self.cart["id"], _cells(("f1", "cells", 1), ("f1", "cells", 2)))
+        self.store.remove_cells(self.cart["id"], _cells(("f1", "cells", 1)))
+        self.assertEqual(self._labels(self.store.favourites(self.cart["id"])["id"]), [2])
+
+    def test_every_set_can_have_its_own_favourites(self):
+        other = self.store.save_set("other", _cells(("f1", "cells", 1)))
+        self.store.star(self.cart["id"], _cells(("f1", "cells", 1)))
+        self.store.star(other["id"], _cells(("f1", "cells", 1)))
+        self.assertEqual(len([s for s in self.store.list_sets() if s["role"] == "favourites"]), 2)
+
+    def test_a_snapshot_is_frozen_and_keeps_the_stars(self):
+        self.store.star(self.cart["id"], _cells(("f1", "cells", 1)))
+        self.store.add_cells(self.cart["id"], _cells(("f1", "cells", 2)))
+        snap = self.store.snapshot(self.cart["id"], "cart then")
+        self.assertTrue(snap["frozen"])
+        self.assertEqual(snap["parents"], [self.cart["id"]])
+        self.assertEqual(self._labels(snap["id"]), [1, 2])
+        self.assertEqual(self._labels(self.store.favourites(snap["id"])["id"]), [1])
+        for edit in (self.store.add_cells, self.store.remove_cells, self.store.star):
+            with self.assertRaises(ValueError):
+                edit(snap["id"], _cells(("f1", "cells", 3)))
+        self.store.add_cells(self.cart["id"], _cells(("f1", "cells", 3)))  # the original stays editable
+        self.assertEqual(self._labels(snap["id"]), [1, 2])
+
+    def test_deleting_a_set_deletes_its_stars(self):
+        self.store.star(self.cart["id"], _cells(("f1", "cells", 1)))
+        deleted = self.store.delete_set(self.cart["id"])
+        self.assertEqual(len(deleted), 2)
+        self.assertEqual(self.store.list_sets(), [])
+        self.assertEqual(list(self.store.folder.glob("*.parquet")), [])
+
+    def test_children_names_do_not_clash_with_top_level_names(self):
+        self.store.save_set("★ favourites", _cells(("f1", "cells", 1)))
+        self.store.star(self.cart["id"], _cells(("f1", "cells", 1)))  # no name clash
+
+    def test_format_1_sets_load_unchanged_and_editable(self):
+        old = self.store.save_set("old", _cells(("f1", "cells", 1)), tags=["celltype:T"])
+        index_path = self.store.folder / "index.json"
+        index = json.loads(index_path.read_text())
+        for key in ("container", "role", "frozen", "edits"):
+            index["sets"][-1].pop(key)
+        index["format"] = 1
+        index_path.write_text(json.dumps(index))
+        meta = self.store.get(old["id"])
+        self.assertEqual((meta["container"], meta["role"], meta["frozen"], meta["edits"]), (None, None, False, []))
+        self.assertEqual(meta["tags"], ["celltype:T"])
+        self.assertEqual(self.store.add_cells(old["id"], _cells(("f1", "cells", 2))), 1)
+        self.assertEqual(json.loads(index_path.read_text())["format"], 2)
+
+
 # ---------------------------------------------------------------------------
 # The bar
 # ---------------------------------------------------------------------------
@@ -245,6 +348,18 @@ class BarTests(unittest.TestCase):
         self.bar.on_action("back", lambda: calls.append("back"))
         self.bar.trigger("back")
         self.assertEqual(calls, ["back"])
+
+    def test_cart_buttons_show_only_with_an_active_cart(self):
+        self.assertEqual(self.bar.cart_add_button.layout.display, "none")
+        self.bar.set_cart("cool CD8")
+        self.assertEqual(self.bar.cart_add_button.layout.display, "inline-flex")
+        self.assertIn("cool CD8", self.bar.cart_remove_button.tooltip)
+        calls = []
+        self.bar.on_action("cart_add", lambda: calls.append("add"))
+        self.bar.trigger("cart_add")
+        self.assertEqual(calls, ["add"])
+        self.bar.set_cart(None)
+        self.assertEqual(self.bar.cart_remove_button.layout.display, "none")
 
     def test_save_form_replaces_the_text_and_shows_errors(self):
         self.assertEqual(self.bar.save_button.layout.display, "none")
@@ -369,10 +484,11 @@ class PluginTests(unittest.TestCase):
         self.assertIn("CD8 high", self.viewer.ui_component.selection_bar.text.value)
         self.assertIn("CD8 high", self.plugin.ui_component.set_list.options[0][0])
 
-    def test_save_reports_bad_tags_and_empty_selection(self):
+    def test_save_reports_an_empty_selection_and_takes_plain_tags(self):
         self.assertIn("Nothing", self.plugin.save_selection("x"))
         self.hub.publish({1}, "scatter")
-        self.assertIn("key:value", self.plugin.save_selection("x", "interesting"))
+        self.assertEqual(self.plugin.save_selection("x", "interesting"), "")
+        self.assertEqual(self.plugin.store.list_sets()[0]["tags"], ["interesting"])
 
     def test_write_to_selection_logs_and_offers_the_tag(self):
         self.hub.publish({0, 3}, "scatter")
@@ -444,6 +560,81 @@ class PluginTests(unittest.TestCase):
         self.plugin._on_update_clicked()
         meta = self.plugin.store.list_sets()[0]
         self.assertEqual((meta["name"], meta["tags"]), ("renamed", ["k:v"]))
+
+    # -- carts, stars, snapshots ---------------------------------------
+    def _hit(self, fov, label, mask="cells"):
+        return SimpleNamespace(fov_name=fov, mask_name=mask, mask_id=label)
+
+    def test_new_empty_cart_becomes_active_and_shows_in_the_bar(self):
+        self.assertEqual(self.plugin.create_cart("cool CD8", "pilot"), "")
+        bar = self.viewer.ui_component.selection_bar
+        self.assertEqual(bar.cart_add_button.layout.display, "inline-flex")
+        self.assertIn("cool CD8", bar.cart_add_button.tooltip)
+        cart = self.plugin.store.list_sets()[0]
+        self.assertEqual(self.plugin.active_cart, cart["id"])
+        self.assertEqual(self.plugin.ui_component.cart_dropdown.value, cart["id"])
+        self.assertTrue(self.plugin.ui_component.set_list.options[0][0].startswith("🛒"))
+
+    def test_plus_and_minus_cart_from_the_bar(self):
+        self.plugin.create_cart("cart")
+        self.hub.publish({0, 1}, "scatter")
+        bar = self.viewer.ui_component.selection_bar
+        bar.trigger("cart_add")
+        cart = self.plugin.store.list_sets()[0]
+        self.assertEqual(cart["count"], 2)
+        self.assertIn("Added 2 cells", bar.text.value)
+        self.assertEqual(cart["edits"][0]["recipe"]["source"], "scatter")
+        self.assertEqual(self.hub.history[-1].label, "added to cart")
+        self.hub.publish({1, 2}, "scatter")
+        self.plugin.add_selection_to_cart()
+        self.assertEqual(self.plugin.store.list_sets()[0]["count"], 3)
+        self.assertIn("1 already in it", bar.text.value)
+        bar.trigger("cart_remove")
+        self.assertEqual(self.plugin.store.list_sets()[0]["count"], 1)
+
+    def test_shift_click_toggles_a_cell_in_the_cart(self):
+        self.assertIs(self.viewer.image_display.shift_click_handler.__func__, CellSetsPlugin.toggle_cell_in_cart)
+        self.assertIsNone(self.plugin.toggle_cell_in_cart(self._hit("fov1", 2)))
+        self.assertIn("no", self.viewer.ui_component.selection_bar.text.value.lower())
+        self.plugin.create_cart("cart")
+        self.assertEqual(self.plugin.toggle_cell_in_cart(self._hit("fov1", 2)), "added")
+        self.assertEqual(self.plugin.toggle_cell_in_cart(self._hit("fov1", 2, "nuclei")), "added")
+        self.assertEqual(self.plugin.toggle_cell_in_cart(self._hit("fov1", 2)), "removed")
+        cells = self.plugin.store.read_cells(self.plugin.active_cart)
+        self.assertEqual(cells[["mask", "label"]].values.tolist(), [["nuclei", 2]])
+        self.assertEqual(len(self.hub.current), 0)  # the selection is not touched
+
+    def test_star_and_select_stars(self):
+        self.hub.publish({0, 1, 2}, "scatter")
+        self.plugin.save_selection("set")
+        set_id = self.plugin.store.list_sets()[0]["id"]
+        self.hub.publish({1, 4}, "scatter")
+        self.assertEqual(self.plugin.star_selection(set_id), 2)
+        self.assertEqual(self.plugin._entry(set_id)["count"], 4)  # cell 4 joined the set
+        self.assertIn("★ 2", self.plugin.ui_component.set_list.options[0][0])
+        self.assertEqual(len(self.plugin.ui_component.set_list.options), 1)  # the stars are not a row
+        self.assertTrue(self.plugin.select_stars(set_id))
+        self.assertEqual(self.hub.current.indices, {1, 4})
+        self.assertEqual(self.hub.current.source_label, "set: ★ set")
+        self.hub.publish({4}, "scatter")
+        self.assertEqual(self.plugin.star_selection(set_id, unstar=True), 1)
+
+    def test_snapshot_is_frozen_and_cannot_be_the_cart(self):
+        self.hub.publish({0}, "scatter")
+        self.plugin.save_selection("set")
+        set_id = self.plugin.store.list_sets()[0]["id"]
+        snap = self.plugin.snapshot_set(set_id)
+        self.assertTrue(snap["name"].startswith("set (snapshot "))
+        self.assertNotIn(snap["id"], [value for _label, value in self.plugin.ui_component.cart_dropdown.options])
+        self.plugin.set_active_cart(snap["id"])
+        self.assertIsNone(self.plugin.active_cart)
+        self.assertTrue(self.plugin.ui_component.star_button.disabled)
+
+    def test_deleting_the_active_cart_clears_it(self):
+        self.plugin.create_cart("cart")
+        self.plugin._delete_confirmed(self.plugin.active_cart)
+        self.assertIsNone(self.plugin.active_cart)
+        self.assertEqual(self.viewer.ui_component.selection_bar.cart_add_button.layout.display, "none")
 
 
 if __name__ == "__main__":

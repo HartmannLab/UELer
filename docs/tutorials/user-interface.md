@@ -102,6 +102,7 @@ Two tabs inside one accordion section:
   - **Click a cell** to select only that cell.
   - **Ctrl + click a cell** to add it to the selection, or take it out if it is selected.
   - **Ctrl + drag** to draw a lasso loop straight away, without the **Lasso Select** toggle.
+  - **Shift + click a cell** to put it in the [active cart](cell-sets.md#carts-collecting-cells-over-time), or take it out if it is in the cart. The selection does not change. With no active cart, the bar says so.
   - **Right-click the background** (outside any cell) to unselect everything, as **✕** does but without asking; **◀** in the selection bar brings the selection back.
   - **A left click on the background does nothing**, so a mis-click never loses a selection.
   
@@ -117,7 +118,7 @@ Two tabs inside one accordion section:
 The row with **Lasso Select** also shows the current cell selection, whichever view made it: a click or lasso in the image, a scatter lasso, a histogram gate, or a heatmap cluster sent to the Gallery. The most recent selection wins.
 
 ```
-[Lasso Select] [◀] [▶]  23 cells · histogram gate · 23 in this FOV, not outlined in the image   [Image] [Gallery ✓] [Plots] [Save as set…] [✕]
+[Lasso Select] [◀] [▶]  23 cells · histogram gate · 23 in this FOV, not outlined in the image   [Image] [Gallery ✓] [Plots] [+ Cart] [− Cart] [Save as set…] [✕]
 ```
 
 - **◀ ▶:** step back and forward through this session's selections; going back puts the earlier selection where the current one was shown. See [Cell Sets](cell-sets.md#going-back-to-an-earlier-selection).
@@ -125,7 +126,8 @@ The row with **Lasso Select** also shows the current cell selection, whichever v
 - **Image:** outlines the cells in the image.
 - **Gallery:** shows them in the Gallery.
 - **Plots:** selects them in the scatter plot and histogram.
-- **Save as set…:** keeps the selection as a named cell set with `key:value` tags; the bar shows a name field and a tags field in its place until you save or cancel. Shown when a cell table is loaded. See [Cell Sets](cell-sets.md).
+- **+ Cart / − Cart:** add the selection to the [active cart](cell-sets.md#carts-collecting-cells-over-time), or take it out. Shown only while a cart is active; the tooltip names it.
+- **Save as set…:** keeps the selection as a named cell set with tags; the bar shows a name field and a tags field in its place until you save or cancel. Shown when a cell table is loaded. See [Cell Sets](cell-sets.md).
 - **✕:** unselects everything: the image, the plots, the Gallery and the bar. It asks first; **◀** brings the selection back.
 
 A button with **✓** shows the selection already, through a link box or an earlier click. Click it again to take the selection back out of that view; the selection itself stays in the bar, so you can send it there again. The button of the view the selection was made in shows **✓** greyed out: you cannot unlink a selection from where it was made, only unselect it with **✕**. The buttons act once; the **Linked plugins** boxes in each plot keep forwarding every new selection automatically, so a view you unlinked receives the next selection from a linked plot again. A selection made in the image belongs to its FOV and is cleared on a FOV switch; one from a plot stays, and the bar's FOV count follows the FOV shown. The same row carries messages, such as the lasso instructions or why a loop or **Trace** found no cells.

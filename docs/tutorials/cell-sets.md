@@ -1,6 +1,6 @@
 # Cell Sets
 
-A cell set is a selection you keep: a named group of cells, with tags, saved with the dataset and available in every later session. The **Cell sets** plugin in the right panel holds them, and it is also where you write a value into the cell table for the selected cells. It appears once a cell table is loaded.
+A cell set is a named group of cells, with tags, saved with the dataset and available in every later session. You can make one from a selection, or start an empty one and collect cells in it over time, like a shopping cart for interesting cells. The **Cell sets** plugin in the right panel holds them, and it is also where you write a value into the cell table for the selected cells. It appears once a cell table is loaded.
 
 ---
 
@@ -29,17 +29,44 @@ A saved set keeps:
 
 Sets are stored in the dataset's `.UELer` folder, next to the Cell Annotation checkpoints.
 
-The cells of a set never change on their own. If you re-segment or replace the cell table, the set keeps the cells it had; selecting it tells you how many of them are no longer in the table.
+The cells of a set change only when you add or remove them (next sections). If you re-segment or replace the cell table, the set keeps the cells it had; selecting it tells you how many of them are no longer in the table.
+
+---
+
+## Carts: collecting cells over time
+
+Every set can be added to and taken from, so a set also works as a cart: pick cells across FOVs and sessions, by whatever means suits each one.
+
+- **Choose the active cart** under **Active cart** in the plugin, or with **Make active cart** on a set. To start from nothing, type a name (and tags) under **Save the current selection** and click **New empty cart**; it becomes the active cart. Nothing is active until you choose.
+- **+ Cart** and **− Cart** appear in the [selection bar](user-interface.md#the-selection-bar) while a cart is active. They add the current selection to the cart or take it out, whichever view made it: a lasso, a gate, a scatter lasso, a heatmap cluster. The bar says how many cells were added and how many were in the cart already.
+- **Shift + click a cell** in the image to put it in the active cart, or take it out if it is there. The current selection does not change. With no active cart, the bar says so and nothing happens.
+- The active cart is marked 🛒 in the list. It is chosen for this session only.
+- Every addition and removal is recorded with the set: when, how many cells, and how they were selected. The set's details show how often it was edited.
+- A cell is its FOV, mask layer and label: the same label on the cell mask and on the nucleus mask counts as two cells.
+
+---
+
+## Stars: favourite cells in a set
+
+Each set can mark some of its cells with a ★, for example the clearest examples of a cell type.
+
+- Select the cells, pick the set in the list and click **★ Star selection**. A starred cell that was not in the set yet is added to it, since a set's stars are always its own cells. **☆ Unstar** takes the star off; the cells stay in the set.
+- **Select ★** makes the starred cells the current selection ("set: ★ CD8 T"), to send to the Gallery or the plots like any selection.
+- The list shows how many cells are starred ("★ 5"). Removing a cell from a set removes its star too, and deleting a set deletes its stars.
+
+---
+
+## Snapshots
+
+**Snapshot** saves a frozen copy of a set, with its stars, named after the set and the time ("CD8 T (snapshot 2026-11-26 14:05)"); rename it if you like. A snapshot's cells cannot change: it cannot be the active cart, and starring in it is refused. It is marked 🔒 in the list and records the set it was taken from. Use one before reworking a cart, or to keep the exact cells behind a figure.
 
 ---
 
 ## Tags
 
-Every tag is written `key:value`, for example `celltype:CD8 T`, `region:tumour` or `qc:exclude`. Separate several with commas. The key is the name of a cell-table column and the value is what the set's cells get in it, which is how cell types and other annotations are usually stored (one `cell_type` column), so they carry straight into pandas, scanpy or R.
+Tags are free-form labels for keeping the list in order: `pilot`, `todo`, `figure 2`, `celltype:CD8 T`. Separate several with commas. They are not written into the cell table; to put a value into a column, use [Writing to the cell table](#writing-to-the-cell-table).
 
-A tag without a `:` is refused with a message; for a one-word label, give it a key: `flag:interesting`. A set cannot carry two values for one key.
-
-Use **Filter** above the list of saved sets to show only the sets whose name or tags contain the text you type: `tumour`, `celltype:`, `CD8`.
+Use **Filter** above the list of saved sets to show only the sets whose name or tags contain the text you type: `tumour`, `pilot`, `CD8`.
 
 ---
 
@@ -49,7 +76,7 @@ Pick a set in the list to see how many cells it has, in how many FOVs, what made
 
 - **Select cells** makes the set the current selection ("1,240 cells · set: CD8 T cells") and outlines it in the image, on the mask layer it was saved on. If the FOV shown holds none of its cells, the view moves: to the FOV with most of them, or to the stitched map when all of its FOVs belong to one [map](map-mode.md). From the bar you can then send it to the Gallery or the plots as any other selection.
 - **Save changes** stores a new name, tags or note. The cells stay as they are.
-- **Delete** removes the set from disk after a confirmation dialog.
+- **Delete** removes the set and its stars from disk after a confirmation dialog.
 
 ---
 
@@ -60,7 +87,7 @@ Pick a set in the list to see how many cells it has, in how many FOVs, what made
 - The new or changed column is available straight away, for example as a colour, tooltip or plot column.
 - The columns that link the table to the images (FOV, label, X, Y, mask) cannot be written to.
 - Writing a text value into a numeric column turns that column into text.
-- **A write changes the cell table for this session only.** To keep the label, save the selection as a set: after a write, the save section's tags field is already filled in with `column:value`.
+- **A write changes the cell table for this session only.** To keep the cells you wrote to, save the selection as a set: after a write, the save section's tags field is already filled in with `column:value`, so the set says what was written.
 - Each write is recorded in the session's selection history, so a set saved afterwards shows that it happened.
 
 This replaces the **Cell Table Editor**, which could only write to cells selected in the image.
