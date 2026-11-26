@@ -50,7 +50,8 @@ Every set can be added to and taken from, so a set also works as a cart: pick ce
 
 Each set can mark some of its cells with a ★, for example the clearest examples of a cell type.
 
-- Select the cells, pick the set in the list and click **★ Star selection**. A starred cell that was not in the set yet is added to it, since a set's stars are always its own cells. **☆ Unstar** takes the star off; the cells stay in the set.
+- The quickest way is in the **Gallery**: show the set there and click **☆** on a tile. See [Editing a cell set in the Gallery](cell-table.md#editing-a-cell-set-in-the-gallery), which also covers taking cells out (✕), **★ only**, **Draw new cells** and **Save shown as set**.
+- From the plugin: select the cells, pick the set in the list and click **★ Star selection**. A starred cell that was not in the set yet is added to it, since a set's stars are always its own cells. **☆ Unstar** takes the star off; the cells stay in the set.
 - **Select ★** makes the starred cells the current selection ("set: ★ CD8 T"), to send to the Gallery or the plots like any selection.
 - The list shows how many cells are starred ("★ 5"). Removing a cell from a set removes its star too, and deleting a set deletes its stars.
 
@@ -76,7 +77,9 @@ Pick a set in the list to see how many cells it has, in how many FOVs, what made
 
 - **Select cells** makes the set the current selection ("1,240 cells · set: CD8 T cells") and outlines it in the image, on the mask layer it was saved on. If the FOV shown holds none of its cells, the view moves: to the FOV with most of them, or to the stitched map when all of its FOVs belong to one [map](map-mode.md). From the bar you can then send it to the Gallery or the plots as any other selection.
 - **Save changes** stores a new name, tags or note. The cells stay as they are.
-- **Delete** removes the set and its stars from disk after a confirmation dialog.
+- **Delete** removes the set, its stars and its sub-groups from disk after a confirmation dialog.
+
+**Sub-groups.** A set saved from the Gallery with **Save shown as set** while a set is shown belongs to that set: it is listed under it (↳) and is always part of it. Taking a cell out of a set also takes it out of its sub-groups. A sub-group can be the active cart; adding to it adds to its set too.
 
 ---
 

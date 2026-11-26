@@ -136,9 +136,35 @@ that cell.
 Useful controls:
 
 - **Cutout Size (px):** — crop size around each cell (default 150).
-- **Max Displayed Cells:** — cap the number of thumbnails (default 20; warns above 100).
-- **Downsample**, **Refresh**, **Mask colour** / **Outline px**, and **Use uniform color** (when
+- **Max Displayed Cells:** — cap the number of thumbnails (default 20; warns above 100). With more cells than that, the Gallery shows a random sample; the same cells always give the same sample.
+- **Refresh** re-renders the cells shown, for example after changing a channel's colour. It never swaps them for others.
+- **Draw new cells** shows another sample, preferring cells not shown yet, so you can go through a large selection screen by screen. It is greyed out when every cell fits.
+- **Downsample**, **Mask colour** / **Outline px**, and **Use uniform color** (when
   off, painted colors from the Mask painter are shown).
+
+A line above the thumbnails says what is shown and how much of it: "Selection: histogram gate · showing 20 of 35", or "Cart: cool CD8 · showing 24 of 310 · ★ 5" for a cell set.
+
+### Editing a cell set in the Gallery
+
+When the Gallery shows a [cell set](cell-sets.md), it is where you edit it, because that is where its cells are visible. The Cell sets plugin and the Gallery always agree: a change in one shows in the other straight away.
+
+- **☆ / ★** in a tile's top-left corner stars the cell in the set shown, or takes the star off. Starred tiles always show a gold ★; the other buttons appear when the mouse is over a tile.
+- **✕** in the top-right corner takes the cell out of the set (and its star), and the tile disappears.
+- **★ only** shows only the starred cells.
+- **+ Cart** adds the cells on screen to the active cart. It appears while a cart is active.
+- **Save shown as set** keeps exactly the cells on screen as a set. With a set shown, the new set is a sub-group of it, listed under it in the Cell sets plugin; it records how many cells it was drawn from and which draw it was, so a figure panel can say "these 24 cells, drawn from cart X". Type a name first, or it is called "Gallery sample".
+
+What ★ and ✕ act on depends on what is shown, and the line above the thumbnails says it:
+
+| Shown | ★ | ✕ |
+| --- | --- | --- |
+| A cell set or cart | stars in that set | takes the cell out of the set |
+| A set's ★ cells (**Select ★**) | takes the star off in the set | — |
+| A plain selection, with an active cart | adds the cell to the cart and stars it there | — |
+| A plain selection, no active cart | — | — |
+| A snapshot | starred cells are marked, nothing can change | — |
+
+A set shown in the Gallery is shown as it is now: cells added to a cart with Shift + click after you selected it are included.
 
 ---
 

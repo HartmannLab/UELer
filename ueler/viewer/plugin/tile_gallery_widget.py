@@ -16,6 +16,14 @@ Traitlets (all ``sync=True`` when anywidget is available):
   ``data:image/png;base64,...`` URI); defines the display order.
 - ``columns`` — number of grid columns.
 - ``clicked`` — JS→Python signal; set to ``"<id>|<nonce>"`` when a tile is clicked.
+- ``controls`` — the per-tile buttons to offer: ``"star"`` (☆/★, top left) and
+  ``"remove"`` (✕, top right). Empty by default, so a gallery that does not use
+  them (the ROI browser) looks as before.
+- ``badges`` — ``{tile id: [mark, ...]}``; ``"star"`` shows a filled ★. Kept apart
+  from ``tiles`` so a star toggle does not resend every image. A ★ without the
+  ``"star"`` control is shown but cannot be clicked (a read-only set).
+- ``action`` — JS→Python signal for the buttons: ``"<action>|<id>|<nonce>"``
+  (``star`` or ``remove``). A button click is not also a tile click.
 """
 
 from __future__ import annotations
@@ -111,6 +119,9 @@ try:
         columns: int = traitlets.Int(2).tag(sync=True)
         clicked: str = traitlets.Unicode("").tag(sync=True)
         max_height: str = traitlets.Unicode("400px").tag(sync=True)
+        controls: list = traitlets.List().tag(sync=True)
+        badges: dict = traitlets.Dict().tag(sync=True)
+        action: str = traitlets.Unicode("").tag(sync=True)
 
         _css = """
 .tg-root {
@@ -162,6 +173,31 @@ try:
 .tg-tile:hover .tg-tip {
     opacity: 1;
 }
+.tg-btn {
+    position: absolute;
+    top: 2px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 3px;
+    border-radius: 9px;
+    font-family: var(--jp-ui-font-family, sans-serif);
+    font-size: 13px;
+    line-height: 18px;
+    text-align: center;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.55);
+    cursor: pointer;
+    user-select: none;
+    opacity: 0;
+    transition: opacity 0.1s ease-in-out;
+}
+.tg-star { left: 2px; }
+.tg-remove { right: 2px; }
+.tg-tile:hover .tg-btn { opacity: 1; }
+.tg-btn:hover { background: rgba(0, 0, 0, 0.8); }
+.tg-star.tg-on { opacity: 1; color: #ffc107; }
+.tg-star.tg-static { cursor: default; pointer-events: none; }
+.tg-star.tg-static:not(.tg-on) { display: none; }
 .tg-empty {
     display: flex;
     align-items: center;
@@ -177,6 +213,25 @@ try:
         _esm = r"""
 export function render({ model, el }) {
   let _nonce = 0;
+
+  function marks(id) {
+    const badges = model.get('badges') || {};
+    return badges[id] || [];
+  }
+
+  function applyBadges() {
+    grid.querySelectorAll('.tg-star').forEach(function (star) {
+      const on = marks(star.dataset.id).indexOf('star') >= 0;
+      star.classList.toggle('tg-on', on);
+      star.textContent = on ? '\u2605' : '\u2606';
+      star.title = star.classList.contains('tg-static') ? 'Starred' : (on ? 'Unstar' : 'Star');
+    });
+  }
+
+  function sendAction(name, id) {
+    model.set('action', name + '|' + id + '|' + (_nonce++));
+    model.save_changes();
+  }
 
   const root = document.createElement('div');
   root.className = 'tg-root';
@@ -223,6 +278,32 @@ export function render({ model, el }) {
         tile.appendChild(tip);
       }
 
+      const controls = model.get('controls') || [];
+      const id = tile.dataset.id;
+      const star = document.createElement('div');
+      star.className = 'tg-btn tg-star';
+      star.dataset.id = id;
+      if (controls.indexOf('star') >= 0) {
+        star.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          sendAction('star', id);
+        });
+      } else {
+        star.classList.add('tg-static');
+      }
+      tile.appendChild(star);
+      if (controls.indexOf('remove') >= 0) {
+        const remove = document.createElement('div');
+        remove.className = 'tg-btn tg-remove';
+        remove.textContent = '\u2715';
+        remove.title = 'Remove from the set';
+        remove.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          sendAction('remove', id);
+        });
+        tile.appendChild(remove);
+      }
+
       tile.addEventListener('click', function () {
         model.set('clicked', tile.dataset.id + '|' + (_nonce++));
         model.save_changes();
@@ -230,10 +311,13 @@ export function render({ model, el }) {
 
       grid.appendChild(tile);
     });
+    applyBadges();
   }
 
   model.on('change:tiles', rebuild);
   model.on('change:columns', rebuild);
+  model.on('change:controls', rebuild);
+  model.on('change:badges', applyBadges);
   model.on('change:max_height', applyHeight);
 
   applyHeight();
@@ -255,6 +339,9 @@ except (ImportError, AttributeError):
         columns: int = traitlets.Int(2)
         clicked: str = traitlets.Unicode("")
         max_height: str = traitlets.Unicode("400px")
+        controls: list = traitlets.List()
+        badges: dict = traitlets.Dict()
+        action: str = traitlets.Unicode("")
 
 
 def parse_clicked_id(value) -> str:
@@ -268,8 +355,17 @@ def parse_clicked_id(value) -> str:
     return text.rsplit("|", 1)[0]
 
 
+def parse_action(value) -> "tuple[str, str]":
+    """Return ``(action, tile id)`` from an ``"<action>|<id>|<nonce>"`` payload, or ``("", "")``."""
+    text = str(value or "")
+    head = text.rsplit("|", 1)[0] if "|" in text else ""
+    name, sep, tile_id = head.partition("|")
+    return (name, tile_id) if sep and name and tile_id else ("", "")
+
+
 __all__ = [
     "TileGalleryWidget",
+    "parse_action",
     "array_to_data_uri",
     "text_placeholder_uri",
     "parse_clicked_id",

@@ -1,12 +1,33 @@
-"""Cell gallery plugin implementation for the packaged namespace."""
+"""Cell gallery plugin implementation for the packaged namespace.
+
+The Gallery shows cutouts of the cells it is given (the current selection, a
+cell set, a heatmap cluster). It is also where a cell set is edited, because
+that is where its cells are visible; the Cell sets plugin keeps the sets and the
+Gallery only asks it and calls it:
+
+* **A header** names what is shown and counts it: "Cart: cool CD8 · showing 24
+  of 310 · ★ 5". For a set, the Gallery draws from the set's cells as they are
+  now, so cells added to a cart since it was selected are included.
+* **On each tile**, ☆/★ stars or unstars the cell in the set shown (with a plain
+  selection, in the active cart, adding the cell to it), and ✕ takes it out of
+  the set shown. A snapshot shows its stars but offers neither.
+* **★ only** limits the Gallery to the starred cells.
+* **Refresh** re-renders the cells shown; **Draw new cells** draws another
+  sample when there are more cells than fit, preferring cells not shown yet.
+* **+ Cart** adds the shown cells to the active cart; **Save shown as set** keeps
+  exactly the cells on screen, as a sub-group of the set shown, recording how
+  the sample was drawn.
+"""
 
 from __future__ import annotations
 
+import html
 import logging
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import numpy as np
-from ipywidgets import Button, Checkbox, ColorPicker, HBox, IntSlider, IntText, VBox
+from ipywidgets import HTML, Button, Checkbox, ColorPicker, HBox, IntSlider, IntText, Layout, Text, ToggleButton, VBox
 from matplotlib.colors import to_rgb
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
@@ -22,7 +43,7 @@ from ueler.viewer.decorators import update_status_bar
 from ueler.viewer.observable import Observable
 
 from .plugin_base import PluginBase
-from .tile_gallery_widget import TileGalleryWidget, array_to_data_uri, parse_clicked_id
+from .tile_gallery_widget import TileGalleryWidget, array_to_data_uri, parse_action, parse_clicked_id
 
 _logger = logging.getLogger(__name__)
 
@@ -122,6 +143,15 @@ class CellGalleryDisplay(PluginBase):
         # The widget owns its own internal vertical scroll via max_height.
         self.gallery = TileGalleryWidget(columns=GRID_COLUMNS, max_height="400px")
         self.gallery.observe(self._on_gallery_clicked, names="clicked")
+        self.gallery.observe(self._on_gallery_action, names="action")
+
+        # What is shown and how it was drawn (see the module doc).
+        self._source: Optional[dict] = None
+        self._shown: List = []
+        self._seen: set = set()
+        self._draw = 0
+        self._pool_size = 0
+        self._build_set_controls()
 
         self.ui_component.refresh_button = Button(
             description="Refresh",
@@ -156,7 +186,39 @@ class CellGalleryDisplay(PluginBase):
                 HBox([self.ui_component.use_uniform_color_checkbox]),
             ]
         )
-        self.ui = VBox([controls, VBox([self.gallery])])
+        sc = self.set_controls
+        set_row = VBox(
+            [
+                sc.header,
+                HBox(
+                    [sc.stars_only, sc.draw_button, sc.cart_button, sc.save_name, sc.save_button],
+                    layout=Layout(gap="4px", flex_flow="row wrap", align_items="center"),
+                ),
+                sc.status,
+            ],
+            layout=Layout(margin="4px 0 0 0"),
+        )
+        self.ui = VBox([controls, set_row, VBox([self.gallery])])
+
+    def _build_set_controls(self) -> None:
+        """The header and set buttons; kept out of ``ui_component`` so they are not saved as settings."""
+        auto = Layout(width="auto")
+        sc = self.set_controls = SimpleNamespace()
+        sc.header = HTML(value="")
+        sc.status = HTML(value="")
+        sc.stars_only = ToggleButton(value=False, description="★ only", disabled=True, layout=auto,
+                                     tooltip="Show only the starred cells")
+        sc.stars_only.observe(lambda change: self._on_stars_only(change["new"]), names="value")
+        sc.draw_button = Button(description="Draw new cells", icon="random", disabled=True, layout=auto,
+                                tooltip="Show another sample of the cells, preferring cells not shown yet (Refresh keeps the cells shown)")
+        sc.draw_button.on_click(lambda _b: self.draw_new_cells())
+        sc.cart_button = Button(description="+ Cart", disabled=True, layout=Layout(width="auto", display="none"),
+                                tooltip="Add the shown cells to the active cart")
+        sc.cart_button.on_click(lambda _b: self.add_shown_to_cart())
+        sc.save_name = Text(value="", placeholder="Name (optional)", layout=Layout(width="140px"))
+        sc.save_button = Button(description="Save shown as set", icon="save", disabled=True, layout=auto,
+                                tooltip="Keep exactly the cells on screen as a cell set (a sub-group of the set shown)")
+        sc.save_button.on_click(lambda _b: self.save_shown_as_set())
 
     def _collect_ui_values(self) -> _UiValues:
         crop_width = int(self.ui_component.cutout_size_slider.value)
@@ -226,6 +288,12 @@ class CellGalleryDisplay(PluginBase):
 
     @update_status_bar
     def plot_gellery(self):  # noqa: N802 - preserve legacy method name
+        """Render the cells shown; keep the same cells unless they no longer fit the source.
+
+        The cells are drawn from the source (see the module doc) by
+        :func:`_limit_selection`; a later render (Refresh, a colour change) shows
+        the same cells, and only :meth:`draw_new_cells` or a new selection draws again.
+        """
         selected_indices = list(self.data.selected_cells.value or [])
         ui_values = self._collect_ui_values()
 
@@ -236,14 +304,24 @@ class CellGalleryDisplay(PluginBase):
                 "Consider reducing display count for better responsiveness."
             )
 
+        source = self._resolve_source(selected_indices) if selected_indices else None
+        self._source = source
+        pool = self._pool(selected_indices, source)
+        self._pool_size = len(pool)
+        pool_set = set(pool)
+        wanted = len(pool) if np.isinf(ui_values.max_cells) else min(len(pool), max(1, int(ui_values.max_cells)))
+        shown = [row for row in self._shown if row in pool_set]
+        if len(shown) != wanted:
+            shown = _limit_selection(pool, ui_values.max_cells, draw=self._draw, exclude=self._seen if self._draw else ())
+
         overlay_snapshot = self._capture_overlay_snapshot()
 
         images, _, displayed_indices = create_gallery_tiles(
             self.main_viewer.cell_table,
-            selected_indices,
+            shown,
             viewer=self.main_viewer,
             crop_width=ui_values.crop_width,
-            max_displayed_cells=ui_values.max_cells,
+            max_displayed_cells=np.inf,
             overlay_snapshot=overlay_snapshot,
             downsample_factor=ui_values.downsample_factor,
             label_key=self.main_viewer.label_key,
@@ -253,16 +331,171 @@ class CellGalleryDisplay(PluginBase):
         )
 
         if not displayed_indices:
-            self._show_empty_message()
+            self._shown = []
+            self._show_empty_message("No starred cells." if self.set_controls.stars_only.value else "No cells selected.")
             self._last_rendered_cells = None
+            self._update_set_controls()
             return
 
         self.data.displayed_cells = displayed_indices
+        self._shown = list(displayed_indices)
+        self._seen.update(displayed_indices)
         self._last_crop_width = ui_values.crop_width
         self._draw_gallery(images, displayed_indices)
+        self._update_set_controls()
 
         # Track what we just rendered to avoid unnecessary regeneration
         self._last_rendered_cells = tuple(sorted(selected_indices))
+
+    # ------------------------------------------------------------------
+    # The source, and editing the cell set shown
+    # ------------------------------------------------------------------
+    def _cell_sets(self):
+        from .cell_sets import CellSetsPlugin
+
+        plugin = getattr(getattr(self.main_viewer, "SidePlots", None), "cell_sets_output", None)
+        return plugin if isinstance(plugin, CellSetsPlugin) and plugin.store is not None else None
+
+    def _resolve_source(self, selected) -> Optional[dict]:
+        """Ask the Cell sets plugin what is shown; ``None`` without it."""
+        plugin = self._cell_sets()
+        if plugin is None:
+            return None
+        hub = getattr(self.main_viewer, "selection_hub", None)
+        current = getattr(hub, "current", None)
+        indices = getattr(current, "indices", None)
+        selection = current if indices and set(indices) == set(selected) else None
+        try:
+            return plugin.gallery_source(selection)
+        except Exception:  # an unreadable set must not blank the Gallery
+            _logger.warning("Could not tell which cell set the Gallery shows", exc_info=True)
+            return None
+
+    def _pool(self, selected, source) -> List:
+        """The rows the Gallery draws from: the set's cells now, or the cells it was given."""
+        rows = selected if not source or source.get("rows") is None else source["rows"]
+        if source and self.set_controls.stars_only.value and source.get("kind") != "stars":
+            starred = source.get("starred") or set()
+            rows = [row for row in rows if row in starred]
+        return sorted(rows, key=str)
+
+    def _update_set_controls(self) -> None:
+        sc = self.set_controls
+        source = self._source
+        shown = len(self._shown)
+        starred = (source or {}).get("starred") or set()
+        if source is None and not shown:
+            sc.header.value = ""
+        else:
+            parts = [source["label"]] if source else []
+            parts.append(f"showing {shown:,} of {self._pool_size:,}")
+            if source and source.get("star_set") and source.get("kind") != "stars":
+                parts.append(f"★ {len(starred):,}" + (" (★ only)" if sc.stars_only.value else ""))
+            sc.header.value = f"<span style='font-size: 12px;'>{' · '.join(parts)}</span>"
+        controls = []
+        if source and source.get("can_star"):
+            controls.append("star")
+        if source and source.get("remove_set"):
+            controls.append("remove")
+        if list(self.gallery.controls) != controls:
+            self.gallery.controls = controls
+        self.gallery.badges = {str(row): ["star"] for row in self._shown if row in starred}
+        sc.stars_only.disabled = not (source and source.get("kind") != "stars" and (starred or sc.stars_only.value))
+        sc.draw_button.disabled = self._pool_size <= shown
+        has_cart = bool(source and source.get("cart"))
+        sc.cart_button.layout.display = "inline-flex" if has_cart else "none"
+        sc.cart_button.disabled = not (has_cart and shown)
+        sc.save_button.disabled = not (shown and self._cell_sets() is not None)
+
+    def _say(self, text: str, ok: bool = True) -> None:
+        color = "var(--jp-success-color1, #2e7d32)" if ok else "var(--jp-warn-color0, #b45309)"
+        self.set_controls.status.value = f"<span style='color: {color}; font-size: 12px;'>{text}</span>" if text else ""
+
+    def on_cell_sets_change(self) -> None:
+        """A cell set changed: update the header and stars, and drop tiles that left the set."""
+        selected = list(self.data.selected_cells.value or [])
+        if not selected and not self._shown:
+            return
+        self._source = self._resolve_source(selected) if selected else None
+        pool = self._pool(selected, self._source)
+        self._pool_size = len(pool)
+        pool_set = set(pool)
+        kept = [row for row in self._shown if row in pool_set]
+        if len(kept) != len(self._shown):
+            keep_ids = {str(row) for row in kept}
+            self.gallery.tiles = [tile for tile in self.gallery.tiles if tile.get("id") in keep_ids]
+            self._shown = kept
+            self.data.displayed_cells = kept
+        self._update_set_controls()
+
+    def _row_for_tile(self, tile_id: str):
+        return next((row for row in self._shown if str(row) == tile_id), None)
+
+    def _on_gallery_action(self, change) -> None:
+        raw = change.get("new") if isinstance(change, dict) else getattr(change, "new", "")
+        action, tile_id = parse_action(raw)
+        row = self._row_for_tile(tile_id)
+        plugin = self._cell_sets()
+        source = self._source
+        if row is None or plugin is None or source is None:
+            return
+        if action == "star" and source.get("can_star"):
+            starred = row in (source.get("starred") or set())
+            plugin.star_rows(source["star_set"], [row], unstar=starred)
+        elif action == "remove" and source.get("remove_set"):
+            plugin.remove_rows(source["remove_set"], [row])
+
+    def _on_stars_only(self, _value) -> None:
+        if getattr(self, "_quiet", False):
+            return
+        self._shown = []
+        self._seen = set()
+        self._draw = 0
+        self.plot_gellery()
+
+    def draw_new_cells(self) -> None:
+        """Show another sample of the source, preferring cells not shown yet."""
+        self._draw += 1
+        self._shown = []
+        self.plot_gellery()
+
+    def add_shown_to_cart(self) -> Optional[int]:
+        plugin = self._cell_sets()
+        if plugin is None or not self._shown:
+            return None
+        added = plugin.add_rows_to_cart(self._shown)
+        if added is not None:
+            self._say(f"Added {added:,} of the {len(self._shown):,} shown cells to the cart.")
+        return added
+
+    def save_shown_as_set(self):
+        """Save exactly the cells on screen; a sub-group of the set shown, if any."""
+        plugin = self._cell_sets()
+        if plugin is None or not self._shown:
+            return None
+        source = self._source or {}
+        pool = self._pool(list(self.data.selected_cells.value or []), self._source)
+        sample = {
+            "source_set": source.get("set_id"),
+            "size": len(self._shown),
+            "of": self._pool_size,
+            "draw": self._draw,
+            "seed": _sample_seed(pool, self._draw),
+            "stars_only": bool(self.set_controls.stars_only.value),
+        }
+        meta, error = plugin.save_rows(
+            self.set_controls.save_name.value,
+            self._shown,
+            container=source.get("container"),
+            sample=sample,
+            default_name="Gallery sample",
+        )
+        if meta is None:
+            self._say(error or "Not saved.", ok=False)
+            return None
+        self.set_controls.save_name.value = ""
+        self._say(f"Saved the {meta['count']:,} shown cells as <b>{html.escape(meta['name'])}</b>.")
+        return meta
 
     def _on_gallery_clicked(self, change) -> None:
         raw = change.get("new") if isinstance(change, dict) else getattr(change, "new", "")
@@ -306,9 +539,20 @@ class CellGalleryDisplay(PluginBase):
         return None
 
     def refresh_gallery(self, _button=None):
+        """Re-render the cells shown (Draw new cells draws others)."""
         self.plot_gellery()
 
     def on_selected_indices_change(self, _selected_indices):
+        # New cells: a new sample, all cells, nothing seen yet.
+        self._shown = []
+        self._seen = set()
+        self._draw = 0
+        self._say("")
+        self._quiet = True
+        try:
+            self.set_controls.stars_only.value = False
+        finally:
+            self._quiet = False
         self.plot_gellery()
 
     def set_selected_cells(self, row_indices):
@@ -467,10 +711,22 @@ def _resolve_mask_array(viewer, fov_name: str, mask_name: Optional[str]) -> Opti
         return np.asarray(mask_array)
 
 
-def _limit_selection(indices, max_displayed: float) -> List[int]:
+def _sample_seed(indices, draw: int = 0) -> int:
+    """The random seed for drawing from *indices*: fixed for one set of cells, new per draw."""
+    try:
+        base = int(abs(int(np.asarray(list(indices), dtype=np.int64).sum())))
+    except (TypeError, ValueError):
+        base = abs(hash(tuple(sorted(map(str, indices)))))
+    return (base + 7919 * int(draw)) % (2**32)
+
+
+def _limit_selection(indices, max_displayed: float, draw: int = 0, exclude=()) -> List[int]:
     """Limit selection to max_displayed cells, randomly sampling if needed.
-    
-    Uses deterministic seeding based on selection sum for reproducibility.
+
+    The seed comes from the cells themselves (:func:`_sample_seed`), so the same
+    cells always give the same sample. *draw* (Draw new cells) changes the seed;
+    cells in *exclude* (already shown) are taken only when the others are too
+    few, and once every cell has been shown the draw starts again from all.
     """
     if isinstance(indices, set):
         indices = list(indices)
@@ -478,14 +734,20 @@ def _limit_selection(indices, max_displayed: float) -> List[int]:
     if max_displayed is None or np.isinf(max_displayed) or len(indices) <= max_displayed:
         return list(indices)
 
-    _logger.warning("%d cells selected, which exceeds the maximum number of cells to display.", len(indices))
+    _logger.info("%d cells selected, more than the %s the Gallery shows; drawing a sample.", len(indices), max_displayed)
     safe_indices = np.asarray(indices, dtype=int)
-    seed = int(abs(int(safe_indices.sum()))) % (2**32)
-    rng = np.random.default_rng(seed=seed)
-    
+    rng = np.random.default_rng(seed=_sample_seed(safe_indices, draw))
+
     sample_size = max(1, int(max_displayed))
-    sampled = rng.choice(safe_indices, size=sample_size, replace=False)
-    _logger.info("Randomly sampled %d cells for display.", sample_size)
+    excluded = set(exclude or ())
+    fresh = np.asarray([i for i in safe_indices if int(i) not in excluded], dtype=int) if excluded else safe_indices
+    if not len(fresh):  # every cell has been shown: start again
+        fresh = safe_indices
+    if len(fresh) >= sample_size:
+        sampled = rng.choice(fresh, size=sample_size, replace=False)
+    else:
+        rest = np.asarray([i for i in safe_indices if int(i) in excluded], dtype=int)
+        sampled = np.concatenate([fresh, rng.choice(rest, size=sample_size - len(fresh), replace=False)])
     return sorted(int(i) for i in sampled.tolist())
 
 

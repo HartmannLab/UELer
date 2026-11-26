@@ -213,6 +213,7 @@ _ENTRY_DEFAULTS: Dict[str, Any] = {
     "trail": [],
     "recipe": {},
     "source": "",
+    "sample": None,
 }
 
 
@@ -357,11 +358,14 @@ class CellSetStore:
         role: Optional[str] = None,
         frozen: bool = False,
         allow_empty: bool = False,
+        sample: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Store *cells* as a new set and return its metadata.
 
         *allow_empty* lets a cart start with no cells. A set with a *container*
-        is its child; its cells are added to the container as well.
+        is its child; its cells are added to the container as well. *sample*
+        records how a set saved from the Gallery was drawn (source set, size,
+        draw number, seed).
         """
         index = self._load_index()
         if container is not None:
@@ -387,6 +391,7 @@ class CellSetStore:
             "role": role,
             "frozen": bool(frozen),
             "edits": [],
+            "sample": dict(sample) if sample else None,
             "file": f"{set_id}.parquet",
         }
         self._write_cells(entry, cells)

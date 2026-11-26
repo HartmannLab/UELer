@@ -16,6 +16,10 @@ The plugin has four parts:
   Editor, which could only act on cells selected in the image. A write changes
   the cell table in memory and is noted in the session log; saving the selection
   as a set tagged ``column:value`` is what keeps it.
+* **The Gallery** asks this plugin what it is showing (:meth:`gallery_source`)
+  and calls it for its ★, remove, + Cart and Save shown controls, so the
+  Gallery holds no copy of any set; after every change this plugin tells the
+  Gallery (``on_cell_sets_change``).
 * **Saved sets**: filter by name or tag, select a set's cells (or its ★
   favourites), star or unstar the selected cells in it, make it the active
   cart, take a frozen **Snapshot** of it, edit its name, tags and note, or delete
@@ -32,7 +36,7 @@ from __future__ import annotations
 import html
 import logging
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from datetime import datetime
 
@@ -306,7 +310,7 @@ class CellSetsPlugin(PluginBase):
             return html.escape(str(exc))
         if hub is not None:
             hub.note("saved as set", {"set_id": meta["id"], "name": meta["name"], "tags": meta["tags"]}, count=meta["count"])
-        self.refresh_sets(select=meta["id"])
+        self._after_change(select=meta["id"])
         saved = f"Saved {_cells(meta['count'])} as the cell set <b>{html.escape(meta['name'])}</b>."
         self._status(saved, _OK)
         bar = getattr(getattr(self.main_viewer, "ui_component", None), "selection_bar", None)
@@ -384,6 +388,12 @@ class CellSetsPlugin(PluginBase):
             return f"★ {parent.get('name', '?')}" if parent else str(entry.get("name", "?"))
         return str(entry.get("name", "?"))
 
+    def _path_name(self, entry: Dict[str, Any]) -> str:
+        """``parent / child`` for a sub-group, the name for a top-level set."""
+        parent = self._entry(entry.get("container")) if entry.get("container") else None
+        name = str(entry.get("name", "?"))
+        return f"{parent.get('name', '?')} / {name}" if parent else name
+
     def _stars(self, set_id: Optional[str]) -> Optional[Dict[str, Any]]:
         return next((e for e in self._sets if e.get("container") == set_id and e.get("role") == FAVOURITES), None)
 
@@ -398,24 +408,43 @@ class CellSetsPlugin(PluginBase):
         tags = f" · {format_tags(entry.get('tags', []))}" if entry.get("tags") else ""
         return f"{marks}{entry.get('name', '?')} — {_cells(int(entry.get('count', 0)))}{star_text}{tags}"
 
+    def _after_change(self, select: Optional[str] = None) -> None:
+        """After a set changed: refresh the list and tell the Gallery."""
+        self.refresh_sets(select=select)
+        gallery = getattr(getattr(self.main_viewer, "SidePlots", None), "cell_gallery_output", None)
+        notify = getattr(gallery, "on_cell_sets_change", None)
+        if callable(notify):
+            try:
+                notify()
+            except Exception:  # the Gallery must not break a set edit
+                _logger.warning("The Gallery could not follow a cell set change", exc_info=True)
+
     def refresh_sets(self, select: Optional[str] = None) -> None:
         """Re-read the index and show the top-level sets that match the filter."""
         ui = self.ui_component
         self._sets = self.store.list_sets() if self.store is not None else []
         if self.active_cart and self._entry(self.active_cart) is None:
             self.active_cart = None
-        top = [entry for entry in self._sets if entry.get("container") is None]
         needle = (ui.filter_input.value or "").strip().casefold()
-        shown = [
-            entry
-            for entry in top
-            if not needle
-            or needle in str(entry.get("name", "")).casefold()
-            or any(needle in str(tag).casefold() for tag in entry.get("tags", []))
-        ]
+
+        def matches(entry):
+            return (
+                not needle
+                or needle in str(entry.get("name", "")).casefold()
+                or any(needle in str(tag).casefold() for tag in entry.get("tags", []))
+            )
+
+        # Top-level sets, each followed by its sub-groups (not its ★, which is a count).
+        options = []
+        for entry in (e for e in self._sets if e.get("container") is None):
+            subs = [e for e in self._sets if e.get("container") == entry["id"] and e.get("role") != FAVOURITES]
+            shown_subs = subs if matches(entry) else [e for e in subs if matches(e)]
+            if matches(entry) or shown_subs:
+                options.append((self._row_label(entry), entry["id"]))
+                options.extend(("    ↳ " + self._row_label(sub), sub["id"]) for sub in shown_subs)
         keep = select or self._picked_id()
-        ui.set_list.options = [(self._row_label(entry), entry["id"]) for entry in shown]
-        ids = [entry["id"] for entry in shown]
+        ui.set_list.options = options
+        ids = [value for _label, value in options]
         ui.set_list.value = keep if keep in ids else None
         self._refresh_cart_choices()
         self._on_set_picked()
@@ -423,8 +452,8 @@ class CellSetsPlugin(PluginBase):
     def _refresh_cart_choices(self) -> None:
         """The active-cart dropdown: the top-level sets that are not snapshots."""
         ui = self.ui_component
-        carts = [e for e in self._sets if e.get("container") is None and not e.get("frozen")]
-        options = [("None", None)] + [(str(e.get("name", "?")), e["id"]) for e in carts]
+        carts = [e for e in self._sets if e.get("role") != FAVOURITES and not e.get("frozen")]
+        options = [("None", None)] + [(self._path_name(e), e["id"]) for e in carts]
         self._updating_cart = True
         try:
             ui.cart_dropdown.options = options
@@ -495,7 +524,7 @@ class CellSetsPlugin(PluginBase):
         except (ValueError, KeyError, OSError) as exc:
             self._status(html.escape(str(exc)), _ERROR)
             return
-        self.refresh_sets(select=meta["id"])
+        self._after_change(select=meta["id"])
         self._status(f"Saved the changes to <b>{html.escape(meta['name'])}</b>.", _OK)
 
     def ask_delete_set(self, set_id: Optional[str]) -> None:
@@ -504,6 +533,9 @@ class CellSetsPlugin(PluginBase):
             return
         stars = self._stars(set_id)
         star_text = f", its {int(stars.get('count', 0))} stars" if stars and stars.get("count") else ""
+        subs = [e for e in self._sets if e.get("container") == set_id and e.get("role") != FAVOURITES]
+        if subs:
+            star_text += f", its {len(subs)} sub-group{'s' if len(subs) != 1 else ''}"
         asked = self.confirm(
             f"The cell set <b>{html.escape(entry['name'])}</b> ({_cells(int(entry.get('count', 0)))}){star_text} "
             "and its recorded history will be deleted from disk. This cannot be undone.",
@@ -523,7 +555,7 @@ class CellSetsPlugin(PluginBase):
             return
         if self.active_cart == set_id:
             self.active_cart = None
-        self.refresh_sets()
+        self._after_change()
         self._status(f"Deleted <b>{html.escape(entry['name'] if entry else set_id)}</b>.", _OK)
 
     # ------------------------------------------------------------------
@@ -538,7 +570,7 @@ class CellSetsPlugin(PluginBase):
             self._status(f"<b>{html.escape(entry['name'])}</b> is a snapshot; its cells cannot change.", _ERROR)
             entry = None
         self.active_cart = entry["id"] if entry else None
-        self.refresh_sets()
+        self._after_change()
         if entry:
             self._status(f"Collecting cells in <b>{html.escape(entry['name'])}</b>: + Cart in the bar, or Shift-click a cell in the image.", _OK)
 
@@ -567,7 +599,7 @@ class CellSetsPlugin(PluginBase):
         if hub is not None:
             hub.note("new cart", {"set_id": meta["id"], "name": meta["name"]}, count=0)
         self.active_cart = meta["id"]
-        self.refresh_sets(select=meta["id"])
+        self._after_change(select=meta["id"])
         self._status(f"Made the empty cart <b>{html.escape(meta['name'])}</b> and made it active.", _OK)
         return ""
 
@@ -585,7 +617,7 @@ class CellSetsPlugin(PluginBase):
         hub = self._hub
         if hub is not None:
             hub.note("removed from cart" if remove else "added to cart", {"set_id": set_id, "name": entry["name"] if entry else ""}, count=changed)
-        self.refresh_sets()
+        self._after_change()
         return changed
 
     def add_selection_to_cart(self, remove: bool = False) -> Optional[int]:
@@ -662,7 +694,7 @@ class CellSetsPlugin(PluginBase):
         hub = self._hub
         if hub is not None:
             hub.note("unstarred" if unstar else "starred", {"set_id": set_id, "name": entry["name"]}, count=changed)
-        self.refresh_sets(select=set_id)
+        self._after_change(select=set_id)
         name = html.escape(entry["name"])
         self._status(f"{'Unstarred' if unstar else 'Starred'} {_cells(changed)} in <b>{name}</b>.", _OK)
         return changed
@@ -685,9 +717,196 @@ class CellSetsPlugin(PluginBase):
         hub = self._hub
         if hub is not None:
             hub.note("snapshot", {"set_id": meta["id"], "of": set_id, "name": meta["name"]}, count=meta.get("count", 0))
-        self.refresh_sets(select=meta["id"])
+        self._after_change(select=meta["id"])
         self._status(f"Saved the snapshot <b>{html.escape(meta['name'])}</b>; rename it below if you like.", _OK)
         return meta
+
+    # ------------------------------------------------------------------
+    # The Gallery: what it shows, and its ★ / remove / cart / save controls
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _set_id_of(selection) -> Optional[str]:
+        """The set a selection came from: selected directly, or restored with ◀."""
+        recipe = getattr(selection, "recipe", None) or {}
+        return recipe.get("set_id") or (recipe.get("recipe") or {}).get("set_id")
+
+    def rows_of(self, set_id: Optional[str]) -> Set:
+        """The cell-table rows of the set's cells now (cells gone from the table left out)."""
+        if not set_id or self.store is None:
+            return set()
+        try:
+            cells = self.store.read_cells(set_id)
+        except (KeyError, OSError, ValueError):
+            return set()
+        rows, _missing = indices_from_cells(self.main_viewer, cells)
+        return rows
+
+    def gallery_source(self, selection) -> Dict[str, Any]:
+        """Describe what the Gallery shows for *selection* (``None``: cells sent without one).
+
+        Keys: ``kind`` (``"set"``, ``"stars"``, ``"snapshot"`` or
+        ``"selection"``); ``label`` (header text, HTML); ``set_id``; ``rows``
+        (the set's rows now, or ``None`` to use the cells the Gallery was given);
+        ``star_set`` (the set whose stars the tiles show and toggle, or ``None``);
+        ``starred`` (its starred rows); ``can_star``; ``remove_set`` (the set ✕
+        removes from, or ``None``); ``container`` (where **Save shown** puts its
+        set); ``cart`` (the active cart's id, for **+ Cart**).
+        """
+        cart = self._entry(self.active_cart)
+        source: Dict[str, Any] = {
+            "kind": "selection",
+            "set_id": None,
+            "rows": None,
+            "star_set": None,
+            "starred": set(),
+            "can_star": False,
+            "remove_set": None,
+            "container": None,
+            "cart": cart["id"] if cart else None,
+        }
+        set_id = self._set_id_of(selection) if selection is not None else None
+        entry = self.store.get(set_id) if (set_id and self.store is not None) else None
+        if entry is None:
+            made = html.escape(selection.source_label) if selection is not None and selection.source_label else "cells sent to the Gallery"
+            source["label"] = f"Selection: {made}"
+            if cart:
+                source.update(star_set=cart["id"], can_star=True)
+                source["label"] += f" · ★ goes to the cart <b>{html.escape(cart['name'])}</b>"
+        elif entry.get("role") == FAVOURITES:
+            parent = self.store.get(entry.get("container")) or {}
+            source.update(
+                kind="stars",
+                set_id=entry["id"],
+                rows=self.rows_of(entry["id"]),
+                star_set=parent.get("id"),
+                can_star=bool(parent) and not parent.get("frozen"),
+                container=parent.get("id"),
+                label=f"★ of <b>{html.escape(str(parent.get('name', '?')))}</b>",
+            )
+        elif entry.get("frozen"):
+            source.update(
+                kind="snapshot",
+                set_id=entry["id"],
+                rows=self.rows_of(entry["id"]),
+                star_set=entry["id"],
+                container=entry["id"],
+                label=f"Snapshot: <b>{html.escape(entry['name'])}</b> (read-only)",
+            )
+        else:
+            word = "Cart" if entry["id"] == self.active_cart else "Set"
+            source.update(
+                kind="set",
+                set_id=entry["id"],
+                rows=self.rows_of(entry["id"]),
+                star_set=entry["id"],
+                can_star=True,
+                remove_set=entry["id"],
+                container=entry["id"],
+                label=f"{word}: <b>{html.escape(entry['name'])}</b>",
+            )
+        if source["star_set"]:
+            stars = self.store.favourites(source["star_set"]) if self.store is not None else None
+            source["starred"] = self.rows_of(stars["id"]) if stars else set()
+        return source
+
+    def _cells_for_rows(self, rows: Iterable, set_id: Optional[str] = None) -> pd.DataFrame:
+        """The cells of *rows*, on the mask layer *set_id* holds them on, if it does."""
+        cells = cells_from_indices(self.main_viewer, rows)
+        if set_id and len(cells) and self.store is not None:
+            try:
+                known = self.store.read_cells(set_id)
+            except (KeyError, OSError, ValueError):
+                known = None
+            if known is not None and len(known):
+                masks = {(str(f), int(l)): str(m) for f, m, l in known[["fov", "mask", "label"]].itertuples(index=False)}
+                cells["mask"] = [masks.get((f, int(l)), m) for f, m, l in cells[["fov", "mask", "label"]].itertuples(index=False)]
+        return cells
+
+    def star_rows(self, set_id: Optional[str], rows: Iterable, unstar: bool = False) -> Optional[int]:
+        """Star (or unstar) cell-table *rows* in the set; ``None`` when refused."""
+        if not set_id or self.store is None:
+            return None
+        entry = self.store.get(set_id)
+        cells = self._cells_for_rows(rows, set_id)
+        recipe = {"source": "gallery"}
+        try:
+            changed = self.store.unstar(set_id, cells, recipe) if unstar else self.store.star(set_id, cells, recipe)
+        except (ValueError, KeyError, OSError) as exc:
+            self._status(html.escape(str(exc)), _ERROR)
+            return None
+        hub = self._hub
+        if hub is not None:
+            hub.note("unstarred" if unstar else "starred", {"set_id": set_id, "name": (entry or {}).get("name", ""), "from": "gallery"}, count=changed)
+        self._after_change()
+        return changed
+
+    def remove_rows(self, set_id: Optional[str], rows: Iterable) -> Optional[int]:
+        """Take cell-table *rows* out of the set (and its stars); ``None`` when refused."""
+        if not set_id or self.store is None:
+            return None
+        changed = self._edit_cells(set_id, self._cells_for_rows(rows, set_id), {"source": "gallery"}, remove=True)
+        if changed is not None:
+            entry = self._entry(set_id) or {}
+            self._status(f"Took {_cells(changed)} out of <b>{html.escape(str(entry.get('name', '')))}</b>.", _OK)
+        return changed
+
+    def add_rows_to_cart(self, rows: Iterable) -> Optional[int]:
+        """Put cell-table *rows* in the active cart; ``None`` when there is none."""
+        cart = self._entry(self.active_cart)
+        if cart is None or self.store is None:
+            self._status("No active cart. Choose one under Active cart.", _WARN)
+            return None
+        rows = list(rows)
+        changed = self._edit_cells(cart["id"], self._cells_for_rows(rows, cart["id"]), {"source": "gallery", "shown": len(rows)})
+        if changed is not None:
+            self._status(f"Added {_cells(changed)} from the Gallery to the cart <b>{html.escape(cart['name'])}</b>.", _OK)
+        return changed
+
+    def save_rows(
+        self,
+        name: str,
+        rows: Iterable,
+        *,
+        container: Optional[str] = None,
+        sample: Optional[Dict[str, Any]] = None,
+        default_name: str = "Gallery cells",
+    ) -> Tuple[Optional[Dict[str, Any]], str]:
+        """Save cell-table *rows* as a set (a child of *container* when given).
+
+        An empty *name* becomes *default_name*, numbered if taken. Returns
+        ``(metadata, "")`` or ``(None, error)``.
+        """
+        if self.store is None:
+            return None, "Cell sets cannot be saved without a dataset folder."
+        cells = self._cells_for_rows(rows, container)
+        if not len(cells):
+            return None, "None of the shown cells is in the cell table."
+        typed = (name or "").strip()
+        candidates = [typed] if typed else [default_name] + [f"{default_name} {n}" for n in range(2, 100)]
+        hub = self._hub
+        error = ""
+        for candidate in candidates:
+            try:
+                meta = self.store.save_set(
+                    candidate,
+                    cells,
+                    source="gallery",
+                    recipe={"gallery": dict(sample or {})},
+                    container=container,
+                    sample=sample,
+                    trail=hub.trail() if hub is not None else (),
+                )
+            except ValueError as exc:
+                error = html.escape(str(exc))
+                continue
+            except (KeyError, OSError) as exc:
+                return None, html.escape(str(exc))
+            if hub is not None:
+                hub.note("saved shown cells as set", {"set_id": meta["id"], "name": meta["name"], "container": container}, count=meta["count"])
+            self._after_change(select=container or meta["id"])
+            self._status(f"Saved the {_cells(meta['count'])} shown in the Gallery as <b>{html.escape(meta['name'])}</b>.", _OK)
+            return meta, ""
+        return None, error
 
     # ------------------------------------------------------------------
     # Selecting a set

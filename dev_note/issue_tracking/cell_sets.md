@@ -1,6 +1,6 @@
 # Cell sets, tags and selection history
 
-Status: **phase 1 done** (history, save / select, tags, quick write; Cell Table Editor removed). **Step A1 done** (editable sets, the active cart, ★ favourites in the store and the plugin, snapshots, free-form tags); A2 (the Gallery as the editing view) and B are open. **The later phases were re-planned on 2026-11-26**: see [Revised plan: carts, stars and the Gallery as the editing view](#revised-plan-carts-stars-and-the-gallery-as-the-editing-view). It replaces phases 2 and 3 below; per-cell labels move to their own plan, [cell_annotation_layers.md](cell_annotation_layers.md). Both steps are on the long-term list ([long_term_todo.md](../long_term_todo.md)). Builds on the global selection (`SelectionHub`) and the in-line selection bar described in [selection_design.md](selection_design.md).
+Status: **phase 1 done** (history, save / select, tags, quick write; Cell Table Editor removed). **Step A done**: A1 (editable sets, the active cart, ★ favourites, snapshots, free-form tags) and A2 (the Gallery as the editing view). Step B is open. **The later phases were re-planned on 2026-11-26**: see [Revised plan: carts, stars and the Gallery as the editing view](#revised-plan-carts-stars-and-the-gallery-as-the-editing-view). It replaces phases 2 and 3 below; per-cell labels move to their own plan, [cell_annotation_layers.md](cell_annotation_layers.md). Both steps are on the long-term list ([long_term_todo.md](../long_term_todo.md)). Builds on the global selection (`SelectionHub`) and the in-line selection bar described in [selection_design.md](selection_design.md).
 
 ---
 
@@ -363,3 +363,50 @@ python -m unittest tests.test_cell_sets tests.test_image_click_gestures tests.te
 python -m unittest discover -s tests
 ```
 - ✅ All tests passed (1633); `mkdocs build --strict` passes. Not yet tried by hand in a running viewer.
+
+---
+
+## **Update Summary: step A2 — the Gallery as the editing view**
+
+The Gallery showed a set's cells but could not act on them, did not say which set it showed, said nothing when it showed only a sample, and could only redraw the same sample.
+
+---
+
+### **Actions Taken**
+- **The Gallery asks, the Cell sets plugin answers:**
+  `CellSetsPlugin.gallery_source(selection)` describes what is shown (kind, header label, the set's live rows, the set whose stars the tiles show and toggle, whether ★ and ✕ are offered, where Save shown puts its set, the active cart). The selection counts as the Gallery's source only when its cells are the Gallery's cells; otherwise the source is "cells sent to the Gallery". The Gallery calls `star_rows`, `remove_rows`, `add_rows_to_cart`, `save_rows`; every set change goes through `_after_change`, which refreshes the list and calls the Gallery's `on_cell_sets_change` directly. A direct call was chosen over `inform_plugins`, which swallows `AttributeError` and would hide a bug in the Gallery's update.
+- **Live set contents:**
+  for a set the Gallery draws from `rows_of(set_id)` (the set's cells now), not from the selection's indices, so cells added with Shift-click after selecting a cart appear and removed ones go.
+- **The tile widget:**
+  `controls`, `badges` and `action` traitlets beside `tiles` and `clicked`. Stars live in `badges` so a toggle sends a small dict, not every PNG again. No optimistic flip in the browser: the star changes when Python sends the new badges, so a refused star (a store error) cannot leave a wrong mark. A tile removed with ✕ is dropped from `tiles` without re-rendering the others.
+- **What ★ acts on:**
+  the set shown; for a set's stars, the parent set (so ★ unstars and the tile leaves); for a plain selection, the active cart, which adds the cell to the cart through `star` (the subset rule). Without a cart a plain selection offers no ★, since a star must belong to a set.
+- **Mask layers:**
+  `_cells_for_rows` maps rows back to cells on the mask layer the target set holds them on, falling back to `mask_key`; without it a star from the Gallery on a nucleus-mask set would add a cell-mask duplicate.
+- **Sampling:**
+  `_limit_selection(draw=, exclude=)` and `_sample_seed`; draw 0 reproduces the old sample. The Gallery keeps its shown cells across renders and draws again only on a new selection, ★ only, or Draw new cells; it also redraws when the number that should be shown changes (Max Displayed Cells).
+- **Save shown as set:**
+  a sub-group (`container`) of the set shown (of the parent for a set's stars), with `sample` recorded in the store; default name "Gallery sample", numbered if taken among siblings. Sub-groups are now listed under their set, offered as carts, and named in the delete dialog; the "move sub-groups or delete them" choice stays for step B.
+- **Settings:** the Gallery's new controls are in `set_controls`, not `ui_component`, so `save_widget_states` does not persist a typed name or the ★ only toggle.
+
+### **Not done**
+Keyboard stepping through tiles (arrows, S to star) was left out: it needs keyboard focus inside the widget, which is fiddly in Jupyter; add it if clicking proves slow. The selection bar's **Gallery ✓** still does not say when only a sample is shown; the Gallery's header does.
+
+---
+
+### **Files Changed**
+- `ueler/viewer/plugin/cell_gallery.py` — source, header, set controls, tile actions, ★ only, Draw new cells, + Cart, Save shown, `_sample_seed`, `_limit_selection(draw, exclude)`.
+- `ueler/viewer/plugin/tile_gallery_widget.py` — `controls`, `badges`, `action`, the ☆/★ and ✕ overlays, `parse_action`.
+- `ueler/viewer/plugin/cell_sets.py` — `gallery_source`, `rows_of`, `star_rows`, `remove_rows`, `add_rows_to_cart`, `save_rows`, `_after_change`, sub-groups in the list and cart choices.
+- `ueler/viewer/cell_set_store.py` — `sample` on a set.
+- `tests/test_gallery_cell_sets.py` — new.
+- `docs/tutorials/cell-table.md`, `docs/tutorials/cell-sets.md`, `README.md`, `doc/log.md`.
+
+---
+
+### **Tests**
+```bash
+python -m unittest tests.test_gallery_cell_sets tests.test_cell_sets tests.test_gallery_heatmap_integration
+python -m unittest discover -s tests
+```
+- ✅ All tests passed (1648); `mkdocs build --strict` passes. The widget's JavaScript was syntax-checked with node and run against a stub DOM (★/✕ do not trigger a tile click, badges update in place, read-only stars); the Gallery and Cell sets flow ran with real ipywidgets. Not yet tried by hand in Jupyter.
