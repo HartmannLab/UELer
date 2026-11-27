@@ -127,6 +127,7 @@ if "seaborn_image" not in sys.modules:  # pragma: no cover - optional dependency
 from ueler.viewer.main_viewer import ImageMaskViewer, MapPixelLocalization
 from ueler.viewer.image_display import MaskSelection
 from ueler.viewer.virtual_map_layer import MapTileViewport
+from ueler.viewer.selection_style import SelectionStyle
 
 
 class _DummyAxes:
@@ -434,7 +435,11 @@ class MapModeActivationTests(unittest.TestCase):
             np.fill_diagonal(diagonal, True)
             return diagonal
 
-        with patch("ueler.viewer.main_viewer.find_boundaries", side_effect=_mock_boundaries):
+        # White, 1 px and no fill, so the test checks only where the outline lands.
+        outline_only = SelectionStyle(color="#ffffff", outline_width=1, fill_opacity=0.0)
+        with patch("ueler.viewer.selection_style.find_boundaries", side_effect=_mock_boundaries), patch.object(
+            ImageMaskViewer, "selection_style", new=property(lambda _self: outline_only)
+        ):
             self.viewer._update_map_mask_highlights()
 
         result = self.viewer.image_display.img_display.data

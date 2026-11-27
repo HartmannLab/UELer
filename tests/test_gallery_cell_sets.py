@@ -23,6 +23,7 @@ from ueler.viewer.plugin.cell_sets import CellSetsPlugin
 from ueler.viewer.plugin.tile_gallery_widget import parse_action
 from ueler.viewer.selection import SelectionHub
 from ueler.viewer.selection_bar import SelectionBar
+from ueler.viewer.selection_style import SelectionStyle
 
 
 def _fake_tiles(df, indices, **_kwargs):
@@ -246,6 +247,21 @@ class GalleryEditingTests(unittest.TestCase):
         self._click("star", 1)
         self.assertEqual(self.gallery._shown, [2])
         self.assertEqual(self.sets.store.get(set_id)["count"], 6)  # unstarred, still in the set
+
+    def test_the_outline_follows_the_selection_colour_until_changed_here(self):
+        picker = self.gallery.ui_component.mask_outline_picker
+        self.assertEqual(picker.value, SelectionStyle().color)
+        self._show(range(5))
+        with mock.patch.object(self.gallery, "refresh_gallery") as refresh:
+            self.viewer.selection_style = SelectionStyle(color="#00ff00")
+            self.gallery.on_selection_style_change(previous_color=SelectionStyle().color)
+            self.assertEqual(picker.value, "#00ff00")
+            refresh.assert_called_once()
+            picker.value = "#ff00ff"  # the user picks another colour in the Gallery
+            self.viewer.selection_style = SelectionStyle(color="#0000ff")
+            self.gallery.on_selection_style_change(previous_color="#00ff00")
+            self.assertEqual(picker.value, "#ff00ff")
+            refresh.assert_called_once()
 
 
 if __name__ == "__main__":

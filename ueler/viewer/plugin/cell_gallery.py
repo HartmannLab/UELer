@@ -41,6 +41,7 @@ from ueler.rendering import (
 )
 from ueler.viewer.decorators import update_status_bar
 from ueler.viewer.observable import Observable
+from ueler.viewer.selection_style import style_of
 
 from .plugin_base import PluginBase
 from .tile_gallery_widget import TileGalleryWidget, array_to_data_uri, parse_action, parse_clicked_id
@@ -122,13 +123,12 @@ class CellGalleryDisplay(PluginBase):
             continuous_update=False,
         )
 
-        default_outline_colour = getattr(main_viewer, "selection_outline_color", "#FFFFFF")
-        if not isinstance(default_outline_colour, str):
-            default_outline_colour = "#FFFFFF"
-
+        # The centred cell's outline starts in the global selection colour and
+        # follows it until the user picks another colour here.
         self.ui_component.mask_outline_picker = ColorPicker(
-            value=default_outline_colour,
+            value=style_of(main_viewer).color,
             description="Mask colour",
+            tooltip="Outline of the centred cell. Follows the selection colour (Advanced Settings) until changed here.",
             style={"description_width": "auto"},
         )
 
@@ -537,6 +537,17 @@ class CellGalleryDisplay(PluginBase):
             except Exception as exc:  # pragma: no cover - non-critical
                 _logger.warning("Failed to capture overlay snapshot: %s", exc)
         return None
+
+    def on_selection_style_change(self, previous_color=None) -> None:
+        """Follow a new selection colour, unless the outline colour was changed here."""
+        picker = self.ui_component.mask_outline_picker
+        new = style_of(self.main_viewer).color
+        current = str(getattr(picker, "value", "") or "").lower()
+        if previous_color is None or current != str(previous_color).lower() or current == new:
+            return
+        picker.value = new
+        if self._shown:
+            self.refresh_gallery()
 
     def refresh_gallery(self, _button=None):
         """Re-render the cells shown (Draw new cells draws others)."""

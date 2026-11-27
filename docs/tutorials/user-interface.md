@@ -76,7 +76,7 @@ Also its own accordion section, visible when `annotations_folder` contains valid
 
 ### Advanced Settings
 
-Two tabs inside one accordion section:
+Two tabs inside one accordion section. The second tab is itself split into collapsible sections:
 
 - **Data mapping** — **X key:**, **Y key:**, **Label key:**, **Mask key:** and **Fov key:**, the names
   that link your cell table and your masks to the images. Each is a text field with a **suggestion
@@ -86,7 +86,9 @@ Two tabs inside one accordion section:
   list does not contain, which is what keeps the field usable when discovery comes up short. Without
   a cell table the four column fields keep their defaults, since there is nothing to offer yet. See
   [Guided Setup](setup-dialog.md#the-key-fields-are-suggestion-lists-not-menus).
-- **Advanced Settings** — **Cache Size:**, the **Pixel Size (nm):** input that drives the [scale bar](#main-viewer), a **Downsample** toggle, and **Frame format:**, which picks how the viewer's image reaches your browser (PNG, or the smaller JPEG / WebP for remote sessions; see [Display Settings](display-settings.md#remote-sessions-frame-format)).
+- **Advanced Settings**
+    - **Display and performance** — **Cache Size:**, the **Pixel Size (nm):** input that drives the [scale bar](#main-viewer), a **Downsample** toggle, and **Frame format:**, which picks how the viewer's image reaches your browser (PNG, or the smaller JPEG / WebP for remote sessions; see [Display Settings](display-settings.md#remote-sessions-frame-format)).
+    - **Selection and colours** — **Selection colour** (amber by default), **Selection outline (px)**, **Selection fill**, **Default mask colour** and **Plot base colour**. See [Display Settings](display-settings.md#selection-and-colours).
 
 !!! note "You are asked for these on first load"
     A [setup dialog](setup-dialog.md) opens the first time you load a dataset and

@@ -11,7 +11,7 @@ Three different things draw on top of the same segmentation mask, and they are e
 | Layer | Owned by | Appears as |
 |---|---|---|
 | **Rendering** | Left panel, Channels section | One uniform colour per *mask layer*, from a dropdown |
-| **Highlighting** | `ImageDisplay` clicks and plugin callbacks | A **white** outline on the selected cells |
+| **Highlighting** | `ImageDisplay` clicks and plugin callbacks | An outline in the selection colour (amber by default), thicker than a mask outline, plus a light tint inside |
 | **Coloring** | The **Mask painter** plugin | Per-*cell* colours from a global registry |
 
 All three are composited in `update_display()`, and all three work identically in single-FOV and stitched-map mode.
@@ -31,7 +31,7 @@ flowchart TD
     E -- Yes --> F["apply_registry_colors<br/>per-cell colours"]
     E -- No --> G[set combined image]
     F --> G
-    G --> H["update_patches<br/>white selection highlight"]
+    G --> H["update_patches<br/>selection highlight"]
     B -- Yes --> I[_render_map_view → per-tile _render_fov_region]
     I --> J[_apply_map_painter_overlay]
     J --> K[_update_map_mask_highlights]
@@ -39,7 +39,7 @@ flowchart TD
 
 1. `render_fov_to_array` — channels plus uniform mask outlines.
 2. `apply_registry_colors` — class-based coloured outlines from the painter registry.
-3. `update_patches` / `_update_map_mask_highlights` — white selection highlights on top.
+3. `update_patches` / `_update_map_mask_highlights` — selection highlights on top, in the selection style.
 
 `apply_registry_colors` takes an `exclude_ids` set of the currently selected cells and skips them, which is the other half of keeping the highlight visible.
 
@@ -73,14 +73,17 @@ class MaskRenderSettings:
 
 ## 2. Selection highlighting
 
-A click, a ctrl-click or a plugin selection draws a white outline over the finished composite **without a full re-render**. The state is a set of `MaskSelection(fov, mask, mask_id)` triples on `ImageDisplay.selected_masks_label`.
+A click, a ctrl-click or a plugin selection draws the highlight over the finished composite **without a full re-render**. The state is a set of `MaskSelection(fov, mask, mask_id)` triples on `ImageDisplay.selected_masks_label`.
 
-`update_patches` (`image_display.py`) reads `main_viewer.full_resolution_label_masks`, slices it to the current viewport at the active downsample factor, extracts edges, and paints white onto a copy of `self.combined`. In map mode it delegates to `_update_map_mask_highlights`, which uses `layer.last_tile_viewports()` to find where each tile was placed and paints at the tile's canvas destination.
+**One style, one drawing routine.** `ueler/viewer/selection_style.py` holds `SelectionStyle` (colour, outline width, fill opacity, and the plots' base colour) and `paint_selection(image, labels, style, downsample_factor=, offset=)`. The routine takes a label array of the selected cells, draws a tint of the colour inside them and then the outline on top, and clips to the image. The outline width is given at full resolution and scaled with `scale_outline_thickness`, like mask outlines. The viewer's `selection_style` property reads the style from the **Advanced Settings → Selection and colours** widgets on every call; `style_of(viewer)` returns the default style for a viewer stub without it. The defaults are in `ueler/constants.py` (`SELECTION_COLOR = "#ffb000"`, width 2, fill 0.25).
 
-`GridChannelDisplay._update_grid_patches()` mirrors the same logic across every pane of the [channel grid view](viewer-runtime.md#channel-controls), so locating a cell works there too (#134); `clear_patches()` drops them again.
+All three image paths call `paint_selection`:
 
-!!! warning "The highlight colour is not configurable"
-    Selection highlights are hard-coded to white (`[1.0, 1.0, 1.0]`). There is no UI for changing it, which matters on a composite that is already bright.
+- `update_patches` (`image_display.py`) reads `main_viewer.full_resolution_label_masks`, slices it to the current viewport at the active downsample factor, and paints onto a copy of `self.combined`.
+- In map mode it delegates to `_update_map_mask_highlights`, which uses `layer.last_tile_viewports()` to find where each tile was placed and paints each selected cell into the tile's canvas section.
+- `GridChannelDisplay._update_grid_patches()` does the same across every pane of the [channel grid view](viewer-runtime.md#channel-controls), so locating a cell works there too (#134); `clear_patches()` drops them again.
+
+**A style change** goes to `viewer.on_selection_style_change`, which redraws the image and the grid and calls `on_selection_style_change(previous_color=...)` on every plugin that has it: the scatter (`ScatterPlotWidget.set_style_colors`), the histogram (recolours its bar glyphs in place) and the Gallery (its outline picker follows the global colour while it still equals the previous one).
 
 ---
 
@@ -163,4 +166,3 @@ set_cell_colors_bulk({"FOV1": {101: "#FF0000", 202: "#00FF00"}})
 
 - The colour registry is not persisted across sessions (see above).
 - In map mode, `_apply_map_painter_overlay` bypasses the per-tile render cache and repaints on every `update_display`.
-- The selection highlight colour is fixed at white.

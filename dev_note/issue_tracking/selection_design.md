@@ -226,3 +226,50 @@ python -m unittest discover -s tests -t .
 ```
 - ✅ 1613 tests, OK; `mkdocs build --strict` passes.
 - Not yet tried in a browser: Ctrl + drag through ipympl, and macOS Ctrl-click (which browsers also treat as a context-menu click).
+
+## **Update Summary: One selection colour and style; Selection and colours in Advanced Settings (uncommitted)**
+
+Design parts 1 and 2, implementation steps 1–4. The bar (part 3) was built earlier as the experiment above; this round gives the selection its own look and makes that look a setting.
+
+---
+
+### **Actions Taken**
+- **`SelectionStyle` and one accessor:**
+  `ueler/viewer/selection_style.py` holds a frozen `SelectionStyle` (colour, outline width, fill opacity, plot base colour) with `build()` for loose widget values. The viewer's `selection_style` property reads the widgets on every call instead of caching, so no path can draw with a stale style. `style_of(viewer)` falls back to the defaults for stub viewers, including `MagicMock` ones, whose attributes would otherwise be mocks. The defaults live in `ueler/constants.py`.
+- **One drawing routine, three callers:**
+  `paint_selection(image, labels, style, downsample_factor=, offset=)` tints the cells, then draws the outline over the tint, and clips to the image. The single-FOV image, the map tiles and the channel-grid panes each used to carry their own copy of the offset and clipping code; all three now call it. The single-FOV path passes the real label slice; the old `astype(np.uint8)` silently dropped cells whose ID is a multiple of 256.
+- **No "outline the whole cell" fallback:**
+  the map-mode code outlined a cell whole when `find_boundaries` found no edge. With the crop of a zoomed view that happens for any cell filling the view, and it painted the whole view. Dropped: the tint now marks such a cell, and a 1 px cell is its own inner boundary anyway.
+- **Plots:**
+  `ScatterPlotWidget` takes `selected_color` / `point_color` and gains `set_style_colors`, which leaves a column colouring alone (jscatter's `color()["by"]`). The histogram keeps its `(base, hits, selected)` quad renderers in `_style_renderers` and recolours their glyphs in place, without a re-render. Since `selection_glyph` is the same object as `glyph`, one assignment covers all three states.
+- **Gallery override rule:**
+  the outline picker follows the global colour while its value still equals the colour before the change. The viewer passes that previous colour (`_applied_selection_color`) to every handler. The rule needs no "touched" flag, which a widget restore would have tripped.
+- **Advanced Settings:**
+  - **Layout:** the inner tab is an `Accordion` (**Display and performance**, **Selection and colours**), closed by default; the outer accordion and the Data mapping tab are unchanged.
+  - **Persistence:** the five widgets are attributes of `ui_component`, so `save_widget_states` persists them like the others.
+  - **Default mask colour:** applies to new mask dropdowns and moves only the existing masks still in the previous default. Its widget is created before `mask_color_controls`, so a restore applies it before the per-mask colours.
+- **Plugins are called directly:**
+  `on_selection_style_change` loops over the plugins itself instead of going through `inform_plugins`, which swallows `AttributeError`.
+
+---
+
+### **Files Changed**
+- `ueler/viewer/selection_style.py` — new: `SelectionStyle`, `selection_edges`, `paint_selection`, `style_of`.
+- `ueler/constants.py` — `SELECTION_COLOR`, `SELECTION_OUTLINE_WIDTH`, `SELECTION_FILL_OPACITY`, `PLOT_BASE_COLOR`, `DEFAULT_MASK_COLOR`.
+- `ueler/viewer/main_viewer.py` — `selection_style`, `selection_outline_color`, `default_mask_color`, `on_selection_style_change`, `on_default_mask_color_change`; map highlights through `paint_selection`; new mask dropdowns use the default mask colour.
+- `ueler/viewer/image_display.py`, `ueler/viewer/channel_grid_view.py` — highlights through `paint_selection`.
+- `ueler/viewer/ui_components.py` — the five widgets and the inner accordion.
+- `ueler/viewer/plugin/scatter_widget.py`, `ueler/viewer/plugin/chart.py` — style colours and recolouring; the static scatter's base colour.
+- `ueler/viewer/plugin/histogram.py` — style colours and in-place recolouring.
+- `ueler/viewer/plugin/cell_gallery.py` — the outline picker starts from and follows the selection colour.
+- Docs: `display-settings.md` (new "Selection and colours"), `user-interface.md`, `setup-dialog.md`, `scatter-histogram.md`, `cell-table.md`, `faq.md`, `docs/develop-notes/mask-rendering.md`; `dev_note/topic_mask_rendering_highlighting_coloring.md`.
+
+---
+
+### **Tests**
+```bash
+python -m unittest tests.test_selection_style tests.test_gallery_cell_sets tests.test_cache_settings tests.test_image_display_tooltip tests.test_issue119_zoom_highlight tests.test_map_mode_activation
+python -m unittest discover -s tests
+```
+- ✅ All tests passed (1668). Tests that check where the outline lands now draw it white, 1 px, without fill, so they keep testing the geometry; `tests/test_selection_style.py` tests the style.
+- Checked with real ipywidgets 8.1.8: the accordion titles, the widget types, each change reaching its handler, and the values as `save_widget_states` would write them. A rendered comparison (amber, and the selection set to the mask colour) showed the selected cells recognisable in both. Not yet seen in a live Jupyter session.

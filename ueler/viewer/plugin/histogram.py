@@ -50,6 +50,9 @@ import pandas as pd
 
 import ipywidgets as _ipywidgets
 
+from ueler.constants import PLOT_BASE_COLOR, SELECTION_COLOR
+from ueler.viewer.selection_style import style_of
+
 Button = getattr(_ipywidgets, "Button")
 Checkbox = getattr(_ipywidgets, "Checkbox")
 Dropdown = getattr(_ipywidgets, "Dropdown")
@@ -145,8 +148,10 @@ _BOKEH_MISSING_NOTICE = (
     "<code>jupyter_bokeh</code> (both are UELer dependencies) and restart the kernel."
 )
 
-_BASE_COLOR = "#1f77b4"        # matplotlib tab:blue
-_OVERLAY_COLOR = "#ff7f0e"     # matplotlib tab:orange
+# Unselected and selected bars take the viewer's selection style
+# (Advanced Settings → Selection and colours); these are its defaults.
+_BASE_COLOR = PLOT_BASE_COLOR
+_OVERLAY_COLOR = SELECTION_COLOR
 _BAND_COLOR = "#2ca02c"        # matplotlib tab:green — persistent gate band
 _HIT_ALPHA = 0.45              # tint of a bin holding a faint selection (#135 reply)
 # A selected-subset bar shorter than this fraction of the tallest bar is too small
@@ -228,6 +233,9 @@ class HistogramDisplay(PluginBase):
         self.main_viewer = main_viewer
         self.width = width
         self.height = height
+        # (base, bins-with-selection, selected) quad renderers per figure, so a
+        # selection-style change recolours them in place.
+        self._style_renderers: list = []
 
         # Cutoff-mode state. ``cutoff``/``_active_histogram_column`` track the
         # *last* cutoff the user set; the authoritative per-channel state lives in
@@ -442,6 +450,7 @@ class HistogramDisplay(PluginBase):
         # repopulates them, and a path that bails out must not leave a mode
         # switch pointing at detached figures.
         self._figures = {}
+        self._style_renderers = []
         self._box_tools = {}
         self._bound_sliders = {}
         if data is None or not channels:
@@ -498,6 +507,8 @@ class HistogramDisplay(PluginBase):
         sources: dict = {}
         spans: dict = {}
         self._figures = {}
+        self._style_renderers = []
+        style = style_of(self.main_viewer)
         self._box_tools = {}
         self._bound_sliders = {}
         for channel in self._channels:
@@ -522,20 +533,20 @@ class HistogramDisplay(PluginBase):
             )
             full_r = p.quad(
                 left="left", right="right", bottom=0, top="top",
-                source=full_src, fill_color=_BASE_COLOR, line_color="white",
+                source=full_src, fill_color=style.base_color, line_color="white",
                 fill_alpha=0.6, legend_label="All",
             )
             # Drawn *between* the two so the whole bar reads as "holds selected
             # cells" while the true count stays legible on top of it (#135 reply).
             hit_r = p.quad(
                 left="left", right="right", bottom=0, top="top",
-                source=hit_src, fill_color=_OVERLAY_COLOR, line_color=_OVERLAY_COLOR,
+                source=hit_src, fill_color=style.color, line_color=style.color,
                 fill_alpha=_HIT_ALPHA, line_alpha=0.7,
                 legend_label="Bins with selection",
             )
             sel_r = p.quad(
                 left="left", right="right", bottom=0, top="top",
-                source=sel_src, fill_color=_OVERLAY_COLOR, line_color="white",
+                source=sel_src, fill_color=style.color, line_color="white",
                 fill_alpha=0.75, legend_label="Selected",
             )
             # Pin the selection glyphs to the base glyph so a box-select gesture
@@ -544,6 +555,7 @@ class HistogramDisplay(PluginBase):
             for renderer in (full_r, hit_r, sel_r):
                 renderer.selection_glyph = renderer.glyph
                 renderer.nonselection_glyph = renderer.glyph
+            self._style_renderers.append((full_r, hit_r, sel_r))
 
             p.xaxis.axis_label = channel
             p.yaxis.axis_label = "Cell count"
@@ -1207,6 +1219,15 @@ class HistogramDisplay(PluginBase):
     # ------------------------------------------------------------------
     # Follow the main viewer's own selection (#135)
     # ------------------------------------------------------------------
+    def on_selection_style_change(self, previous_color=None) -> None:
+        """Recolour the bars of every histogram in the current selection style."""
+        style = style_of(self.main_viewer)
+        for full_r, hit_r, sel_r in self._style_renderers:
+            full_r.glyph.fill_color = style.base_color
+            hit_r.glyph.fill_color = style.color
+            hit_r.glyph.line_color = style.color
+            sel_r.glyph.fill_color = style.color
+
     def on_selection_change(self) -> None:
         """Overlay the cells the user picked in the image on every histogram.
 

@@ -140,7 +140,7 @@ Useful controls:
 - **Refresh** re-renders the cells shown, for example after changing a channel's colour. It never swaps them for others.
 - **Draw new cells** shows another sample, preferring cells not shown yet, so you can go through a large selection screen by screen. It is greyed out when every cell fits.
 - **Downsample**, **Mask colour** / **Outline px**, and **Use uniform color** (when
-  off, painted colors from the Mask painter are shown).
+  off, painted colors from the Mask painter are shown). **Mask colour** outlines the centred cell; it starts in the [selection colour](display-settings.md#selection-and-colours) and follows it until you change it here.
 
 A line above the thumbnails says what is shown and how much of it: "Selection: histogram gate · showing 20 of 35", or "Cart: cool CD8 · showing 24 of 310 · ★ 5" for a cell set.
 

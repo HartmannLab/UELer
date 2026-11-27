@@ -60,6 +60,6 @@ Loading the table later in the same notebook asks only about the new columns ins
 Everything above is in the left panel, in the **Advanced Settings** accordion, split across two tabs:
 
 - **Data mapping** — the five key fields.
-- **Advanced Settings** — **Cache Size:**, **Pixel Size (nm):**, **Downsample**.
+- **Advanced Settings** — in its **Display and performance** section: **Cache Size:**, **Pixel Size (nm):**, **Downsample**.
 
 See [User Interface](user-interface.md#advanced-settings) for the control-by-control map, and [Display Settings](display-settings.md) for the reasoning behind each value.

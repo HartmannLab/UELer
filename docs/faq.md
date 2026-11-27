@@ -182,6 +182,10 @@ The [setup dialog](tutorials/setup-dialog.md) asks for exactly these when a tabl
 - **No masks are loaded.** The lasso selects cells of a segmentation mask; start the viewer with a masks folder.
 - **The canvas is a static image.** Without `%matplotlib widget` in the notebook the figure is a plain PNG and receives no mouse events, so zoom, pan and clicks do nothing either. Run `%matplotlib widget`, then start the viewer again.
 
+### Selected cells are hard to see
+
+Selected cells are drawn in the selection colour (amber by default) with a thicker outline than masks and a light tint inside. If that clashes with your channels, change **Selection colour**, **Selection outline (px)** or **Selection fill** under **Advanced Settings → Advanced Settings → Selection and colours**. The scatter, histogram and Gallery follow the same colour. See [Display Settings](tutorials/display-settings.md#selection-and-colours).
+
 ### A setting came back different, with a warning in the log
 
 UELer saves your settings per dataset in `widget_states.json` (inside the `.UELer` folder) and restores them next time. The data can change in between — a field of view removed from the folder, a marker set deleted, a column renamed — and then a saved setting names something that is no longer there.

@@ -16,7 +16,20 @@ PREDEFINED_COLORS = {
     "White": "#ffffff",
 }
 
-DOWNSAMPLE_FACTORS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
+# How a cell selection is drawn (ueler/viewer/selection_style.py). The amber is
+# deliberately not one of PREDEFINED_COLORS, so it differs from the default
+# white masks and from the pure RGB/CMY channel colours. The width is in pixels
+# at full resolution and scaled with the downsample factor; a fill opacity of 0
+# turns the tint off. All four are editable under Advanced Settings.
+SELECTION_COLOR = "#ffb000"
+SELECTION_OUTLINE_WIDTH = 2
+SELECTION_FILL_OPACITY = 0.25
+# Unselected points and bars in the scatter and histogram.
+PLOT_BASE_COLOR = "#1f77b4"
+# Colour of a mask with no saved colour of its own.
+DEFAULT_MASK_COLOR = "White"
+
+DOWNSAMPLE_FACTORS =[1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
 
 # Longest-edge pixel budget: frames whose largest dimension is <= this value
 # render at full resolution; larger frames are downsampled by the smallest

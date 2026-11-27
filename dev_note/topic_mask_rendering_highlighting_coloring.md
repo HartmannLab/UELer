@@ -7,7 +7,7 @@ UELer supports three distinct but interrelated visual layers on top of cell mask
 | Layer | Who controls it | How it appears |
 |---|---|---|
 | **Rendering** | Main viewer controls (Masks panel) | Solid-colour outlines via a per-mask colour dropdown |
-| **Highlighting** | `ImageDisplay` clicks / plugin callbacks | White outline on the clicked or scatter-selected cell |
+| **Highlighting** | `ImageDisplay` clicks / plugin callbacks | Outline in the selection colour (amber by default), thicker than a mask outline, plus a light tint, on the clicked or scatter-selected cell |
 | **Coloring** | `MaskPainterDisplay` plugin | Per-class coloured outlines driven by a global cell-color registry |
 
 All three layers are composited in `update_display` and are aware of both single-FOV mode and stitched-map mode.
@@ -95,7 +95,9 @@ In map mode, `_render_map_view` delegates per-tile rendering to `VirtualMapLayer
 
 ### Concept
 
-When the user clicks on a cell or a plugin (chart, heatmap) selects one, a **white outline** is drawn on top of the current composited image without a full re-render. This is stored in `ImageDisplay.selected_masks_label` as a set of `MaskSelection` namedtuples.
+When the user clicks on a cell or a plugin (chart, heatmap) selects one, the highlight is drawn on top of the current composited image without a full re-render. This is stored in `ImageDisplay.selected_masks_label` as a set of `MaskSelection` namedtuples.
+
+**Style (updated 2026-11-27).** The highlight is drawn in the selection style, `SelectionStyle` in `ueler/viewer/selection_style.py`: colour (`SELECTION_COLOR = "#ffb000"` by default), outline width (2 px at full resolution, scaled with `scale_outline_thickness`) and fill opacity (0.25; the tint inside the cell). `paint_selection(image, labels, style, downsample_factor=, offset=)` is the one drawing routine for the single-FOV image, map mode and the channel grid. The viewer's `selection_style` property reads the **Advanced Settings → Selection and colours** widgets; `style_of(viewer)` gives the default for a stub viewer. A style change calls `viewer.on_selection_style_change`, which redraws the image and calls `on_selection_style_change(previous_color=...)` on the scatter, histogram and Gallery plugins.
 
 ### MaskSelection dataclass
 
@@ -123,7 +125,7 @@ sequenceDiagram
     ImageDisplay->>update_patches: update_patches()
     update_patches->>MainViewer: read full_resolution_label_masks
     update_patches->>update_patches: slice label mask at viewport / downsample
-    update_patches->>update_patches: find_boundaries → thicken_outline → paint white
+    update_patches->>update_patches: paint_selection (tint, then find_boundaries → thicken_outline)
     update_patches->>ImageDisplay: img_display.set_data(overlaid)
 ```
 
@@ -131,7 +133,7 @@ sequenceDiagram
 
 - Reads `self.main_viewer.full_resolution_label_masks` (populated by `update_display`).
 - Slices the label array to the current viewport using `[ymin:ymax:downsample_factor, xmin:xmax:downsample_factor]`.
-- Renders matching IDs as white edges onto a copy of `self.combined`.
+- Paints the matching IDs with `paint_selection` onto a copy of `self.combined`. The label slice keeps the real IDs; the earlier `uint8` cast, which dropped IDs that are multiples of 256, is gone.
 - Supports multi-select (Ctrl+click) and right-click clear.
 
 ### Map mode highlight flow
@@ -139,7 +141,7 @@ sequenceDiagram
 In map mode, `update_patches` delegates to `_update_map_mask_highlights` (main_viewer.py ~L1464):
 
 - Reads `layer.last_tile_viewports()` to know where each tile was placed.
-- For each `MaskSelection`, reads the full-resolution mask from `_get_mask_array`, slices to the tile's rendered region, downsamples, extracts edges, and paints white at the tile's canvas destination coordinates.
+- For each `MaskSelection`, reads the full-resolution mask from `_get_mask_array`, slices to the tile's rendered region, downsamples, and paints each selected cell with `paint_selection` into the tile's canvas section.
 
 ### Plugin-triggered highlights
 
@@ -241,7 +243,7 @@ flowchart TD
     E -- Yes --> F["apply_registry_colors\n(per-cell colors)"]
     E -- No --> G[set combined image]
     F --> G
-    G --> H["update_patches\n(white selection highlight)"]
+    G --> H["update_patches\n(selection highlight)"]
     B -- Yes --> I[_render_map_view → per-tile _render_fov_region]
     I --> J[_apply_map_painter_overlay]
     J --> K[_update_map_mask_highlights]
@@ -250,7 +252,7 @@ flowchart TD
 Order matters:
 1. `render_fov_to_array` — channels + uniform mask outlines
 2. `apply_registry_colors` — class-based colored outlines from painter registry
-3. `update_patches` / `_update_map_mask_highlights` — white selection highlights on top
+3. `update_patches` / `_update_map_mask_highlights` — selection highlights on top, in the selection style
 
 ---
 
@@ -299,5 +301,5 @@ Set `image_display.selected_masks_label = set()` before calling `update_display`
 
 - The global registry (`engine._cell_colors`) is a plain module-level dict — it is not persisted across sessions and will be lost on kernel restart. Color sets must be re-applied via the painter plugin.
 - `apply_registry_colors` iterates `np.unique(region_array)` per mask region, which may be slow when many distinct IDs are present in the visible window.
-- The selection highlight always uses white (`[1.0, 1.0, 1.0]`) — there is currently no UI to change the highlight colour.
+- ~~The selection highlight always uses white~~ — resolved 2026-11-27: the colour, outline width and fill are set under **Advanced Settings → Selection and colours**.
 - In map mode, `_apply_map_painter_overlay` bypasses the per-tile render cache and re-paints on every `update_display` call.

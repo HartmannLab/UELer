@@ -25,7 +25,7 @@ import pandas as pd
 from ueler import cell_table as cell_table_utils
 from ueler import cell_table_source
 from ueler.viewer.decorators import update_status_bar
-from ueler.constants import PREDEFINED_COLORS, DOWNSAMPLE_FACTORS, DOWNSAMPLE_MAX_DIMENSION, UICOMPNENTS_SKIP
+from ueler.constants import PREDEFINED_COLORS, DOWNSAMPLE_FACTORS, DOWNSAMPLE_MAX_DIMENSION, UICOMPNENTS_SKIP, DEFAULT_MASK_COLOR, SELECTION_COLOR
 from ueler.data_loader import (
     load_annotations_for_fov,
     load_channel_struct_fov,
@@ -56,6 +56,7 @@ import json
 
 from .image_display import DRAG_PREVIEW_PX, ImageDisplay, adopt_current_view, canvas_is_interactive
 from .selection import SelectionHub
+from .selection_style import SelectionStyle, paint_selection
 from .frame_encoding import available_frame_formats, install_frame_encoder
 from .ipympl_guard import install_canvas_message_guard
 from .widget_frontend_check import warn_about_widget_frontend
@@ -1589,6 +1590,87 @@ class ImageMaskViewer:
             self.set_lasso_hint("No cells inside the loop. Turn on <b>Lasso Select</b>, or hold <b>Ctrl</b> and drag, and draw around the cells.", warning=True)
 
     # ------------------------------------------------------------------
+    # How a selection looks (ueler/viewer/selection_style.py)
+    # ------------------------------------------------------------------
+    def _ui_value(self, name: str):
+        widget = getattr(getattr(self, "ui_component", None), name, None)
+        return getattr(widget, "value", None)
+
+    @property
+    def selection_style(self) -> SelectionStyle:
+        """The selection style set under Advanced Settings → Selection and colours.
+
+        Read afresh from the widgets on every call, so whatever draws a
+        selection always uses the current values; a viewer without those
+        widgets (a test stub) gets the defaults.
+        """
+        return SelectionStyle.build(
+            self._ui_value("selection_color_picker"),
+            self._ui_value("selection_outline_width_slider"),
+            self._ui_value("selection_fill_opacity_slider"),
+            self._ui_value("plot_base_color_picker"),
+        )
+
+    @property
+    def selection_outline_color(self) -> str:
+        """The selection colour as ``#rrggbb``; the Gallery's outline picker starts from it."""
+        return self.selection_style.color
+
+    @property
+    def default_mask_color(self) -> str:
+        """The colour name a mask gets when it has no saved colour of its own."""
+        value = self._ui_value("default_mask_color_dropdown")
+        return value if value in self.predefined_colors else DEFAULT_MASK_COLOR
+
+    def on_selection_style_change(self, change=None) -> None:
+        """Redraw the selection in the image and recolour the plots and the Gallery.
+
+        Handlers get the selection colour in force before this change, so the
+        Gallery's outline picker can tell whether it still follows the global
+        colour or was overridden.
+        """
+        previous_color = self.__dict__.get("_applied_selection_color", SELECTION_COLOR)
+        self.__dict__["_applied_selection_color"] = self.selection_style.color
+        if getattr(self, "initialized", False):
+            display = getattr(self, "image_display", None)
+            if display is not None:
+                try:
+                    display.update_patches()
+                except Exception:
+                    logger.debug("[selection] redraw after a style change failed", exc_info=True)
+            grid = getattr(self, "_grid_display", None)
+            if grid is not None:
+                try:
+                    grid._update_grid_patches()
+                except Exception:
+                    logger.debug("[selection] grid redraw after a style change failed", exc_info=True)
+        # Called directly, not through ``inform_plugins``, which would hide an
+        # AttributeError raised inside the handler.
+        side = getattr(self, "SidePlots", None)
+        for attr_name in dir(side) if side is not None else ():
+            plugin = getattr(side, attr_name, None)
+            handler = getattr(plugin, "on_selection_style_change", None)
+            if isinstance(plugin, PluginBase) and callable(handler):
+                try:
+                    handler(previous_color=previous_color)
+                except Exception:
+                    logger.warning("[selection] %s could not follow the selection style", attr_name, exc_info=True)
+
+    def on_default_mask_color_change(self, change) -> None:
+        """Move the masks still drawn in the previous default to the new one.
+
+        A mask whose colour was chosen by hand (anything but the previous
+        default) keeps it; masks loaded later start from the new default.
+        """
+        old, new = change.get("old"), change.get("new")
+        if new not in self.predefined_colors:
+            return
+        controls = getattr(getattr(self, "ui_component", None), "mask_color_controls", {}) or {}
+        for dropdown in controls.values():
+            if getattr(dropdown, "value", None) == old:
+                dropdown.value = new
+
+    # ------------------------------------------------------------------
     # The current selection (ueler/viewer/selection.py) and its bar
     # ------------------------------------------------------------------
     @property
@@ -2221,6 +2303,7 @@ class ImageMaskViewer:
 
         overlay = np.array(base_image, copy=True)
         applied = False
+        style = self.selection_style
 
         for selection in selections:
             fov_name = getattr(selection, "fov", None)
@@ -2269,23 +2352,6 @@ class ImageMaskViewer:
             if not np.any(mask_binary):
                 continue
 
-            try:
-                edges = find_boundaries(mask_binary, mode="inner")
-            except Exception:
-                edges = mask_binary
-            if not np.any(edges):
-                edges = mask_binary
-
-            outline_thickness = scale_outline_thickness(
-                getattr(self, "mask_outline_thickness", 1),
-                downsample,
-            )
-            if outline_thickness > 1:
-                try:
-                    edges = thicken_outline(edges, outline_thickness - 1)
-                except Exception:
-                    pass
-
             dest_x0 = max(0, int(getattr(viewport_info, "dest_x0", 0)))
             dest_x1 = max(dest_x0, int(getattr(viewport_info, "dest_x1", dest_x0)))
             dest_y0 = max(0, int(getattr(viewport_info, "dest_y0", 0)))
@@ -2298,16 +2364,14 @@ class ImageMaskViewer:
             if section_view.size == 0:
                 continue
 
-            if section_view.shape[0] != edges.shape[0] or section_view.shape[1] != edges.shape[1]:
-                rows = min(section_view.shape[0], edges.shape[0])
-                cols = min(section_view.shape[1], edges.shape[1])
-                if rows <= 0 or cols <= 0:
-                    continue
-                section_view = section_view[:rows, :cols]
-                edges = edges[:rows, :cols]
-
-            section_view[edges] = [1.0, 1.0, 1.0]
-            applied = True
+            # ``paint_selection`` clips the cell to the tile's section.
+            if paint_selection(
+                section_view,
+                mask_binary.astype(np.uint8),
+                style,
+                downsample_factor=downsample,
+            ):
+                applied = True
 
         if applied:
             display.img_display.set_data(overlay)
@@ -3595,7 +3659,7 @@ class ImageMaskViewer:
                 else:
                     mask_color_dropdown = Dropdown(
                         options=list(self.predefined_colors.keys()),
-                        value="White",
+                        value=self.default_mask_color,
                         description=f"Mask {mask_name}",
                         disabled=False,
                         layout=Layout(
@@ -4768,7 +4832,7 @@ class ImageMaskViewer:
                 if mask_array.size == 0:
                     continue
                 color_control = controls.mask_color_controls.get(mask_name)
-                color_key = color_control.value if color_control is not None else "White"
+                color_key = color_control.value if color_control is not None else self.default_mask_color
                 color_value = self.predefined_colors.get(color_key, color_key)
                 mask_settings.append(
                     MaskRenderSettings(

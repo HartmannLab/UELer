@@ -22,8 +22,19 @@ SelectionListener = Callable[[Set[Union[int, str]], str], None]
 HoverListener = Callable[[Optional[Union[int, str]]], None]
 
 _DEFAULT_TOOLBAR = ["pan_zoom", "lasso", "reset", "download"]
-_DEFAULT_SELECTED_COLOR = (1, 0, 0, 1)
+# Fallbacks only: the chart plugin passes the viewer's selection style
+# (ueler/viewer/selection_style.py), which supplies both colours.
+_DEFAULT_SELECTED_COLOR = (1.0, 0.690, 0.0, 1.0)  # SELECTION_COLOR, #ffb000
 _DEFAULT_POINT_COLOR = (0.2, 0.4, 0.8, 0.85)
+_POINT_ALPHA = 0.85
+
+
+def _rgba(color, alpha: float = 1.0) -> Tuple[float, float, float, float]:
+    """``color`` (a name, hex string or tuple) as an RGBA tuple jscatter accepts."""
+    from matplotlib.colors import to_rgba
+
+    r, g, b, _a = to_rgba(color)
+    return (float(r), float(g), float(b), float(alpha))
 
 
 def _padded_domain(values, fraction: float = 0.05) -> Tuple[float, float]:
@@ -88,6 +99,8 @@ class ScatterPlotWidget:
         tooltip_fields: Optional[Sequence[str]] = None,
         height: int = 320,
         toolbar: Optional[Sequence[str]] = None,
+        selected_color=None,
+        point_color=None,
     ) -> None:
         if x not in data.columns or y not in data.columns:
             raise KeyError(f"Required columns '{x}' or '{y}' not found in scatter DataFrame")
@@ -102,6 +115,8 @@ class ScatterPlotWidget:
         self._selection_callbacks: List[SelectionListener] = []
         self._hover_callbacks: List[HoverListener] = []
         self._suspend_selection = False
+        self._selected_color = _rgba(selected_color) if selected_color is not None else _DEFAULT_SELECTED_COLOR
+        self._point_color = _rgba(point_color, _POINT_ALPHA) if point_color is not None else _DEFAULT_POINT_COLOR
 
         tooltip_candidates: List[str] = [x, y]
         if tooltip_fields:
@@ -126,9 +141,9 @@ class ScatterPlotWidget:
         self._scatter.height(self._height)
         self._scatter.size(default=point_size)
         if color and color in self._data.columns:
-            self._scatter.color(by=color, selected=_DEFAULT_SELECTED_COLOR)
+            self._scatter.color(by=color, selected=self._selected_color)
         else:
-            self._scatter.color(default=_DEFAULT_POINT_COLOR, selected=_DEFAULT_SELECTED_COLOR)
+            self._scatter.color(default=self._point_color, selected=self._selected_color)
         self._scatter.tooltip(True, properties=tooltip_properties)
         self._jwidget = self._scatter.widget
         # Do NOT pin the DOM height to the plot height: jscatter draws the axes,
@@ -242,6 +257,21 @@ class ScatterPlotWidget:
     def add_hover_listener(self, callback: HoverListener) -> None:
         self._hover_callbacks.append(callback)
 
+    def set_style_colors(self, *, selected_color=None, point_color=None) -> None:
+        """Recolour the selected points and, unless the plot is coloured by a column, the others."""
+        if selected_color is not None:
+            self._selected_color = _rgba(selected_color)
+        if point_color is not None:
+            self._point_color = _rgba(point_color, _POINT_ALPHA)
+        try:
+            coloured_by = self._scatter.color().get("by") is not None
+        except Exception:
+            coloured_by = bool(self._color)
+        if coloured_by:
+            self._scatter.color(selected=self._selected_color)
+        else:
+            self._scatter.color(default=self._point_color, selected=self._selected_color)
+
     def apply_selection(
         self,
         indices: Iterable[Union[int, str]],
@@ -289,7 +319,7 @@ class ScatterPlotWidget:
             return
         current_colors = self._scatter.color()
         if default_color is None:
-            default_color = current_colors.get("color", _DEFAULT_POINT_COLOR)
+            default_color = current_colors.get("color", self._point_color)
         sentinel = "__missing__"
         normalized_map = {}
         for key, value in color_map.items():

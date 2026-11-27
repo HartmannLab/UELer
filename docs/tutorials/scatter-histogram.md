@@ -50,7 +50,7 @@ The **Interaction:** toggle switches between two ways of selecting cells:
 - **Cutoff** (default) — click a histogram to set an above/below threshold. A red dashed line marks
   the cutoff; the **Highlight:** toggle chooses whether cells **below** or **above** it are selected.
 - **Brush** — drag a range on a histogram to select the cells in it. The selected subset's
-  distribution is overlaid (in orange) on *every* channel's histogram for comparison.
+  distribution is overlaid in the [selection colour](display-settings.md#selection-and-colours) (amber by default) on *every* channel's histogram for comparison. Selected points in the scatter are drawn in the same colour.
 
 Use **Clear selection** to reset. The legend entries (**All** / **Selected**) can be clicked to hide
 either series.

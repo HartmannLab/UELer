@@ -53,6 +53,11 @@ if "cv2" not in sys.modules:
 
 
 from ueler.viewer.image_display import ImageDisplay, MaskSelection
+from ueler.viewer.selection_style import SelectionStyle
+
+# These tests check where the outline lands, so they draw it as before the
+# selection style: white, 1 px, no fill. test_selection_style.py covers the style.
+OUTLINE_ONLY = SelectionStyle(color="#ffffff", outline_width=1, fill_opacity=0.0)
 from ueler.viewer.tooltip_utils import format_tooltip_value, resolve_cell_record
 
 
@@ -241,6 +246,7 @@ class UpdatePatchesTests(unittest.TestCase):
             ui_component=SimpleNamespace(image_selector=SimpleNamespace(value="FOV_A")),
             full_resolution_label_masks={"CellMask": mask_array},
             _debug=False,
+            selection_style=OUTLINE_ONLY,
         )
         viewer.image_display = display
         viewer.width = 256
@@ -261,7 +267,7 @@ class UpdatePatchesTests(unittest.TestCase):
             return mask
 
         with patch("ueler.viewer.image_display.get_axis_limits_with_padding", return_value=limits), patch(
-            "ueler.viewer.image_display.find_boundaries",
+            "ueler.viewer.selection_style.find_boundaries",
             side_effect=_fake_find_boundaries,
         ):
             display.update_patches(do_not_reset=False)
@@ -374,6 +380,7 @@ class UpdatePatchesTests(unittest.TestCase):
             ui_component=SimpleNamespace(image_selector=SimpleNamespace(value="FOV_A")),
             full_resolution_label_masks={"CellMask": mask_array},
             _debug=False,
+            selection_style=OUTLINE_ONLY,
         )
         viewer.image_display = display
         viewer.width = 32
@@ -395,7 +402,7 @@ class UpdatePatchesTests(unittest.TestCase):
             return mask
 
         with patch("ueler.viewer.image_display.get_axis_limits_with_padding", return_value=limits), patch(
-            "ueler.viewer.image_display.find_boundaries",
+            "ueler.viewer.selection_style.find_boundaries",
             side_effect=_fake_find_boundaries,
         ):
             display.set_mask_ids("CellMask", [5])

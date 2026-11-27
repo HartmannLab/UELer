@@ -1,7 +1,8 @@
 """Issue #119 follow-up — the highlight must survive a zoom / pan.
 
 The selection outline is not a Matplotlib artist: ``ImageDisplay.update_patches``
-paints white pixels *into* the RGB array and pushes it with ``set_data``.
+paints it *into* the RGB array and pushes it with ``set_data``. The stub viewer
+draws it white, 1 px and without fill, so the tests can find its pixels.
 ``update_display`` used to call ``update_patches`` **before** installing the newly
 rendered ``combined`` array, so every zoom or pan (which reaches ``update_display``
 through ``ImageDisplay.on_draw``) outlined the *previous* viewport's array and then
@@ -26,6 +27,7 @@ import numpy as np
 # stub, against which ``main_viewer`` cannot be imported.
 from ueler.viewer.image_display import ImageDisplay, MaskSelection
 from ueler.viewer.main_viewer import ImageMaskViewer
+from ueler.viewer.selection_style import SelectionStyle
 
 
 MASK_NAME = "whole_cell"
@@ -111,6 +113,7 @@ def _make_viewer(*, map_mode=False, selected=(1,)):
     viewer._last_viewport_px = None
     viewer._debug = False
     viewer.linked_selection_indices = None
+    viewer.selection_style = SelectionStyle(color="#ffffff", outline_width=1, fill_opacity=0.0)
     viewer.current_label_masks = {}
     viewer.full_resolution_label_masks = {}
     viewer.label_mask = _label_mask()

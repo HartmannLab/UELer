@@ -364,9 +364,8 @@ class GridChannelDisplay:
     # ------------------------------------------------------------------
 
     def _update_grid_patches(self, do_not_reset: bool = False) -> None:
-        """Apply (or remove) the white-edge selection highlight on all panes."""
-        from skimage.segmentation import find_boundaries
-        from ueler.rendering.engine import scale_outline_thickness, thicken_outline
+        """Draw (or remove) the selection highlight on all panes, in the selection style."""
+        from ueler.viewer.selection_style import paint_selection, style_of
 
         viewer = self.main_viewer
         downsample_factor = viewer.current_downsample_factor
@@ -413,15 +412,9 @@ class GridChannelDisplay:
             self.fig.canvas.draw_idle()
             return
 
-        outline_thickness = scale_outline_thickness(
-            getattr(viewer, "mask_outline_thickness", 1),
-            downsample_factor,
-        )
-        edge_mask = find_boundaries(selected_mask_visible_ds.astype(np.uint8), mode="inner")
-        if outline_thickness > 1:
-            edge_mask = thicken_outline(edge_mask, outline_thickness - 1)
-
-        rows, cols = np.nonzero(edge_mask)
+        style = style_of(viewer)
+        region_h = max(0, int(ymax_ds - ymin_ds))
+        region_w = max(0, int(xmax_ds - xmin_ds))
 
         extent = (xmin, xmax, ymax, ymin)
         for i, ch in enumerate(self.channels):
@@ -430,26 +423,14 @@ class GridChannelDisplay:
                 continue
             combined = np.array(base, copy=True)
             h, w = combined.shape[:2]
-
-            region_h = max(0, int(ymax_ds - ymin_ds))
-            region_w = max(0, int(xmax_ds - xmin_ds))
-
-            if h == region_h and w == region_w:
-                mapped_rows, mapped_cols = rows, cols
-            else:
-                mapped_rows = rows + int(ymin_ds)
-                mapped_cols = cols + int(xmin_ds)
-
-            valid = (
-                (mapped_rows >= 0)
-                & (mapped_rows < h)
-                & (mapped_cols >= 0)
-                & (mapped_cols < w)
+            offset = (0, 0) if (h, w) == (region_h, region_w) else (int(ymin_ds), int(xmin_ds))
+            paint_selection(
+                combined,
+                selected_mask_visible_ds,
+                style,
+                downsample_factor=downsample_factor,
+                offset=offset,
             )
-            mr = mapped_rows[valid]
-            mc = mapped_cols[valid]
-            if mr.size > 0:
-                combined[mr, mc] = [1.0, 1.0, 1.0]
 
             self.img_artists[i].set_data(combined)
             self.img_artists[i].set_extent(extent)

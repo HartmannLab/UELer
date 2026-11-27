@@ -38,6 +38,7 @@ from ueler.viewer.observable import Observable
 from . import _chart_common
 from .plugin_base import PluginBase
 from .scatter_widget import ScatterPlotWidget
+from ..selection_style import style_of
 
 
 _SELECTION_NOTICE = (
@@ -359,6 +360,7 @@ class ChartDisplay(PluginBase):
             title=self._scatter_title(x_col, y_col, c_col),
             tooltip_fields=self._tooltip_fields(x_col, y_col, c_col),
             height=320,
+            **self._style_colors(),
         )
         scatter.add_selection_listener(self._on_scatter_selection)
         scatter.add_hover_listener(self._on_scatter_hover)
@@ -499,6 +501,20 @@ class ChartDisplay(PluginBase):
         link is active.  Works in both single-FOV and map mode.
         """
         _chart_common.sync_mask_highlights_from_selection(self.main_viewer, indices)
+
+    # ------------------------------------------------------------------
+    # Selection style (Advanced Settings → Selection and colours)
+    # ------------------------------------------------------------------
+    def _style_colors(self) -> dict:
+        """The selected and unselected point colours from the viewer's selection style."""
+        style = style_of(self.main_viewer)
+        return {"selected_color": style.color, "point_color": style.base_color}
+
+    def on_selection_style_change(self, previous_color=None) -> None:
+        """Recolour every scatter view in the current selection style."""
+        colors = self._style_colors()
+        for view in self._scatter_views.values():
+            view.set_style_colors(**colors)
 
     # ------------------------------------------------------------------
     # Follow the main viewer's own selection (#135)
@@ -713,6 +729,8 @@ class ChartDisplay(PluginBase):
         if c_col and c_col != "None" and c_col in data.columns:
             color_values = data[c_col]
             scatter_kwargs["c"] = color_values
+        else:
+            scatter_kwargs["color"] = style_of(self.main_viewer).base_color
         out = Output(layout=Layout(width="100%"))
         with out:
             fig, ax = plt.subplots(figsize=(self.width * 0.9, self.height))

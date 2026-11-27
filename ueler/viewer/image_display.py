@@ -31,6 +31,7 @@ import cv2
 import math
 from matplotlib.backend_bases import MouseButton
 from ueler.viewer.decorators import update_status_bar
+from ueler.viewer.selection_style import paint_selection, style_of
 from ueler.viewer.predraw import install_pre_draw_hook
 from .tooltip_utils import format_tooltip_value, resolve_cell_record
 
@@ -782,65 +783,42 @@ class ImageDisplay:
             for mask_id in matching_ids:
                 selected_mask_visible_ds[mask_visible_ds == mask_id] = mask_id
 
-        # If selected_mask_full_visible is defined
-        if selected_mask_visible_ds is not None:
-            if self.selected_masks_label:
-                mask_binary_ds = selected_mask_visible_ds.astype(np.uint8)
-
-                outline_thickness = scale_outline_thickness(
-                    getattr(self.main_viewer, "mask_outline_thickness", 1),
-                    downsample_factor,
-                )
-
-                edge_mask = find_boundaries(mask_binary_ds, mode="inner")
-                if outline_thickness > 1:
-                    edge_mask = thicken_outline(edge_mask, outline_thickness - 1)
-                
-                if do_not_reset:
-                    combined = np.array(self.img_display.get_array(), copy=True)
-                else:
-                    combined = self._materialize_combined()
-                    if combined is None:
-                        return
-                    combined = np.array(combined, copy=True)
-
-                combined_height, combined_width = combined.shape[:2]
-                region_height_expected = max(0, int(ymax_ds - ymin_ds))
-                region_width_expected = max(0, int(xmax_ds - xmin_ds))
-
-                rows, cols = np.nonzero(edge_mask)
-                if combined_height == region_height_expected and combined_width == region_width_expected:
-                    mapped_rows = rows
-                    mapped_cols = cols
-                else:
-                    mapped_rows = rows + int(ymin_ds)
-                    mapped_cols = cols + int(xmin_ds)
-
-                valid = (
-                    (mapped_rows >= 0)
-                    & (mapped_rows < combined_height)
-                    & (mapped_cols >= 0)
-                    & (mapped_cols < combined_width)
-                )
-                mapped_rows = mapped_rows[valid]
-                mapped_cols = mapped_cols[valid]
-                if mapped_rows.size == 0:
+        if selected_mask_visible_ds is None:
+            if not do_not_reset:
+                combined = self._materialize_combined()
+                if combined is not None:
                     self.img_display.set_data(combined)
                     self.fig.canvas.draw_idle()
-                    return
+            return
 
-                combined[mapped_rows, mapped_cols] = [1, 1, 1]
-                self.img_display.set_data(combined)
+        if do_not_reset:
+            combined = np.array(self.img_display.get_array(), copy=True)
+        else:
+            combined = self._materialize_combined()
+            if combined is None:
+                return
+            combined = np.array(combined, copy=True)
 
-                _logger.debug("Redrawing canvas")
-                self.fig.canvas.draw_idle()
-            else:
-                # No cells selected - just refresh to show painted colors if painter is enabled
-                if not do_not_reset:
-                    combined = self._materialize_combined()
-                    if combined is not None:
-                        self.img_display.set_data(combined)
-                        self.fig.canvas.draw_idle()
+        # The frame is either the visible region alone or the whole downsampled
+        # FOV; in the latter case the region sits at its downsampled origin.
+        combined_height, combined_width = combined.shape[:2]
+        if (combined_height, combined_width) == (
+            max(0, int(ymax_ds - ymin_ds)),
+            max(0, int(xmax_ds - xmin_ds)),
+        ):
+            offset = (0, 0)
+        else:
+            offset = (int(ymin_ds), int(xmin_ds))
+        paint_selection(
+            combined,
+            selected_mask_visible_ds,
+            style_of(self.main_viewer),
+            downsample_factor=downsample_factor,
+            offset=offset,
+        )
+        self.img_display.set_data(combined)
+        _logger.debug("Redrawing canvas")
+        self.fig.canvas.draw_idle()
 
     def set_mask_ids(self, mask_name, mask_ids, *, fov_mask_pairs=None):
         """

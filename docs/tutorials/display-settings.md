@@ -116,6 +116,25 @@ Overlays are drawn over the finished channel composite, in this order: annotatio
 - **No image (masks only)** — hides the channel composite and draws overlays on black. Good for checking segmentation boundaries, and cheaper to render since no channel compositing happens.
 - **Channel grid view** — one labelled, synchronised pane per visible channel instead of one composite. The honest way to judge whether a marker is really co-expressed or just additively blended into the same white.
 
+### Selection and colours
+
+Selected cells look the same wherever they appear. In the image (single FOV, map mode and the channel grid) a selected cell gets an outline in the selection colour, thicker than a mask outline, and a light tint of the same colour inside. The scatter draws selected points in that colour, the histogram its selected bars, and the Gallery the outline of the centred cell. Because the outline is thicker and the cell is tinted, a selection stays recognisable even when your masks are drawn in the same colour.
+
+All of it is set under **Advanced Settings → Advanced Settings → Selection and colours** and saved with your other settings:
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| **Selection colour** | amber `#ffb000` | Colour of selected cells in the image, the scatter, the histogram and the Gallery. Amber is not one of the mask colours, so it differs from the default white masks and from pure red / green / blue / cyan / magenta / yellow channels. |
+| **Selection outline (px)** | 2 | Outline width at full resolution. Like mask outlines, it gets thinner when zoomed out. |
+| **Selection fill** | 0.25 | Opacity of the tint inside a selected cell. **0** draws the outline only. |
+| **Default mask colour** | White | Colour of a mask with no colour of its own. Masks still drawn in the previous default follow a change; a mask whose colour you picked keeps it. |
+| **Plot base colour** | blue `#1f77b4` | Colour of unselected points and bars in the scatter and histogram. A scatter coloured by a column keeps that column's colours. |
+
+A change redraws the selection in the image at once and recolours open plots. The Gallery's own **Mask colour** picker follows the selection colour until you change it in the Gallery; from then on it keeps your choice.
+
+!!! tip "When the selection is hard to see"
+    On a composite that is already amber or orange, pick a selection colour that contrasts with your channels, or raise **Selection fill** so the selected cells stand out by their tint as well as their outline.
+
 ---
 
 ## Saving and Reusing a View

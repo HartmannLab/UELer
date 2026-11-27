@@ -180,8 +180,27 @@ class TestCacheSettings(unittest.TestCase):
 
         self.assertEqual(components.cache_size_input.value, 100)
 
+        # The inner Advanced Settings tab is grouped into collapsible sections;
+        # the cache size sits in the first, Display and performance.
         advanced_tab = components.advanced_settings_tabs.children[1]
-        self.assertIn(components.cache_size_input, tuple(advanced_tab.children))
+        display_section = advanced_tab.children[0]
+        self.assertIn(components.cache_size_input, tuple(display_section.children))
+
+    def test_selection_and_colours_is_a_section_of_the_advanced_settings_tab(self) -> None:
+        components = uicomponents(_DummyViewer())
+        sections = components.advanced_settings_tabs.children[1]
+        self.assertIs(sections, components.advanced_settings_sections)
+        colours = sections.children[1]
+        for widget in (
+            components.selection_color_picker,
+            components.selection_outline_width_slider,
+            components.selection_fill_opacity_slider,
+            components.default_mask_color_dropdown,
+            components.plot_base_color_picker,
+        ):
+            self.assertIn(widget, tuple(colours.children))
+        self.assertEqual(components.selection_color_picker.value, "#ffb000")
+        self.assertEqual(components.default_mask_color_dropdown.value, "White")
 
     def test_image_mask_viewer_defaults_cache_size_to_100(self) -> None:
         with TemporaryDirectory() as tmpdir:

@@ -95,6 +95,7 @@ ToggleButton = _ensure_widget_class("ToggleButton")
 IntSlider = _ensure_widget_class("IntSlider")
 TagsInput = _ensure_widget_class("TagsInput")
 Image = _ensure_widget_class("Image")
+ColorPicker = _ensure_widget_class("ColorPicker")
 
 from .plugin.channel_picker_widget import build_channel_picker  # type: ignore[import-error]
 from .plugin.chart import ChartDisplay  # type: ignore[import-error]
@@ -108,6 +109,14 @@ from .fullscreen_toggle import HOST_CLASS as FULLSCREEN_HOST_CLASS, attach_canva
 from .selection_bar import SelectionBar  # type: ignore[import-error]
 from .setup_dialog import SetupDialog  # type: ignore[import-error]
 from ueler.viewer.decorators import set_status_ready
+from ueler.constants import (  # noqa: E402
+    DEFAULT_MASK_COLOR,
+    PLOT_BASE_COLOR,
+    PREDEFINED_COLORS,
+    SELECTION_COLOR,
+    SELECTION_FILL_OPACITY,
+    SELECTION_OUTLINE_WIDTH,
+)
 from .frame_encoding import available_frame_formats  # type: ignore[import-error]
 
 
@@ -852,15 +861,86 @@ class uicomponents:
             self.fov_key,
             ])
         
-        main_viewer_VBox = VBox([
+        display_settings_VBox = VBox([
             self.cache_size_input,
             self.pixel_size_inttext,
             self.enable_downsample_checkbox,
             self.frame_format_dropdown,
         ])
 
+        # How a selection looks (ueler/viewer/selection_style.py). Widget
+        # attributes of this object, so they are saved and restored with the
+        # other settings; each change redraws the selection everywhere.
+        colour_style = {'description_width': '150px'}
+        self.selection_color_picker = ColorPicker(
+            value=SELECTION_COLOR,
+            concise=False,
+            description='Selection colour',
+            tooltip="Colour of selected cells in the image, the plots and the Gallery.",
+            style=colour_style,
+        )
+        self.selection_outline_width_slider = IntSlider(
+            value=SELECTION_OUTLINE_WIDTH,
+            min=1,
+            max=8,
+            step=1,
+            description='Selection outline (px)',
+            tooltip="Outline width of a selected cell at full resolution; thinner when zoomed out, like mask outlines.",
+            continuous_update=False,
+            style=colour_style,
+        )
+        self.selection_fill_opacity_slider = FloatSlider(
+            value=SELECTION_FILL_OPACITY,
+            min=0.0,
+            max=1.0,
+            step=0.05,
+            description='Selection fill',
+            tooltip="Opacity of the tint inside a selected cell; 0 draws the outline only.",
+            continuous_update=False,
+            readout_format='.2f',
+            style=colour_style,
+        )
+        self.default_mask_color_dropdown = Dropdown(
+            options=list(PREDEFINED_COLORS.keys()),
+            value=DEFAULT_MASK_COLOR,
+            description='Default mask colour',
+            tooltip="Colour of a mask with no colour of its own. Masks still in the previous default follow a change.",
+            style=colour_style,
+        )
+        self.plot_base_color_picker = ColorPicker(
+            value=PLOT_BASE_COLOR,
+            concise=False,
+            description='Plot base colour',
+            tooltip="Colour of unselected points and bars in the scatter and histogram.",
+            style=colour_style,
+        )
+        for style_widget in (
+            self.selection_color_picker,
+            self.selection_outline_width_slider,
+            self.selection_fill_opacity_slider,
+            self.plot_base_color_picker,
+        ):
+            style_widget.observe(viewer.on_selection_style_change, names='value')
+        self.default_mask_color_dropdown.observe(viewer.on_default_mask_color_change, names='value')
+
+        selection_colours_VBox = VBox([
+            self.selection_color_picker,
+            self.selection_outline_width_slider,
+            self.selection_fill_opacity_slider,
+            self.default_mask_color_dropdown,
+            self.plot_base_color_picker,
+        ])
+
+        # The inner tab holds collapsible sections, so a new group of settings
+        # adds one closed line instead of lengthening a single list.
+        self.advanced_settings_sections = Accordion(
+            children=[display_settings_VBox, selection_colours_VBox],
+            titles=('Display and performance', 'Selection and colours'),
+            selected_index=None,
+        )
+
         self.advanced_settings_tabs = Tab(
-            children=[identifiers_VBox, main_viewer_VBox],
+            children=[identifiers_VBox, self.advanced_settings_sections],
             titles=('Data mapping','Advanced Settings')
         )
 
