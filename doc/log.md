@@ -1,4 +1,8 @@
 ### v0.6.1-alpha1
+**Selection bar: undo / redo icons instead of ◀ ▶**
+
+- The back and forward buttons in the selection bar now show the usual undo and redo arrows (Font Awesome `undo` and `repeat`, the set ipywidgets ships), with tooltips "Undo: back to the previous selection" and "Redo: forward to the next selection". The triangles read as "previous / next page" rather than as undo. The ✕ dialog, the docs (`cell-sets.md`, `user-interface.md`), the README summary and the docstrings now say undo / redo.
+
 **The Gallery edits cell sets: a header with what is shown, ★ and ✕ on tiles, ★ only, Draw new cells, + Cart, Save shown as set**
 
 - **Starring and pruning a set needed the cells in view,** and the Gallery could show them but not act on them: it did not know which set it showed, said nothing when it showed only a sample, and Refresh could only redraw the same sample.

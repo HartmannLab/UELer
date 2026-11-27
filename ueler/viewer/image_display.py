@@ -537,7 +537,7 @@ class ImageDisplay:
     #   Ctrl + left drag            a lasso, without arming Lasso Select
     #   Shift + left click on a cell put it in the active cart, or take it out
     #                               (``shift_click_handler``, set by the Cell sets plugin)
-    #   right click on background   unselect everything (◀ brings it back)
+    #   right click on background   unselect everything (undo brings it back)
     # A loop around cells that are all selected already unselects them.
     CTRL_DRAG_PIXELS = 5  # a Ctrl press that moves less than this is a click
 
@@ -636,7 +636,7 @@ class ImageDisplay:
         )
 
     def _unselect_everything(self) -> None:
-        """Right click on the background: what ✕ does, without asking (◀ undoes it)."""
+        """Right click on the background: what ✕ does, without asking (undo brings it back)."""
         recipe = {"action": "right click on background"}
         clear_all = getattr(self.main_viewer, "clear_selection_everywhere", None)
         if callable(clear_all):

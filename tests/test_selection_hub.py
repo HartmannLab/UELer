@@ -318,7 +318,7 @@ class ViewerSummaryAndActionsTests(unittest.TestCase):
         dialog.ask.assert_called_once()
         message, on_confirm = dialog.ask.call_args.args
         self.assertIn("2 cells", message)
-        self.assertIn("brings it back", message)  # ◀ restores it
+        self.assertIn("brings it back", message)  # undo restores it
         self.assertEqual(dialog.ask.call_args.kwargs["confirm_label"], "Unselect")
         self.assertEqual(len(self.viewer.selection_hub.current), 2)  # nothing cleared yet
         on_confirm()

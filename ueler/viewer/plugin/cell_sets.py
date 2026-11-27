@@ -726,7 +726,7 @@ class CellSetsPlugin(PluginBase):
     # ------------------------------------------------------------------
     @staticmethod
     def _set_id_of(selection) -> Optional[str]:
-        """The set a selection came from: selected directly, or restored with ◀."""
+        """The set a selection came from: selected directly, or restored with undo / redo."""
         recipe = getattr(selection, "recipe", None) or {}
         return recipe.get("set_id") or (recipe.get("recipe") or {}).get("set_id")
 

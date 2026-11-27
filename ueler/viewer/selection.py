@@ -20,9 +20,9 @@ limits:
   cell count and *recipe* (a JSON-ready dict saying how it was made). The log is
   never truncated within a session, because a saved cell set stores all of it as
   the record of how the set came about;
-* the *cells* of each step, which ◀ ▶ need to restore an earlier selection. A
+* the *cells* of each step, which undo / redo need to restore an earlier selection. A
   step can hold hundreds of thousands of cells, so only the last
-  :data:`KEEP_CELLS` selection steps keep them; ◀ stops at the first step that
+  :data:`KEEP_CELLS` selection steps keep them; undo stops at the first step that
   no longer has its cells.
 
 Moving back or forward and other actions that are not selections (a column
@@ -63,10 +63,10 @@ SOURCE_TARGETS = {
     "histogram": "plots",
 }
 
-#: How many selection steps keep their cells for ◀ ▶.
+#: How many selection steps keep their cells for undo / redo.
 KEEP_CELLS = 50
 
-#: Step kinds. Only ``selection`` steps are places ◀ ▶ can go to.
+#: Step kinds. Only ``selection`` steps are places undo / redo can go to.
 SELECTION, NAVIGATION, EVENT = "selection", "navigation", "event"
 
 
@@ -232,7 +232,7 @@ class SelectionHub:
         self._notify()
 
     def _target(self, direction: int) -> Optional[int]:
-        """The selection step ◀ (``-1``) or ▶ (``+1``) would go to, if it still has its cells."""
+        """The selection step undo (``-1``) or redo (``+1``) would go to, if it still has its cells."""
         if self._cursor is None:
             return None
         position = self._cursor + direction
@@ -254,7 +254,7 @@ class SelectionHub:
 
         The restored selection comes back with source ``"history"`` (its original
         source is in the recipe), so every bar button can act on it. The move is
-        logged as a navigation step, which ◀ ▶ themselves skip.
+        logged as a navigation step, which undo / redo themselves skip.
         """
         position = self._target(direction)
         if position is None:

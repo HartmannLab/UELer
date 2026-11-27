@@ -6,11 +6,11 @@ A cell set is a named group of cells, with tags, saved with the dataset and avai
 
 ## Going back to an earlier selection
 
-Every selection you make in this session is remembered: an image click, Ctrl-click or lasso (with the toggle or Ctrl + drag), a scatter lasso, a histogram gate, a heatmap cluster sent to the Gallery, a set you selected, and unselecting with **✕** or a right click on the image background. **◀** and **▶** at the left of the [selection bar](user-interface.md#the-selection-bar) step back and forward through them.
+Every selection you make in this session is remembered: an image click, Ctrl-click or lasso (with the toggle or Ctrl + drag), a scatter lasso, a histogram gate, a heatmap cluster sent to the Gallery, a set you selected, and unselecting with **✕** or a right click on the image background. **Undo** (↶) and **Redo** (↷) at the left of the [selection bar](user-interface.md#the-selection-bar) step back and forward through them.
 
 - **Going back puts the earlier selection where the current one was shown.** If the current selection is outlined in the image, the earlier one is outlined there instead; a selection made in the image is outlined there again. The bar then reads, for example, "35 cells · step 1 (image lasso)".
-- **◀ undoes ✕ and a right click on the background.** Unselecting everything is a step too, so ◀ brings the selection back.
-- **The last 50 selections can be restored.** Further back, ◀ stops: the cells of older steps are let go to keep memory in check. The record of what was done is kept for the whole session, and it is what a saved set stores (below).
+- **Undo also undoes ✕ and a right click on the background.** Unselecting everything is a step too, so undo brings the selection back.
+- **The last 50 selections can be restored.** Further back, undo stops: the cells of older steps are let go to keep memory in check. The record of what was done is kept for the whole session, and it is what a saved set stores (below).
 - The history lasts for the session. Saving a set is what keeps a selection.
 
 ---

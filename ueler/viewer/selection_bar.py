@@ -1,7 +1,7 @@
 """The in-line selection bar above the image.
 
-One row, shared with the **Lasso Select** toggle: ◀ ▶, a line of text and the
-action buttons. ◀ ▶ step through the session's selections. The text says what
+One row, shared with the **Lasso Select** toggle: undo / redo, a line of text
+and the action buttons. Undo and redo step through the session's selections. The text says what
 is selected (count, source, how many in the FOV shown) or carries a message
 (lasso armed, why a loop found nothing). The buttons send the current selection
 to the image, the Gallery or the plots, and a second click on a linked (✓)
@@ -45,7 +45,7 @@ def _show(widget, visible: bool, display: str = "flex") -> None:
 
 
 class SelectionBar:
-    """◀ ▶, text, Image / Gallery / Plots / + Cart / − Cart / Save as set… / ✕; see the module doc."""
+    """Undo / redo, text, Image / Gallery / Plots / + Cart / − Cart / Save as set… / ✕; see the module doc."""
 
     LABELS = {"image": "Image", "gallery": "Gallery", "plots": "Plots"}
     _PLACES = {"image": "image", "gallery": "Gallery", "plots": "plots"}
@@ -56,8 +56,12 @@ class SelectionBar:
     }
 
     def __init__(self, toggle) -> None:
-        self.back_button = _button("◀", "Previous selection", min_width="28px")
-        self.forward_button = _button("▶", "Next selection", min_width="28px")
+        # The usual undo / redo arrows (Font Awesome 4.7, which ipywidgets ships:
+        # "repeat" is its redo arrow).
+        self.back_button = _button("", "Undo: back to the previous selection", min_width="28px")
+        self.back_button.icon = "undo"
+        self.forward_button = _button("", "Redo: forward to the next selection", min_width="28px")
+        self.forward_button.icon = "repeat"
         self.back_button.disabled = True
         self.forward_button.disabled = True
         self.text = HTML(
@@ -117,7 +121,7 @@ class SelectionBar:
         """Run *callback* when the button for *target* is clicked.
 
         *target* is a view (``"image"``, ``"gallery"``, ``"plots"``), ``"clear"``
-        (✕), ``"back"`` (◀), ``"forward"`` (▶), ``"cart_add"`` or ``"cart_remove"``.
+        (✕), ``"back"`` (undo), ``"forward"`` (redo), ``"cart_add"`` or ``"cart_remove"``.
         """
         self._callbacks[target] = callback
         extra = {
@@ -189,7 +193,7 @@ class SelectionBar:
 
     # -- history ---------------------------------------------------------
     def set_history(self, can_back: bool, can_forward: bool) -> None:
-        """Enable ◀ ▶ when there is a selection to go back or forward to."""
+        """Enable undo / redo when there is a selection to go back or forward to."""
         self.back_button.disabled = not can_back
         self.forward_button.disabled = not can_forward
 

@@ -1686,7 +1686,7 @@ class ImageMaskViewer:
         bar.on_action("forward", lambda: self.step_selection(+1))
 
     def step_selection(self, direction: int) -> None:
-        """◀ (``-1``) or ▶ (``+1``): restore the previous or next selection.
+        """Undo (``-1``) or redo (``+1``): restore the previous or next selection.
 
         The restored selection replaces the current one in every view that
         showed the current one, so going back looks like undo: a selection
@@ -1788,7 +1788,7 @@ class ImageMaskViewer:
         """The bar's ✕: confirm, then unselect everywhere.
 
         Clearing drops a selection that may have taken several gates or loops to
-        build, so it goes through the shared dialog (◀ brings it back). With
+        build, so it goes through the shared dialog (undo brings it back). With
         no front end to ask with, it clears directly, as deleting a marker set
         does: the selection lives only in this session.
         """
@@ -1799,7 +1799,7 @@ class ImageMaskViewer:
         asked = self.confirm(
             f"The selection of <b>{count:,} {'cell' if count == 1 else 'cells'}</b> "
             f"({html_lib.escape(selection.source_label)}) will be removed from the image, "
-            "the plots and the Gallery. <b>◀</b> in the selection bar brings it back.",
+            "the plots and the Gallery. <b>Undo</b> (↶) in the selection bar brings it back.",
             self.clear_selection_everywhere,
             title="Unselect everything?",
             confirm_label="Unselect",

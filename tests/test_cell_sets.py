@@ -1,6 +1,6 @@
 """Selection history, saved cell sets, carts, stars, tags and writing to the cell table.
 
-Covers the session log in ``SelectionHub`` (◀ ▶, the cell limit that leaves the
+Covers the session log in ``SelectionHub`` (undo / redo, the cell limit that leaves the
 log whole), ``CellSetStore`` (editing, the subset rule, snapshots, ★ favourites)
 and the cell-identity helpers, the bar's cart buttons, Shift-click in the image,
 and the Cell sets plugin that replaced the Cell Table Editor.
@@ -383,7 +383,7 @@ class BarTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# The viewer: ◀ ▶ replace the selection where it was shown
+# The viewer: undo / redo replace the selection where it was shown
 # ---------------------------------------------------------------------------
 class StepSelectionTests(unittest.TestCase):
     def setUp(self):
