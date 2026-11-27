@@ -1,10 +1,11 @@
-### v0.6.1-alpha2
+### v0.6.1-rc1
 **Previous / next image buttons beside Select Image**
 
 - **Stepping through FOVs took two clicks each.** Going through the FOVs one by one meant opening the **Select Image:** dropdown and picking the next entry every time.
 - **◀ ▶ beside the dropdown** (`ueler/viewer/ui_components.py`): `build_selector_stepper` adds two caret buttons right of the dropdown, which shrinks to make room in the left panel (`image_selector_row`). They set the dropdown's value through `step_selector`, so a step loads the FOV exactly as picking it in the dropdown does (`on_image_change`). They do not wrap: each is disabled at its end of the list, and both are disabled while the dropdown is, which covers map mode. They follow changes of the dropdown's value, options and disabled state through an observer.
 - Tests: `tests/test_image_stepper.py` (stepping, the ends, a disabled selector, a single option, new options). Docs: `user-interface.md`, `basic-usage.md`, `map-mode.md`.
 
+### v0.6.1-alpha2
 **One selection colour and style everywhere, set under Advanced Settings → Selection and colours**
 
 - **A selection looked like a mask.** Selected cells were outlined 1 px in hard-coded white, the default colour of every mask outline, so on a FOV with masks shown the selection could not be told apart; the scatter drew selected points red, the histogram orange, and the Gallery's outline picker read a `viewer.selection_outline_color` attribute that did not exist.

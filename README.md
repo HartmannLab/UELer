@@ -155,7 +155,7 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 For more details, see the [user guide](https://hartmannlab.github.io/UELer/latest/tutorials/user-interface).
 
 ## New Update  
-### **UELer v0.6.1-alpha2 Summary**
+### **UELer v0.6.1-rc1 Summary**
 
 - **Step through FOVs with ◀ ▶.** Two buttons beside **Select Image:** go to the previous or next FOV in the list, so going through a dataset one image at a time no longer needs the dropdown.
 - **Selected cells stand out, in one colour everywhere.** A selected cell is now drawn in amber with a thicker outline than a mask and a light tint inside, so it no longer looks like a white mask outline. The scatter, histogram and Gallery use the same colour. Change the colour, outline width and fill, the default mask colour and the plots' base colour under **Advanced Settings → Selection and colours**; they are saved with your settings.
