@@ -18,7 +18,7 @@
         <link rel="prev" href="../cell-table/">
       
       
-        <link rel="next" href="../clustering-annotation/">
+        <link rel="next" href="../cell-sets/">
       
       
         
@@ -1095,6 +1095,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../cell-sets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Sets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../clustering-annotation/" class="md-nav__link">
         
   
@@ -1717,7 +1745,7 @@ single time.</p>
 <li><strong>Cutoff</strong> (default) — click a histogram to set an above/below threshold. A red dashed line marks
   the cutoff; the <strong>Highlight:</strong> toggle chooses whether cells <strong>below</strong> or <strong>above</strong> it are selected.</li>
 <li><strong>Brush</strong> — drag a range on a histogram to select the cells in it. The selected subset's
-  distribution is overlaid (in orange) on <em>every</em> channel's histogram for comparison.</li>
+  distribution is overlaid in the <a href="../display-settings/#selection-and-colours">selection colour</a> (amber by default) on <em>every</em> channel's histogram for comparison. Selected points in the scatter are drawn in the same colour.</li>
 </ul>
 <p>Use <strong>Clear selection</strong> to reset. The legend entries (<strong>All</strong> / <strong>Selected</strong>) can be clicked to hide
 either series.</p>
@@ -1739,9 +1767,8 @@ UELer dependencies) and restart the kernel.</p>
 <strong>Plot all pairs</strong>. UELer generates a scatter for every pair and lays them out as an
 <strong>upper-triangular matrix</strong>.</p>
 <h3 id="brushing">Brushing<a class="headerlink" href="#brushing" title="Permanent link">&para;</a></h3>
-<p>Select cells with the <strong>lasso</strong> tool in the scatter toolbar (pan/zoom and box tools are available
-too). The selection mirrors across all scatter views and, with the <strong>Linked plugins</strong> checkboxes on,
-highlights the cells in the image and gallery. <strong>Clear selection</strong> resets it.</p>
+<p>The plots open in pan/zoom mode, so a plain drag pans. To select cells, pick the <strong>lasso</strong> in a plot's toolbar and drag around the points, or hold <strong>Shift</strong> and drag. The selection mirrors across all scatter views and, with the <strong>Linked plugins</strong> checkboxes on, highlights the cells in the image and gallery. <strong>Clear selection</strong> resets it.</p>
+<p>The selection bar above the image reports every selection, including one made here: how many cells, from which plot, and how many are in the FOV shown. Its <strong>Image</strong>, <strong>Gallery</strong> and <strong>Plots</strong> buttons send the selection on without ticking a link box; see <a href="../user-interface/#the-selection-bar">The selection bar</a>. <strong>Trace</strong> reports its failures in the same bar, for example when no cells are selected in the image.</p>
 <p>The selection is a set of cells, not a set of pixels, so it <strong>survives a FOV change</strong>: switch FOV in
 <strong>Select Image</strong> and the selected cells belonging to the newly loaded FOV are outlined right away
 (#119). A selection with no cells in the new FOV simply shows nothing until you switch to one that

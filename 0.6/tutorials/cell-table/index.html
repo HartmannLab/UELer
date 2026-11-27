@@ -1010,6 +1010,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="The Cell Gallery">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#editing-a-cell-set-in-the-gallery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Editing a cell set in the Gallery
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1058,6 +1075,34 @@
     
   
     Scatter & Histogram
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cell-sets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Sets
   
 
     
@@ -1578,6 +1623,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="The Cell Gallery">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#editing-a-cell-set-in-the-gallery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Editing a cell set in the Gallery
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1638,7 +1700,7 @@ ties everything together, and the tools that operate on the current selection.</
 </code></pre></div>
 <p>See <a href="../../getting-started/">Get Started</a> for the full launch flow. Once the table is loaded, the
 analytical plugins appear — most in the right-panel accordion (<strong>Histogram</strong>, <strong>Gallery</strong>,
-<strong>FlowSOM</strong>, <strong>Cell Annotation</strong>, <strong>Mask painter</strong>, <strong>Go to</strong>, <strong>Cell Table Editor</strong>, <strong>Cell tooltip
+<strong>FlowSOM</strong>, <strong>Cell Annotation</strong>, <strong>Mask painter</strong>, <strong>Go to</strong>, <strong>Cell sets</strong>, <strong>Cell tooltip
 label</strong>), and two in the wide footer below the viewer (<strong>Scatter plot</strong> and <strong>Heatmap</strong>, which need
 the full window width). See the <a href="../user-interface/#right-panel-plugins">User Interface</a> reference.</p>
 <hr />
@@ -1700,7 +1762,7 @@ hand.</p>
 </ul>
 <h3 id="getting-your-annotations-back-out">Getting your annotations back out<a class="headerlink" href="#getting-your-annotations-back-out" title="Permanent link">&para;</a></h3>
 <p>The object you passed in is kept, and anything the plugins add to the table — FlowSOM clusters,
-heatmap meta-clusters, manual labels from the <strong>Cell Table Editor</strong> — is written back into its <code>obs</code>:</p>
+heatmap meta-clusters, labels written from the <strong>Cell sets</strong> plugin — is written back into its <code>obs</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">adata</span> <span class="o">=</span> <span class="n">viewer</span><span class="o">.</span><span class="n">get_cell_table_adata</span><span class="p">()</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">adata</span><span class="o">.</span><span class="n">obs</span><span class="o">.</span><span class="n">columns</span>          <span class="c1"># now includes e.g. 'FlowSOM_cluster'</span>
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">adata</span><span class="o">.</span><span class="n">write_h5ad</span><span class="p">(</span><span class="s2">"cells_annotated.h5ad"</span><span class="p">)</span>
@@ -1736,8 +1798,8 @@ spatial and stay with the FOV they were drawn in.</p>
 <h2 id="selecting-cells">Selecting Cells<a class="headerlink" href="#selecting-cells" title="Permanent link">&para;</a></h2>
 <p>You can create a selection several ways:</p>
 <ul>
-<li><strong>Lasso Select</strong> — the one-shot toggle at the top of the viewer; draw a freehand loop to select the
-  cells whose mask centroids fall inside it.</li>
+<li><strong>Click, Ctrl + click, Ctrl + drag</strong> in the image — select one cell, add or remove one cell, or draw a lasso loop; a right click on the background unselects everything; Shift + click puts a cell in the active cart. See <a href="../user-interface/#main-viewer">The User Interface</a>.</li>
+<li><strong>Lasso Select</strong> — the one-shot toggle at the top of the viewer; draw a freehand loop to add every cell with part of its mask inside it, or, if they are all selected already, to unselect them. It searches the masks ticked under <strong>Masks</strong>; with none shown it selects nothing, and the selection bar beside the toggle says so.</li>
 <li><strong>Scatter plot / Histogram</strong> — brush or gate on marker values. See
   <a href="../scatter-histogram/">Scatter &amp; Histogram</a>.</li>
 <li><strong>Heatmap / FlowSOM</strong> — trace a cluster or meta-cluster. See
@@ -1751,19 +1813,67 @@ that cell.</p>
 <p>Useful controls:</p>
 <ul>
 <li><strong>Cutout Size (px):</strong> — crop size around each cell (default 150).</li>
-<li><strong>Max Displayed Cells:</strong> — cap the number of thumbnails (default 20; warns above 100).</li>
-<li><strong>Downsample</strong>, <strong>Refresh</strong>, <strong>Mask colour</strong> / <strong>Outline px</strong>, and <strong>Use uniform color</strong> (when
-  off, painted colors from the Mask painter are shown).</li>
+<li><strong>Max Displayed Cells:</strong> — cap the number of thumbnails (default 20; warns above 100). With more cells than that, the Gallery shows a random sample; the same cells always give the same sample.</li>
+<li><strong>Refresh</strong> re-renders the cells shown, for example after changing a channel's colour. It never swaps them for others.</li>
+<li><strong>Draw new cells</strong> shows another sample, preferring cells not shown yet, so you can go through a large selection screen by screen. It is greyed out when every cell fits.</li>
+<li><strong>Downsample</strong>, <strong>Mask colour</strong> / <strong>Outline px</strong>, and <strong>Use uniform color</strong> (when
+  off, painted colors from the Mask painter are shown). <strong>Mask colour</strong> outlines the centred cell; it starts in the <a href="../display-settings/#selection-and-colours">selection colour</a> and follows it until you change it here.</li>
 </ul>
+<p>A line above the thumbnails says what is shown and how much of it: "Selection: histogram gate · showing 20 of 35", or "Cart: cool CD8 · showing 24 of 310 · ★ 5" for a cell set.</p>
+<h3 id="editing-a-cell-set-in-the-gallery">Editing a cell set in the Gallery<a class="headerlink" href="#editing-a-cell-set-in-the-gallery" title="Permanent link">&para;</a></h3>
+<p>When the Gallery shows a <a href="../cell-sets/">cell set</a>, it is where you edit it, because that is where its cells are visible. The Cell sets plugin and the Gallery always agree: a change in one shows in the other straight away.</p>
+<ul>
+<li><strong>☆ / ★</strong> in a tile's top-left corner stars the cell in the set shown, or takes the star off. Starred tiles always show a gold ★; the other buttons appear when the mouse is over a tile.</li>
+<li><strong>✕</strong> in the top-right corner takes the cell out of the set (and its star), and the tile disappears.</li>
+<li><strong>★ only</strong> shows only the starred cells.</li>
+<li><strong>+ Cart</strong> adds the cells on screen to the active cart. It appears while a cart is active.</li>
+<li><strong>Save shown as set</strong> keeps exactly the cells on screen as a set. With a set shown, the new set is a sub-group of it, listed under it in the Cell sets plugin; it records how many cells it was drawn from and which draw it was, so a figure panel can say "these 24 cells, drawn from cart X". Type a name first, or it is called "Gallery sample".</li>
+</ul>
+<p>What ★ and ✕ act on depends on what is shown, and the line above the thumbnails says it:</p>
+<table>
+<thead>
+<tr>
+<th>Shown</th>
+<th>★</th>
+<th>✕</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A cell set or cart</td>
+<td>stars in that set</td>
+<td>takes the cell out of the set</td>
+</tr>
+<tr>
+<td>A set's ★ cells (<strong>Select ★</strong>)</td>
+<td>takes the star off in the set</td>
+<td>—</td>
+</tr>
+<tr>
+<td>A plain selection, with an active cart</td>
+<td>adds the cell to the cart and stars it there</td>
+<td>—</td>
+</tr>
+<tr>
+<td>A plain selection, no active cart</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>A snapshot</td>
+<td>starred cells are marked, nothing can change</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p>A set shown in the Gallery is shown as it is now: cells added to a cart with Shift + click after you selected it are included.</p>
 <hr />
 <h2 id="acting-on-the-selection">Acting on the Selection<a class="headerlink" href="#acting-on-the-selection" title="Permanent link">&para;</a></h2>
 <p>Three plugins consume the current selection directly:</p>
 <ul>
 <li><strong>Go to</strong> — jump and zoom to a specific cell. Pick the <strong>FOV:</strong> and <strong>Cell ID:</strong>, set <strong>Width
   (pixel):</strong> (the crop width, default 150), and click <strong>Go to</strong>.</li>
-<li><strong>Cell Table Editor</strong> — write a value onto the selected cells. Enter a <strong>Column:</strong> (new or
-  existing) and a <strong>Value:</strong>, then click <strong>Apply to selected cells</strong> (the button is enabled only when
-  a selection exists). This is handy for manual gating/labelling.</li>
+<li><strong>Cell sets</strong> — write a value into a column for the cells of the current selection, whichever view made it, and keep selections as named, tagged sets. See <a href="../cell-sets/">Cell Sets</a>.</li>
 <li><strong>Cell tooltip label</strong> — tick the cell-table columns you want to appear in the image hover tooltip.
   It reacts live to each checkbox.</li>
 </ul>
