@@ -928,6 +928,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../tutorials/cell-sets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Sets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../tutorials/clustering-annotation/" class="md-nav__link">
         
   
@@ -1706,7 +1734,7 @@
 <tr>
 <td><strong>Highlighting</strong></td>
 <td><code>ImageDisplay</code> clicks and plugin callbacks</td>
-<td>A <strong>white</strong> outline on the selected cells</td>
+<td>An outline in the selection colour (amber by default), thicker than a mask outline, plus a light tint inside</td>
 </tr>
 <tr>
 <td><strong>Coloring</strong></td>
@@ -1727,14 +1755,14 @@
     E -- Yes --&gt; F["apply_registry_colors&lt;br/&gt;per-cell colours"]
     E -- No --&gt; G[set combined image]
     F --&gt; G
-    G --&gt; H["update_patches&lt;br/&gt;white selection highlight"]
+    G --&gt; H["update_patches&lt;br/&gt;selection highlight"]
     B -- Yes --&gt; I[_render_map_view → per-tile _render_fov_region]
     I --&gt; J[_apply_map_painter_overlay]
     J --&gt; K[_update_map_mask_highlights]</code></pre>
 <ol>
 <li><code>render_fov_to_array</code> — channels plus uniform mask outlines.</li>
 <li><code>apply_registry_colors</code> — class-based coloured outlines from the painter registry.</li>
-<li><code>update_patches</code> / <code>_update_map_mask_highlights</code> — white selection highlights on top.</li>
+<li><code>update_patches</code> / <code>_update_map_mask_highlights</code> — selection highlights on top, in the selection style.</li>
 </ol>
 <p><code>apply_registry_colors</code> takes an <code>exclude_ids</code> set of the currently selected cells and skips them, which is the other half of keeping the highlight visible.</p>
 <hr />
@@ -1758,13 +1786,15 @@
 </div>
 <hr />
 <h2 id="2-selection-highlighting">2. Selection highlighting<a class="headerlink" href="#2-selection-highlighting" title="Permanent link">&para;</a></h2>
-<p>A click, a ctrl-click or a plugin selection draws a white outline over the finished composite <strong>without a full re-render</strong>. The state is a set of <code>MaskSelection(fov, mask, mask_id)</code> triples on <code>ImageDisplay.selected_masks_label</code>.</p>
-<p><code>update_patches</code> (<code>image_display.py</code>) reads <code>main_viewer.full_resolution_label_masks</code>, slices it to the current viewport at the active downsample factor, extracts edges, and paints white onto a copy of <code>self.combined</code>. In map mode it delegates to <code>_update_map_mask_highlights</code>, which uses <code>layer.last_tile_viewports()</code> to find where each tile was placed and paints at the tile's canvas destination.</p>
-<p><code>GridChannelDisplay._update_grid_patches()</code> mirrors the same logic across every pane of the <a href="../viewer-runtime/#channel-controls">channel grid view</a>, so locating a cell works there too (#134); <code>clear_patches()</code> drops them again.</p>
-<div class="admonition warning">
-<p class="admonition-title">The highlight colour is not configurable</p>
-<p>Selection highlights are hard-coded to white (<code>[1.0, 1.0, 1.0]</code>). There is no UI for changing it, which matters on a composite that is already bright.</p>
-</div>
+<p>A click, a ctrl-click or a plugin selection draws the highlight over the finished composite <strong>without a full re-render</strong>. The state is a set of <code>MaskSelection(fov, mask, mask_id)</code> triples on <code>ImageDisplay.selected_masks_label</code>.</p>
+<p><strong>One style, one drawing routine.</strong> <code>ueler/viewer/selection_style.py</code> holds <code>SelectionStyle</code> (colour, outline width, fill opacity, and the plots' base colour) and <code>paint_selection(image, labels, style, downsample_factor=, offset=)</code>. The routine takes a label array of the selected cells, draws a tint of the colour inside them and then the outline on top, and clips to the image. The outline width is given at full resolution and scaled with <code>scale_outline_thickness</code>, like mask outlines. The viewer's <code>selection_style</code> property reads the style from the <strong>Advanced Settings → Selection and colours</strong> widgets on every call; <code>style_of(viewer)</code> returns the default style for a viewer stub without it. The defaults are in <code>ueler/constants.py</code> (<code>SELECTION_COLOR = "#ffb000"</code>, width 2, fill 0.25).</p>
+<p>All three image paths call <code>paint_selection</code>:</p>
+<ul>
+<li><code>update_patches</code> (<code>image_display.py</code>) reads <code>main_viewer.full_resolution_label_masks</code>, slices it to the current viewport at the active downsample factor, and paints onto a copy of <code>self.combined</code>.</li>
+<li>In map mode it delegates to <code>_update_map_mask_highlights</code>, which uses <code>layer.last_tile_viewports()</code> to find where each tile was placed and paints each selected cell into the tile's canvas section.</li>
+<li><code>GridChannelDisplay._update_grid_patches()</code> does the same across every pane of the <a href="../viewer-runtime/#channel-controls">channel grid view</a>, so locating a cell works there too (#134); <code>clear_patches()</code> drops them again.</li>
+</ul>
+<p><strong>A style change</strong> goes to <code>viewer.on_selection_style_change</code>, which redraws the image and the grid and calls <code>on_selection_style_change(previous_color=...)</code> on every plugin that has it: the scatter (<code>ScatterPlotWidget.set_style_colors</code>), the histogram (recolours its bar glyphs in place) and the Gallery (its outline picker follows the global colour while it still equals the previous one).</p>
 <hr />
 <h2 id="3-mask-painter-coloring">3. Mask painter coloring<a class="headerlink" href="#3-mask-painter-coloring" title="Permanent link">&para;</a></h2>
 <p>The painter assigns a colour to <strong>every individual cell</strong>, keyed by a chosen cell-table column (<code>cell_type</code>, <code>cluster</code>, …), and stores them in a module-level registry in <code>ueler/rendering/engine.py</code>:</p>
@@ -1852,7 +1882,6 @@
 <ul>
 <li>The colour registry is not persisted across sessions (see above).</li>
 <li>In map mode, <code>_apply_map_painter_overlay</code> bypasses the per-tile render cache and repaints on every <code>update_display</code>.</li>
-<li>The selection highlight colour is fixed at white.</li>
 </ul>
 
 

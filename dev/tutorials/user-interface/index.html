@@ -838,6 +838,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Main Viewer">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-selection-bar" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The selection bar
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1091,6 +1108,34 @@
     
   
     Scatter & Histogram
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cell-sets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Sets
   
 
     
@@ -1644,6 +1689,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Main Viewer">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-selection-bar" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The selection bar
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1734,7 +1796,7 @@ setting to switch on.</p>
 <h2 id="left-panel">Left Panel<a class="headerlink" href="#left-panel" title="Permanent link">&para;</a></h2>
 <h3 id="top-controls">Top controls<a class="headerlink" href="#top-controls" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong>Select Image:</strong> — choose the active FOV.</li>
+<li><strong>Select Image:</strong> — choose the active FOV. The ◀ and ▶ buttons beside it step to the previous or next FOV in the list; each is greyed out at its end of the list.</li>
 <li><strong>Cache Size:</strong> — number of FOVs kept in memory at once (default 100).</li>
 </ul>
 <h3 id="channels">Channels<a class="headerlink" href="#channels" title="Permanent link">&para;</a></h3>
@@ -1775,7 +1837,7 @@ input, and <strong>Load / Save / Update / Delete Marker Set</strong> buttons. <s
 <li><strong>Edit palette…</strong> — customize per-class colors (with save/load of <code>.pixelannotations.json</code> sets).</li>
 </ul>
 <h3 id="advanced-settings">Advanced Settings<a class="headerlink" href="#advanced-settings" title="Permanent link">&para;</a></h3>
-<p>Two tabs inside one accordion section:</p>
+<p>Two tabs inside one accordion section. The second tab is itself split into collapsible sections:</p>
 <ul>
 <li><strong>Data mapping</strong> — <strong>X key:</strong>, <strong>Y key:</strong>, <strong>Label key:</strong>, <strong>Mask key:</strong> and <strong>Fov key:</strong>, the names
   that link your cell table and your masks to the images. Each is a text field with a <strong>suggestion
@@ -1785,7 +1847,11 @@ input, and <strong>Load / Save / Update / Delete Marker Set</strong> buttons. <s
   list does not contain, which is what keeps the field usable when discovery comes up short. Without
   a cell table the four column fields keep their defaults, since there is nothing to offer yet. See
   <a href="../setup-dialog/#the-key-fields-are-suggestion-lists-not-menus">Guided Setup</a>.</li>
-<li><strong>Advanced Settings</strong> — <strong>Cache Size:</strong>, the <strong>Pixel Size (nm):</strong> input that drives the <a href="#main-viewer">scale bar</a>, a <strong>Downsample</strong> toggle, and <strong>Frame format:</strong>, which picks how the viewer's image reaches your browser (PNG, or the smaller JPEG / WebP for remote sessions; see <a href="../display-settings/#remote-sessions-frame-format">Display Settings</a>).</li>
+<li><strong>Advanced Settings</strong><ul>
+<li><strong>Display and performance</strong> — <strong>Cache Size:</strong>, the <strong>Pixel Size (nm):</strong> input that drives the <a href="#main-viewer">scale bar</a>, a <strong>Downsample</strong> toggle, and <strong>Frame format:</strong>, which picks how the viewer's image reaches your browser (PNG, or the smaller JPEG / WebP for remote sessions; see <a href="../display-settings/#remote-sessions-frame-format">Display Settings</a>).</li>
+<li><strong>Selection and colours</strong> — <strong>Selection colour</strong> (amber by default), <strong>Selection outline (px)</strong>, <strong>Selection fill</strong>, <strong>Default mask colour</strong> and <strong>Plot base colour</strong>. See <a href="../display-settings/#selection-and-colours">Display Settings</a>.</li>
+</ul>
+</li>
 </ul>
 <div class="admonition note">
 <p class="admonition-title">You are asked for these on first load</p>
@@ -1797,14 +1863,35 @@ anything you set there is already applied here.</p>
 <h2 id="main-viewer">Main Viewer<a class="headerlink" href="#main-viewer" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Image canvas</strong> — the composited multi-channel image with any active overlays.</li>
-<li><strong>Lasso Select</strong> (top of the viewer) — a one-shot toggle: draw a freehand lasso to select the cells
-  whose mask centroids fall inside it. The toggle resets itself after each lasso. (Selection drives
-  the linked plots and gallery — see <a href="../cell-table/">Working with a Cell Table</a>.)</li>
-<li><strong>Zoom and pan</strong> — scroll to zoom, drag to pan.</li>
-<li><strong>Scale bar</strong> — computed from the <strong>Pixel Size (nm):</strong> value when available (there is no separate
-  on/off toggle; set the pixel size to 0 to omit it).</li>
-<li><strong>No image (masks only)</strong> — hide the channel image to inspect overlays on a blank background.</li>
+<li><strong>Selecting cells with the mouse:</strong></li>
+<li><strong>Click a cell</strong> to select only that cell.</li>
+<li><strong>Ctrl + click a cell</strong> to add it to the selection, or take it out if it is selected.</li>
+<li><strong>Ctrl + drag</strong> to draw a lasso loop straight away, without the <strong>Lasso Select</strong> toggle.</li>
+<li><strong>Shift + click a cell</strong> to put it in the <a href="../cell-sets/#carts-collecting-cells-over-time">active cart</a>, or take it out if it is in the cart. The selection does not change. With no active cart, the bar says so.</li>
+<li><strong>Right-click the background</strong> (outside any cell) to unselect everything, as <strong>✕</strong> does but without asking; <strong>Undo</strong> (↶) in the selection bar brings the selection back.</li>
+<li><strong>A left click on the background does nothing</strong>, so a mis-click never loses a selection.</li>
 </ul>
+<p>Every one of these is a step in the session's <a href="../cell-sets/#going-back-to-an-earlier-selection">selection history</a>.
+- <strong>Lasso Select</strong> (top of the viewer) — a one-shot toggle: draw a freehand loop to add every cell with part of its mask inside it to the selection. A loop around cells that are all selected already unselects them instead; a loop that also reaches unselected cells adds those, so a larger loop extends a selection. Only the masks ticked under <strong>Masks</strong> are searched, so show one first. The toggle resets itself after each loop, and the selection bar beside it shows the result, or why there was none. <strong>Ctrl + drag</strong> draws the same loop without the toggle.
+- <strong>Zoom and pan</strong> — scroll to zoom, drag to pan.
+- <strong>Scale bar</strong> — computed from the <strong>Pixel Size (nm):</strong> value when available (there is no separate
+  on/off toggle; set the pixel size to 0 to omit it).
+- <strong>No image (masks only)</strong> — hide the channel image to inspect overlays on a blank background.</p>
+<h3 id="the-selection-bar">The selection bar<a class="headerlink" href="#the-selection-bar" title="Permanent link">&para;</a></h3>
+<p>The row with <strong>Lasso Select</strong> also shows the current cell selection, whichever view made it: a click or lasso in the image, a scatter lasso, a histogram gate, or a heatmap cluster sent to the Gallery. The most recent selection wins.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>[Lasso Select] [↶] [↷]  23 cells · histogram gate · 23 in this FOV, not outlined in the image   [Image] [Gallery ✓] [Plots] [+ Cart] [− Cart] [Save as set…] [✕]
+</code></pre></div>
+<ul>
+<li><strong>Undo ↶ / Redo ↷:</strong> step back and forward through this session's selections; going back puts the earlier selection where the current one was shown. See <a href="../cell-sets/#going-back-to-an-earlier-selection">Cell Sets</a>.</li>
+<li><strong>The text:</strong> how many cells, where they were selected, and how many are in the FOV shown (left out in map mode). "Not outlined in the image" means the selection went elsewhere, for example straight from a histogram to the Gallery.</li>
+<li><strong>Image:</strong> outlines the cells in the image.</li>
+<li><strong>Gallery:</strong> shows them in the Gallery.</li>
+<li><strong>Plots:</strong> selects them in the scatter plot and histogram.</li>
+<li><strong>+ Cart / − Cart:</strong> add the selection to the <a href="../cell-sets/#carts-collecting-cells-over-time">active cart</a>, or take it out. Shown only while a cart is active; the tooltip names it.</li>
+<li><strong>Save as set…:</strong> keeps the selection as a named cell set with tags; the bar shows a name field and a tags field in its place until you save or cancel. Shown when a cell table is loaded. See <a href="../cell-sets/">Cell Sets</a>.</li>
+<li><strong>✕:</strong> unselects everything: the image, the plots, the Gallery and the bar. It asks first; <strong>Undo</strong> brings the selection back.</li>
+</ul>
+<p>A button with <strong>✓</strong> shows the selection already, through a link box or an earlier click. Click it again to take the selection back out of that view; the selection itself stays in the bar, so you can send it there again. The button of the view the selection was made in shows <strong>✓</strong> greyed out: you cannot unlink a selection from where it was made, only unselect it with <strong>✕</strong>. The buttons act once; the <strong>Linked plugins</strong> boxes in each plot keep forwarding every new selection automatically, so a view you unlinked receives the next selection from a linked plot again. A selection made in the image belongs to its FOV and is cleared on a FOV switch; one from a plot stays, and the bar's FOV count follows the FOV shown. The same row carries messages, such as the lasso instructions or why a loop or <strong>Trace</strong> found no cells.</p>
 <hr />
 <h2 id="right-panel-plugins">Right Panel (Plugins)<a class="headerlink" href="#right-panel-plugins" title="Permanent link">&para;</a></h2>
 <p>Plugins appear as an accordion. <strong>Which plugins load depends on whether a cell table is present:</strong></p>
@@ -1820,7 +1907,7 @@ anything you set there is already applied here.</p>
 <li><strong>FlowSOM</strong> and <strong>Cell Annotation</strong> — clustering and checkpoints. See <a href="../clustering-annotation/">Clustering &amp; Annotation</a>.</li>
 <li><strong>Mask painter</strong> — per-class mask colors, fill/outline modes, opacity, and saved palettes.</li>
 <li><strong>Go to</strong> — jump and zoom to a specific cell.</li>
-<li><strong>Cell Table Editor</strong> — write a value onto the selected cells.</li>
+<li><strong>Cell sets</strong> — save selections as named, tagged sets and write values into the cell table. See <a href="../cell-sets/">Cell Sets</a>.</li>
 <li><strong>Cell tooltip label</strong> — choose which cell-table columns appear in the hover tooltip.</li>
 </ul>
 </li>

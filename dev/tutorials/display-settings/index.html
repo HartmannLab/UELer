@@ -866,6 +866,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Overlays">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#selection-and-colours" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Selection and colours
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1113,6 +1130,34 @@
     
   
     Scatter & Histogram
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cell-sets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Sets
   
 
     
@@ -1666,6 +1711,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Overlays">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#selection-and-colours" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Selection and colours
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1828,6 +1890,50 @@
 <li><strong>No image (masks only)</strong> — hides the channel composite and draws overlays on black. Good for checking segmentation boundaries, and cheaper to render since no channel compositing happens.</li>
 <li><strong>Channel grid view</strong> — one labelled, synchronised pane per visible channel instead of one composite. The honest way to judge whether a marker is really co-expressed or just additively blended into the same white.</li>
 </ul>
+<h3 id="selection-and-colours">Selection and colours<a class="headerlink" href="#selection-and-colours" title="Permanent link">&para;</a></h3>
+<p>Selected cells look the same wherever they appear. In the image (single FOV, map mode and the channel grid) a selected cell gets an outline in the selection colour, thicker than a mask outline, and a light tint of the same colour inside. The scatter draws selected points in that colour, the histogram its selected bars, and the Gallery the outline of the centred cell. Because the outline is thicker and the cell is tinted, a selection stays recognisable even when your masks are drawn in the same colour.</p>
+<p>All of it is set under <strong>Advanced Settings → Advanced Settings → Selection and colours</strong> and saved with your other settings:</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Default</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Selection colour</strong></td>
+<td>amber <code>#ffb000</code></td>
+<td>Colour of selected cells in the image, the scatter, the histogram and the Gallery. Amber is not one of the mask colours, so it differs from the default white masks and from pure red / green / blue / cyan / magenta / yellow channels.</td>
+</tr>
+<tr>
+<td><strong>Selection outline (px)</strong></td>
+<td>2</td>
+<td>Outline width at full resolution. Like mask outlines, it gets thinner when zoomed out.</td>
+</tr>
+<tr>
+<td><strong>Selection fill</strong></td>
+<td>0.25</td>
+<td>Opacity of the tint inside a selected cell. <strong>0</strong> draws the outline only.</td>
+</tr>
+<tr>
+<td><strong>Default mask colour</strong></td>
+<td>White</td>
+<td>Colour of a mask with no colour of its own. Masks still drawn in the previous default follow a change; a mask whose colour you picked keeps it.</td>
+</tr>
+<tr>
+<td><strong>Plot base colour</strong></td>
+<td>blue <code>#1f77b4</code></td>
+<td>Colour of unselected points and bars in the scatter and histogram. A scatter coloured by a column keeps that column's colours.</td>
+</tr>
+</tbody>
+</table>
+<p>A change redraws the selection in the image at once and recolours open plots. The Gallery's own <strong>Mask colour</strong> picker follows the selection colour until you change it in the Gallery; from then on it keeps your choice.</p>
+<div class="admonition tip">
+<p class="admonition-title">When the selection is hard to see</p>
+<p>On a composite that is already amber or orange, pick a selection colour that contrasts with your channels, or raise <strong>Selection fill</strong> so the selected cells stand out by their tint as well as their outline.</p>
+</div>
 <hr />
 <h2 id="saving-and-reusing-a-view">Saving and Reusing a View<a class="headerlink" href="#saving-and-reusing-a-view" title="Permanent link">&para;</a></h2>
 <p>Two mechanisms, with different jobs.</p>

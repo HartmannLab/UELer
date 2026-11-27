@@ -928,6 +928,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../tutorials/cell-sets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Sets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../tutorials/clustering-annotation/" class="md-nav__link">
         
   
@@ -1252,6 +1280,28 @@
     <span class="md-ellipsis">
       
         The image loads but no cells are shown
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-lasso-selects-nothing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The lasso selects nothing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#selected-cells-are-hard-to-see" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Selected cells are hard to see
       
     </span>
   </a>
@@ -2022,6 +2072,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#the-lasso-selects-nothing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The lasso selects nothing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#selected-cells-are-hard-to-see" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Selected cells are hard to see
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#a-setting-came-back-different-with-a-warning-in-the-log" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2320,6 +2392,16 @@ without a priming cell.</p>
 <p>Almost always the <strong>data mapping</strong>: the four keys that tell UELer which columns of your cell table hold the coordinates, the mask label and the FOV name. If one of them names a column your table does not have, UELer finds no cells to draw — and an empty overlay looks exactly the same as a dataset that genuinely has nothing in it, which is what makes this hard to spot.</p>
 <p>Open <strong>Advanced Settings → Data mapping</strong> in the left panel and compare <strong>X key:</strong>, <strong>Y key:</strong>, <strong>Label key:</strong> and <strong>Fov key:</strong> against your table's real column names. Each field offers your own columns as suggestions, so in the normal case you can pick the right one; it also accepts a name typed by hand. <strong>Mask key:</strong> does the same for the mask suffixes in your masks folder.</p>
 <p>The <a href="../tutorials/setup-dialog/">setup dialog</a> asks for exactly these when a table first loads, and pre-fills the ones it recognises — so if you skipped it, that is the thing to check first.</p>
+<h3 id="the-lasso-selects-nothing">The lasso selects nothing<a class="headerlink" href="#the-lasso-selects-nothing" title="Permanent link">&para;</a></h3>
+<p><strong>In a scatter plot:</strong> the plots open in pan/zoom mode, so a plain drag pans. Pick the lasso in the plot's toolbar, or hold <strong>Shift</strong> and drag. The selection bar above the image then reports the selection. If it says the cells are "not outlined in the image", the plot's <strong>Main viewer</strong> link is off: press <strong>Image</strong> in the bar. If none of the cells is in the FOV shown, the image has nothing to outline until you switch FOV. If the plots are empty boxes, the line above the plots names the widget front-end problem found at start-up (see <a href="#my-editor-cannot-find-the-widget-anywidget">My editor cannot find the widget <code>anywidget</code></a>).</p>
+<p><strong>In the image (Lasso Select):</strong> the selection bar beside the toggle names the cause. The three common ones:</p>
+<ul>
+<li><strong>No mask is shown.</strong> The lasso searches only the masks ticked under <strong>Masks</strong> in the left panel, and none is ticked when the viewer starts. Tick one, then draw the loop again.</li>
+<li><strong>No masks are loaded.</strong> The lasso selects cells of a segmentation mask; start the viewer with a masks folder.</li>
+<li><strong>The canvas is a static image.</strong> Without <code>%matplotlib widget</code> in the notebook the figure is a plain PNG and receives no mouse events, so zoom, pan and clicks do nothing either. Run <code>%matplotlib widget</code>, then start the viewer again.</li>
+</ul>
+<h3 id="selected-cells-are-hard-to-see">Selected cells are hard to see<a class="headerlink" href="#selected-cells-are-hard-to-see" title="Permanent link">&para;</a></h3>
+<p>Selected cells are drawn in the selection colour (amber by default) with a thicker outline than masks and a light tint inside. If that clashes with your channels, change <strong>Selection colour</strong>, <strong>Selection outline (px)</strong> or <strong>Selection fill</strong> under <strong>Advanced Settings → Advanced Settings → Selection and colours</strong>. The scatter, histogram and Gallery follow the same colour. See <a href="../tutorials/display-settings/#selection-and-colours">Display Settings</a>.</p>
 <h3 id="a-setting-came-back-different-with-a-warning-in-the-log">A setting came back different, with a warning in the log<a class="headerlink" href="#a-setting-came-back-different-with-a-warning-in-the-log" title="Permanent link">&para;</a></h3>
 <p>UELer saves your settings per dataset in <code>widget_states.json</code> (inside the <code>.UELer</code> folder) and restores them next time. The data can change in between — a field of view removed from the folder, a marker set deleted, a column renamed — and then a saved setting names something that is no longer there.</p>
 <p>When that happens UELer does <strong>not</strong> fail to open. It falls back to the nearest value the control will accept — the first available FOV for <strong>Select Image:</strong>, the first option for a list, the nearest end of a slider's range, otherwise that control's default — and logs a warning naming the setting, the value it could not use, and what it used instead:</p>
