@@ -15,7 +15,7 @@ After [configuring your paths](../getting-started.md), run the launch cells in
 ## 2. Select an FOV
 
 Use the **Select Image:** dropdown in the left panel to choose a Field of View (FOV). UELer loads
-image data on demand and caches recently accessed FOVs in memory.
+image data on demand and caches recently accessed FOVs in memory. To go through the FOVs one by one, use the ◀ and ▶ buttons right of the dropdown.
 
 The **Cache Size:** field controls how many FOVs are held in memory at once (default 100). Lower it if
 memory is tight; raise it for faster back-and-forth navigation.

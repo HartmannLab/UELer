@@ -47,7 +47,7 @@ spatial layout descriptor. This lets you:
 3. Choose a map from the **Select map:** dropdown (options are labelled with the map id and its tile
    count).
 
-Once active, the canvas switches to the stitched composite and the **Select Image:** FOV selector is
+Once active, the canvas switches to the stitched composite and the **Select Image:** FOV selector and its ◀ ▶ buttons are
 disabled — you navigate by panning. The channel grid view is also disabled while map mode is on.
 
 ---

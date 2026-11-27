@@ -29,7 +29,7 @@ Plugin placement is fixed, not adaptive: each plugin lives in either the right-p
 
 ### Top controls
 
-- **Select Image:** — choose the active FOV.
+- **Select Image:** — choose the active FOV. The ◀ and ▶ buttons beside it step to the previous or next FOV in the list; each is greyed out at its end of the list.
 - **Cache Size:** — number of FOVs kept in memory at once (default 100).
 
 ### Channels

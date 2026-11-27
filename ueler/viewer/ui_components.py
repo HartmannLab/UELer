@@ -126,6 +126,59 @@ SIDE_PANEL_PX = 576
 SIDE_TOGGLE_PX = 24
 
 
+def step_selector(selector, delta):
+    """Move *selector* by *delta* places in its options; stops at either end.
+
+    Returns whether the value changed. Does nothing while the selector is
+    disabled (map mode), so the buttons cannot change the FOV behind the map.
+    """
+    if getattr(selector, "disabled", False):
+        return False
+    values = [opt[1] if isinstance(opt, tuple) else opt for opt in (getattr(selector, "options", None) or ())]
+    if not values:
+        return False
+    try:
+        index = values.index(selector.value)
+    except ValueError:
+        return False
+    target = index + int(delta)
+    if target < 0 or target >= len(values):
+        return False
+    selector.value = values[target]
+    return True
+
+
+def build_selector_stepper(selector):
+    """Previous / next buttons for *selector*, kept disabled at the ends and while it is."""
+    previous_button = Button(
+        icon='caret-left',
+        tooltip='Previous image',
+        layout=Layout(width='32px', min_width='32px', padding='0'),
+    )
+    next_button = Button(
+        icon='caret-right',
+        tooltip='Next image',
+        layout=Layout(width='32px', min_width='32px', padding='0'),
+    )
+
+    def sync(_change=None):
+        values = [opt[1] if isinstance(opt, tuple) else opt for opt in (getattr(selector, "options", None) or ())]
+        locked = bool(getattr(selector, "disabled", False))
+        try:
+            index = values.index(selector.value)
+        except ValueError:
+            index = None
+        previous_button.disabled = locked or index is None or index <= 0
+        next_button.disabled = locked or index is None or index >= len(values) - 1
+
+    previous_button.on_click(lambda _b: step_selector(selector, -1))
+    next_button.on_click(lambda _b: step_selector(selector, 1))
+    if hasattr(selector, "observe"):
+        selector.observe(sync, names=['value', 'options', 'disabled'])
+    sync()
+    return previous_button, next_button
+
+
 def _bounded_panel_layout(**overrides):
     """Return a width-constrained layout that avoids edge overflow in panels."""
     props = {
@@ -389,7 +442,7 @@ def display_ui(viewer):
 
     top_part_widgets = VBox(
         [
-            viewer.ui_component.image_selector,
+            getattr(viewer.ui_component, 'image_selector_row', viewer.ui_component.image_selector),
             viewer.ui_component.map_controls_box,
             control_panel_stack,
             VBox([viewer.ui_component.advanced_settings_accordion]),
@@ -543,6 +596,14 @@ class uicomponents:
             disabled=False
         )
         self.image_selector.observe(viewer.on_image_change, names='value')
+        # Previous / next image buttons beside the dropdown. The dropdown
+        # shrinks to leave them room in the 350 px left panel.
+        self.image_selector.layout = Layout(flex='1 1 auto', width='auto', min_width='0')
+        self.previous_image_button, self.next_image_button = build_selector_stepper(self.image_selector)
+        self.image_selector_row = HBox(
+            [self.image_selector, self.previous_image_button, self.next_image_button],
+            layout=Layout(width='100%', align_items='center', gap='2px'),
+        )
 
         self.lasso_select_toggle = ToggleButton(
             value=False,
