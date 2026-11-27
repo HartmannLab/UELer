@@ -1,3 +1,8 @@
+### v0.6.1
+**Stable release: one current selection with a selection bar and history, Cell sets with carts and stars, Gallery editing of sets, image gestures, one selection colour, and ◀ ▶ FOV stepping**
+
+- **Promotes v0.6.1-rc1 unchanged.** Only the version declarations and release notes differ from the candidate.
+
 ### v0.6.1-rc1
 **Previous / next image buttons beside Select Image**
 
