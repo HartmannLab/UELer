@@ -155,8 +155,10 @@ The GUI can be split into four main regions (wide plugins toggle the optional fo
 For more details, see the [user guide](https://hartmannlab.github.io/UELer/latest/tutorials/user-interface).
 
 ## New Update  
-### **UELer v0.6.1-alpha1 Summary**
+### **UELer v0.6.1-alpha2 Summary**
 
+- **Step through FOVs with ◀ ▶.** Two buttons beside **Select Image:** go to the previous or next FOV in the list, so going through a dataset one image at a time no longer needs the dropdown.
+- **Selected cells stand out, in one colour everywhere.** A selected cell is now drawn in amber with a thicker outline than a mask and a light tint inside, so it no longer looks like a white mask outline. The scatter, histogram and Gallery use the same colour. Change the colour, outline width and fill, the default mask colour and the plots' base colour under **Advanced Settings → Selection and colours**; they are saved with your settings.
 - **Star and prune cell sets in the Gallery.** The Gallery now says what it shows and how much of it ("Cart: cool CD8 · showing 24 of 310 · ★ 5"). Click ☆ on a tile to star the cell, ✕ to take it out of the set, **★ only** to see the starred cells, and **Draw new cells** to go through a large set screen by screen (**Refresh** keeps the cells shown). **Save shown as set** keeps exactly the cells on screen, as a sub-group of the set, for a figure panel. See [Working with a Cell Table](https://hartmannlab.github.io/UELer/latest/tutorials/cell-table/#editing-a-cell-set-in-the-gallery).
 - **Collect interesting cells in carts, and star your favourites.** A cell set can now grow: make a cart (or pick any set) as the active cart, then add the current selection with **+ Cart** in the selection bar, or Shift + click single cells in the image, across FOVs and sessions. **★ Star selection** marks favourite cells within a set, **Snapshot** keeps a frozen copy, and tags are free-form labels (`pilot`, `figure 2`). See [Cell Sets](https://hartmannlab.github.io/UELer/latest/tutorials/cell-sets/).
 - **A mis-click no longer loses the selection.** A left click on the image background does nothing; right-click the background to unselect everything (undo brings it back). Ctrl + click adds or removes a cell, Ctrl + drag draws a lasso without the toggle, and a loop around cells that are all selected unselects them.
